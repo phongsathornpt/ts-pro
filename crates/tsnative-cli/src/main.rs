@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use tsnative_compiler::TypeScriptFrontend;
+use tsnative_compiler::{Frontend, TypeScriptFrontend};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -28,6 +28,7 @@ enum Command {
         config: PathBuf,
     },
 }
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let frontend = TypeScriptFrontend::discover(&cli.project_root)?;
@@ -40,8 +41,15 @@ fn main() -> Result<()> {
         }
         Command::Check { config } => {
             let result = frontend.check_project(&config)?;
-            print!("{}", result.stdout);
-            eprint!("{}", result.stderr);
+
+            if result.diagnostics.is_empty() {
+                print!("{}", result.raw_stdout);
+                eprint!("{}", result.raw_stderr);
+            } else {
+                for diagnostic in &result.diagnostics {
+                    eprintln!("{}", diagnostic.render());
+                }
+            }
 
             if !result.success {
                 bail!("TypeScript 7 check failed");

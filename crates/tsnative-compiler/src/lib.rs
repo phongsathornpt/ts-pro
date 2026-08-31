@@ -1,3 +1,3 @@
 pub mod frontend;
 
-pub use frontend::{CheckResult, TypeScriptFrontend};
+pub use frontend::{CheckResult, Diagnostic, DiagnosticLevel, Frontend, TypeScriptFrontend};
