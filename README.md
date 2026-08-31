@@ -15,6 +15,26 @@ Goal: compile strongly typed TypeScript 7 programs into native binaries without 
 - Native representation proof decides between unboxed values and dynamic `JSValue`.
 - LLVM is the initial machine-code backend.
 
+## Current native MVP
+
+The first end-to-end path is working for the typed scalar subset. From the project root:
+
+```bash
+go build -o build/tsnative ./cmd/tsnative
+./build/tsnative build examples/fib.ts -o build/fib -O2
+./build/fib
+```
+
+Expected output:
+
+```text
+6765
+```
+
+The generated program is a native executable linked against the small tsnative C runtime and the platform C library; Node.js and V8 are not part of the runtime path.
+
+Build optimization flags currently accepted are `-O0`, `-O1`, `-O2`, `-O3`, and `-Oz`. Use `-p <tsconfig.json>` to select the TypeScript project configuration.
+
 ## Design goals
 
 - One TypeScript semantic source for editor and compiler.

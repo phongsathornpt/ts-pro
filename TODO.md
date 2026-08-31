@@ -22,7 +22,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add request cancellation and timeouts.
 - [ ] Add LS crash detection and restart policy.
 - [x] Capture TypeScript diagnostics into Go DTOs.
-- [~] Resolve project files and config through TypeScript-LS.
+- [x] Resolve compiler project files and config through the TypeScript 7 API snapshot.
 
 ## Semantic bridge
 
@@ -45,18 +45,18 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Native representation / MIR
 
 - [~] Add `Bool`, `I32`, `I64`, `F64`, and reference representations (Bool/F64/reference proof pass implemented; integer refinement pending).
-- [~] Add representation-proof diagnostics (analysis diagnostics implemented; CLI reporting pending).
+- [x] Add representation-proof diagnostics for the current native MVP.
 - [x] Lower proven scalar HIR to MIR/SSA.
-- [~] Add direct-call and scalar fast paths (MIR direct calls/F64 ops implemented; backend emission pending).
+- [x] Add direct-call and scalar fast paths for the current native MVP.
 - [ ] Add typed-array and closed-shape representation rules.
 
 ## LLVM / executable
 
 - [x] Emit deterministic textual LLVM IR from Go.
-- [~] Compile LLVM IR with clang (integration test passes; production toolchain wrapper pending).
+- [x] Compile LLVM IR with clang through the production toolchain wrapper.
 - [x] Link executable with lld/clang without Node/V8.
-- [ ] Compile and run `examples/fib.ts`.
-- [ ] Add `-O0/-O1/-O2/-O3/-Oz` profiles.
+- [x] Compile and run `examples/fib.ts` as a native executable.
+- [x] Add `-O0/-O1/-O2/-O3/-Oz` build profiles.
 - [ ] Add parallel LLVM module compilation and object cache.
 
 ## Runtime and optimization

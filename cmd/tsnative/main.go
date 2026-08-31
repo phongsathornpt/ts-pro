@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/projectthorn/tsv7-bin/internal/compiler"
 	"github.com/projectthorn/tsv7-bin/internal/frontend"
 	"github.com/projectthorn/tsv7-bin/internal/tsls"
 )
@@ -31,6 +32,8 @@ func run(args []string) error {
 			return fmt.Errorf("usage: tsnative check <file.ts>")
 		}
 		return checkFile(args[1])
+	case "build":
+		return buildFile(args[1:])
 	case "version", "--version", "-version":
 		fmt.Println("tsnative dev")
 		return nil
@@ -90,6 +93,48 @@ func checkFile(path string) error {
 	return nil
 }
 
+func buildFile(args []string) error {
+	options, err := parseBuildArgs(args)
+	if err != nil {
+		return err
+	}
+	result, err := compiler.Build(context.Background(), options)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Built %s (%d native functions)\n", result.Output, result.Functions)
+	return nil
+}
+
+func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
+	options := compiler.BuildOptions{Root: ".", Optimization: "-O2"}
+	if len(args) == 0 {
+		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json]")
+	}
+	options.Input = args[0]
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-o", "--output":
+			i++
+			if i >= len(args) {
+				return options, fmt.Errorf("%s requires an output path", args[i-1])
+			}
+			options.Output = args[i]
+		case "-p", "--project":
+			i++
+			if i >= len(args) {
+				return options, fmt.Errorf("%s requires a tsconfig path", args[i-1])
+			}
+			options.Config = args[i]
+		case "-O0", "-O1", "-O2", "-O3", "-Oz":
+			options.Optimization = args[i]
+		default:
+			return options, fmt.Errorf("unknown build option %q", args[i])
+		}
+	}
+	return options, nil
+}
+
 func startInitializedClient(ctx context.Context) (*tsls.Client, error) {
 	client, err := tsls.Start(".")
 	if err != nil {
@@ -111,5 +156,6 @@ func usage() {
 	fmt.Println("tsnative <command>")
 	fmt.Println("  doctor        validate Go/TypeScript 7 frontend toolchain")
 	fmt.Println("  check <file>  type-check a TypeScript file through TypeScript-LS")
+	fmt.Println("  build <file>  compile TypeScript 7 to a native executable")
 	fmt.Println("  version       print compiler version")
 }
