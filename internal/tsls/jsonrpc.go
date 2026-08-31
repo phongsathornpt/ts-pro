@@ -92,3 +92,10 @@ func parseRPCID(raw json.RawMessage) (int64, error) {
 	}
 	return strconv.ParseInt(string(raw), 10, 64)
 }
+
+type rpcResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  any             `json:"result"`
+	Error   *rpcError       `json:"error,omitempty"`
+}

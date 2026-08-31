@@ -21,8 +21,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Keep one language-server process per workspace.
 - [x] Add request cancellation and timeouts.
 - [ ] Add LS crash detection and restart policy.
-- [ ] Capture TypeScript diagnostics into Go DTOs.
-- [ ] Resolve project files and config through TypeScript-LS.
+- [x] Capture TypeScript diagnostics into Go DTOs.
+- [~] Resolve project files and config through TypeScript-LS.
 
 ## Semantic bridge
 

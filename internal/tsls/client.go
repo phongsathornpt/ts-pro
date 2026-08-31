@@ -85,7 +85,13 @@ func (c *Client) readLoop() {
 			c.failPending(err)
 			return
 		}
-		if len(message.ID) == 0 || message.Method != "" {
+		if message.Method != "" {
+			if len(message.ID) != 0 {
+				c.handleServerRequest(message)
+			}
+			continue
+		}
+		if len(message.ID) == 0 {
 			continue
 		}
 		id, err := parseRPCID(message.ID)
