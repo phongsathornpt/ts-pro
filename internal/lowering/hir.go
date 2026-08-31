@@ -29,6 +29,23 @@ func LowerHIR(source frontend.Snapshot, name string) (hir.Module, error) {
 		}
 		lowerer.module.Functions = append(lowerer.module.Functions, lowered)
 	}
+	if len(source.Entry) != 0 {
+		voidType, ok := findFrontendType(source, frontend.TypeVoid)
+		if !ok {
+			return hir.Module{}, fmt.Errorf("top-level entry requires a void semantic type")
+		}
+		entrySource := frontend.Function{
+			ID: frontend.FunctionID(len(source.Functions)), Name: "__entry",
+			ReturnType: voidType, Body: source.Entry,
+		}
+		lowered, err := lowerer.lowerFunction(entrySource)
+		if err != nil {
+			return hir.Module{}, err
+		}
+		lowerer.module.Functions = append(lowerer.module.Functions, lowered)
+		entryID := lowered.ID
+		lowerer.module.Entry = &entryID
+	}
 	if err := lowerer.module.Verify(); err != nil {
 		return hir.Module{}, fmt.Errorf("verify lowered HIR: %w", err)
 	}
@@ -89,4 +106,13 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 	default:
 		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
 	}
+}
+
+func findFrontendType(source frontend.Snapshot, kind frontend.TypeKind) (frontend.TypeID, bool) {
+	for _, typ := range source.Types {
+		if typ.Kind == kind {
+			return typ.ID, true
+		}
+	}
+	return 0, false
 }

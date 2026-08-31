@@ -5,6 +5,7 @@ type Module struct {
 	Name      string
 	Types     []SemanticType
 	Functions []Function
+	Entry     *FunctionID
 }
 
 type Function struct {
@@ -55,10 +56,23 @@ type CallOp struct {
 	Args   []ValueID
 }
 
-func (ConstOp) isOperation()    {}
-func (UnaryExpr) isOperation()  {}
-func (BinaryExpr) isOperation() {}
-func (CallOp) isOperation()     {}
+type IntrinsicKind uint8
+
+const (
+	IntrinsicInvalid IntrinsicKind = iota
+	IntrinsicConsoleLogF64
+)
+
+type IntrinsicCallOp struct {
+	Intrinsic IntrinsicKind
+	Args      []ValueID
+}
+
+func (ConstOp) isOperation()         {}
+func (UnaryExpr) isOperation()       {}
+func (BinaryExpr) isOperation()      {}
+func (CallOp) isOperation()          {}
+func (IntrinsicCallOp) isOperation() {}
 
 type LiteralKind uint8
 

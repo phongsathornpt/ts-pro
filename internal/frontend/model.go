@@ -103,6 +103,7 @@ type Snapshot struct {
 	Symbols        []Symbol
 	Types          []Type
 	Functions      []Function
+	Entry          []Statement
 }
 
 func (s Snapshot) Source(id SourceID) (Source, bool) {

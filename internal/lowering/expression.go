@@ -55,9 +55,6 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 }
 
 func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
-	if expr.CallTarget == nil {
-		return 0, fmt.Errorf("dynamic call is not supported by HIR MVP")
-	}
 	args := make([]hir.ValueID, 0, len(expr.Args))
 	for _, arg := range expr.Args {
 		value, err := f.lowerExpr(arg)
@@ -65,6 +62,19 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		args = append(args, value)
+	}
+	if expr.Intrinsic != frontend.IntrinsicNone {
+		intrinsic := hir.IntrinsicInvalid
+		switch expr.Intrinsic {
+		case frontend.IntrinsicConsoleLogF64:
+			intrinsic = hir.IntrinsicConsoleLogF64
+		default:
+			return 0, fmt.Errorf("unsupported semantic intrinsic %d", expr.Intrinsic)
+		}
+		return f.emit(expr.Type, hir.IntrinsicCallOp{Intrinsic: intrinsic, Args: args}), nil
+	}
+	if expr.CallTarget == nil {
+		return 0, fmt.Errorf("dynamic call is not supported by HIR MVP")
 	}
 	return f.emit(expr.Type, hir.CallOp{
 		Callee: hir.NewFunctionID(uint32(*expr.CallTarget)),

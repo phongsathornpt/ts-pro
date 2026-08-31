@@ -10,6 +10,13 @@ const (
 	ExprCall
 )
 
+type IntrinsicKind uint8
+
+const (
+	IntrinsicNone IntrinsicKind = iota
+	IntrinsicConsoleLogF64
+)
+
 type BinaryOperator uint8
 
 const (
@@ -31,6 +38,7 @@ type Expr struct {
 	Callee     *Expr
 	Args       []*Expr
 	CallTarget *FunctionID
+	Intrinsic  IntrinsicKind
 	Span       Span
 }
 
@@ -41,6 +49,7 @@ const (
 	StmtBlock
 	StmtIf
 	StmtReturn
+	StmtExpr
 )
 
 type Statement struct {

@@ -24,6 +24,7 @@ const (
 type Module struct {
 	Name      string
 	Functions []Function
+	Entry     *FunctionID
 }
 
 type Function struct {
@@ -89,10 +90,23 @@ type Call struct {
 	Args   []ValueID
 }
 
-func (ConstF64) isOperation()     {}
-func (FloatBinary) isOperation()  {}
-func (FloatCompare) isOperation() {}
-func (Call) isOperation()         {}
+type Intrinsic uint8
+
+const (
+	IntrinsicInvalid Intrinsic = iota
+	IntrinsicConsoleLogF64
+)
+
+type IntrinsicCall struct {
+	Intrinsic Intrinsic
+	Args      []ValueID
+}
+
+func (ConstF64) isOperation()      {}
+func (FloatBinary) isOperation()   {}
+func (FloatCompare) isOperation()  {}
+func (Call) isOperation()          {}
+func (IntrinsicCall) isOperation() {}
 
 type Terminator interface{ isTerminator() }
 

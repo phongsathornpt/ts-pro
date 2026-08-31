@@ -58,6 +58,16 @@ func TestExtractTypedFibFromTypeScript7(t *testing.T) {
 			t.Fatalf("call type = %+v, ok=%v", typ, ok)
 		}
 	}
+	if len(semantic.Entry) != 1 || semantic.Entry[0].Kind != StmtExpr {
+		t.Fatalf("entry = %+v", semantic.Entry)
+	}
+	entryCall := semantic.Entry[0].Expr
+	if entryCall == nil || entryCall.Intrinsic != IntrinsicConsoleLogF64 || len(entryCall.Args) != 1 {
+		t.Fatalf("entry call = %+v", entryCall)
+	}
+	if entryCall.Args[0].CallTarget == nil || *entryCall.Args[0].CallTarget != fn.ID {
+		t.Fatalf("entry fib call = %+v", entryCall.Args[0])
+	}
 }
 
 func projectRootFrontend(t *testing.T) string {

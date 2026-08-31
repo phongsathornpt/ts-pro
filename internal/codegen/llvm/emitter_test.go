@@ -13,6 +13,7 @@ import (
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
 	"github.com/projectthorn/tsv7-bin/internal/frontend"
 	"github.com/projectthorn/tsv7-bin/internal/lowering"
+	"github.com/projectthorn/tsv7-bin/internal/toolchain"
 	"github.com/projectthorn/tsv7-bin/internal/tsls"
 )
 
@@ -56,27 +57,46 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"declare void @tsnative_console_log_f64(double)",
 		"define double @tsnative_f0(double %v0)",
 		"fcmp ole double",
 		"call double @tsnative_f0",
 		"fadd double",
+		"call void @tsnative_console_log_f64",
+		"define i32 @main()",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
 		}
 	}
 
-	clang, err := exec.LookPath("clang")
+	tc, err := toolchain.DiscoverClang()
 	if err != nil {
-		t.Skip("clang not installed")
+		t.Skip(err)
 	}
 	dir := t.TempDir()
 	ll := filepath.Join(dir, "fib.ll")
 	obj := filepath.Join(dir, "fib.o")
+	runtimeObj := filepath.Join(dir, "runtime.o")
+	bin := filepath.Join(dir, "fib")
 	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := exec.Command(clang, "-c", ll, "-o", obj).CombinedOutput(); err != nil {
-		t.Fatalf("clang failed: %v\n%s\nIR:\n%s", err, output, text)
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile LLVM: %v\nIR:\n%s", err, text)
 	}
+	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "core", "console.c"), runtimeObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tc.Link(ctx, []string{obj, runtimeObj}, bin); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.CommandContext(ctx, bin).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native fib: %v: %s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != "6765" {
+		t.Fatalf("native output = %q", got)
+	}
+
 }

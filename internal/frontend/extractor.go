@@ -72,6 +72,20 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		}
 		e.result.Functions[i].Body = body
 	}
+	for _, node := range file.Root().Children() {
+		switch node.Kind() {
+		case tsast.KindFunctionDeclaration, tsast.KindEndOfFile:
+			continue
+		case tsast.KindExpressionStatement:
+			stmt, err := e.extractStatement(node)
+			if err != nil {
+				return Snapshot{}, err
+			}
+			e.result.Entry = append(e.result.Entry, stmt)
+		default:
+			return Snapshot{}, fmt.Errorf("unsupported top-level native statement %s at %d", tsast.KindName(node.Kind()), node.Pos())
+		}
+	}
 	return e.result, nil
 }
 
@@ -205,6 +219,16 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 	case tsast.KindBlock:
 		body, err := e.extractBlock(node)
 		return Statement{Kind: StmtBlock, Span: e.span(node), Then: body}, err
+	case tsast.KindExpressionStatement:
+		exprNode, ok := node.NamedChild("expression")
+		if !ok {
+			return Statement{}, fmt.Errorf("expression statement at %d has no expression", node.Pos())
+		}
+		expr, err := e.extractExpr(exprNode)
+		if err != nil {
+			return Statement{}, err
+		}
+		return Statement{Kind: StmtExpr, Span: e.span(node), Expr: expr}, nil
 	default:
 		return Statement{}, fmt.Errorf("unsupported native statement %s at %d", tsast.KindName(node.Kind()), node.Pos())
 	}
@@ -299,21 +323,29 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	if !ok {
 		return nil, fmt.Errorf("call at %d has no callee", node.Pos())
 	}
-	if calleeNode.Kind() != tsast.KindIdentifier {
-		return nil, fmt.Errorf("non-identifier callee at %d is not supported by the native MVP", calleeNode.Pos())
-	}
-	calleeName, _ := calleeNode.Text()
 	expr.Kind = ExprCall
-	expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeName, Span: e.span(calleeNode)}
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
-	if err != nil {
-		return nil, err
-	}
-	if symbol != nil {
-		if target, ok := e.functions[symbol.ID]; ok {
-			targetCopy := target
-			expr.CallTarget = &targetCopy
+	switch calleeNode.Kind() {
+	case tsast.KindIdentifier:
+		calleeName, _ := calleeNode.Text()
+		expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeName, Span: e.span(calleeNode)}
+		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
+		if err != nil {
+			return nil, err
 		}
+		if symbol != nil {
+			if target, ok := e.functions[symbol.ID]; ok {
+				targetCopy := target
+				expr.CallTarget = &targetCopy
+			}
+		}
+	case tsast.KindPropertyAccessExpression:
+		if !isConsoleLog(calleeNode) {
+			return nil, fmt.Errorf("property call at %d is not a supported native intrinsic", calleeNode.Pos())
+		}
+		expr.Callee = &Expr{Kind: ExprIdentifier, Name: "console.log", Span: e.span(calleeNode)}
+		expr.Intrinsic = IntrinsicConsoleLogF64
+	default:
+		return nil, fmt.Errorf("callee %s at %d is not supported by the native MVP", tsast.KindName(calleeNode.Kind()), calleeNode.Pos())
 	}
 	if args, ok := node.NamedChild("arguments"); ok {
 		for _, argNode := range args.ListElements() {
@@ -324,10 +356,30 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
+	if expr.Intrinsic == IntrinsicConsoleLogF64 {
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeNumber {
+			return nil, fmt.Errorf("console.log native MVP requires exactly one number argument at %d", node.Pos())
+		}
+		return expr, nil
+	}
 	if expr.CallTarget == nil {
 		return nil, fmt.Errorf("dynamic call at %d is not supported by the native MVP", node.Pos())
 	}
 	return expr, nil
+}
+
+func isConsoleLog(node tsast.Node) bool {
+	object, ok := node.NamedChild("expression")
+	if !ok || object.Kind() != tsast.KindIdentifier {
+		return false
+	}
+	name, ok := node.NamedChild("name")
+	if !ok || name.Kind() != tsast.KindIdentifier {
+		return false
+	}
+	objectText, _ := object.Text()
+	nameText, _ := name.Text()
+	return objectText == "console" && nameText == "log"
 }
 
 func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {

@@ -25,12 +25,16 @@ func Emit(module mir.Module) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "; tsnative module %s\n", strconv.Quote(module.Name))
 	b.WriteString("target triple = \"x86_64-unknown-linux-gnu\"\n\n")
+	b.WriteString("declare void @tsnative_console_log_f64(double)\n\n")
 	functions := append([]mir.Function(nil), module.Functions...)
 	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
 	for _, fn := range functions {
 		if err := e.emitFunction(&b, fn); err != nil {
 			return "", err
 		}
+	}
+	if module.Entry != nil {
+		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  ret i32 0\n}\n", functionName(*module.Entry))
 	}
 	return b.String(), nil
 }
@@ -113,6 +117,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		return nil
 	case mir.Call:
 		return e.emitCall(b, inst, op, values)
+	case mir.IntrinsicCall:
+		return e.emitIntrinsicCall(b, inst, op, values)
 	default:
 		return fmt.Errorf("unsupported MIR operation %T", inst.Op)
 	}
@@ -148,6 +154,21 @@ func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Ca
 	}
 	b.WriteString(")\n")
 	values[inst.Result] = name
+	return nil
+}
+
+func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, call mir.IntrinsicCall, values map[mir.ValueID]string) error {
+	if call.Intrinsic != mir.IntrinsicConsoleLogF64 {
+		return fmt.Errorf("unsupported intrinsic %d", call.Intrinsic)
+	}
+	if inst.Repr != mir.ReprVoid || len(call.Args) != 1 {
+		return fmt.Errorf("console.log.f64 requires void result and one argument")
+	}
+	arg, err := operand(values, call.Args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "  call void @tsnative_console_log_f64(double %s)\n", arg)
 	return nil
 }
 

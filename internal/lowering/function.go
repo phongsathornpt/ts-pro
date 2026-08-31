@@ -44,7 +44,13 @@ func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, e
 		return hir.Function{}, fmt.Errorf("lower function %s: %w", source.Name, err)
 	}
 	if !fl.terminated {
-		return hir.Function{}, fmt.Errorf("lower function %s: reachable block b%d has no terminator", source.Name, fl.block().ID)
+		if int(source.ReturnType) < len(l.source.Types) && l.source.Types[source.ReturnType].Kind == frontend.TypeVoid {
+			if err := fl.terminate(hir.ReturnTerm{}); err != nil {
+				return hir.Function{}, err
+			}
+		} else {
+			return hir.Function{}, fmt.Errorf("lower function %s: reachable block b%d has no terminator", source.Name, fl.block().ID)
+		}
 	}
 	return fl.result, nil
 }
@@ -110,6 +116,12 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		return f.lowerIf(stmt)
 	case frontend.StmtBlock:
 		return f.lowerStatements(stmt.Then)
+	case frontend.StmtExpr:
+		if stmt.Expr == nil {
+			return fmt.Errorf("expression statement has no expression")
+		}
+		_, err := f.lowerExpr(stmt.Expr)
+		return err
 	default:
 		return fmt.Errorf("unsupported semantic statement kind %d", stmt.Kind)
 	}

@@ -10,6 +10,19 @@ func (m Module) Verify() error {
 		}
 		functions[fn.ID] = struct{}{}
 	}
+	if m.Entry != nil {
+		if _, ok := functions[*m.Entry]; !ok {
+			return fmt.Errorf("entry references unknown function f%d", *m.Entry)
+		}
+		for _, fn := range m.Functions {
+			if fn.ID == *m.Entry {
+				if len(fn.Params) != 0 || fn.ReturnRepr != ReprVoid {
+					return fmt.Errorf("entry function f%d must be () -> void", fn.ID)
+				}
+				break
+			}
+		}
+	}
 	for _, fn := range m.Functions {
 		if err := verifyFunction(fn, functions); err != nil {
 			return fmt.Errorf("function f%d: %w", fn.ID, err)
@@ -79,6 +92,15 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[Block
 			case Call:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("unknown callee f%d", op.Callee)
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
+				}
+			case IntrinsicCall:
+				if op.Intrinsic == IntrinsicInvalid {
+					return fmt.Errorf("invalid intrinsic")
 				}
 				for _, arg := range op.Args {
 					if err := checkValue(arg); err != nil {

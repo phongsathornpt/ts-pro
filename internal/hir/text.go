@@ -15,6 +15,9 @@ func DumpText(module Module) string {
 	for i, typ := range module.Types {
 		fmt.Fprintf(&b, "  type t%d = %s\n", i, formatType(typ))
 	}
+	if module.Entry != nil {
+		fmt.Fprintf(&b, "  entry f%d\n", *module.Entry)
+	}
 	functions := append([]Function(nil), module.Functions...)
 	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
 	for _, function := range functions {
@@ -71,6 +74,16 @@ func formatOperation(op Operation) string {
 			args[i] = fmt.Sprintf("v%d", arg)
 		}
 		return fmt.Sprintf("call f%d(%s)", op.Callee, strings.Join(args, ", "))
+	case IntrinsicCallOp:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = fmt.Sprintf("v%d", arg)
+		}
+		name := "invalid"
+		if op.Intrinsic == IntrinsicConsoleLogF64 {
+			name = "console.log.f64"
+		}
+		return fmt.Sprintf("intrinsic %s(%s)", name, strings.Join(args, ", "))
 	default:
 		return "<invalid-op>"
 	}

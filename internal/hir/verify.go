@@ -67,6 +67,11 @@ func (m Module) verifyFunctions() VerificationErrors {
 		}
 		functionIDs[function.ID] = struct{}{}
 	}
+	if m.Entry != nil {
+		if _, exists := functionIDs[*m.Entry]; !exists {
+			errors = append(errors, VerificationError{Message: fmt.Sprintf("entry references unknown function f%d", *m.Entry)})
+		}
+	}
 	for i := range m.Functions {
 		errors = append(errors, m.verifyFunction(&m.Functions[i], functionIDs)...)
 	}
@@ -137,6 +142,13 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case CallOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("calls unknown function f%d", op.Callee))
+				}
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
+			case IntrinsicCallOp:
+				if op.Intrinsic == IntrinsicInvalid {
+					add(fmt.Sprintf("instruction v%d has invalid intrinsic", instruction.Result))
 				}
 				for _, arg := range op.Args {
 					checkValue(arg)

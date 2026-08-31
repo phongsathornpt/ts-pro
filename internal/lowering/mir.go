@@ -9,6 +9,10 @@ import (
 
 func LowerMIR(source hir.Module) (mir.Module, error) {
 	result := mir.Module{Name: source.Name}
+	if source.Entry != nil {
+		entry := mir.FunctionID(*source.Entry)
+		result.Entry = &entry
+	}
 	for _, fn := range source.Functions {
 		lowered, err := lowerMIRFunction(fn)
 		if err != nil {
@@ -81,6 +85,19 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.Call{Callee: mir.FunctionID(op.Callee), Args: args}
+	case hir.IntrinsicCallOp:
+		args := make([]mir.ValueID, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = mir.ValueID(arg)
+		}
+		intrinsic := mir.IntrinsicInvalid
+		if op.Intrinsic == hir.IntrinsicConsoleLogF64 {
+			intrinsic = mir.IntrinsicConsoleLogF64
+		}
+		if intrinsic == mir.IntrinsicInvalid {
+			return mir.Instruction{}, fmt.Errorf("unsupported HIR intrinsic %d", op.Intrinsic)
+		}
+		result.Op = mir.IntrinsicCall{Intrinsic: intrinsic, Args: args}
 	default:
 		return mir.Instruction{}, fmt.Errorf("unsupported HIR operation %T", source.Op)
 	}

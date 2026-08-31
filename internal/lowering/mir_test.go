@@ -57,4 +57,17 @@ func TestLowerTypedFibToMIR(t *testing.T) {
 	if len(fn.Blocks) != 3 {
 		t.Fatalf("blocks = %d", len(fn.Blocks))
 	}
+	if module.Entry == nil || len(module.Functions) != 2 {
+		t.Fatalf("entry = %+v functions=%d", module.Entry, len(module.Functions))
+	}
+	entry := module.Functions[1]
+	if entry.ID != *module.Entry || entry.ReturnRepr != mir.ReprVoid || len(entry.Params) != 0 {
+		t.Fatalf("entry function = %+v", entry)
+	}
+	if len(entry.Blocks) != 1 || len(entry.Blocks[0].Instructions) != 3 {
+		t.Fatalf("entry blocks = %+v", entry.Blocks)
+	}
+	if call, ok := entry.Blocks[0].Instructions[2].Op.(mir.IntrinsicCall); !ok || call.Intrinsic != mir.IntrinsicConsoleLogF64 {
+		t.Fatalf("entry intrinsic = %+v", entry.Blocks[0].Instructions[2].Op)
+	}
 }
