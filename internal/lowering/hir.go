@@ -64,7 +64,15 @@ func (l *moduleLowerer) lowerTypes() error {
 			continue
 		}
 		id := hir.NewTypeID(uint32(len(l.module.Types)))
-		l.module.Types = append(l.module.Types, hir.SemanticType{Kind: kind})
+		semantic := hir.SemanticType{Kind: kind}
+		if typ.Kind == frontend.TypeArray {
+			element, ok := l.types[typ.Element]
+			if !ok {
+				return fmt.Errorf("array type %q references unavailable element type t%d", typ.Name, typ.Element)
+			}
+			semantic.Element = element
+		}
+		l.module.Types = append(l.module.Types, semantic)
 		l.types[typ.ID] = id
 		if isScalarType(typ.Kind) {
 			canonical[typ.Kind] = id
@@ -103,6 +111,14 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypeNumber, nil
 	case frontend.TypeString:
 		return hir.TypeString, nil
+	case frontend.TypeArray:
+		return hir.TypeArray, nil
+	case frontend.TypeObject:
+		return hir.TypeObject, nil
+	case frontend.TypeUnion:
+		return hir.TypeUnion, nil
+	case frontend.TypeFunction:
+		return hir.TypeFunction, nil
 	default:
 		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
 	}

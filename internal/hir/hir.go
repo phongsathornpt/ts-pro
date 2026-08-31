@@ -77,12 +77,19 @@ type PhiOp struct {
 	Incoming []PhiIncoming
 }
 
+type ArrayNewOp struct{ Elements []ValueID }
+type ArrayLengthOp struct{ Array ValueID }
+type ArrayGetOp struct{ Array, Index ValueID }
+
 func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
 func (BinaryExpr) isOperation()      {}
 func (CallOp) isOperation()          {}
 func (IntrinsicCallOp) isOperation() {}
 func (PhiOp) isOperation()           {}
+func (ArrayNewOp) isOperation()      {}
+func (ArrayLengthOp) isOperation()   {}
+func (ArrayGetOp) isOperation()      {}
 
 type LiteralKind uint8
 

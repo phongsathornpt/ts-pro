@@ -119,6 +119,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[Block
 						return err
 					}
 				}
+			case ArrayNewF64:
+				for _, element := range op.Elements {
+					if err := checkValue(element); err != nil {
+						return err
+					}
+				}
+			case ArrayLengthF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+			case ArrayGetF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}

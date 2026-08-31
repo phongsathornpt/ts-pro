@@ -85,6 +85,16 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.Call{Callee: mir.FunctionID(op.Callee), Args: args}
+	case hir.ArrayNewOp:
+		elements := make([]mir.ValueID, len(op.Elements))
+		for i, value := range op.Elements {
+			elements[i] = mir.ValueID(value)
+		}
+		result.Op = mir.ArrayNewF64{Elements: elements}
+	case hir.ArrayLengthOp:
+		result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
+	case hir.ArrayGetOp:
+		result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {

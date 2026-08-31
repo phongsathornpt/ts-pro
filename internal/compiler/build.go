@@ -86,21 +86,26 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	defer os.RemoveAll(workDir)
 	llPath := filepath.Join(workDir, "module.ll")
 	moduleObj := filepath.Join(workDir, "module.o")
-	runtimeObj := filepath.Join(workDir, "runtime.o")
 	if err := os.WriteFile(llPath, []byte(llvmIR), 0o644); err != nil {
 		return BuildResult{}, fmt.Errorf("write LLVM IR: %w", err)
 	}
 	if err := tc.CompileLLVM(ctx, llPath, moduleObj, options.Optimization); err != nil {
 		return BuildResult{}, err
 	}
-	runtimeSource := filepath.Join(options.Root, "runtime", "core", "console.c")
-	if err := tc.CompileC(ctx, runtimeSource, runtimeObj, options.Optimization); err != nil {
-		return BuildResult{}, err
+	objects := []string{moduleObj}
+	runtimeSources := []string{"console.c", "array_f64.c"}
+	for i, source := range runtimeSources {
+		runtimeObj := filepath.Join(workDir, fmt.Sprintf("runtime-%d.o", i))
+		runtimeSource := filepath.Join(options.Root, "runtime", "core", source)
+		if err := tc.CompileC(ctx, runtimeSource, runtimeObj, options.Optimization); err != nil {
+			return BuildResult{}, err
+		}
+		objects = append(objects, runtimeObj)
 	}
 	if err := toolchain.EnsureParent(options.Output); err != nil {
 		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
 	}
-	if err := tc.Link(ctx, []string{moduleObj, runtimeObj}, options.Output); err != nil {
+	if err := tc.Link(ctx, objects, options.Output); err != nil {
 		return BuildResult{}, err
 	}
 	return BuildResult{Output: options.Output, Functions: len(mirModule.Functions)}, nil

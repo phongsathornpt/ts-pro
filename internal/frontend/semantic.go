@@ -8,6 +8,9 @@ const (
 	ExprNumber
 	ExprBinary
 	ExprCall
+	ExprArray
+	ExprIndex
+	ExprArrayLength
 )
 
 type IntrinsicKind uint8
@@ -46,6 +49,9 @@ type Expr struct {
 	Args       []*Expr
 	CallTarget *FunctionID
 	Intrinsic  IntrinsicKind
+	Elements   []*Expr
+	Object     *Expr
+	Index      *Expr
 	Span       Span
 }
 

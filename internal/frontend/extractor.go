@@ -485,6 +485,75 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		return e.extractBinary(node, expr)
 	case tsast.KindCallExpression:
 		return e.extractCall(node, expr)
+	case tsast.KindArrayLiteralExpression:
+		expr.Kind = ExprArray
+		elements, ok := node.NamedChild("elements")
+		if !ok || !elements.IsList() {
+			return nil, fmt.Errorf("array literal at %d has no element list", node.Pos())
+		}
+		for _, elementNode := range elements.ListElements() {
+			element, err := e.extractExpr(elementNode)
+			if err != nil {
+				return nil, err
+			}
+			if int(element.Type) >= len(e.result.Types) || e.result.Types[element.Type].Kind != TypeNumber {
+				return nil, fmt.Errorf("native array at %d currently supports number elements only", node.Pos())
+			}
+			expr.Elements = append(expr.Elements, element)
+		}
+		return expr, nil
+	case tsast.KindElementAccessExpression:
+		objectNode, ok := node.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("element access at %d has no object", node.Pos())
+		}
+		indexNode, ok := node.NamedChild("argumentExpression")
+		if !ok {
+			return nil, fmt.Errorf("element access at %d has no index", node.Pos())
+		}
+		object, err := e.extractExpr(objectNode)
+		if err != nil {
+			return nil, err
+		}
+		index, err := e.extractExpr(indexNode)
+		if err != nil {
+			return nil, err
+		}
+		expr.Kind, expr.Object, expr.Index = ExprIndex, object, index
+		return expr, nil
+	case tsast.KindPropertyAccessExpression:
+		objectNode, ok := node.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("property access at %d has no object", node.Pos())
+		}
+		nameNode, ok := node.NamedChild("name")
+		if !ok {
+			return nil, fmt.Errorf("property access at %d has no name", node.Pos())
+		}
+		name, _ := nameNode.Text()
+		if name != "length" {
+			return nil, fmt.Errorf("native property %q at %d is not supported", name, node.Pos())
+		}
+		object, err := e.extractExpr(objectNode)
+		if err != nil {
+			return nil, err
+		}
+		if int(object.Type) >= len(e.result.Types) || e.result.Types[object.Type].Kind != TypeArray {
+			return nil, fmt.Errorf(".length at %d currently requires a native array", node.Pos())
+		}
+		expr.Kind, expr.Object = ExprArrayLength, object
+		return expr, nil
+	case tsast.KindNonNullExpression:
+		innerNode, ok := node.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("non-null expression at %d has no operand", node.Pos())
+		}
+		inner, err := e.extractExpr(innerNode)
+		if err != nil {
+			return nil, err
+		}
+		inner.Type, inner.Span = typeID, e.span(node)
+		return inner, nil
 	default:
 		return nil, fmt.Errorf("unsupported native expression %s at %d", tsast.KindName(node.Kind()), node.Pos())
 	}
@@ -613,10 +682,36 @@ func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
 	if err != nil {
 		return 0, err
 	}
+	kind := classifyType(text)
+	if kind == TypeNumber && text == "number" {
+		id := e.ensureSemanticType(TypeNumber, "number")
+		e.types[info.ID] = id
+		return id, nil
+	}
+	typ := Type{Kind: kind, Name: text}
+	if kind == TypeArray {
+		base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
+		if base != "number[]" {
+			return 0, fmt.Errorf("native array type %q is not supported", text)
+		}
+		typ.Element = e.ensureSemanticType(TypeNumber, "number")
+	}
 	id := TypeID(len(e.result.Types))
-	e.result.Types = append(e.result.Types, Type{ID: id, Kind: classifyType(text), Name: text})
+	typ.ID = id
+	e.result.Types = append(e.result.Types, typ)
 	e.types[info.ID] = id
 	return id, nil
+}
+
+func (e *extractor) ensureSemanticType(kind TypeKind, name string) TypeID {
+	for _, typ := range e.result.Types {
+		if typ.Kind == kind && typ.Name == name {
+			return typ.ID
+		}
+	}
+	id := TypeID(len(e.result.Types))
+	e.result.Types = append(e.result.Types, Type{ID: id, Kind: kind, Name: name})
+	return id
 }
 
 func classifyType(text string) TypeKind {
@@ -642,6 +737,10 @@ func classifyType(text string) TypeKind {
 	}
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
 		return TypeNumber
+	}
+	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
+	if strings.HasSuffix(arrayText, "[]") {
+		return TypeArray
 	}
 	if strings.Contains(text, "=>") {
 		return TypeFunction

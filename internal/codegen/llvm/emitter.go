@@ -25,7 +25,11 @@ func Emit(module mir.Module) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "; tsnative module %s\n", strconv.Quote(module.Name))
 	b.WriteString("target triple = \"x86_64-unknown-linux-gnu\"\n\n")
-	b.WriteString("declare void @tsnative_console_log_f64(double)\n\n")
+	b.WriteString("declare void @tsnative_console_log_f64(double)\n")
+	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
+	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
+	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
+	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n\n")
 	functions := append([]mir.Function(nil), module.Functions...)
 	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
 	for _, fn := range functions {
@@ -79,6 +83,40 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.Instruction, values map[mir.ValueID]string) error {
 	switch op := inst.Op.(type) {
 	case mir.ConstF64:
+		return nil
+	case mir.ArrayNewF64:
+		if inst.Repr != mir.ReprArrayRef {
+			return fmt.Errorf("array.new.f64 requires arrayref result")
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_array_f64_new(i64 %d)\n", name, len(op.Elements))
+		for i, element := range op.Elements {
+			value, err := operand(values, element)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  call void @tsnative_array_f64_set(ptr %s, i64 %d, double %s)\n", name, i, value)
+		}
+		return nil
+	case mir.ArrayLengthF64:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call double @tsnative_array_f64_len(ptr %s)\n", name, array)
+		return nil
+	case mir.ArrayGetF64:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call double @tsnative_array_f64_get(ptr %s, double %s)\n", name, array, index)
 		return nil
 	case mir.Phi:
 		typ, err := llvmType(inst.Repr)

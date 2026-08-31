@@ -26,6 +26,32 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.lowerBinary(expr)
 	case frontend.ExprCall:
 		return f.lowerCall(expr)
+	case frontend.ExprArray:
+		elements := make([]hir.ValueID, 0, len(expr.Elements))
+		for _, element := range expr.Elements {
+			value, err := f.lowerExpr(element)
+			if err != nil {
+				return 0, err
+			}
+			elements = append(elements, value)
+		}
+		return f.emit(expr.Type, hir.ArrayNewOp{Elements: elements}), nil
+	case frontend.ExprArrayLength:
+		array, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.ArrayLengthOp{Array: array}), nil
+	case frontend.ExprIndex:
+		array, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		index, err := f.lowerExpr(expr.Index)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.ArrayGetOp{Array: array, Index: index}), nil
 	default:
 		return 0, fmt.Errorf("unsupported semantic expression kind %d", expr.Kind)
 	}

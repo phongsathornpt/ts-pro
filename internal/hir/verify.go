@@ -161,6 +161,15 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 					checkBlock(incoming.Block)
 					checkValue(incoming.Value)
 				}
+			case ArrayNewOp:
+				for _, element := range op.Elements {
+					checkValue(element)
+				}
+			case ArrayLengthOp:
+				checkValue(op.Array)
+			case ArrayGetOp:
+				checkValue(op.Array)
+				checkValue(op.Index)
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

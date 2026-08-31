@@ -116,12 +116,19 @@ type Phi struct {
 	Incoming []PhiIncoming
 }
 
-func (ConstF64) isOperation()      {}
-func (FloatBinary) isOperation()   {}
-func (FloatCompare) isOperation()  {}
-func (Call) isOperation()          {}
-func (IntrinsicCall) isOperation() {}
-func (Phi) isOperation()           {}
+type ArrayNewF64 struct{ Elements []ValueID }
+type ArrayLengthF64 struct{ Array ValueID }
+type ArrayGetF64 struct{ Array, Index ValueID }
+
+func (ConstF64) isOperation()       {}
+func (FloatBinary) isOperation()    {}
+func (FloatCompare) isOperation()   {}
+func (Call) isOperation()           {}
+func (IntrinsicCall) isOperation()  {}
+func (Phi) isOperation()            {}
+func (ArrayNewF64) isOperation()    {}
+func (ArrayLengthF64) isOperation() {}
+func (ArrayGetF64) isOperation()    {}
 
 type Terminator interface{ isTerminator() }
 
