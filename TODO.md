@@ -44,7 +44,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Classes, constructors, fields, and devirtualized methods.
   - [x] Parameter-property constructors with closed instance shapes.
   - [x] Direct instance-method calls with a native hidden `this` parameter.
-  - [ ] General constructor bodies, explicit property initializers, inheritance, and virtual dispatch.
+  - [x] Explicit field declarations with `this.field = parameter` constructor assignment bodies.
+  - [ ] Property initializers, arbitrary constructor side effects, inheritance, and virtual dispatch.
 - [ ] Closures and captured environments.
 - [ ] Generic monomorphization and call-site specialization.
 - [ ] Exceptions, Promise, and async/await.

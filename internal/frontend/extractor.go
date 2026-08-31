@@ -1052,7 +1052,9 @@ func (e *extractor) extractClassMembers(node tsast.Node, info *classInfo) error 
 				return err
 			}
 		case tsast.KindPropertyDeclaration:
-			return fmt.Errorf("explicit property declaration in class %s is not supported yet; use constructor parameter-properties", info.Name)
+			if err := e.validateClassProperty(member, info); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unsupported class member %s in %s", tsast.KindName(member.Kind()), info.Name)
 		}
@@ -1085,8 +1087,12 @@ func (e *extractor) extractConstructor(node tsast.Node, info *classInfo) error {
 		return fmt.Errorf("constructor for %s has no body", info.Name)
 	}
 	statements, ok := body.NamedChild("statements")
-	if ok && statements.IsList() && len(statements.ListElements()) != 0 {
-		return fmt.Errorf("constructor body for %s is not supported yet; use parameter-properties with an empty body", info.Name)
+	if ok && statements.IsList() {
+		for _, statement := range statements.ListElements() {
+			if err := e.extractConstructorFieldAssignment(statement, info); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1182,4 +1188,80 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 		expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(fieldIndex), Value: args[paramIndex]})
 	}
 	return expr, nil
+}
+
+func (e *extractor) validateClassProperty(node tsast.Node, info *classInfo) error {
+	if hasModifier(node, tsast.KindStaticKeyword) {
+		return fmt.Errorf("static property in class %s is not supported yet", info.Name)
+	}
+	nameNode, ok := node.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return fmt.Errorf("class %s property at %d requires an identifier name", info.Name, node.Pos())
+	}
+	name, _ := nameNode.Text()
+	if _, ok := node.NamedChild("initializer"); ok {
+		return fmt.Errorf("class %s property %s initializer is not supported yet", info.Name, name)
+	}
+	for _, field := range e.result.Shapes[info.Shape].Fields {
+		if field.Name == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("class %s property %s is missing from checker-derived shape", info.Name, name)
+}
+
+func (e *extractor) extractConstructorFieldAssignment(node tsast.Node, info *classInfo) error {
+	if node.Kind() != tsast.KindExpressionStatement {
+		return fmt.Errorf("constructor %s only supports field assignment statements", info.Name)
+	}
+	expression, ok := node.NamedChild("expression")
+	if !ok || expression.Kind() != tsast.KindBinaryExpression {
+		return fmt.Errorf("constructor %s only supports this.field = parameter assignments", info.Name)
+	}
+	op, ok := expression.NamedChild("operatorToken")
+	if !ok || op.Kind() != tsast.KindEqualsToken {
+		return fmt.Errorf("constructor %s only supports simple field assignments", info.Name)
+	}
+	left, lok := expression.NamedChild("left")
+	right, rok := expression.NamedChild("right")
+	if !lok || !rok || left.Kind() != tsast.KindPropertyAccessExpression || right.Kind() != tsast.KindIdentifier {
+		return fmt.Errorf("constructor %s only supports this.field = parameter assignments", info.Name)
+	}
+	receiver, ok := left.NamedChild("expression")
+	if !ok || receiver.Kind() != tsast.KindThisKeyword {
+		return fmt.Errorf("constructor %s assignment target must be this.field", info.Name)
+	}
+	nameNode, ok := left.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return fmt.Errorf("constructor %s assignment has invalid field", info.Name)
+	}
+	fieldName, _ := nameNode.Text()
+	rightSymbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, right.Handle(e.fileName))
+	if err != nil || rightSymbol == nil {
+		if err == nil {
+			err = fmt.Errorf("constructor %s assignment source has no symbol", info.Name)
+		}
+		return err
+	}
+	paramSymbol, ok := e.symbols[rightSymbol.ID]
+	if !ok {
+		return fmt.Errorf("constructor %s assignment source is not a constructor parameter", info.Name)
+	}
+	paramIndex := -1
+	for i, param := range info.ConstructorParams {
+		if param.Symbol == paramSymbol {
+			paramIndex = i
+			break
+		}
+	}
+	if paramIndex < 0 {
+		return fmt.Errorf("constructor %s assignment source is not a constructor parameter", info.Name)
+	}
+	for fieldIndex, field := range e.result.Shapes[info.Shape].Fields {
+		if field.Name == fieldName {
+			info.FieldParam[fieldIndex] = paramIndex
+			return nil
+		}
+	}
+	return fmt.Errorf("constructor %s assigns unknown field %s", info.Name, fieldName)
 }
