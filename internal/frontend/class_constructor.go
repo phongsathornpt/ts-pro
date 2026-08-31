@@ -36,7 +36,27 @@ func (e *extractor) extractNativeConstructorBody(info *classInfo) ([]Statement, 
 		e.parameterAliases[param.Name] = param.Symbol
 	}
 	defer func() { e.parameterAliases = previousAliases }()
-	body := make([]Statement, 0, len(info.Initializers)+len(info.ConstructorParams)+4)
+
+	var sourceStatements []tsast.Node
+	if info.HasConstructor {
+		block, ok := info.ConstructorNode.NamedChild("body")
+		if !ok {
+			return nil, fmt.Errorf("constructor %s has no body", info.Name)
+		}
+		if statements, ok := block.NamedChild("statements"); ok && statements.IsList() {
+			sourceStatements = statements.ListElements()
+		}
+	}
+
+	body := make([]Statement, 0, len(info.Initializers)+len(info.ConstructorParams)+len(sourceStatements)+1)
+	if info.Base != nil {
+		superStmt, remaining, err := e.extractSuperConstructorStatement(info, sourceStatements)
+		if err != nil {
+			return nil, err
+		}
+		body = append(body, superStmt)
+		sourceStatements = remaining
+	}
 	for _, initializer := range info.Initializers {
 		value, err := e.extractExpr(initializer.Node)
 		if err != nil {
@@ -54,18 +74,7 @@ func (e *extractor) extractNativeConstructorBody(info *classInfo) ([]Statement, 
 		field := e.result.Shapes[info.Shape].Fields[fieldIndex]
 		body = append(body, e.constructorFieldStore(info, fieldIndex, field.Name, field.Type, value))
 	}
-	if !info.HasConstructor {
-		return body, nil
-	}
-	block, ok := info.ConstructorNode.NamedChild("body")
-	if !ok {
-		return nil, fmt.Errorf("constructor %s has no body", info.Name)
-	}
-	statements, ok := block.NamedChild("statements")
-	if !ok || !statements.IsList() {
-		return body, nil
-	}
-	for _, node := range statements.ListElements() {
+	for _, node := range sourceStatements {
 		stmt, err := e.extractStatement(node)
 		if err != nil {
 			return nil, fmt.Errorf("constructor %s: %w", info.Name, err)

@@ -25,7 +25,7 @@ func TestNativeOutputMatchesTypeScriptReference(t *testing.T) {
 	fixtures := []string{
 		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts",
 		"strings.ts", "objects.ts", "classes.ts", "class_fields.ts",
-		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts",
+		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts",
 	}
 	for _, fixture := range fixtures {
 		fixture := fixture

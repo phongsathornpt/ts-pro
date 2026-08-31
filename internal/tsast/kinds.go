@@ -20,6 +20,7 @@ const (
 	KindMinusMinusToken              uint32 = 46
 	KindEqualsToken                  uint32 = 63
 	KindExportKeyword                uint32 = 94
+	KindExtendsKeyword               uint32 = 95
 	KindSuperKeyword                 uint32 = 107
 	KindThisKeyword                  uint32 = 109
 	KindPrivateKeyword               uint32 = 122
@@ -42,6 +43,7 @@ const (
 	KindNewExpression                uint32 = 215
 	KindPrefixUnaryExpression        uint32 = 225
 	KindPostfixUnaryExpression       uint32 = 226
+	KindExpressionWithTypeArguments  uint32 = 234
 	KindNonNullExpression            uint32 = 236
 	KindBinaryExpression             uint32 = 227
 	KindBlock                        uint32 = 242
@@ -58,6 +60,7 @@ const (
 	KindInterfaceDeclaration         uint32 = 265
 	KindTypeAliasDeclaration         uint32 = 266
 	KindPropertyAssignment           uint32 = 303
+	KindHeritageClause               uint32 = 299
 	KindShorthandPropertyAssignment  uint32 = 304
 	KindSourceFile                   uint32 = 307
 	KindIdentifier                   uint32 = 79
@@ -70,19 +73,19 @@ var kindNames = map[uint32]string{
 	KindEqualsEqualsEqualsToken: "EqualsEqualsEqualsToken", KindExclamationEqualsEqualsToken: "ExclamationEqualsEqualsToken",
 	KindPlusToken: "PlusToken", KindMinusToken: "MinusToken", KindAsteriskToken: "AsteriskToken", KindSlashToken: "SlashToken",
 	KindPlusPlusToken: "PlusPlusToken", KindMinusMinusToken: "MinusMinusToken", KindEqualsToken: "EqualsToken",
-	KindExportKeyword: "ExportKeyword", KindSuperKeyword: "SuperKeyword", KindThisKeyword: "ThisKeyword",
+	KindExportKeyword: "ExportKeyword", KindExtendsKeyword: "ExtendsKeyword", KindSuperKeyword: "SuperKeyword", KindThisKeyword: "ThisKeyword",
 	KindPrivateKeyword: "PrivateKeyword", KindProtectedKeyword: "ProtectedKeyword", KindPublicKeyword: "PublicKeyword", KindStaticKeyword: "StaticKeyword", KindReadonlyKeyword: "ReadonlyKeyword",
 	KindIdentifier: "Identifier", KindNumberKeyword: "NumberKeyword",
 	KindParameter: "Parameter", KindPropertyDeclaration: "PropertyDeclaration", KindMethodDeclaration: "MethodDeclaration", KindConstructor: "Constructor",
 	KindArrayLiteralExpression: "ArrayLiteralExpression", KindObjectLiteralExpression: "ObjectLiteralExpression", KindPropertyAccessExpression: "PropertyAccessExpression",
 	KindElementAccessExpression: "ElementAccessExpression", KindCallExpression: "CallExpression",
 	KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
-	KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
+	KindExpressionWithTypeArguments: "ExpressionWithTypeArguments", KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
 	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement",
 	KindVariableDeclaration: "VariableDeclaration", KindVariableDeclarationList: "VariableDeclarationList", KindFunctionDeclaration: "FunctionDeclaration", KindClassDeclaration: "ClassDeclaration",
 	KindInterfaceDeclaration: "InterfaceDeclaration", KindTypeAliasDeclaration: "TypeAliasDeclaration",
-	KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",
+	KindHeritageClause: "HeritageClause", KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",
 	KindSourceFile: "SourceFile", KindNodeList: "NodeList",
 }
 

@@ -6,6 +6,8 @@ var childProperties = map[uint32][]string{
 	KindSourceFile:                  {"statements", "endOfFileToken"},
 	KindFunctionDeclaration:         {"modifiers", "asteriskToken", "name", "typeParameters", "parameters", "type", "body"},
 	KindClassDeclaration:            {"modifiers", "name", "typeParameters", "heritageClauses", "members"},
+	KindHeritageClause:              {"types"},
+	KindExpressionWithTypeArguments: {"expression", "typeArguments"},
 	KindConstructor:                 {"modifiers", "typeParameters", "parameters", "type", "body"},
 	KindMethodDeclaration:           {"modifiers", "asteriskToken", "name", "postfixToken", "typeParameters", "parameters", "type", "body"},
 	KindPropertyDeclaration:         {"modifiers", "name", "postfixToken", "type", "initializer"},

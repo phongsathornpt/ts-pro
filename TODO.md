@@ -49,8 +49,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Constructor bodies using the supported native statement/expression subset, preserving initializer and parameter-property order.
   - [x] Fixed-offset mutable instance field stores.
   - [~] Closed-world inheritance and virtual dispatch.
-    - [~] Single-inheritance frontend groundwork: TypeScript 7 heritage-clause decoding, base-class resolution, derived-shape prefix layout, and `super(...)` constructor chaining.
-    - [ ] Native inheritance acceptance + differential coverage for inherited fields/methods and base-constructor effects.
+    - [x] Single-inheritance frontend: exact TypeScript 7 heritage-clause decoding, base-class resolution, derived-shape prefix layout, and `super(...)` constructor chaining.
+    - [x] Native inheritance acceptance + differential coverage for inherited fields/methods and base-constructor effects.
     - [ ] Base-typed references holding derived instances and override dispatch/devirtualization.
     - [ ] General virtual dispatch/vtable or type-tag strategy where closed-world devirtualization cannot prove a single target.
 - [x] Closures and captured environments, with direct-call conversion for non-escaping closures and native `{code, env}` function values for escaping closures.

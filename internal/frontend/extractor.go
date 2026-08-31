@@ -36,6 +36,7 @@ type classInfo struct {
 	HasConstructor    bool
 	Constructor       FunctionID
 	ConstructorThis   SymbolID
+	Base              *classInfo
 }
 
 type extractor struct {
@@ -1164,11 +1165,15 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 		return fmt.Errorf("class %s does not have a closed object type", name)
 	}
 	shapeID := e.result.Types[typeID].Shape
-	info := &classInfo{Node: node, Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields))}
+	info := &classInfo{Node: node, Name: name, Type: typeID, Shape: shapeID}
+	e.classes[symbol.ID] = info
+	if err := e.resolveBaseClass(node, info); err != nil {
+		return err
+	}
+	info.FieldParam = make([]int, len(e.result.Shapes[shapeID].Fields))
 	for i := range info.FieldParam {
 		info.FieldParam[i] = -1
 	}
-	e.classes[symbol.ID] = info
 	classSymbol := e.internSymbol(symbol, SymbolClass, nameNode)
 	e.result.Symbols[classSymbol].Type = typeID
 	return e.extractClassMembers(node, info)

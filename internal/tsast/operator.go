@@ -19,3 +19,7 @@ func (n Node) UnaryOperatorKind() (uint32, bool) {
 	}
 	return 0, false
 }
+
+func (n Node) HeritageIsImplements() bool {
+	return n.Kind() == KindHeritageClause && ((n.Data()>>24)&1) != 0
+}
