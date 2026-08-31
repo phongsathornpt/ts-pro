@@ -1,0 +1,92 @@
+package lowering
+
+import (
+	"fmt"
+
+	"github.com/projectthorn/tsv7-bin/internal/frontend"
+	"github.com/projectthorn/tsv7-bin/internal/hir"
+)
+
+type moduleLowerer struct {
+	source frontend.Snapshot
+	types  map[frontend.TypeID]hir.TypeID
+	module hir.Module
+}
+
+func LowerHIR(source frontend.Snapshot, name string) (hir.Module, error) {
+	lowerer := &moduleLowerer{
+		source: source,
+		types:  map[frontend.TypeID]hir.TypeID{},
+		module: hir.Module{ID: hir.NewModuleID(0), Name: name},
+	}
+	if err := lowerer.lowerTypes(); err != nil {
+		return hir.Module{}, err
+	}
+	for _, fn := range source.Functions {
+		lowered, err := lowerer.lowerFunction(fn)
+		if err != nil {
+			return hir.Module{}, err
+		}
+		lowerer.module.Functions = append(lowerer.module.Functions, lowered)
+	}
+	if err := lowerer.module.Verify(); err != nil {
+		return hir.Module{}, fmt.Errorf("verify lowered HIR: %w", err)
+	}
+	return lowerer.module, nil
+}
+
+func (l *moduleLowerer) lowerTypes() error {
+	canonical := map[frontend.TypeKind]hir.TypeID{}
+	for _, typ := range l.source.Types {
+		kind, err := lowerTypeKind(typ.Kind)
+		if err != nil {
+			return fmt.Errorf("lower type %q: %w", typ.Name, err)
+		}
+		if existing, ok := canonical[typ.Kind]; ok && isScalarType(typ.Kind) {
+			l.types[typ.ID] = existing
+			continue
+		}
+		id := hir.NewTypeID(uint32(len(l.module.Types)))
+		l.module.Types = append(l.module.Types, hir.SemanticType{Kind: kind})
+		l.types[typ.ID] = id
+		if isScalarType(typ.Kind) {
+			canonical[typ.Kind] = id
+		}
+	}
+	return nil
+}
+
+func isScalarType(kind frontend.TypeKind) bool {
+	switch kind {
+	case frontend.TypeAny, frontend.TypeUnknown, frontend.TypeNever, frontend.TypeVoid,
+		frontend.TypeUndefined, frontend.TypeNull, frontend.TypeBoolean, frontend.TypeNumber, frontend.TypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
+	switch kind {
+	case frontend.TypeAny:
+		return hir.TypeAny, nil
+	case frontend.TypeUnknown:
+		return hir.TypeUnknown, nil
+	case frontend.TypeNever:
+		return hir.TypeNever, nil
+	case frontend.TypeVoid:
+		return hir.TypeVoid, nil
+	case frontend.TypeUndefined:
+		return hir.TypeUndefined, nil
+	case frontend.TypeNull:
+		return hir.TypeNull, nil
+	case frontend.TypeBoolean:
+		return hir.TypeBoolean, nil
+	case frontend.TypeNumber:
+		return hir.TypeNumber, nil
+	case frontend.TypeString:
+		return hir.TypeString, nil
+	default:
+		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
+	}
+}

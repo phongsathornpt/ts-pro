@@ -28,7 +28,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Define compiler-owned source/symbol/type/function DTOs.
 - [x] Determine the minimum semantic data required to lower TypeScript to HIR.
-- [~] Implement semantic extraction on top of TypeScript 7.
+- [x] Implement semantic extraction on top of TypeScript 7 for the typed MVP subset.
 - [x] Isolate version-specific TypeScript LSP/API protocol in `internal/tsls`.
 - [x] Add compatibility tests for the pinned TypeScript 7 version.
 - [ ] Verify that the compiler path contains no SWC/Babel/Oxc frontend.
@@ -40,7 +40,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Define expressions, instructions, and terminators.
 - [x] Add HIR verifier.
 - [x] Add deterministic textual HIR dump.
-- [ ] Lower the first typed function from TypeScript-LS semantic DTOs.
+- [x] Lower the first typed function from TypeScript 7 semantic DTOs.
 
 ## Native representation / MIR
 

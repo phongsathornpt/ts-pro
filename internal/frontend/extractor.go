@@ -299,12 +299,12 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	if !ok {
 		return nil, fmt.Errorf("call at %d has no callee", node.Pos())
 	}
-	callee, err := e.extractExpr(calleeNode)
-	if err != nil {
-		return nil, err
+	if calleeNode.Kind() != tsast.KindIdentifier {
+		return nil, fmt.Errorf("non-identifier callee at %d is not supported by the native MVP", calleeNode.Pos())
 	}
+	calleeName, _ := calleeNode.Text()
 	expr.Kind = ExprCall
-	expr.Callee = callee
+	expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeName, Span: e.span(calleeNode)}
 	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
 	if err != nil {
 		return nil, err
