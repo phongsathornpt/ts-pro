@@ -68,8 +68,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add tagged `JSValue` only for values that cannot keep a proven native representation.
 - [ ] Add checked conversions and dynamic operator/property slow paths.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
-- [ ] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
-- [ ] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and cache hit rate.
+- [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
+- [~] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and cache hit rate (stage timings implemented; cache hit rate pending cache implementation).
 - [ ] Add ThinLTO after module/object caching is established.
 - [ ] Add PGO after MIR quality and benchmark coverage are stable.
 - [ ] Add cross compilation after the Linux x86-64 runtime ABI is stable.

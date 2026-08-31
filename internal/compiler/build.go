@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
@@ -16,23 +17,29 @@ import (
 )
 
 type BuildOptions struct {
-	Root         string
-	Input        string
-	Output       string
-	Config       string
-	Optimization string
+	Root              string
+	Input             string
+	Output            string
+	Config            string
+	Optimization      string
+	ReportPerformance bool
 }
 
 type BuildResult struct {
 	Output    string
 	Functions int
+	Metrics   BuildMetrics
+	Timings   BuildTimings
 }
 
 func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
+	totalStart := time.Now()
+	var timings BuildTimings
 	options, err := normalizeOptions(options)
 	if err != nil {
 		return BuildResult{}, err
 	}
+	tsStart := time.Now()
 	if err := validateTypeScript(ctx, options.Root); err != nil {
 		return BuildResult{}, err
 	}
@@ -60,21 +67,31 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
+	timings.TypeScript = time.Since(tsStart)
+	hirStart := time.Now()
 	hirModule, err := lowering.LowerHIR(semantic, moduleName(options.Input))
 	if err != nil {
 		return BuildResult{}, err
 	}
+	timings.HIR = time.Since(hirStart)
+	reprStart := time.Now()
 	if diagnostics := repranalysis.Analyze(&hirModule); len(diagnostics) != 0 {
 		return BuildResult{}, fmt.Errorf("native representation analysis failed: %s", formatRepresentationDiagnostics(diagnostics))
 	}
+	timings.Repr = time.Since(reprStart)
+	mirStart := time.Now()
 	mirModule, err := lowering.LowerMIR(hirModule)
 	if err != nil {
 		return BuildResult{}, err
 	}
+	timings.MIR = time.Since(mirStart)
+	metrics := collectBuildMetrics(hirModule, mirModule)
+	llvmStart := time.Now()
 	llvmIR, err := llvmcodegen.Emit(mirModule)
 	if err != nil {
 		return BuildResult{}, err
 	}
+	timings.LLVM = time.Since(llvmStart)
 	tc, err := toolchain.DiscoverClang()
 	if err != nil {
 		return BuildResult{}, err
@@ -89,11 +106,14 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	if err := os.WriteFile(llPath, []byte(llvmIR), 0o644); err != nil {
 		return BuildResult{}, fmt.Errorf("write LLVM IR: %w", err)
 	}
+	codegenStart := time.Now()
 	if err := tc.CompileLLVM(ctx, llPath, moduleObj, options.Optimization); err != nil {
 		return BuildResult{}, err
 	}
+	timings.Codegen = time.Since(codegenStart)
 	objects := []string{moduleObj}
 	runtimeSources := []string{"console.c", "array_f64.c", "string.c", "object.c"}
+	runtimeStart := time.Now()
 	for i, source := range runtimeSources {
 		runtimeObj := filepath.Join(workDir, fmt.Sprintf("runtime-%d.o", i))
 		runtimeSource := filepath.Join(options.Root, "runtime", "core", source)
@@ -102,13 +122,17 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 		}
 		objects = append(objects, runtimeObj)
 	}
+	timings.Runtime = time.Since(runtimeStart)
 	if err := toolchain.EnsureParent(options.Output); err != nil {
 		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
 	}
+	linkStart := time.Now()
 	if err := tc.Link(ctx, objects, options.Output); err != nil {
 		return BuildResult{}, err
 	}
-	return BuildResult{Output: options.Output, Functions: len(mirModule.Functions)}, nil
+	timings.Link = time.Since(linkStart)
+	timings.Total = time.Since(totalStart)
+	return BuildResult{Output: options.Output, Functions: len(mirModule.Functions), Metrics: metrics, Timings: timings}, nil
 }
 
 func normalizeOptions(options BuildOptions) (BuildOptions, error) {

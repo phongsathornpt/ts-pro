@@ -103,13 +103,16 @@ func buildFile(args []string) error {
 		return err
 	}
 	fmt.Printf("Built %s (%d native functions)\n", result.Output, result.Functions)
+	if options.ReportPerformance {
+		printBuildReport(result)
+	}
 	return nil
 }
 
 func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 	options := compiler.BuildOptions{Root: ".", Optimization: "-O2"}
 	if len(args) == 0 {
-		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json]")
+		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--report-performance]")
 	}
 	options.Input = args[0]
 	for i := 1; i < len(args); i++ {
@@ -128,6 +131,8 @@ func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 			options.Config = args[i]
 		case "-O0", "-O1", "-O2", "-O3", "-Oz":
 			options.Optimization = args[i]
+		case "--report-performance":
+			options.ReportPerformance = true
 		default:
 			return options, fmt.Errorf("unknown build option %q", args[i])
 		}
