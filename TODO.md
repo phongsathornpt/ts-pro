@@ -6,17 +6,17 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete.
 
 - [x] Initialize Git repository.
 - [x] Create architecture and implementation docs.
-- [ ] Add Rust workspace and compiler CLI.
-- [ ] Pin TypeScript 7 dependency.
-- [ ] Add native `tsconfig` fixture.
-- [ ] Add CI-style local check command.
+- [x] Add Rust workspace and compiler CLI.
+- [x] Pin TypeScript 7 dependency.
+- [x] Add native `tsconfig` fixture.
+- [x] Add CI-style local check command.
 
 ## TypeScript 7 frontend
 
-- [ ] Locate and validate the official TypeScript 7 CLI.
-- [ ] Define frontend adapter trait/contracts.
-- [ ] Run TS7 type checking before native compilation.
-- [ ] Parse project config and entry points through the adapter.
+- [x] Locate and validate the official TypeScript 7 CLI.
+- [~] Define frontend adapter trait/contracts.
+- [x] Run TS7 type checking before native compilation.
+- [~] Parse project config and entry points through the adapter.
 - [ ] Normalize diagnostics into compiler-owned structures.
 - [ ] Define semantic type/symbol DTOs without leaking TS AST internals.
 
