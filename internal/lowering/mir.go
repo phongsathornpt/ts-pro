@@ -118,6 +118,18 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 		result.Op = mir.ObjectNew{Shape: mir.ShapeID(op.Shape), Fields: fields}
 	case hir.FieldGetOp:
 		result.Op = mir.FieldGet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field}
+	case hir.ClosureNewOp:
+		captures := make([]mir.ValueID, len(op.Captures))
+		for i, capture := range op.Captures {
+			captures[i] = mir.ValueID(capture)
+		}
+		result.Op = mir.ClosureNew{Callee: mir.FunctionID(op.Callee), Captures: captures}
+	case hir.ClosureCallOp:
+		args := make([]mir.ValueID, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = mir.ValueID(arg)
+		}
+		result.Op = mir.ClosureCall{Closure: mir.ValueID(op.Closure), Args: args}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {

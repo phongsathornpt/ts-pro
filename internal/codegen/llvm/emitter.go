@@ -14,13 +14,18 @@ type emitter struct {
 	functions     map[mir.FunctionID]mir.Function
 	shapes        map[mir.ShapeID]mir.Shape
 	stringGlobals map[string]string
+	closures      map[mir.FunctionID]closureDescriptor
 }
 
 func Emit(module mir.Module) (string, error) {
 	if err := module.Verify(); err != nil {
 		return "", fmt.Errorf("verify MIR before LLVM emission: %w", err)
 	}
-	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}}
+	closures, err := collectClosureDescriptors(module)
+	if err != nil {
+		return "", err
+	}
+	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}, closures: closures}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
 	}
@@ -39,6 +44,9 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n\n")
+	if err := e.emitClosureTypes(&b); err != nil {
+		return "", err
+	}
 	shapes := append([]mir.Shape(nil), module.Shapes...)
 	sort.Slice(shapes, func(i, j int) bool { return shapes[i].ID < shapes[j].ID })
 	for _, shape := range shapes {
@@ -70,6 +78,9 @@ func Emit(module mir.Module) (string, error) {
 		if err := e.emitFunction(&b, fn); err != nil {
 			return "", err
 		}
+	}
+	if err := e.emitClosureWrappers(&b); err != nil {
+		return "", err
 	}
 	if module.Entry != nil {
 		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  ret i32 0\n}\n", functionName(*module.Entry))
@@ -199,6 +210,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, value, name, i)
 		}
 		return nil
+	case mir.ClosureNew:
+		return e.emitClosureNew(b, inst, op, values)
+	case mir.ClosureCall:
+		return e.emitClosureCall(b, fn, inst, op, values)
 	case mir.FieldGet:
 		shape, ok := e.shapes[op.Shape]
 		if !ok {
@@ -463,3 +478,16 @@ func valueName(value mir.ValueID) string    { return fmt.Sprintf("%%v%d", value)
 func functionName(id mir.FunctionID) string { return fmt.Sprintf("tsnative_f%d", id) }
 func shapeTypeName(id mir.ShapeID) string   { return fmt.Sprintf("%%tsnative_shape_s%d", id) }
 func formatF64(value float64) string        { return strconv.FormatFloat(value, 'e', 6, 64) }
+
+func buildValueReprs(fn mir.Function) map[mir.ValueID]mir.Repr {
+	result := make(map[mir.ValueID]mir.Repr)
+	for _, param := range fn.Params {
+		result[param.Value] = param.Repr
+	}
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			result[inst.Result] = inst.Repr
+		}
+	}
+	return result
+}

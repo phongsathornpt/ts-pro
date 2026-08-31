@@ -76,6 +76,19 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		shape := f.module.source.Types[expr.Object.Type].Shape
 		return f.emit(expr.Type, hir.FieldGetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: expr.FieldIndex}), nil
+	case frontend.ExprClosure:
+		if expr.CallTarget == nil {
+			return 0, fmt.Errorf("closure value has no native target")
+		}
+		captures := make([]hir.ValueID, 0, len(expr.Captures))
+		for _, capture := range expr.Captures {
+			value, err := f.lowerExpr(capture)
+			if err != nil {
+				return 0, err
+			}
+			captures = append(captures, value)
+		}
+		return f.emit(expr.Type, hir.ClosureNewOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Captures: captures}), nil
 	default:
 		return 0, fmt.Errorf("unsupported semantic expression kind %d", expr.Kind)
 	}
@@ -119,15 +132,22 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 }
 
 func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
-	args := make([]hir.ValueID, 0, len(expr.Args))
-	for _, arg := range expr.Args {
-		value, err := f.lowerExpr(arg)
+	lowerArgs := func() ([]hir.ValueID, error) {
+		args := make([]hir.ValueID, 0, len(expr.Args))
+		for _, arg := range expr.Args {
+			value, err := f.lowerExpr(arg)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, value)
+		}
+		return args, nil
+	}
+	if expr.Intrinsic != frontend.IntrinsicNone {
+		args, err := lowerArgs()
 		if err != nil {
 			return 0, err
 		}
-		args = append(args, value)
-	}
-	if expr.Intrinsic != frontend.IntrinsicNone {
 		intrinsic := hir.IntrinsicInvalid
 		switch expr.Intrinsic {
 		case frontend.IntrinsicConsoleLogF64:
@@ -139,11 +159,23 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		return f.emit(expr.Type, hir.IntrinsicCallOp{Intrinsic: intrinsic, Args: args}), nil
 	}
-	if expr.CallTarget == nil {
-		return 0, fmt.Errorf("dynamic call is not supported by HIR MVP")
+	if expr.CallTarget != nil {
+		args, err := lowerArgs()
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.CallOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Args: args}), nil
 	}
-	return f.emit(expr.Type, hir.CallOp{
-		Callee: hir.NewFunctionID(uint32(*expr.CallTarget)),
-		Args:   args,
-	}), nil
+	if expr.Callee == nil {
+		return 0, fmt.Errorf("indirect call has no closure value")
+	}
+	closure, err := f.lowerExpr(expr.Callee)
+	if err != nil {
+		return 0, err
+	}
+	args, err := lowerArgs()
+	if err != nil {
+		return 0, err
+	}
+	return f.emit(expr.Type, hir.ClosureCallOp{Closure: closure, Args: args}), nil
 }

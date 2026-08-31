@@ -91,6 +91,14 @@ type FieldGetOp struct {
 	Shape  ShapeID
 	Field  uint32
 }
+type ClosureNewOp struct {
+	Callee   FunctionID
+	Captures []ValueID
+}
+type ClosureCallOp struct {
+	Closure ValueID
+	Args    []ValueID
+}
 
 func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
@@ -103,6 +111,8 @@ func (ArrayLengthOp) isOperation()   {}
 func (ArrayGetOp) isOperation()      {}
 func (ObjectNewOp) isOperation()     {}
 func (FieldGetOp) isOperation()      {}
+func (ClosureNewOp) isOperation()    {}
+func (ClosureCallOp) isOperation()   {}
 
 type LiteralKind uint8
 

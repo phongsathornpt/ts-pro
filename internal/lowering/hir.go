@@ -67,21 +67,46 @@ func (l *moduleLowerer) lowerTypes() error {
 			continue
 		}
 		id := hir.NewTypeID(uint32(len(l.module.Types)))
-		semantic := hir.SemanticType{Kind: kind}
-		if typ.Kind == frontend.TypeObject {
-			semantic.Shape = hir.NewShapeID(uint32(typ.Shape))
+		l.module.Types = append(l.module.Types, hir.SemanticType{Kind: kind})
+		l.types[typ.ID] = id
+		if isScalarType(typ.Kind) {
+			canonical[typ.Kind] = id
 		}
-		if typ.Kind == frontend.TypeArray {
+	}
+
+	for _, typ := range l.source.Types {
+		id := l.types[typ.ID]
+		semantic := &l.module.Types[id]
+		switch typ.Kind {
+		case frontend.TypeObject:
+			semantic.Shape = hir.NewShapeID(uint32(typ.Shape))
+		case frontend.TypeArray:
 			element, ok := l.types[typ.Element]
 			if !ok {
 				return fmt.Errorf("array type %q references unavailable element type t%d", typ.Name, typ.Element)
 			}
 			semantic.Element = element
-		}
-		l.module.Types = append(l.module.Types, semantic)
-		l.types[typ.ID] = id
-		if isScalarType(typ.Kind) {
-			canonical[typ.Kind] = id
+		case frontend.TypeUnion:
+			for _, member := range typ.Members {
+				mapped, ok := l.types[member]
+				if !ok {
+					return fmt.Errorf("union type %q references unavailable member t%d", typ.Name, member)
+				}
+				semantic.Members = append(semantic.Members, mapped)
+			}
+		case frontend.TypeFunction:
+			for _, param := range typ.Params {
+				mapped, ok := l.types[param]
+				if !ok {
+					return fmt.Errorf("function type %q references unavailable parameter t%d", typ.Name, param)
+				}
+				semantic.Params = append(semantic.Params, mapped)
+			}
+			mapped, ok := l.types[typ.ReturnType]
+			if !ok {
+				return fmt.Errorf("function type %q references unavailable return t%d", typ.Name, typ.ReturnType)
+			}
+			semantic.ReturnType = mapped
 		}
 	}
 	return nil

@@ -84,6 +84,18 @@ func formatOperation(op Operation) string {
 			args[i] = fmt.Sprintf("v%d", arg)
 		}
 		return fmt.Sprintf("call f%d(%s)", op.Callee, strings.Join(args, ", "))
+	case ClosureNewOp:
+		captures := make([]string, len(op.Captures))
+		for i, capture := range op.Captures {
+			captures[i] = fmt.Sprintf("v%d", capture)
+		}
+		return fmt.Sprintf("closure.new f%d(%s)", op.Callee, strings.Join(captures, ", "))
+	case ClosureCallOp:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = fmt.Sprintf("v%d", arg)
+		}
+		return fmt.Sprintf("closure.call v%d(%s)", op.Closure, strings.Join(args, ", "))
 	case IntrinsicCallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

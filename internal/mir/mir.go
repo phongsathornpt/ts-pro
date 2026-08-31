@@ -144,6 +144,14 @@ type FieldGet struct {
 	Shape  ShapeID
 	Field  uint32
 }
+type ClosureNew struct {
+	Callee   FunctionID
+	Captures []ValueID
+}
+type ClosureCall struct {
+	Closure ValueID
+	Args    []ValueID
+}
 
 func (ConstF64) isOperation()       {}
 func (ConstString) isOperation()    {}
@@ -158,6 +166,8 @@ func (ArrayLengthF64) isOperation() {}
 func (ArrayGetF64) isOperation()    {}
 func (ObjectNew) isOperation()      {}
 func (FieldGet) isOperation()       {}
+func (ClosureNew) isOperation()     {}
+func (ClosureCall) isOperation()    {}
 
 type Terminator interface{ isTerminator() }
 

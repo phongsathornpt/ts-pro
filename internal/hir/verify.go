@@ -209,6 +209,18 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				} else if int(op.Field) >= len(m.Shapes[op.Shape].Fields) {
 					add(fmt.Sprintf("field access s%d.%d is out of range", op.Shape, op.Field))
 				}
+			case ClosureNewOp:
+				if _, exists := functionIDs[op.Callee]; !exists {
+					add(fmt.Sprintf("closure references unknown function f%d", op.Callee))
+				}
+				for _, capture := range op.Captures {
+					checkValue(capture)
+				}
+			case ClosureCallOp:
+				checkValue(op.Closure)
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

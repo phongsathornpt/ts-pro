@@ -506,11 +506,20 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, err
 		}
 		if symbol != nil {
-			kind := SymbolVariable
-			if _, ok := e.functions[symbol.ID]; ok {
-				kind = SymbolFunction
+			if closure, ok := e.closures[symbol.ID]; ok {
+				target := closure.Function
+				expr.Kind = ExprClosure
+				expr.CallTarget = &target
+				expr.Captures = e.closureCaptureArgs(closure, e.span(node))
+				return expr, nil
 			}
-			expr.Symbol = e.internSymbol(symbol, kind, node)
+			if target, ok := e.functions[symbol.ID]; ok {
+				targetCopy := target
+				expr.Kind = ExprClosure
+				expr.CallTarget = &targetCopy
+				return expr, nil
+			}
+			expr.Symbol = e.internSymbol(symbol, SymbolVariable, node)
 			e.result.Symbols[expr.Symbol].Type = typeID
 		}
 		return expr, nil
@@ -740,6 +749,13 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 				expr.CallTarget = &targetCopy
 			}
 		}
+		if expr.CallTarget == nil {
+			callee, err := e.extractExpr(calleeNode)
+			if err != nil {
+				return nil, err
+			}
+			expr.Callee = callee
+		}
 	case tsast.KindPropertyAccessExpression:
 		if isConsoleLog(calleeNode) {
 			expr.Callee = &Expr{Kind: ExprIdentifier, Name: "console.log", Span: e.span(calleeNode)}
@@ -775,7 +791,11 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		expr.CallTarget = &targetCopy
 		expr.Args = append(expr.Args, receiver)
 	default:
-		return nil, fmt.Errorf("callee %s at %d is not supported by the native MVP", tsast.KindName(calleeNode.Kind()), calleeNode.Pos())
+		callee, err := e.extractExpr(calleeNode)
+		if err != nil {
+			return nil, err
+		}
+		expr.Callee = callee
 	}
 	if args, ok := node.NamedChild("arguments"); ok {
 		for _, argNode := range args.ListElements() {
@@ -801,7 +821,9 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		return expr, nil
 	}
 	if expr.CallTarget == nil {
-		return nil, fmt.Errorf("dynamic call at %d is not supported by the native MVP", node.Pos())
+		if expr.Callee == nil || int(expr.Callee.Type) >= len(e.result.Types) || e.result.Types[expr.Callee.Type].Kind != TypeFunction {
+			return nil, fmt.Errorf("dynamic call at %d is not a proven native function value", node.Pos())
+		}
 	}
 	return expr, nil
 }
@@ -865,6 +887,45 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 	typ.ID = id
 	e.result.Types = append(e.result.Types, typ)
 	e.types[info.ID] = id
+	if kind == TypeFunction {
+		signatures, err := e.client.GetSignaturesOfType(e.ctx, e.snapshot, e.project, info.ID, 0)
+		if err != nil {
+			return 0, err
+		}
+		if len(signatures) != 1 {
+			return 0, fmt.Errorf("native function type %q requires exactly one call signature; got %d", text, len(signatures))
+		}
+		params, err := e.client.GetParametersOfSignature(e.ctx, e.snapshot, e.project, signatures[0].ID)
+		if err != nil {
+			return 0, err
+		}
+		for _, param := range params {
+			paramType, err := e.client.GetTypeOfSymbol(e.ctx, e.snapshot, e.project, param.ID)
+			if err != nil || paramType == nil {
+				if err == nil {
+					err = fmt.Errorf("function parameter %s has no type", param.Name)
+				}
+				return 0, err
+			}
+			paramID, err := e.internAPIType(paramType)
+			if err != nil {
+				return 0, err
+			}
+			e.result.Types[id].Params = append(e.result.Types[id].Params, paramID)
+		}
+		returnType, err := e.client.GetReturnTypeOfSignature(e.ctx, e.snapshot, e.project, signatures[0].ID)
+		if err != nil || returnType == nil {
+			if err == nil {
+				err = fmt.Errorf("function type %q has no return type", text)
+			}
+			return 0, err
+		}
+		returnID, err := e.internAPIType(returnType)
+		if err != nil {
+			return 0, err
+		}
+		e.result.Types[id].ReturnType = returnID
+	}
 	if kind == TypeObject {
 		shape, err := e.internObjectShape(info, text)
 		if err != nil {

@@ -179,6 +179,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Object); err != nil {
 					return err
 				}
+			case ClosureNew:
+				if _, ok := functions[op.Callee]; !ok {
+					return fmt.Errorf("closure v%d references unknown callee f%d", inst.Result, op.Callee)
+				}
+				for _, capture := range op.Captures {
+					if err := checkValue(capture); err != nil {
+						return err
+					}
+				}
+			case ClosureCall:
+				if err := checkValue(op.Closure); err != nil {
+					return err
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}

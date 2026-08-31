@@ -14,6 +14,7 @@ const (
 	ExprArrayLength
 	ExprObject
 	ExprFieldGet
+	ExprClosure
 )
 
 type IntrinsicKind uint8
@@ -64,6 +65,7 @@ type Expr struct {
 	Object     *Expr
 	Index      *Expr
 	Fields     []ObjectFieldExpr
+	Captures   []*Expr
 	Field      string
 	FieldIndex uint32
 	Span       Span
