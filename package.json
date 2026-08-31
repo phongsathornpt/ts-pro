@@ -1,0 +1,14 @@
+{
+  "name": "tsv7-bin-toolchain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned TypeScript 7 frontend toolchain for tsv7-bin",
+  "license": "MIT",
+  "scripts": {
+    "tsc": "tsc",
+    "tsc:version": "tsc --version"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
