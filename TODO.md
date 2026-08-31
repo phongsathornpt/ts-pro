@@ -15,11 +15,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Pin TypeScript 7.0.2 dependency.
 - [x] Add strict native `tsconfig` fixture.
-- [ ] Validate official `tsc --lsp --stdio` from Go.
-- [ ] Implement JSON-RPC 2.0 transport over stdio.
-- [ ] Implement LSP initialize/shutdown lifecycle.
+- [x] Validate official `tsc --lsp --stdio` from Go.
+- [x] Implement JSON-RPC 2.0 transport over stdio.
+- [x] Implement LSP initialize/shutdown lifecycle.
 - [ ] Keep one language-server process per workspace.
-- [ ] Add request cancellation and timeouts.
+- [x] Add request cancellation and timeouts.
 - [ ] Add LS crash detection and restart policy.
 - [ ] Capture TypeScript diagnostics into Go DTOs.
 - [ ] Resolve project files and config through TypeScript-LS.

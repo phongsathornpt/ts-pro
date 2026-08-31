@@ -46,7 +46,20 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Go compiler frontend: ready\nTypeScript: %s\nLSP command: %s --lsp --stdio\n", version, toolchain.TSCPath)
+	client, err := tsls.Start(".")
+	if err != nil {
+		return err
+	}
+	if err := client.Initialize(ctx); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+		defer cleanupCancel()
+		_ = client.Close(cleanupCtx)
+		return err
+	}
+	if err := client.Close(ctx); err != nil {
+		return err
+	}
+	fmt.Printf("Go compiler frontend: ready\nTypeScript: %s\nTypeScript-LS: ready\nLSP command: %s --lsp --stdio\n", version, toolchain.TSCPath)
 	return nil
 }
 

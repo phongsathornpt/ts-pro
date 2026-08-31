@@ -45,3 +45,9 @@ Standard LSP is sufficient for IDE features but not a complete compiler IR API. 
 If richer AST/type/control-flow data is unavailable through public LSP methods, implement the smallest possible version-pinned extension on top of TypeScript 7. Keep that extension isolated and covered by compatibility tests.
 
 No fallback to SWC is planned.
+
+## TypeScript 7.0.2 lifecycle note
+
+The pinned server responds normally to `initialize`, but may not answer the standard `shutdown` request. The Go client therefore treats `shutdown` as best-effort with a short deadline and always sends `exit`, which terminates the server cleanly.
+
+This behavior is covered by an integration test and must be rechecked on each TypeScript upgrade.
