@@ -2,6 +2,11 @@
 
 Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
+## Project completion goal
+
+- [~] Reach 100% of the compiler roadmap tracked in this file, with every completed capability covered by native acceptance/regression tests and differential tests where TypeScript/JavaScript observable behavior applies.
+- [ ] Do not mark the project 100% until all `[ ]` and `[~]` roadmap items below are either completed (`[x]`) or explicitly superseded (`[S]`) with a documented replacement.
+
 ## Foundation and frontend
 
 - [x] Migrate the active compiler from the superseded Rust prototype to Go.
