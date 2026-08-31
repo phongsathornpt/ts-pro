@@ -3,11 +3,16 @@ package lowering
 import (
 	"fmt"
 
+	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	"github.com/projectthorn/tsv7-bin/internal/hir"
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
 func LowerMIR(source hir.Module) (mir.Module, error) {
+	return LowerMIRWithRanges(source, nil)
+}
+
+func LowerMIRWithRanges(source hir.Module, ranges rangeanalysis.Result) (mir.Module, error) {
 	result := mir.Module{Name: source.Name}
 	for _, shape := range source.Shapes {
 		lowered := mir.Shape{ID: mir.ShapeID(shape.ID), Name: shape.Name, ClassTag: shape.ClassTag}
@@ -25,7 +30,7 @@ func LowerMIR(source hir.Module) (mir.Module, error) {
 		result.Entry = &entry
 	}
 	for _, fn := range source.Functions {
-		lowered, err := lowerMIRFunction(fn)
+		lowered, err := lowerMIRFunction(fn, ranges[fn.ID])
 		if err != nil {
 			return mir.Module{}, err
 		}
@@ -37,7 +42,7 @@ func LowerMIR(source hir.Module) (mir.Module, error) {
 	return result, nil
 }
 
-func lowerMIRFunction(source hir.Function) (mir.Function, error) {
+func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult) (mir.Function, error) {
 	returnRepr, err := lowerRepr(source.ReturnRepr)
 	if err != nil {
 		return mir.Function{}, fmt.Errorf("function %s return: %w", source.Name, err)
@@ -56,7 +61,7 @@ func lowerMIRFunction(source hir.Function) (mir.Function, error) {
 	for _, block := range source.Blocks {
 		lowered := mir.Block{ID: mir.BlockID(block.ID)}
 		for _, instruction := range block.Instructions {
-			inst, err := lowerMIRInstruction(instruction)
+			inst, err := lowerMIRInstruction(instruction, ranges)
 			if err != nil {
 				return mir.Function{}, fmt.Errorf("function %s block b%d: %w", source.Name, block.ID, err)
 			}
@@ -72,7 +77,7 @@ func lowerMIRFunction(source hir.Function) (mir.Function, error) {
 	return result, nil
 }
 
-func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
+func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionResult) (mir.Instruction, error) {
 	repr, err := lowerRepr(source.Repr)
 	if err != nil {
 		return mir.Instruction{}, fmt.Errorf("value v%d: %w", source.Result, err)
@@ -89,6 +94,14 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			return mir.Instruction{}, fmt.Errorf("unsupported const kind %d representation %v", op.Literal.Kind, repr)
 		}
 	case hir.BinaryExpr:
+		if width, ok := provenIntegerWidth(source.Result, op, repr, ranges); ok {
+			operator, err := lowerIntegerBinaryOperator(op.Operator)
+			if err != nil {
+				return mir.Instruction{}, err
+			}
+			result.Op = mir.ProvenIntBinary{Width: width, Operator: operator, Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
+			break
+		}
 		lowered, err := lowerMIRBinary(op, repr)
 		if err != nil {
 			return mir.Instruction{}, err
@@ -255,5 +268,44 @@ func lowerRepr(source hir.Repr) (mir.Repr, error) {
 		return mir.ReprInvalid, fmt.Errorf("representation is not proven")
 	default:
 		return mir.ReprInvalid, fmt.Errorf("unknown HIR representation %d", source.Kind)
+	}
+}
+
+func provenIntegerWidth(result hir.ValueID, op hir.BinaryExpr, repr mir.Repr, ranges rangeanalysis.FunctionResult) (mir.IntWidth, bool) {
+	if repr != mir.ReprF64 || ranges == nil {
+		return 0, false
+	}
+	switch op.Operator {
+	case hir.BinaryAdd, hir.BinarySub, hir.BinaryMul, hir.BinaryDiv:
+	default:
+		return 0, false
+	}
+	out, ook := ranges[result]
+	left, lok := ranges[op.Left]
+	right, rok := ranges[op.Right]
+	if !ook || !lok || !rok || !out.Known || !left.Known || !right.Known {
+		return 0, false
+	}
+	if out.FitsI32() && left.FitsI32() && right.FitsI32() {
+		return mir.IntWidth32, true
+	}
+	if out.FitsI64() && left.FitsI64() && right.FitsI64() {
+		return mir.IntWidth64, true
+	}
+	return 0, false
+}
+
+func lowerIntegerBinaryOperator(op hir.BinaryOperator) (mir.FloatBinaryOp, error) {
+	switch op {
+	case hir.BinaryAdd:
+		return mir.FloatAdd, nil
+	case hir.BinarySub:
+		return mir.FloatSub, nil
+	case hir.BinaryMul:
+		return mir.FloatMul, nil
+	case hir.BinaryDiv:
+		return mir.FloatDiv, nil
+	default:
+		return 0, fmt.Errorf("unsupported proven integer operator %d", op)
 	}
 }

@@ -38,6 +38,7 @@ const (
 	KindPropertyAccessExpression     uint32 = 212
 	KindElementAccessExpression      uint32 = 213
 	KindCallExpression               uint32 = 214
+	KindParenthesizedExpression      uint32 = 218
 	KindFunctionExpression           uint32 = 219
 	KindArrowFunction                uint32 = 220
 	KindNewExpression                uint32 = 215
@@ -79,7 +80,7 @@ var kindNames = map[uint32]string{
 	KindParameter: "Parameter", KindPropertyDeclaration: "PropertyDeclaration", KindMethodDeclaration: "MethodDeclaration", KindConstructor: "Constructor",
 	KindArrayLiteralExpression: "ArrayLiteralExpression", KindObjectLiteralExpression: "ObjectLiteralExpression", KindPropertyAccessExpression: "PropertyAccessExpression",
 	KindElementAccessExpression: "ElementAccessExpression", KindCallExpression: "CallExpression",
-	KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
+	KindParenthesizedExpression: "ParenthesizedExpression", KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
 	KindExpressionWithTypeArguments: "ExpressionWithTypeArguments", KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
 	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement",

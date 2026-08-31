@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
 	"github.com/projectthorn/tsv7-bin/internal/frontend"
@@ -80,7 +81,8 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	}
 	timings.Repr = time.Since(reprStart)
 	mirStart := time.Now()
-	mirModule, err := lowering.LowerMIR(hirModule)
+	ranges := rangeanalysis.Analyze(hirModule)
+	mirModule, err := lowering.LowerMIRWithRanges(hirModule, ranges)
 	if err != nil {
 		return BuildResult{}, err
 	}

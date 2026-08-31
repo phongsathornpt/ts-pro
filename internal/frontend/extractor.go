@@ -746,6 +746,17 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			}
 		}
 		return nil, fmt.Errorf("shape %s has no field %q", shape.Name, name)
+	case tsast.KindParenthesizedExpression:
+		innerNode, ok := node.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("parenthesized expression at %d has no operand", node.Pos())
+		}
+		inner, err := e.extractExpr(innerNode)
+		if err != nil {
+			return nil, err
+		}
+		inner.Type, inner.Span = typeID, e.span(node)
+		return inner, nil
 	case tsast.KindNonNullExpression:
 		innerNode, ok := node.NamedChild("expression")
 		if !ok {

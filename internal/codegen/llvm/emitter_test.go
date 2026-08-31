@@ -132,3 +132,24 @@ func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitProvenIntegerFastArithmetic(t *testing.T) {
+	result := mir.ValueID(2)
+	module := mir.Module{Name: "intfast", Functions: []mir.Function{{
+		ID: 0, Name: "intfast", ReturnRepr: mir.ReprF64, Entry: 0,
+		Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 20}},
+			{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 22}},
+			{Result: 2, Repr: mir.ReprF64, Op: mir.ProvenIntBinary{Width: mir.IntWidth32, Operator: mir.FloatAdd, Left: 0, Right: 1}},
+		}, Terminator: mir.Return{Value: &result}}},
+	}}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"fptosi double", "add i32", "sitofp i32"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

@@ -101,6 +101,19 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Right); err != nil {
 					return err
 				}
+			case ProvenIntBinary:
+				if op.Width != IntWidth32 && op.Width != IntWidth64 {
+					return fmt.Errorf("proven integer v%d has invalid width %d", inst.Result, op.Width)
+				}
+				if inst.Repr != ReprF64 {
+					return fmt.Errorf("proven integer v%d must preserve f64 boundary representation", inst.Result)
+				}
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
 			case FloatCompare:
 				if err := checkValue(op.Left); err != nil {
 					return err

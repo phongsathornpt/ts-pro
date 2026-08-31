@@ -30,6 +30,8 @@ type BuildMetrics struct {
 	DynamicDispatch int
 	I32Candidates   int
 	I64Candidates   int
+	I32FastOps      int
+	I64FastOps      int
 	RuntimeCalls    int
 	CacheHits       int
 	CacheMisses     int
@@ -74,9 +76,29 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 			}
 		}
 	}
+	metrics.I32FastOps, metrics.I64FastOps = countIntegerFastOps(mirModule)
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
 	return metrics
+}
+
+func countIntegerFastOps(module mir.Module) (i32, i64 int) {
+	for _, fn := range module.Functions {
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				op, ok := inst.Op.(mir.ProvenIntBinary)
+				if !ok {
+					continue
+				}
+				if op.Width == mir.IntWidth32 {
+					i32++
+				} else if op.Width == mir.IntWidth64 {
+					i64++
+				}
+			}
+		}
+	}
+	return i32, i64
 }
 
 func countDynamicDispatch(module mir.Module) int {

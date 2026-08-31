@@ -89,6 +89,20 @@ type FloatBinary struct {
 	Right    ValueID
 }
 
+type IntWidth uint8
+
+const (
+	IntWidth32 IntWidth = 32
+	IntWidth64 IntWidth = 64
+)
+
+type ProvenIntBinary struct {
+	Width    IntWidth
+	Operator FloatBinaryOp
+	Left     ValueID
+	Right    ValueID
+}
+
 type FloatCompareOp uint8
 
 const (
@@ -171,24 +185,25 @@ type ClosureCall struct {
 	Args    []ValueID
 }
 
-func (ConstF64) isOperation()       {}
-func (ConstString) isOperation()    {}
-func (StringConcat) isOperation()   {}
-func (FloatBinary) isOperation()    {}
-func (FloatCompare) isOperation()   {}
-func (Call) isOperation()           {}
-func (DispatchCall) isOperation()   {}
-func (IntrinsicCall) isOperation()  {}
-func (Phi) isOperation()            {}
-func (ArrayNewF64) isOperation()    {}
-func (ArrayLengthF64) isOperation() {}
-func (ArrayGetF64) isOperation()    {}
-func (ObjectNew) isOperation()      {}
-func (ObjectAlloc) isOperation()    {}
-func (FieldSet) isOperation()       {}
-func (FieldGet) isOperation()       {}
-func (ClosureNew) isOperation()     {}
-func (ClosureCall) isOperation()    {}
+func (ConstF64) isOperation()        {}
+func (ConstString) isOperation()     {}
+func (StringConcat) isOperation()    {}
+func (FloatBinary) isOperation()     {}
+func (ProvenIntBinary) isOperation() {}
+func (FloatCompare) isOperation()    {}
+func (Call) isOperation()            {}
+func (DispatchCall) isOperation()    {}
+func (IntrinsicCall) isOperation()   {}
+func (Phi) isOperation()             {}
+func (ArrayNewF64) isOperation()     {}
+func (ArrayLengthF64) isOperation()  {}
+func (ArrayGetF64) isOperation()     {}
+func (ObjectNew) isOperation()       {}
+func (ObjectAlloc) isOperation()     {}
+func (FieldSet) isOperation()        {}
+func (FieldGet) isOperation()        {}
+func (ClosureNew) isOperation()      {}
+func (ClosureCall) isOperation()     {}
 
 type Terminator interface{ isTerminator() }
 

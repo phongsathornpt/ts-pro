@@ -32,7 +32,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add SSA phi nodes for mutable loop-carried values.
 - [x] Add direct-call and scalar fast paths.
 - [x] Add conservative overflow-safe integer range proof with phi propagation and safe-integer guards.
-- [ ] Enable `I32`/`I64` lowering only where range proof and boundary conversions preserve TypeScript `number` semantics.
+- [~] Enable `I32`/`I64` lowering only where range proof and boundary conversions preserve TypeScript `number` semantics.
+  - [x] Proven local arithmetic fast path computes with i32/i64 while preserving F64 TypeScript-number boundaries.
+  - [ ] Keep integer SSA representation across larger subgraphs/calls/loops to eliminate redundant conversions.
+  - [ ] Add integer comparisons, overflow-aware specialization guards, and ABI-specialized internal functions where profitable.
 - [x] Add checker-derived closed object-shape representation and fixed field layout.
 
 ## Native language coverage

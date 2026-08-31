@@ -22,6 +22,7 @@ func formatBuildReport(result compiler.BuildResult) string {
 	fmt.Fprintf(&b, "  dynamic values: %d\n", m.DynamicValues)
 	fmt.Fprintf(&b, "  dynamic dispatch: %d\n", m.DynamicDispatch)
 	fmt.Fprintf(&b, "  integer proof: %d i32 / %d i64-only candidates\n", m.I32Candidates, m.I64Candidates)
+	fmt.Fprintf(&b, "  integer fast ops: %d i32 / %d i64\n", m.I32FastOps, m.I64FastOps)
 	fmt.Fprintf(&b, "  runtime calls: %d\n", m.RuntimeCalls)
 	fmt.Fprintf(&b, "  object cache: %.1f%% (%d hit / %d miss)\n", m.CacheHitRate(), m.CacheHits, m.CacheMisses)
 	fmt.Fprintf(&b, "  timings:\n")

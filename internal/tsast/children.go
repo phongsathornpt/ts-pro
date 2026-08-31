@@ -22,6 +22,7 @@ var childProperties = map[uint32][]string{
 	KindObjectLiteralExpression:     {"properties"},
 	KindElementAccessExpression:     {"expression", "questionDotToken", "argumentExpression"},
 	KindCallExpression:              {"expression", "questionDotToken", "typeArguments", "arguments"},
+	KindParenthesizedExpression:     {"expression"},
 	KindFunctionExpression:          {"modifiers", "asteriskToken", "name", "typeParameters", "parameters", "type", "body"},
 	KindArrowFunction:               {"modifiers", "typeParameters", "parameters", "type", "equalsGreaterThanToken", "body"},
 	KindNewExpression:               {"expression", "typeArguments", "arguments"},

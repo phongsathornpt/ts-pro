@@ -345,6 +345,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		b.WriteString("\n")
 		return nil
+	case mir.ProvenIntBinary:
+		return e.emitProvenIntBinary(b, inst, op, values)
 	case mir.FloatBinary:
 		left, err := operand(values, op.Left)
 		if err != nil {
@@ -690,4 +692,35 @@ func shapeFieldIndex(shape mir.Shape, field uint32) uint32 {
 		return field + 1
 	}
 	return field
+}
+
+func (e *emitter) emitProvenIntBinary(b *strings.Builder, inst mir.Instruction, op mir.ProvenIntBinary, values map[mir.ValueID]string) error {
+	if inst.Repr != mir.ReprF64 {
+		return fmt.Errorf("proven integer v%d must preserve f64 result", inst.Result)
+	}
+	left, err := operand(values, op.Left)
+	if err != nil {
+		return err
+	}
+	right, err := operand(values, op.Right)
+	if err != nil {
+		return err
+	}
+	intType := "i32"
+	if op.Width == mir.IntWidth64 {
+		intType = "i64"
+	} else if op.Width != mir.IntWidth32 {
+		return fmt.Errorf("invalid proven integer width %d", op.Width)
+	}
+	opcode := map[mir.FloatBinaryOp]string{mir.FloatAdd: "add", mir.FloatSub: "sub", mir.FloatMul: "mul", mir.FloatDiv: "sdiv"}[op.Operator]
+	if opcode == "" {
+		return fmt.Errorf("unsupported proven integer operator %d", op.Operator)
+	}
+	name := valueName(inst.Result)
+	fmt.Fprintf(b, "  %s.lhs.int = fptosi double %s to %s\n", name, left, intType)
+	fmt.Fprintf(b, "  %s.rhs.int = fptosi double %s to %s\n", name, right, intType)
+	fmt.Fprintf(b, "  %s.int = %s %s %s.lhs.int, %s.rhs.int\n", name, opcode, intType, name, name)
+	fmt.Fprintf(b, "  %s = sitofp %s %s.int to double\n", name, intType, name)
+	values[inst.Result] = name
+	return nil
 }
