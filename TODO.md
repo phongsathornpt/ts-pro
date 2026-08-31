@@ -68,7 +68,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
   - [ ] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
 - [ ] Exceptions, Promise, and async/await.
-- [ ] Expand native array coverage beyond `number[]`: indexed writes, string/object arrays, typed generic arrays, and common mutators.
+- [~] Expand native array coverage beyond read-only `number[]`.
+  - [x] Bounds-checked in-place indexed writes for specialized `number[]`.
+  - [ ] String/object arrays and typed generic array specializations.
+  - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
 - [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
 - [ ] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/do-while/for-of, templates, default/optional params, enums, and module linking.
 - [ ] Add selected standard-library/runtime APIs such as JSON, Map/Set, Date, and RegExp after their representation contracts are defined.

@@ -95,6 +95,7 @@ const (
 	StmtFor
 	StmtClosureBind
 	StmtFieldAssign
+	StmtArrayAssign
 )
 
 type Statement struct {
@@ -110,6 +111,7 @@ type Statement struct {
 	Type       TypeID
 	Value      *Expr
 	Object     *Expr
+	Index      *Expr
 	Field      string
 	FieldIndex uint32
 	Init       []Statement

@@ -148,6 +148,24 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		return f.lowerLoop(stmt.Expr, stmt.Then, stmt.Update)
 	case frontend.StmtClosureBind:
 		return nil
+	case frontend.StmtArrayAssign:
+		if stmt.Object == nil || stmt.Index == nil || stmt.Value == nil {
+			return fmt.Errorf("array assignment is incomplete")
+		}
+		array, err := f.lowerExpr(stmt.Object)
+		if err != nil {
+			return err
+		}
+		index, err := f.lowerExpr(stmt.Index)
+		if err != nil {
+			return err
+		}
+		value, err := f.lowerExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		f.emit(stmt.Type, hir.ArraySetOp{Array: array, Index: index, Value: value})
+		return nil
 	case frontend.StmtFieldAssign:
 		if stmt.Object == nil || stmt.Value == nil {
 			return fmt.Errorf("field assignment %q is incomplete", stmt.Field)

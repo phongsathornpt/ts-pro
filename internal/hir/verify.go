@@ -207,6 +207,10 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case ArrayGetOp:
 				checkValue(op.Array)
 				checkValue(op.Index)
+			case ArraySetOp:
+				checkValue(op.Array)
+				checkValue(op.Index)
+				checkValue(op.Value)
 			case ObjectNewOp:
 				if int(op.Shape) >= len(m.Shapes) {
 					add(fmt.Sprintf("object allocation references unknown shape s%d", op.Shape))

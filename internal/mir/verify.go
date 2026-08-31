@@ -182,6 +182,19 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Index); err != nil {
 					return err
 				}
+			case ArraySetF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+				if inst.Repr != ReprF64 {
+					return fmt.Errorf("array set v%d must return f64 assigned value", inst.Result)
+				}
 			case ObjectNew:
 				shape, ok := shapes[op.Shape]
 				if !ok {

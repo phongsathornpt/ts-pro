@@ -492,6 +492,8 @@ func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
 			return e.buildAssignment(node, left, right, 0)
 		case tsast.KindPropertyAccessExpression:
 			return e.buildFieldAssignment(node, left, right)
+		case tsast.KindElementAccessExpression:
+			return e.buildArrayAssignment(node, left, right)
 		default:
 			return Statement{}, true, fmt.Errorf("native assignment at %d does not support %s target", node.Pos(), tsast.KindName(left.Kind()))
 		}

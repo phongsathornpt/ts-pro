@@ -133,6 +133,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
 	case hir.ArrayGetOp:
 		result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+	case hir.ArraySetOp:
+		result.Op = mir.ArraySetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
 	case hir.ObjectNewOp:
 		fields := make([]mir.ValueID, len(op.Fields))
 		for i, value := range op.Fields {

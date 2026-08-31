@@ -32,3 +32,11 @@ double tsnative_array_f64_get(void *raw, double index) {
   if ((double)i != index || i >= array->len) return NAN;
   return array->data[i];
 }
+
+void tsnative_array_f64_set_checked(void *raw, double index, double value) {
+  tsnative_array_f64 *array = raw;
+  if (!array || !isfinite(index) || index < 0.0) abort();
+  uint64_t i = (uint64_t)index;
+  if ((double)i != index || i >= array->len) abort();
+  array->data[i] = value;
+}

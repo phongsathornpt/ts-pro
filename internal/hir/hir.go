@@ -92,6 +92,7 @@ type PhiOp struct {
 type ArrayNewOp struct{ Elements []ValueID }
 type ArrayLengthOp struct{ Array ValueID }
 type ArrayGetOp struct{ Array, Index ValueID }
+type ArraySetOp struct{ Array, Index, Value ValueID }
 type ObjectNewOp struct {
 	Shape  ShapeID
 	Fields []ValueID
@@ -127,6 +128,7 @@ func (PhiOp) isOperation()           {}
 func (ArrayNewOp) isOperation()      {}
 func (ArrayLengthOp) isOperation()   {}
 func (ArrayGetOp) isOperation()      {}
+func (ArraySetOp) isOperation()      {}
 func (ObjectNewOp) isOperation()     {}
 func (ObjectAllocOp) isOperation()   {}
 func (FieldSetOp) isOperation()      {}

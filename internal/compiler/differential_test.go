@@ -23,7 +23,7 @@ func TestNativeOutputMatchesTypeScriptReference(t *testing.T) {
 	}
 	tsc := filepath.Join(root, "node_modules", ".bin", "tsc")
 	fixtures := []string{
-		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts",
+		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts", "array_writes.ts",
 		"strings.ts", "objects.ts", "classes.ts", "class_fields.ts",
 		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts",
 	}

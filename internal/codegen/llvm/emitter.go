@@ -41,6 +41,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
+	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n")
@@ -223,6 +224,22 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call double @tsnative_array_f64_get(ptr %s, double %s)\n", name, array, index)
+		return nil
+	case mir.ArraySetF64:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_array_f64_set_checked(ptr %s, double %s, double %s)\n", array, index, value)
+		values[inst.Result] = value
 		return nil
 	case mir.ObjectNew:
 		shape, ok := e.shapes[op.Shape]
