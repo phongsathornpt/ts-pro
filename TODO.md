@@ -9,7 +9,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add `go.mod` and Go package layout.
 - [x] Add `cmd/tsnative` Go CLI.
 - [x] Add Go test/lint/build commands.
-- [ ] Remove Rust from the active build after Go parity is reached.
+- [x] Remove the superseded Rust workspace after Go parity is reached.
 
 ## TypeScript 7 / TypeScript-LS
 
