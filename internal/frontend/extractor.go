@@ -306,8 +306,22 @@ func (e *extractor) extractBinary(node tsast.Node, expr *Expr) (*Expr, error) {
 		op = BinaryAdd
 	case tsast.KindMinusToken:
 		op = BinarySub
+	case tsast.KindAsteriskToken:
+		op = BinaryMul
+	case tsast.KindSlashToken:
+		op = BinaryDiv
+	case tsast.KindLessThanToken:
+		op = BinaryLessThan
 	case tsast.KindLessThanEqualsToken:
 		op = BinaryLessEqual
+	case tsast.KindGreaterThanToken:
+		op = BinaryGreaterThan
+	case tsast.KindGreaterThanEqualsToken:
+		op = BinaryGreaterEqual
+	case tsast.KindEqualsEqualsToken, tsast.KindEqualsEqualsEqualsToken:
+		op = BinaryEqual
+	case tsast.KindExclamationEqualsToken, tsast.KindExclamationEqualsEqualsToken:
+		op = BinaryNotEqual
 	default:
 		return nil, fmt.Errorf("unsupported binary operator %s at %d", tsast.KindName(opNode.Kind()), opNode.Pos())
 	}

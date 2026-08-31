@@ -107,10 +107,15 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 func lowerMIRBinary(op hir.BinaryExpr, repr mir.Repr) (mir.Operation, error) {
 	left, right := mir.ValueID(op.Left), mir.ValueID(op.Right)
 	if repr == mir.ReprBool {
-		if op.Operator != hir.BinaryLessEqual {
+		operator := map[hir.BinaryOperator]mir.FloatCompareOp{
+			hir.BinaryLessThan: mir.FloatLessThan, hir.BinaryLessEqual: mir.FloatLessEqual,
+			hir.BinaryGreaterThan: mir.FloatGreaterThan, hir.BinaryGreaterEqual: mir.FloatGreaterEqual,
+			hir.BinaryEqual: mir.FloatEqual, hir.BinaryNotEqual: mir.FloatNotEqual,
+		}[op.Operator]
+		if operator == 0 {
 			return nil, fmt.Errorf("unsupported boolean binary operator %d", op.Operator)
 		}
-		return mir.FloatCompare{Operator: mir.FloatLessEqual, Left: left, Right: right}, nil
+		return mir.FloatCompare{Operator: operator, Left: left, Right: right}, nil
 	}
 	if repr != mir.ReprF64 {
 		return nil, fmt.Errorf("binary result requires unsupported representation %d", repr)

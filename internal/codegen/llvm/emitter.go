@@ -108,11 +108,16 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		if err != nil {
 			return err
 		}
-		if op.Operator != mir.FloatLessEqual {
+		predicate := map[mir.FloatCompareOp]string{
+			mir.FloatLessThan: "olt", mir.FloatLessEqual: "ole",
+			mir.FloatGreaterThan: "ogt", mir.FloatGreaterEqual: "oge",
+			mir.FloatEqual: "oeq", mir.FloatNotEqual: "une",
+		}[op.Operator]
+		if predicate == "" {
 			return fmt.Errorf("unsupported float compare operator %d", op.Operator)
 		}
 		name := valueName(inst.Result)
-		fmt.Fprintf(b, "  %s = fcmp ole double %s, %s\n", name, left, right)
+		fmt.Fprintf(b, "  %s = fcmp %s double %s, %s\n", name, predicate, left, right)
 		values[inst.Result] = name
 		return nil
 	case mir.Call:

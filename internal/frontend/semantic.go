@@ -23,7 +23,14 @@ const (
 	BinaryInvalid BinaryOperator = iota
 	BinaryAdd
 	BinarySub
+	BinaryMul
+	BinaryDiv
+	BinaryLessThan
 	BinaryLessEqual
+	BinaryGreaterThan
+	BinaryGreaterEqual
+	BinaryEqual
+	BinaryNotEqual
 )
 
 type Expr struct {

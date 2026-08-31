@@ -76,7 +76,12 @@ type FloatBinary struct {
 type FloatCompareOp uint8
 
 const (
-	FloatLessEqual FloatCompareOp = iota + 1
+	FloatLessThan FloatCompareOp = iota + 1
+	FloatLessEqual
+	FloatGreaterThan
+	FloatGreaterEqual
+	FloatEqual
+	FloatNotEqual
 )
 
 type FloatCompare struct {

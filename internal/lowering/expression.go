@@ -46,8 +46,22 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 		op = hir.BinaryAdd
 	case frontend.BinarySub:
 		op = hir.BinarySub
+	case frontend.BinaryMul:
+		op = hir.BinaryMul
+	case frontend.BinaryDiv:
+		op = hir.BinaryDiv
+	case frontend.BinaryLessThan:
+		op = hir.BinaryLessThan
 	case frontend.BinaryLessEqual:
 		op = hir.BinaryLessEqual
+	case frontend.BinaryGreaterThan:
+		op = hir.BinaryGreaterThan
+	case frontend.BinaryGreaterEqual:
+		op = hir.BinaryGreaterEqual
+	case frontend.BinaryEqual:
+		op = hir.BinaryEqual
+	case frontend.BinaryNotEqual:
+		op = hir.BinaryNotEqual
 	default:
 		return 0, fmt.Errorf("unsupported semantic binary operator %d", expr.Operator)
 	}
