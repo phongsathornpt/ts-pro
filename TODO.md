@@ -26,7 +26,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Semantic bridge
 
-- [ ] Define compiler-owned source/symbol/type/function DTOs.
+- [x] Define compiler-owned source/symbol/type/function DTOs.
 - [ ] Determine the minimum semantic data required to lower TypeScript to HIR.
 - [ ] Implement semantic extraction on top of TypeScript 7.
 - [ ] Isolate version-specific/custom TypeScript-LS methods in `internal/tsls`.
