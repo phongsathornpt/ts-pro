@@ -24,6 +24,7 @@ type classInfo struct {
 	Shape             ShapeID
 	ConstructorParams []Parameter
 	FieldParam        []int
+	FieldInitializers map[int]tsast.Node
 }
 
 type extractor struct {
@@ -1134,7 +1135,7 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 		return fmt.Errorf("class %s does not have a closed object type", name)
 	}
 	shapeID := e.result.Types[typeID].Shape
-	info := &classInfo{Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields))}
+	info := &classInfo{Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields)), FieldInitializers: map[int]tsast.Node{}}
 	for i := range info.FieldParam {
 		info.FieldParam[i] = -1
 	}
@@ -1296,10 +1297,18 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 	expr.Kind, expr.Type = ExprObject, class.Type
 	for fieldIndex, field := range e.result.Shapes[class.Shape].Fields {
 		paramIndex := class.FieldParam[fieldIndex]
-		if paramIndex < 0 || paramIndex >= len(args) {
-			return nil, fmt.Errorf("class %s field %s is not initialized by a constructor parameter-property", class.Name, field.Name)
+		var value *Expr
+		if paramIndex >= 0 && paramIndex < len(args) {
+			value = args[paramIndex]
+		} else if initializer, ok := class.FieldInitializers[fieldIndex]; ok {
+			value, err = e.extractExpr(initializer)
+			if err != nil {
+				return nil, fmt.Errorf("class %s field %s initializer: %w", class.Name, field.Name, err)
+			}
+		} else {
+			return nil, fmt.Errorf("class %s field %s has no native initializer", class.Name, field.Name)
 		}
-		expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(fieldIndex), Value: args[paramIndex]})
+		expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(fieldIndex), Value: value})
 	}
 	return expr, nil
 }
@@ -1313,11 +1322,11 @@ func (e *extractor) validateClassProperty(node tsast.Node, info *classInfo) erro
 		return fmt.Errorf("class %s property at %d requires an identifier name", info.Name, node.Pos())
 	}
 	name, _ := nameNode.Text()
-	if _, ok := node.NamedChild("initializer"); ok {
-		return fmt.Errorf("class %s property %s initializer is not supported yet", info.Name, name)
-	}
-	for _, field := range e.result.Shapes[info.Shape].Fields {
+	for fieldIndex, field := range e.result.Shapes[info.Shape].Fields {
 		if field.Name == name {
+			if initializer, ok := node.NamedChild("initializer"); ok {
+				info.FieldInitializers[fieldIndex] = initializer
+			}
 			return nil
 		}
 	}

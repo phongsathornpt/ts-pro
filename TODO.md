@@ -45,7 +45,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Parameter-property constructors with closed instance shapes.
   - [x] Direct instance-method calls with a native hidden `this` parameter.
   - [x] Explicit field declarations with `this.field = parameter` constructor assignment bodies.
-  - [ ] Property initializers, arbitrary constructor side effects, inheritance, and virtual dispatch.
+  - [x] Per-instance property initializers for closed-shape fields.
+  - [ ] Arbitrary constructor side effects, inheritance, and virtual dispatch.
 - [x] Closures and captured environments, with direct-call conversion for non-escaping closures and native `{code, env}` function values for escaping closures.
 - [~] Generic monomorphization and call-site specialization.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
