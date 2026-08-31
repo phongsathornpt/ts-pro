@@ -3,6 +3,7 @@ package compiler
 import (
 	"time"
 
+	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	"github.com/projectthorn/tsv7-bin/internal/hir"
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
@@ -27,6 +28,8 @@ type BuildMetrics struct {
 	DynamicValues   int
 	BoxingSites     int
 	DynamicDispatch int
+	I32Candidates   int
+	I64Candidates   int
 	RuntimeCalls    int
 	CacheHits       int
 	CacheMisses     int
@@ -58,6 +61,16 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
 				count(inst.Repr)
+			}
+		}
+	}
+	ranges := rangeanalysis.Analyze(hirModule)
+	for _, fn := range ranges {
+		for _, interval := range fn {
+			if interval.FitsI32() {
+				metrics.I32Candidates++
+			} else if interval.FitsI64() {
+				metrics.I64Candidates++
 			}
 		}
 	}

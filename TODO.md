@@ -31,7 +31,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Lower proven HIR to MIR/SSA.
 - [x] Add SSA phi nodes for mutable loop-carried values.
 - [x] Add direct-call and scalar fast paths.
-- [ ] Add conservative integer range proof before enabling `I32`/`I64` narrowing.
+- [x] Add conservative overflow-safe integer range proof with phi propagation and safe-integer guards.
+- [ ] Enable `I32`/`I64` lowering only where range proof and boundary conversions preserve TypeScript `number` semantics.
 - [x] Add checker-derived closed object-shape representation and fixed field layout.
 
 ## Native language coverage
@@ -99,7 +100,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 1. Finish and commit closed-world single inheritance: exact TS7 heritage decoding, base-prefix layouts, `super(...)`, inherited fields/methods, and differential acceptance.
 2. Add override dispatch for base-typed references, preferring closed-world devirtualization before introducing vtables/type tags.
 3. Complete generic specialization beyond direct `T`: nested generics, constrained structural generics, recursion, and cross-module specialization caching.
-4. Add conservative integer range analysis before enabling `I32`/`I64` narrowing while preserving TypeScript `number` semantics.
+4. Use the completed conservative range analysis to enable guarded/specialized `I32`/`I64` lowering while preserving TypeScript `number` semantics.
 5. Introduce tagged `JSValue` only at representation-unsafe boundaries, then checked conversions and dynamic operator/property slow paths.
 6. Add exceptions and Promise/async/await semantics on top of the stabilized native/dynamic runtime boundary.
 7. Finish multi-module LLVM scheduling, then ThinLTO/PGO and cross-compilation work.
