@@ -54,7 +54,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Emit deterministic textual LLVM IR from Go.
 - [~] Compile LLVM IR with clang (integration test passes; production toolchain wrapper pending).
-- [ ] Link executable with lld/clang without Node/V8.
+- [x] Link executable with lld/clang without Node/V8.
 - [ ] Compile and run `examples/fib.ts`.
 - [ ] Add `-O0/-O1/-O2/-O3/-Oz` profiles.
 - [ ] Add parallel LLVM module compilation and object cache.
