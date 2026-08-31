@@ -61,7 +61,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [ ] Add heap allocator ownership model shared by strings/arrays/objects.
 - [ ] Add initial mark/sweep GC once object/closure allocation is live.
-- [ ] Add parallel LLVM module compilation and deterministic object cache.
+- [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
 ## Dynamic boundary, correctness, and performance
 
@@ -69,7 +69,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add checked conversions and dynamic operator/property slow paths.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
-- [~] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and cache hit rate (stage timings implemented; cache hit rate pending cache implementation).
+- [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.
 - [ ] Add ThinLTO after module/object caching is established.
 - [ ] Add PGO after MIR quality and benchmark coverage are stable.
 - [ ] Add cross compilation after the Linux x86-64 runtime ABI is stable.

@@ -96,33 +96,35 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
+	cache, err := toolchain.NewObjectCache(options.Root, tc)
+	if err != nil {
+		return BuildResult{}, err
+	}
 	workDir, err := os.MkdirTemp("", "tsnative-build-*")
 	if err != nil {
 		return BuildResult{}, fmt.Errorf("create build directory: %w", err)
 	}
 	defer os.RemoveAll(workDir)
 	llPath := filepath.Join(workDir, "module.ll")
-	moduleObj := filepath.Join(workDir, "module.o")
 	if err := os.WriteFile(llPath, []byte(llvmIR), 0o644); err != nil {
 		return BuildResult{}, fmt.Errorf("write LLVM IR: %w", err)
 	}
 	codegenStart := time.Now()
-	if err := tc.CompileLLVM(ctx, llPath, moduleObj, options.Optimization); err != nil {
+	moduleObj, hit, err := cache.CompileLLVM(ctx, llPath, options.Optimization)
+	if err != nil {
 		return BuildResult{}, err
 	}
+	recordCacheResult(&metrics, hit)
 	timings.Codegen = time.Since(codegenStart)
-	objects := []string{moduleObj}
-	runtimeSources := []string{"console.c", "array_f64.c", "string.c", "object.c"}
 	runtimeStart := time.Now()
-	for i, source := range runtimeSources {
-		runtimeObj := filepath.Join(workDir, fmt.Sprintf("runtime-%d.o", i))
-		runtimeSource := filepath.Join(options.Root, "runtime", "core", source)
-		if err := tc.CompileC(ctx, runtimeSource, runtimeObj, options.Optimization); err != nil {
-			return BuildResult{}, err
-		}
-		objects = append(objects, runtimeObj)
+	runtimeObjects, hits, misses, err := compileRuntimeObjects(ctx, cache, options.Root, options.Optimization)
+	if err != nil {
+		return BuildResult{}, err
 	}
+	metrics.CacheHits += hits
+	metrics.CacheMisses += misses
 	timings.Runtime = time.Since(runtimeStart)
+	objects := append([]string{moduleObj}, runtimeObjects...)
 	if err := toolchain.EnsureParent(options.Output); err != nil {
 		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
 	}
@@ -277,4 +279,45 @@ func renderAPIDiagnostic(diagnostic tsls.APIDiagnostic) string {
 		column = diagnostic.Pos - lastNewline
 	}
 	return fmt.Sprintf("%s:%d:%d: error TS%d: %s", fileName, line, column, diagnostic.Code, diagnostic.Text)
+}
+
+func recordCacheResult(metrics *BuildMetrics, hit bool) {
+	if hit {
+		metrics.CacheHits++
+	} else {
+		metrics.CacheMisses++
+	}
+}
+
+type runtimeCompileResult struct {
+	index int
+	path  string
+	hit   bool
+	err   error
+}
+
+func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
+	sources := []string{"console.c", "array_f64.c", "string.c", "object.c"}
+	results := make(chan runtimeCompileResult, len(sources))
+	for i, source := range sources {
+		go func(index int, name string) {
+			path, hit, err := cache.CompileC(ctx, filepath.Join(root, "runtime", "core", name), opt)
+			results <- runtimeCompileResult{index: index, path: path, hit: hit, err: err}
+		}(i, source)
+	}
+	objects := make([]string, len(sources))
+	hits, misses := 0, 0
+	for range sources {
+		result := <-results
+		if result.err != nil {
+			return nil, hits, misses, result.err
+		}
+		objects[result.index] = result.path
+		if result.hit {
+			hits++
+		} else {
+			misses++
+		}
+	}
+	return objects, hits, misses, nil
 }

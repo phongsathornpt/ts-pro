@@ -28,6 +28,8 @@ type BuildMetrics struct {
 	BoxingSites     int
 	DynamicDispatch int
 	RuntimeCalls    int
+	CacheHits       int
+	CacheMisses     int
 }
 
 func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetrics {
@@ -84,4 +86,12 @@ func (m BuildMetrics) NativeCoverage() float64 {
 		return 100
 	}
 	return float64(m.NativeValues) * 100 / float64(m.Values)
+}
+
+func (m BuildMetrics) CacheHitRate() float64 {
+	total := m.CacheHits + m.CacheMisses
+	if total == 0 {
+		return 0
+	}
+	return float64(m.CacheHits) * 100 / float64(total)
 }

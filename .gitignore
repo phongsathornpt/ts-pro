@@ -7,3 +7,5 @@
 *.profraw
 *.profdata
 .DS_Store
+
+/.tsnative/
