@@ -57,6 +57,10 @@ const (
 	StmtIf
 	StmtReturn
 	StmtExpr
+	StmtVar
+	StmtAssign
+	StmtWhile
+	StmtFor
 )
 
 type Statement struct {
@@ -66,4 +70,11 @@ type Statement struct {
 	Then   []Statement
 	Else   []Statement
 	Return *Expr
+
+	Symbol SymbolID
+	Name   string
+	Type   TypeID
+	Value  *Expr
+	Init   []Statement
+	Update []Statement
 }

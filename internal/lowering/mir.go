@@ -85,6 +85,12 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.Call{Callee: mir.FunctionID(op.Callee), Args: args}
+	case hir.PhiOp:
+		incoming := make([]mir.PhiIncoming, len(op.Incoming))
+		for i, item := range op.Incoming {
+			incoming[i] = mir.PhiIncoming{Block: mir.BlockID(item.Block), Value: mir.ValueID(item.Value)}
+		}
+		result.Op = mir.Phi{Incoming: incoming}
 	case hir.IntrinsicCallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {

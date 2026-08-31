@@ -153,6 +153,14 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
+			case PhiOp:
+				if len(op.Incoming) == 0 {
+					add(fmt.Sprintf("phi v%d has no incoming values", instruction.Result))
+				}
+				for _, incoming := range op.Incoming {
+					checkBlock(incoming.Block)
+					checkValue(incoming.Value)
+				}
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

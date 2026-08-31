@@ -46,7 +46,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 	}
 	fmt.Fprintf(b, "; function %s\n", fn.Name)
 	fmt.Fprintf(b, "define %s @%s(", returnType, functionName(fn.ID))
-	values := map[mir.ValueID]string{}
+	values := buildValueOperands(fn)
 	for i, param := range fn.Params {
 		if i != 0 {
 			b.WriteString(", ")
@@ -55,9 +55,8 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		if err != nil {
 			return fmt.Errorf("function %s parameter %s: %w", fn.Name, param.Name, err)
 		}
-		operand := valueName(param.Value)
-		values[param.Value] = operand
-		fmt.Fprintf(b, "%s %s", typ, operand)
+		paramOperand := valueName(param.Value)
+		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
 	blocks := append([]mir.Block(nil), fn.Blocks...)
@@ -80,7 +79,25 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.Instruction, values map[mir.ValueID]string) error {
 	switch op := inst.Op.(type) {
 	case mir.ConstF64:
-		values[inst.Result] = formatF64(op.Value)
+		return nil
+	case mir.Phi:
+		typ, err := llvmType(inst.Repr)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = phi %s ", name, typ)
+		for i, incoming := range op.Incoming {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			value, err := operand(values, incoming.Value)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "[ %s, %%b%d ]", value, incoming.Block)
+		}
+		b.WriteString("\n")
 		return nil
 	case mir.FloatBinary:
 		left, err := operand(values, op.Left)
@@ -228,6 +245,23 @@ func llvmType(repr mir.Repr) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported MIR representation %d", repr)
 	}
+}
+
+func buildValueOperands(fn mir.Function) map[mir.ValueID]string {
+	values := make(map[mir.ValueID]string)
+	for _, param := range fn.Params {
+		values[param.Value] = valueName(param.Value)
+	}
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			if constant, ok := inst.Op.(mir.ConstF64); ok {
+				values[inst.Result] = formatF64(constant.Value)
+			} else if inst.Repr != mir.ReprVoid {
+				values[inst.Result] = valueName(inst.Result)
+			}
+		}
+	}
+	return values
 }
 
 func operand(values map[mir.ValueID]string, value mir.ValueID) (string, error) {

@@ -107,11 +107,21 @@ type IntrinsicCall struct {
 	Args      []ValueID
 }
 
+type PhiIncoming struct {
+	Block BlockID
+	Value ValueID
+}
+
+type Phi struct {
+	Incoming []PhiIncoming
+}
+
 func (ConstF64) isOperation()      {}
 func (FloatBinary) isOperation()   {}
 func (FloatCompare) isOperation()  {}
 func (Call) isOperation()          {}
 func (IntrinsicCall) isOperation() {}
+func (Phi) isOperation()           {}
 
 type Terminator interface{ isTerminator() }
 

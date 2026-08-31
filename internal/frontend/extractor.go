@@ -219,10 +219,26 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 	case tsast.KindBlock:
 		body, err := e.extractBlock(node)
 		return Statement{Kind: StmtBlock, Span: e.span(node), Then: body}, err
+	case tsast.KindVariableStatement:
+		items, err := e.extractVariableStatement(node)
+		if err != nil {
+			return Statement{}, err
+		}
+		if len(items) == 1 {
+			return items[0], nil
+		}
+		return Statement{Kind: StmtBlock, Span: e.span(node), Then: items}, nil
+	case tsast.KindWhileStatement:
+		return e.extractWhile(node)
+	case tsast.KindForStatement:
+		return e.extractFor(node)
 	case tsast.KindExpressionStatement:
 		exprNode, ok := node.NamedChild("expression")
 		if !ok {
 			return Statement{}, fmt.Errorf("expression statement at %d has no expression", node.Pos())
+		}
+		if mutation, ok, err := e.extractMutation(exprNode); ok || err != nil {
+			return mutation, err
 		}
 		expr, err := e.extractExpr(exprNode)
 		if err != nil {
@@ -232,6 +248,192 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 	default:
 		return Statement{}, fmt.Errorf("unsupported native statement %s at %d", tsast.KindName(node.Kind()), node.Pos())
 	}
+}
+
+func (e *extractor) extractVariableStatement(node tsast.Node) ([]Statement, error) {
+	list, ok := node.NamedChild("declarationList")
+	if !ok {
+		return nil, fmt.Errorf("variable statement at %d has no declaration list", node.Pos())
+	}
+	return e.extractVariableDeclarationList(list)
+}
+
+func (e *extractor) extractVariableDeclarationList(node tsast.Node) ([]Statement, error) {
+	declarations, ok := node.NamedChild("declarations")
+	if !ok || !declarations.IsList() {
+		return nil, fmt.Errorf("variable declaration list at %d has no declarations", node.Pos())
+	}
+	result := make([]Statement, 0, len(declarations.ListElements()))
+	for _, declaration := range declarations.ListElements() {
+		stmt, err := e.extractVariableDeclaration(declaration)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, stmt)
+	}
+	return result, nil
+}
+
+func (e *extractor) extractVariableDeclaration(node tsast.Node) (Statement, error) {
+	nameNode, ok := node.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return Statement{}, fmt.Errorf("native variable at %d requires an identifier name", node.Pos())
+	}
+	name, _ := nameNode.Text()
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("variable %s has no TypeScript symbol", name)
+		}
+		return Statement{}, err
+	}
+	typeID, err := e.typeAt(nameNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	symbolID := e.internSymbol(symbol, SymbolVariable, nameNode)
+	e.result.Symbols[symbolID].Type = typeID
+	initializer, ok := node.NamedChild("initializer")
+	if !ok {
+		return Statement{}, fmt.Errorf("native variable %s requires an initializer", name)
+	}
+	value, err := e.extractExpr(initializer)
+	if err != nil {
+		return Statement{}, err
+	}
+	return Statement{Kind: StmtVar, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, nil
+}
+
+func (e *extractor) extractWhile(node tsast.Node) (Statement, error) {
+	conditionNode, ok := node.NamedChild("expression")
+	if !ok {
+		return Statement{}, fmt.Errorf("while at %d has no condition", node.Pos())
+	}
+	condition, err := e.extractExpr(conditionNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	bodyNode, ok := node.NamedChild("statement")
+	if !ok {
+		return Statement{}, fmt.Errorf("while at %d has no body", node.Pos())
+	}
+	body, err := e.extractStatementBody(bodyNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	return Statement{Kind: StmtWhile, Span: e.span(node), Expr: condition, Then: body}, nil
+}
+
+func (e *extractor) extractFor(node tsast.Node) (Statement, error) {
+	stmt := Statement{Kind: StmtFor, Span: e.span(node)}
+	if initializer, ok := node.NamedChild("initializer"); ok {
+		var err error
+		switch initializer.Kind() {
+		case tsast.KindVariableDeclarationList:
+			stmt.Init, err = e.extractVariableDeclarationList(initializer)
+		default:
+			var mutation Statement
+			var matched bool
+			mutation, matched, err = e.extractMutation(initializer)
+			if err == nil && matched {
+				stmt.Init = []Statement{mutation}
+			}
+			if err == nil && !matched {
+				err = fmt.Errorf("unsupported for initializer %s at %d", tsast.KindName(initializer.Kind()), initializer.Pos())
+			}
+		}
+		if err != nil {
+			return Statement{}, err
+		}
+	}
+	conditionNode, ok := node.NamedChild("condition")
+	if !ok {
+		return Statement{}, fmt.Errorf("native for at %d requires a condition", node.Pos())
+	}
+	condition, err := e.extractExpr(conditionNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	stmt.Expr = condition
+	if incrementor, ok := node.NamedChild("incrementor"); ok {
+		mutation, matched, err := e.extractMutation(incrementor)
+		if err != nil {
+			return Statement{}, err
+		}
+		if !matched {
+			return Statement{}, fmt.Errorf("unsupported for incrementor %s at %d", tsast.KindName(incrementor.Kind()), incrementor.Pos())
+		}
+		stmt.Update = []Statement{mutation}
+	}
+	bodyNode, ok := node.NamedChild("statement")
+	if !ok {
+		return Statement{}, fmt.Errorf("for at %d has no body", node.Pos())
+	}
+	stmt.Then, err = e.extractStatementBody(bodyNode)
+	return stmt, err
+}
+
+func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
+	if node.Kind() == tsast.KindBinaryExpression {
+		opNode, ok := node.NamedChild("operatorToken")
+		if !ok || opNode.Kind() != tsast.KindEqualsToken {
+			return Statement{}, false, nil
+		}
+		left, ok := node.NamedChild("left")
+		if !ok || left.Kind() != tsast.KindIdentifier {
+			return Statement{}, true, fmt.Errorf("native assignment at %d requires identifier target", node.Pos())
+		}
+		right, ok := node.NamedChild("right")
+		if !ok {
+			return Statement{}, true, fmt.Errorf("assignment at %d has no value", node.Pos())
+		}
+		return e.buildAssignment(node, left, right, 0)
+	}
+	if node.Kind() == tsast.KindPrefixUnaryExpression || node.Kind() == tsast.KindPostfixUnaryExpression {
+		op, ok := node.UnaryOperatorKind()
+		if !ok || (op != tsast.KindPlusPlusToken && op != tsast.KindMinusMinusToken) {
+			return Statement{}, false, nil
+		}
+		operand, ok := node.NamedChild("operand")
+		if !ok || operand.Kind() != tsast.KindIdentifier {
+			return Statement{}, true, fmt.Errorf("increment at %d requires identifier operand", node.Pos())
+		}
+		return e.buildAssignment(node, operand, tsast.Node{}, op)
+	}
+	return Statement{}, false, nil
+}
+
+func (e *extractor) buildAssignment(node, target, rhs tsast.Node, unary uint32) (Statement, bool, error) {
+	name, _ := target.Text()
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, target.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("assignment target %s has no TypeScript symbol", name)
+		}
+		return Statement{}, true, err
+	}
+	typeID, err := e.typeAt(target)
+	if err != nil {
+		return Statement{}, true, err
+	}
+	symbolID := e.internSymbol(symbol, SymbolVariable, target)
+	e.result.Symbols[symbolID].Type = typeID
+	var value *Expr
+	if unary == 0 {
+		value, err = e.extractExpr(rhs)
+	} else {
+		left := &Expr{Kind: ExprIdentifier, Type: typeID, Symbol: symbolID, Name: name, Span: e.span(target)}
+		right := &Expr{Kind: ExprNumber, Type: typeID, Number: 1, Span: e.span(node)}
+		op := BinaryAdd
+		if unary == tsast.KindMinusMinusToken {
+			op = BinarySub
+		}
+		value = &Expr{Kind: ExprBinary, Type: typeID, Operator: op, Left: left, Right: right, Span: e.span(node)}
+	}
+	if err != nil {
+		return Statement{}, true, err
+	}
+	return Statement{Kind: StmtAssign, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, true, nil
 }
 
 func (e *extractor) extractStatementBody(node tsast.Node) ([]Statement, error) {

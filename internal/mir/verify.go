@@ -107,6 +107,18 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[Block
 						return err
 					}
 				}
+			case Phi:
+				if len(op.Incoming) == 0 {
+					return fmt.Errorf("phi v%d has no incoming values", inst.Result)
+				}
+				for _, incoming := range op.Incoming {
+					if _, ok := blocks[incoming.Block]; !ok {
+						return fmt.Errorf("phi v%d references unknown block b%d", inst.Result, incoming.Block)
+					}
+					if err := checkValue(incoming.Value); err != nil {
+						return err
+					}
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}
