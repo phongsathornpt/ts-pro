@@ -44,7 +44,10 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n")
-	b.WriteString("declare void @tsnative_heap_shutdown()\n\n")
+	b.WriteString("declare void @tsnative_heap_shutdown()\n")
+	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
+	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
+	b.WriteString("declare void @tsnative_gc_safepoint()\n\n")
 	if err := e.emitClosureTypes(&b); err != nil {
 		return "", err
 	}
@@ -109,16 +112,43 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
+	gc := buildGCRootLayout(fn)
+	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
 	for _, block := range blocks {
 		fmt.Fprintf(b, "b%d:\n", block.ID)
-		for _, inst := range block.Instructions {
+		index := 0
+		var phiRoots []mir.Instruction
+		for index < len(block.Instructions) {
+			inst := block.Instructions[index]
+			if _, ok := inst.Op.(mir.Phi); !ok {
+				break
+			}
 			if err := e.emitInstruction(b, fn, inst, values); err != nil {
 				return fmt.Errorf("function %s block b%d: %w", fn.Name, block.ID, err)
 			}
+			phiRoots = append(phiRoots, inst)
+			index++
 		}
-		if err := e.emitTerminator(b, fn, block.Terminator, values); err != nil {
+		for _, inst := range phiRoots {
+			if err := gc.emitStore(b, inst, values); err != nil {
+				return fmt.Errorf("function %s root v%d: %w", fn.Name, inst.Result, err)
+			}
+		}
+		for ; index < len(block.Instructions); index++ {
+			inst := block.Instructions[index]
+			if emitsGCAllocation(inst.Op) {
+				b.WriteString("  call void @tsnative_gc_safepoint()\n")
+			}
+			if err := e.emitInstruction(b, fn, inst, values); err != nil {
+				return fmt.Errorf("function %s block b%d: %w", fn.Name, block.ID, err)
+			}
+			if err := gc.emitStore(b, inst, values); err != nil {
+				return fmt.Errorf("function %s root v%d: %w", fn.Name, inst.Result, err)
+			}
+		}
+		if err := e.emitTerminator(b, fn, block.Terminator, values, gc); err != nil {
 			return fmt.Errorf("function %s block b%d: %w", fn.Name, block.ID, err)
 		}
 	}
@@ -354,10 +384,13 @@ func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, ca
 	return nil
 }
 
-func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.Terminator, values map[mir.ValueID]string) error {
+func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.Terminator, values map[mir.ValueID]string, gc gcRootLayout) error {
 	switch term := term.(type) {
 	case mir.Return:
 		if term.Value == nil {
+			if gc.count != 0 {
+				b.WriteString("  call void @tsnative_gc_leave(ptr %gc.frame)\n")
+			}
 			b.WriteString("  ret void\n")
 			return nil
 		}
@@ -368,6 +401,9 @@ func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.T
 		op, err := operand(values, *term.Value)
 		if err != nil {
 			return err
+		}
+		if gc.count != 0 {
+			b.WriteString("  call void @tsnative_gc_leave(ptr %gc.frame)\n")
 		}
 		fmt.Fprintf(b, "  ret %s %s\n", typ, op)
 		return nil

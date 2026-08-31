@@ -62,7 +62,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add specialized native F64-array runtime support.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [x] Add shared heap ownership for strings, arrays, objects, and closure environments/values, with deterministic shutdown from native `main`.
-- [ ] Add initial mark/sweep GC once object/closure allocation is live.
+- [x] Add initial mark/sweep GC with explicit native shadow roots, compiler safepoints, conservative heap tracing, and sweep reclamation.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
 ## Dynamic boundary, correctness, and performance
