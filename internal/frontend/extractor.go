@@ -27,21 +27,25 @@ type classInfo struct {
 }
 
 type extractor struct {
-	ctx         context.Context
-	client      *tsls.APIClient
-	snapshot    uint64
-	project     string
-	fileName    string
-	sourceText  string
-	result      Snapshot
-	types       map[uint64]TypeID
-	symbols     map[uint64]SymbolID
-	functions   map[uint64]FunctionID
-	shapes      map[uint64]ShapeID
-	classes     map[uint64]*classInfo
-	closures    map[uint64]closureInfo
-	pending     []pendingFunctionBody
-	currentThis *SymbolID
+	ctx                 context.Context
+	client              *tsls.APIClient
+	snapshot            uint64
+	project             string
+	fileName            string
+	sourceText          string
+	result              Snapshot
+	types               map[uint64]TypeID
+	symbols             map[uint64]SymbolID
+	functions           map[uint64]FunctionID
+	shapes              map[uint64]ShapeID
+	classes             map[uint64]*classInfo
+	closures            map[uint64]closureInfo
+	generics            map[uint64]genericInfo
+	specializations     map[string]FunctionID
+	typeSubstitutions   map[uint64]TypeID
+	symbolSubstitutions map[uint64]SymbolID
+	pending             []pendingFunctionBody
+	currentThis         *SymbolID
 }
 
 func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, fileName string) (Snapshot, error) {
@@ -62,24 +66,32 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		return Snapshot{}, fmt.Errorf("resolve source path: %w", err)
 	}
 	e := &extractor{
-		ctx:        ctx,
-		client:     client,
-		snapshot:   snapshot,
-		project:    project,
-		fileName:   abs,
-		sourceText: text,
-		types:      map[uint64]TypeID{},
-		symbols:    map[uint64]SymbolID{},
-		functions:  map[uint64]FunctionID{},
-		shapes:     map[uint64]ShapeID{},
-		classes:    map[uint64]*classInfo{},
-		closures:   map[uint64]closureInfo{},
+		ctx:             ctx,
+		client:          client,
+		snapshot:        snapshot,
+		project:         project,
+		fileName:        abs,
+		sourceText:      text,
+		types:           map[uint64]TypeID{},
+		symbols:         map[uint64]SymbolID{},
+		functions:       map[uint64]FunctionID{},
+		shapes:          map[uint64]ShapeID{},
+		classes:         map[uint64]*classInfo{},
+		closures:        map[uint64]closureInfo{},
+		generics:        map[uint64]genericInfo{},
+		specializations: map[string]FunctionID{},
 	}
 	e.result.Sources = append(e.result.Sources, Source{ID: 0, URI: "file://" + filepath.ToSlash(abs), Path: abs})
 
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
 		case tsast.KindFunctionDeclaration:
+			if hasTypeParameters(node) {
+				if err := e.registerGenericFunction(node); err != nil {
+					return Snapshot{}, err
+				}
+				continue
+			}
 			functionID, err := e.extractFunctionSignature(node)
 			if err != nil {
 				return Snapshot{}, err
@@ -484,20 +496,19 @@ func (e *extractor) extractStatementBody(node tsast.Node) ([]Statement, error) {
 }
 
 func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
+	if node.Kind() == tsast.KindThisKeyword {
+		if e.currentThis == nil {
+			return nil, fmt.Errorf("this at %d is outside a native method", node.Pos())
+		}
+		typeID := e.result.Symbols[*e.currentThis].Type
+		return &Expr{Kind: ExprIdentifier, Type: typeID, Name: "this", Symbol: *e.currentThis, Span: e.span(node)}, nil
+	}
 	typeID, err := e.typeAt(node)
 	if err != nil {
 		return nil, err
 	}
 	expr := &Expr{Type: typeID, Span: e.span(node)}
 	switch node.Kind() {
-	case tsast.KindThisKeyword:
-		if e.currentThis == nil {
-			return nil, fmt.Errorf("this at %d is outside a native method", node.Pos())
-		}
-		expr.Kind = ExprIdentifier
-		expr.Name = "this"
-		expr.Symbol = *e.currentThis
-		return expr, nil
 	case tsast.KindIdentifier:
 		expr.Kind = ExprIdentifier
 		expr.Name, _ = node.Text()
@@ -506,6 +517,10 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, err
 		}
 		if symbol != nil {
+			if replacement, ok := e.symbolSubstitutions[symbol.ID]; ok {
+				expr.Symbol = replacement
+				return expr, nil
+			}
 			if closure, ok := e.closures[symbol.ID]; ok {
 				target := closure.Function
 				expr.Kind = ExprClosure
@@ -654,7 +669,7 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return expr, nil
 		}
 		if objectType.Kind != TypeObject || int(objectType.Shape) >= len(e.result.Shapes) {
-			return nil, fmt.Errorf("native property %q at %d requires a closed object shape", name, node.Pos())
+			return nil, fmt.Errorf("native property %q at %d requires a closed object shape; receiver type=%q kind=%d", name, node.Pos(), objectType.Name, objectType.Kind)
 		}
 		shape := e.result.Shapes[objectType.Shape]
 		for i, field := range shape.Fields {
@@ -731,6 +746,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	}
 	expr.Kind = ExprCall
 	consoleCall := false
+	var generic *genericInfo
 	switch calleeNode.Kind() {
 	case tsast.KindIdentifier:
 		calleeName, _ := calleeNode.Text()
@@ -740,7 +756,10 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			return nil, err
 		}
 		if symbol != nil {
-			if closure, ok := e.closures[symbol.ID]; ok {
+			if info, ok := e.generics[symbol.ID]; ok {
+				infoCopy := info
+				generic = &infoCopy
+			} else if closure, ok := e.closures[symbol.ID]; ok {
 				targetCopy := closure.Function
 				expr.CallTarget = &targetCopy
 				expr.Args = append(expr.Args, e.closureCaptureArgs(closure, e.span(calleeNode))...)
@@ -749,7 +768,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 				expr.CallTarget = &targetCopy
 			}
 		}
-		if expr.CallTarget == nil {
+		if expr.CallTarget == nil && generic == nil {
 			callee, err := e.extractExpr(calleeNode)
 			if err != nil {
 				return nil, err
@@ -806,6 +825,14 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
+	if generic != nil {
+		target, err := e.specializeGenericCall(*generic, expr.Args, expr.Type)
+		if err != nil {
+			return nil, err
+		}
+		targetCopy := target
+		expr.CallTarget = &targetCopy
+	}
 	if consoleCall {
 		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) {
 			return nil, fmt.Errorf("console.log native MVP requires exactly one supported argument at %d", node.Pos())
@@ -850,6 +877,9 @@ func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
 	if info == nil {
 		return 0, fmt.Errorf("node %s at %d has no TypeScript type", tsast.KindName(node.Kind()), node.Pos())
 	}
+	if replacement, ok := e.typeSubstitutions[info.ID]; ok {
+		return replacement, nil
+	}
 	return e.internAPIType(info)
 }
 
@@ -865,6 +895,9 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 		return 0, err
 	}
 	kind := classifyType(text)
+	if info.Flags&typeFlagTypeParameter != 0 {
+		kind = TypeParameter
+	}
 	if kind == TypeNumber && text == "number" {
 		id := e.ensureSemanticType(TypeNumber, "number")
 		e.types[info.ID] = id

@@ -38,3 +38,13 @@ func (c *APIClient) GetReturnTypeOfSignature(ctx context.Context, snapshot uint6
 	}, &result)
 	return result, err
 }
+
+func (c *APIClient) GetResolvedSignature(ctx context.Context, snapshot uint64, project, location string) (*APISignature, error) {
+	var result *APISignature
+	err := c.request(ctx, "getResolvedSignature", map[string]any{
+		"snapshot": snapshot,
+		"project":  project,
+		"location": location,
+	}, &result)
+	return result, err
+}

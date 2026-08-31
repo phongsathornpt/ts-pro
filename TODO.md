@@ -47,7 +47,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Explicit field declarations with `this.field = parameter` constructor assignment bodies.
   - [ ] Property initializers, arbitrary constructor side effects, inheritance, and virtual dispatch.
 - [x] Closures and captured environments, with direct-call conversion for non-escaping closures and native `{code, env}` function values for escaping closures.
-- [ ] Generic monomorphization and call-site specialization.
+- [~] Generic monomorphization and call-site specialization.
+  - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
+  - [ ] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
 - [ ] Exceptions, Promise, and async/await.
 
 ## LLVM, runtime, and build
