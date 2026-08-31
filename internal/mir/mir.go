@@ -57,6 +57,8 @@ type Instruction struct {
 type Operation interface{ isOperation() }
 
 type ConstF64 struct{ Value float64 }
+type ConstString struct{ Value string }
+type StringConcat struct{ Left, Right ValueID }
 
 type FloatBinaryOp uint8
 
@@ -100,6 +102,7 @@ type Intrinsic uint8
 const (
 	IntrinsicInvalid Intrinsic = iota
 	IntrinsicConsoleLogF64
+	IntrinsicConsoleLogString
 )
 
 type IntrinsicCall struct {
@@ -121,6 +124,8 @@ type ArrayLengthF64 struct{ Array ValueID }
 type ArrayGetF64 struct{ Array, Index ValueID }
 
 func (ConstF64) isOperation()       {}
+func (ConstString) isOperation()    {}
+func (StringConcat) isOperation()   {}
 func (FloatBinary) isOperation()    {}
 func (FloatCompare) isOperation()   {}
 func (Call) isOperation()           {}

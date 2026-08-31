@@ -61,6 +61,7 @@ type IntrinsicKind uint8
 const (
 	IntrinsicInvalid IntrinsicKind = iota
 	IntrinsicConsoleLogF64
+	IntrinsicConsoleLogString
 )
 
 type IntrinsicCallOp struct {

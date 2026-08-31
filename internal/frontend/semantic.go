@@ -6,6 +6,7 @@ const (
 	ExprInvalid ExprKind = iota
 	ExprIdentifier
 	ExprNumber
+	ExprString
 	ExprBinary
 	ExprCall
 	ExprArray
@@ -18,6 +19,7 @@ type IntrinsicKind uint8
 const (
 	IntrinsicNone IntrinsicKind = iota
 	IntrinsicConsoleLogF64
+	IntrinsicConsoleLogString
 )
 
 type BinaryOperator uint8
@@ -42,6 +44,7 @@ type Expr struct {
 	Symbol     SymbolID
 	Name       string
 	Number     float64
+	String     string
 	Operator   BinaryOperator
 	Left       *Expr
 	Right      *Expr

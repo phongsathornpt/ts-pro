@@ -115,3 +115,26 @@ func TestBuildTypedNumberArrayExecutable(t *testing.T) {
 		t.Fatalf("native output = %q", got)
 	}
 }
+
+func TestBuildNativeStringExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "strings")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := Build(ctx, BuildOptions{Root: root, Input: "examples/strings.ts", Output: output, Optimization: "-O2"}); err != nil {
+		t.Fatal(err)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "Hello, TypeScript 7!" {
+		t.Fatalf("native output = %q", got)
+	}
+}

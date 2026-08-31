@@ -74,7 +74,14 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[Block
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			switch op := inst.Op.(type) {
-			case ConstF64:
+			case ConstF64, ConstString:
+			case StringConcat:
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
 			case FloatBinary:
 				if err := checkValue(op.Left); err != nil {
 					return err

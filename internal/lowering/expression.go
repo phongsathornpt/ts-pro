@@ -19,9 +19,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		return value, nil
 	case frontend.ExprNumber:
-		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{
-			Kind: hir.LiteralNumber, Number: expr.Number,
-		}}), nil
+		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralNumber, Number: expr.Number}}), nil
+	case frontend.ExprString:
+		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralString, String: expr.String}}), nil
 	case frontend.ExprBinary:
 		return f.lowerBinary(expr)
 	case frontend.ExprCall:
@@ -108,6 +108,8 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		switch expr.Intrinsic {
 		case frontend.IntrinsicConsoleLogF64:
 			intrinsic = hir.IntrinsicConsoleLogF64
+		case frontend.IntrinsicConsoleLogString:
+			intrinsic = hir.IntrinsicConsoleLogString
 		default:
 			return 0, fmt.Errorf("unsupported semantic intrinsic %d", expr.Intrinsic)
 		}

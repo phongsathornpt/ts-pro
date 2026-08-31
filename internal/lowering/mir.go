@@ -69,10 +69,14 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 	result := mir.Instruction{Result: mir.ValueID(source.Result), Repr: repr}
 	switch op := source.Op.(type) {
 	case hir.ConstOp:
-		if op.Literal.Kind != hir.LiteralNumber || repr != mir.ReprF64 {
-			return mir.Instruction{}, fmt.Errorf("unsupported const representation %v", repr)
+		switch {
+		case op.Literal.Kind == hir.LiteralNumber && repr == mir.ReprF64:
+			result.Op = mir.ConstF64{Value: op.Literal.Number}
+		case op.Literal.Kind == hir.LiteralString && repr == mir.ReprStringRef:
+			result.Op = mir.ConstString{Value: op.Literal.String}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported const kind %d representation %v", op.Literal.Kind, repr)
 		}
-		result.Op = mir.ConstF64{Value: op.Literal.Number}
 	case hir.BinaryExpr:
 		lowered, err := lowerMIRBinary(op, repr)
 		if err != nil {
@@ -107,8 +111,11 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			args[i] = mir.ValueID(arg)
 		}
 		intrinsic := mir.IntrinsicInvalid
-		if op.Intrinsic == hir.IntrinsicConsoleLogF64 {
+		switch op.Intrinsic {
+		case hir.IntrinsicConsoleLogF64:
 			intrinsic = mir.IntrinsicConsoleLogF64
+		case hir.IntrinsicConsoleLogString:
+			intrinsic = mir.IntrinsicConsoleLogString
 		}
 		if intrinsic == mir.IntrinsicInvalid {
 			return mir.Instruction{}, fmt.Errorf("unsupported HIR intrinsic %d", op.Intrinsic)
@@ -132,6 +139,12 @@ func lowerMIRBinary(op hir.BinaryExpr, repr mir.Repr) (mir.Operation, error) {
 			return nil, fmt.Errorf("unsupported boolean binary operator %d", op.Operator)
 		}
 		return mir.FloatCompare{Operator: operator, Left: left, Right: right}, nil
+	}
+	if repr == mir.ReprStringRef {
+		if op.Operator != hir.BinaryAdd {
+			return nil, fmt.Errorf("string binary operator %d is not supported", op.Operator)
+		}
+		return mir.StringConcat{Left: left, Right: right}, nil
 	}
 	if repr != mir.ReprF64 {
 		return nil, fmt.Errorf("binary result requires unsupported representation %d", repr)

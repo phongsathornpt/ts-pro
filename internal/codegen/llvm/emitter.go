@@ -10,15 +10,16 @@ import (
 )
 
 type emitter struct {
-	module    mir.Module
-	functions map[mir.FunctionID]mir.Function
+	module        mir.Module
+	functions     map[mir.FunctionID]mir.Function
+	stringGlobals map[string]string
 }
 
 func Emit(module mir.Module) (string, error) {
 	if err := module.Verify(); err != nil {
 		return "", fmt.Errorf("verify MIR before LLVM emission: %w", err)
 	}
-	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}}
+	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, stringGlobals: map[string]string{}}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
 	}
@@ -26,10 +27,19 @@ func Emit(module mir.Module) (string, error) {
 	fmt.Fprintf(&b, "; tsnative module %s\n", strconv.Quote(module.Name))
 	b.WriteString("target triple = \"x86_64-unknown-linux-gnu\"\n\n")
 	b.WriteString("declare void @tsnative_console_log_f64(double)\n")
+	b.WriteString("declare void @tsnative_console_log_string(ptr)\n")
+	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
+	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n\n")
+	for _, global := range e.collectStringGlobals() {
+		fmt.Fprintf(&b, "%s = private unnamed_addr constant [%d x i8] c\"%s\", align 1\n", global.name, len(global.value), escapeLLVMBytes(global.value))
+	}
+	if len(e.stringGlobals) != 0 {
+		b.WriteString("\n")
+	}
 	functions := append([]mir.Function(nil), module.Functions...)
 	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
 	for _, fn := range functions {
@@ -83,6 +93,30 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.Instruction, values map[mir.ValueID]string) error {
 	switch op := inst.Op.(type) {
 	case mir.ConstF64:
+		return nil
+	case mir.ConstString:
+		global, ok := e.stringGlobals[stringValueKey(fn.ID, inst.Result)]
+		if !ok {
+			return fmt.Errorf("missing LLVM string global for v%d", inst.Result)
+		}
+		name := valueName(inst.Result)
+		length := len([]byte(op.Value))
+		if length == 0 {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_string_new(ptr null, i64 0)\n", name)
+		} else {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_string_new(ptr getelementptr inbounds ([%d x i8], ptr %s, i64 0, i64 0), i64 %d)\n", name, length, global, length)
+		}
+		return nil
+	case mir.StringConcat:
+		left, err := operand(values, op.Left)
+		if err != nil {
+			return err
+		}
+		right, err := operand(values, op.Right)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_string_concat(ptr %s, ptr %s)\n", valueName(inst.Result), left, right)
 		return nil
 	case mir.ArrayNewF64:
 		if inst.Repr != mir.ReprArrayRef {
@@ -218,17 +252,21 @@ func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Ca
 }
 
 func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, call mir.IntrinsicCall, values map[mir.ValueID]string) error {
-	if call.Intrinsic != mir.IntrinsicConsoleLogF64 {
-		return fmt.Errorf("unsupported intrinsic %d", call.Intrinsic)
-	}
 	if inst.Repr != mir.ReprVoid || len(call.Args) != 1 {
-		return fmt.Errorf("console.log.f64 requires void result and one argument")
+		return fmt.Errorf("console.log requires void result and one argument")
 	}
 	arg, err := operand(values, call.Args[0])
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(b, "  call void @tsnative_console_log_f64(double %s)\n", arg)
+	switch call.Intrinsic {
+	case mir.IntrinsicConsoleLogF64:
+		fmt.Fprintf(b, "  call void @tsnative_console_log_f64(double %s)\n", arg)
+	case mir.IntrinsicConsoleLogString:
+		fmt.Fprintf(b, "  call void @tsnative_console_log_string(ptr %s)\n", arg)
+	default:
+		return fmt.Errorf("unsupported intrinsic %d", call.Intrinsic)
+	}
 	return nil
 }
 
@@ -283,6 +321,49 @@ func llvmType(repr mir.Repr) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported MIR representation %d", repr)
 	}
+}
+
+type llvmStringGlobal struct {
+	name  string
+	value []byte
+}
+
+func (e *emitter) collectStringGlobals() []llvmStringGlobal {
+	functions := append([]mir.Function(nil), e.module.Functions...)
+	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
+	var globals []llvmStringGlobal
+	for _, fn := range functions {
+		blocks := append([]mir.Block(nil), fn.Blocks...)
+		sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
+		for _, block := range blocks {
+			for _, inst := range block.Instructions {
+				constant, ok := inst.Op.(mir.ConstString)
+				if !ok {
+					continue
+				}
+				name := fmt.Sprintf("@.tsnative.str.%d", len(globals))
+				e.stringGlobals[stringValueKey(fn.ID, inst.Result)] = name
+				globals = append(globals, llvmStringGlobal{name: name, value: []byte(constant.Value)})
+			}
+		}
+	}
+	return globals
+}
+
+func stringValueKey(fn mir.FunctionID, value mir.ValueID) string {
+	return fmt.Sprintf("%d:%d", fn, value)
+}
+
+func escapeLLVMBytes(value []byte) string {
+	var b strings.Builder
+	for _, ch := range value {
+		if ch >= 0x20 && ch <= 0x7e && ch != '\\' && ch != '"' {
+			b.WriteByte(ch)
+		} else {
+			fmt.Fprintf(&b, "\\%02X", ch)
+		}
+	}
+	return b.String()
 }
 
 func buildValueOperands(fn mir.Function) map[mir.ValueID]string {

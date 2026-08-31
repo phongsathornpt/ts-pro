@@ -481,6 +481,14 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("parse numeric literal %q: %w", text, err)
 		}
 		return expr, nil
+	case tsast.KindStringLiteral:
+		expr.Kind = ExprString
+		text, ok := node.Text()
+		if !ok {
+			return nil, fmt.Errorf("string literal at %d has no text", node.Pos())
+		}
+		expr.String = text
+		return expr, nil
 	case tsast.KindBinaryExpression:
 		return e.extractBinary(node, expr)
 	case tsast.KindCallExpression:
@@ -609,6 +617,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		return nil, fmt.Errorf("call at %d has no callee", node.Pos())
 	}
 	expr.Kind = ExprCall
+	consoleCall := false
 	switch calleeNode.Kind() {
 	case tsast.KindIdentifier:
 		calleeName, _ := calleeNode.Text()
@@ -628,7 +637,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			return nil, fmt.Errorf("property call at %d is not a supported native intrinsic", calleeNode.Pos())
 		}
 		expr.Callee = &Expr{Kind: ExprIdentifier, Name: "console.log", Span: e.span(calleeNode)}
-		expr.Intrinsic = IntrinsicConsoleLogF64
+		consoleCall = true
 	default:
 		return nil, fmt.Errorf("callee %s at %d is not supported by the native MVP", tsast.KindName(calleeNode.Kind()), calleeNode.Pos())
 	}
@@ -641,9 +650,17 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
-	if expr.Intrinsic == IntrinsicConsoleLogF64 {
-		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeNumber {
-			return nil, fmt.Errorf("console.log native MVP requires exactly one number argument at %d", node.Pos())
+	if consoleCall {
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) {
+			return nil, fmt.Errorf("console.log native MVP requires exactly one supported argument at %d", node.Pos())
+		}
+		switch e.result.Types[expr.Args[0].Type].Kind {
+		case TypeNumber:
+			expr.Intrinsic = IntrinsicConsoleLogF64
+		case TypeString:
+			expr.Intrinsic = IntrinsicConsoleLogString
+		default:
+			return nil, fmt.Errorf("console.log native MVP does not support argument type %q at %d", e.result.Types[expr.Args[0].Type].Name, node.Pos())
 		}
 		return expr, nil
 	}
@@ -737,6 +754,9 @@ func classifyType(text string) TypeKind {
 	}
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
 		return TypeNumber
+	}
+	if len(text) >= 2 && ((strings.HasPrefix(text, "\"") && strings.HasSuffix(text, "\"")) || (strings.HasPrefix(text, "'") && strings.HasSuffix(text, "'"))) {
+		return TypeString
 	}
 	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
 	if strings.HasSuffix(arrayText, "[]") {

@@ -3,6 +3,7 @@ package tsast
 const (
 	KindEndOfFile                    uint32 = 1
 	KindNumericLiteral               uint32 = 8
+	KindStringLiteral                uint32 = 10
 	KindLessThanToken                uint32 = 29
 	KindGreaterThanToken             uint32 = 31
 	KindLessThanEqualsToken          uint32 = 32
@@ -44,7 +45,7 @@ const (
 )
 
 var kindNames = map[uint32]string{
-	KindEndOfFile: "EndOfFile", KindNumericLiteral: "NumericLiteral",
+	KindEndOfFile: "EndOfFile", KindNumericLiteral: "NumericLiteral", KindStringLiteral: "StringLiteral",
 	KindLessThanToken: "LessThanToken", KindGreaterThanToken: "GreaterThanToken", KindLessThanEqualsToken: "LessThanEqualsToken",
 	KindGreaterThanEqualsToken: "GreaterThanEqualsToken", KindEqualsEqualsToken: "EqualsEqualsToken", KindExclamationEqualsToken: "ExclamationEqualsToken",
 	KindEqualsEqualsEqualsToken: "EqualsEqualsEqualsToken", KindExclamationEqualsEqualsToken: "ExclamationEqualsEqualsToken",
