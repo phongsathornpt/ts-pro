@@ -1,55 +1,71 @@
 # TODO
 
-Legend: `[ ]` planned, `[~]` in progress, `[x]` complete.
+Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
-## Bootstrap
+## Architecture migration: Rust -> Go
 
-- [x] Initialize Git repository.
-- [x] Create architecture and implementation docs.
-- [x] Add Rust workspace and compiler CLI.
-- [x] Pin TypeScript 7 dependency.
-- [x] Add native `tsconfig` fixture.
-- [x] Add CI-style local check command.
+- [x] Create architecture/type/performance/native-config documentation.
+- [S] Rust workspace, Rust CLI, and Rust HIR prototype.
+- [ ] Add `go.mod` and Go package layout.
+- [ ] Add `cmd/tsnative` Go CLI.
+- [ ] Add Go test/lint/build commands.
+- [ ] Remove Rust from the active build after Go parity is reached.
 
-## TypeScript 7 frontend
+## TypeScript 7 / TypeScript-LS
 
-- [x] Locate and validate the official TypeScript 7 CLI.
-- [x] Define frontend adapter trait/contracts.
-- [x] Run TS7 type checking before native compilation.
-- [~] Parse project config and entry points through the adapter.
-- [x] Normalize diagnostics into compiler-owned structures.
-- [ ] Define semantic type/symbol DTOs without leaking TS AST internals.
+- [x] Pin TypeScript 7.0.2 dependency.
+- [x] Add strict native `tsconfig` fixture.
+- [ ] Validate official `tsc --lsp --stdio` from Go.
+- [ ] Implement JSON-RPC 2.0 transport over stdio.
+- [ ] Implement LSP initialize/shutdown lifecycle.
+- [ ] Keep one language-server process per workspace.
+- [ ] Add request cancellation and timeouts.
+- [ ] Add LS crash detection and restart policy.
+- [ ] Capture TypeScript diagnostics into Go DTOs.
+- [ ] Resolve project files and config through TypeScript-LS.
 
-## HIR
+## Semantic bridge
 
-- [x] Define HIR module/function/block/value IDs.
-- [x] Define primitive semantic types.
-- [x] Define expressions and terminators.
-- [x] Add HIR verifier.
-- [ ] Add stable textual HIR dump.
+- [ ] Define compiler-owned source/symbol/type/function DTOs.
+- [ ] Determine the minimum semantic data required to lower TypeScript to HIR.
+- [ ] Implement semantic extraction on top of TypeScript 7.
+- [ ] Isolate version-specific/custom TypeScript-LS methods in `internal/tsls`.
+- [ ] Add compatibility tests for the pinned TypeScript 7 version.
+- [ ] Verify that the compiler path contains no SWC/Babel/Oxc frontend.
+
+## HIR in Go
+
+- [ ] Port HIR module/function/block/value IDs from the Rust prototype.
+- [ ] Port semantic type and `Repr` separation.
+- [ ] Define expressions, instructions, and terminators.
+- [ ] Add HIR verifier.
+- [ ] Add deterministic textual HIR dump.
+- [ ] Lower the first typed function from TypeScript-LS semantic DTOs.
 
 ## Native representation / MIR
 
-- [x] Separate TypeScript semantic type from native `Repr`.
-- [x] Add `Bool`, `I32`, `I64`, `F64`, and reference representations.
-- [ ] Add representation proof diagnostics.
+- [ ] Add `Bool`, `I32`, `I64`, `F64`, and reference representations.
+- [ ] Add representation-proof diagnostics.
 - [ ] Lower HIR to MIR/SSA.
 - [ ] Add direct-call and scalar fast paths.
+- [ ] Add typed-array and closed-shape representation rules.
 
 ## LLVM / executable
 
-- [ ] Emit textual LLVM IR.
+- [ ] Emit textual LLVM IR from Go.
 - [ ] Compile LLVM IR with clang.
-- [ ] Link an executable without Node/V8.
-- [ ] Compile the first `fib.ts` acceptance test.
+- [ ] Link executable with lld/clang without Node/V8.
+- [ ] Compile and run `examples/fib.ts`.
 - [ ] Add `-O0/-O1/-O2/-O3/-Oz` profiles.
+- [ ] Add parallel LLVM module compilation and object cache.
 
 ## Runtime and optimization
 
-- [ ] Add strings and typed arrays.
+- [ ] Add strings and specialized arrays.
 - [ ] Add closed object/class shapes.
-- [ ] Add closures and specialization.
+- [ ] Add closures, specialization, and monomorphization.
 - [ ] Add `JSValue` only for dynamic boundaries.
 - [ ] Add heap allocator and mark/sweep GC.
-- [ ] Add differential tests against TypeScript 7 + Node reference behavior.
-- [ ] Add performance report for boxing and dynamic dispatch sites.
+- [ ] Add differential tests against TypeScript 7 reference behavior.
+- [ ] Add native-coverage, boxing, and dynamic-dispatch performance reports.
+- [ ] Add ThinLTO/PGO after MIR quality is established.
