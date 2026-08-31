@@ -48,7 +48,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Per-instance property initializers for closed-shape fields.
   - [x] Constructor bodies using the supported native statement/expression subset, preserving initializer and parameter-property order.
   - [x] Fixed-offset mutable instance field stores.
-  - [ ] Inheritance and virtual dispatch.
+  - [~] Closed-world inheritance and virtual dispatch.
+    - [~] Single-inheritance frontend groundwork: TypeScript 7 heritage-clause decoding, base-class resolution, derived-shape prefix layout, and `super(...)` constructor chaining.
+    - [ ] Native inheritance acceptance + differential coverage for inherited fields/methods and base-constructor effects.
+    - [ ] Base-typed references holding derived instances and override dispatch/devirtualization.
+    - [ ] General virtual dispatch/vtable or type-tag strategy where closed-world devirtualization cannot prove a single target.
 - [x] Closures and captured environments, with direct-call conversion for non-escaping closures and native `{code, env}` function values for escaping closures.
 - [~] Generic monomorphization and call-site specialization.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
@@ -81,10 +85,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Finish and commit checker-derived closed object shapes.
-2. Add object allocation and fixed-offset field load/store through MIR/LLVM.
-3. Reuse the same shape model for classes and direct/devirtualized methods.
-4. Add closures and specialization/monomorphization.
-5. Consolidate heap allocation and introduce mark/sweep GC.
-6. Add dynamic `JSValue` boundaries only after static paths are mature.
-7. Add differential/performance suites and incremental/parallel build infrastructure.
+1. Finish and commit closed-world single inheritance: exact TS7 heritage decoding, base-prefix layouts, `super(...)`, inherited fields/methods, and differential acceptance.
+2. Add override dispatch for base-typed references, preferring closed-world devirtualization before introducing vtables/type tags.
+3. Complete generic specialization beyond direct `T`: nested generics, constrained structural generics, recursion, and cross-module specialization caching.
+4. Add conservative integer range analysis before enabling `I32`/`I64` narrowing while preserving TypeScript `number` semantics.
+5. Introduce tagged `JSValue` only at representation-unsafe boundaries, then checked conversions and dynamic operator/property slow paths.
+6. Add exceptions and Promise/async/await semantics on top of the stabilized native/dynamic runtime boundary.
+7. Finish multi-module LLVM scheduling, then ThinLTO/PGO and cross-compilation work.
