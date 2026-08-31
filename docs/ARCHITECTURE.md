@@ -6,11 +6,12 @@
 .ts / .tsx / .js
        |
        v
-TypeScript 7 native language server
-`tsc --lsp --stdio`
+TypeScript 7 native frontend
+IDE: `tsc --lsp --stdio`
+compile: `tsc --api --async`
        |
        v
-Go TypeScript-LS client / semantic bridge
+Go TypeScript client / semantic bridge
        |
        v
 compiler-owned semantic DTOs
@@ -57,23 +58,29 @@ Editors talk directly to the official TypeScript 7 language server. The compiler
 
 ## Compile path
 
-The Go compiler starts or connects to a long-lived TypeScript-LS workspace process. Standard LSP is used for lifecycle, project state, diagnostics, and editor-compatible semantic queries.
-
-Native lowering needs richer information than standard LSP guarantees. The frontend adapter therefore owns a semantic bridge layer that can evolve without leaking TypeScript internals into HIR. Until TypeScript exposes a stable semantic API, this bridge may require a small pinned TypeScript 7 extension/fork, but it must remain TypeScript-based rather than introducing SWC.
+The compiler uses the pinned TypeScript 7 native API process (`tsc --api --async`) for project snapshots, diagnostics, binary AST payloads, exact AST-node handles, symbols, and checker type queries. The IDE path remains the official LSP process. Both use `typescript@7.0.2` and the same `tsconfig.json`.
 
 ```text
-TypeScript-LS
+TypeScript 7 API (`tsc --api --async`)
     |
-    +-- diagnostics/project graph
-    +-- symbols/types/control-flow facts
-    +-- semantic extraction bridge
+    +-- project snapshot + diagnostics
+    +-- binary TypeScript AST
+    +-- exact node handles
+    +-- symbols and checker types
     |
     v
-Go frontend DTOs -> HIR
+Go AST decoder + semantic DTOs -> HIR
 ```
+
+Standard LSP is not treated as a compiler IR API. If a later TypeScript release makes a shared LSP-hosted API session reliable, `internal/tsls` may switch transports without changing HIR/MIR contracts.
 
 ## Backend ownership
 
 The Go native compiler owns HIR/MIR, representation proof, native layouts, monomorphization, devirtualization, escape analysis, LLVM generation, linker orchestration, runtime ABI, allocator, GC, and native APIs.
 
 The central rule remains: a TypeScript type is evidence, not by itself a proof of runtime representation.
+
+
+## Current native data model
+
+Committed fast paths use `F64` for TypeScript `number`, SSA `Bool` conditions, `StringRef` for length-aware UTF-8 strings, and specialized contiguous `ArrayRef<F64>` storage. Mutable loops remain in SSA through phi nodes. `I32`/`I64` narrowing is reserved for future range proofs rather than inferred from the TypeScript `number` annotation alone. Closed object shapes are currently being added from checker-derived property metadata.

@@ -51,3 +51,9 @@ The compiler will eventually support native-specific policy outside `compilerOpt
 The official TypeScript 7 language server and native compiler must resolve the same project and the same `tsconfig.json`. The Go frontend must not maintain a second parser-specific config or SWC config.
 
 Native-only settings such as representation policy, LLVM optimization, LTO, and dynamic fallback remain outside `compilerOptions`; TypeScript-LS owns TypeScript semantics while the Go compiler owns native policy.
+
+## Current native fast-path notes
+
+`noUncheckedIndexedAccess` is intentionally enabled. Therefore an indexed read from `number[]` is typed as `number | undefined` until control flow proves the index is valid. The current specialized array path accepts an explicit non-null proof such as `xs[i]!` inside a bounds-checked loop; the backend still keeps the array itself as contiguous unboxed F64 storage.
+
+TypeScript `number` is not treated as an integer merely because a value looks integral in source. Native `I32`/`I64` lowering remains disabled until range analysis can prove it preserves JavaScript number behavior.

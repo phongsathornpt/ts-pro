@@ -2,71 +2,80 @@
 
 Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
-## Architecture migration: Rust -> Go
+## Foundation and frontend
 
-- [x] Create architecture/type/performance/native-config documentation.
-- [S] Rust workspace, Rust CLI, and Rust HIR prototype.
-- [x] Add `go.mod` and Go package layout.
-- [x] Add `cmd/tsnative` Go CLI.
-- [x] Add Go test/lint/build commands.
-- [x] Remove the superseded Rust workspace after Go parity is reached.
+- [x] Migrate the active compiler from the superseded Rust prototype to Go.
+- [x] Remove the superseded Rust workspace from the repository.
+- [x] Pin `typescript@7.0.2` and strict native `tsconfig`.
+- [x] Implement `cmd/tsnative`, Go tests, vet, build, and doctor commands.
+- [x] Implement TypeScript 7 LSP JSON-RPC transport and lifecycle.
+- [x] Implement TypeScript 7 `tsc --api --async` semantic transport.
+- [x] Decode the TypeScript 7 binary AST protocol in Go.
+- [x] Query exact AST-node symbols/types through the TypeScript checker.
+- [x] Gate native builds on TypeScript diagnostics before lowering.
+- [x] Regression-test that SWC/Babel/Oxc are absent from the active compiler path.
+- [ ] Keep one long-lived TypeScript-LS process per IDE workspace.
+- [ ] Add TypeScript-LS crash detection and restart policy.
 
-## TypeScript 7 / TypeScript-LS
+## HIR, representation, and MIR
 
-- [x] Pin TypeScript 7.0.2 dependency.
-- [x] Add strict native `tsconfig` fixture.
-- [x] Validate official `tsc --lsp --stdio` from Go.
-- [x] Implement JSON-RPC 2.0 transport over stdio.
-- [x] Implement LSP initialize/shutdown lifecycle.
-- [ ] Keep one language-server process per workspace.
-- [x] Add request cancellation and timeouts.
-- [ ] Add LS crash detection and restart policy.
-- [x] Capture TypeScript diagnostics into Go DTOs.
-- [x] Gate native builds on TypeScript 7 API diagnostics before lowering.
-- [x] Resolve compiler project files and config through the TypeScript 7 API snapshot.
+- [x] Define compiler-owned semantic DTOs and typed Go HIR.
+- [x] Separate TypeScript semantic types from native runtime `Repr`.
+- [x] Add HIR verifier and deterministic textual dump.
+- [x] Add scalar representation proof for `Bool`, `F64`, strings, arrays, and references.
+- [x] Lower proven HIR to MIR/SSA.
+- [x] Add SSA phi nodes for mutable loop-carried values.
+- [x] Add direct-call and scalar fast paths.
+- [ ] Add conservative integer range proof before enabling `I32`/`I64` narrowing.
+- [~] Add checker-derived closed object-shape representation and fixed field layout.
 
-## Semantic bridge
+## Native language coverage
 
-- [x] Define compiler-owned source/symbol/type/function DTOs.
-- [x] Determine the minimum semantic data required to lower TypeScript to HIR.
-- [x] Implement semantic extraction on top of TypeScript 7 for the typed MVP subset.
-- [x] Isolate version-specific TypeScript LSP/API protocol in `internal/tsls`.
-- [x] Add compatibility tests for the pinned TypeScript 7 version.
-- [x] Verify and regression-test that the active compiler path contains no SWC/Babel/Oxc frontend.
+- [x] Functions, recursion, returns, and direct calls.
+- [x] Native numeric arithmetic: `+ - * /`.
+- [x] Native numeric comparisons: `< <= > >= == !=`.
+- [x] Mutable locals and assignment.
+- [x] `if`, `while`, and `for` control flow.
+- [x] `i++` / `i--` lowering.
+- [x] Specialized unboxed `number[]` literals, `.length`, and indexed reads.
+- [x] Native UTF-8 string literals, string parameters/returns, and concatenation.
+- [x] `console.log(number)` and `console.log(string)` intrinsics.
+- [~] Object literals and fixed-offset property reads through closed shapes.
+- [ ] Classes, constructors, fields, and devirtualized methods.
+- [ ] Closures and captured environments.
+- [ ] Generic monomorphization and call-site specialization.
+- [ ] Exceptions, Promise, and async/await.
 
-## HIR in Go
-
-- [x] Port HIR module/function/block/value IDs from the Rust prototype.
-- [x] Port semantic type and `Repr` separation.
-- [x] Define expressions, instructions, and terminators.
-- [x] Add HIR verifier.
-- [x] Add deterministic textual HIR dump.
-- [x] Lower the first typed function from TypeScript 7 semantic DTOs.
-
-## Native representation / MIR
-
-- [~] Add `Bool`, `I32`, `I64`, `F64`, and reference representations (Bool/F64/reference proof pass implemented; integer refinement pending).
-- [x] Add representation-proof diagnostics for the current native MVP.
-- [x] Lower proven scalar HIR to MIR/SSA.
-- [x] Add direct-call and scalar fast paths for the current native MVP.
-- [ ] Add typed-array and closed-shape representation rules.
-
-## LLVM / executable
+## LLVM, runtime, and build
 
 - [x] Emit deterministic textual LLVM IR from Go.
-- [x] Compile LLVM IR with clang through the production toolchain wrapper.
-- [x] Link executable with lld/clang without Node/V8.
-- [x] Compile and run `examples/fib.ts` as a native executable.
-- [x] Add `-O0/-O1/-O2/-O3/-Oz` build profiles.
-- [ ] Add parallel LLVM module compilation and object cache.
+- [x] Compile LLVM IR and runtime C sources through the clang toolchain wrapper.
+- [x] Link native executables without Node/V8.
+- [x] Support `-O0/-O1/-O2/-O3/-Oz`.
+- [x] Compile and run `fib.ts`, loop, numeric-array, and string acceptance programs.
+- [x] Add specialized native F64-array runtime support.
+- [x] Add native length-aware UTF-8 string runtime support.
+- [ ] Add heap allocator ownership model shared by strings/arrays/objects.
+- [ ] Add initial mark/sweep GC once object/closure allocation is live.
+- [ ] Add parallel LLVM module compilation and deterministic object cache.
 
-## Runtime and optimization
+## Dynamic boundary, correctness, and performance
 
-- [ ] Add strings and specialized arrays.
-- [ ] Add closed object/class shapes.
-- [ ] Add closures, specialization, and monomorphization.
-- [ ] Add `JSValue` only for dynamic boundaries.
-- [ ] Add heap allocator and mark/sweep GC.
-- [ ] Add differential tests against TypeScript 7 reference behavior.
-- [ ] Add native-coverage, boxing, and dynamic-dispatch performance reports.
-- [ ] Add ThinLTO/PGO after MIR quality is established.
+- [ ] Add tagged `JSValue` only for values that cannot keep a proven native representation.
+- [ ] Add checked conversions and dynamic operator/property slow paths.
+- [ ] Add differential tests against the TypeScript 7 → JavaScript reference path.
+- [ ] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
+- [ ] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and cache hit rate.
+- [ ] Add ThinLTO after module/object caching is established.
+- [ ] Add PGO after MIR quality and benchmark coverage are stable.
+- [ ] Add cross compilation after the Linux x86-64 runtime ABI is stable.
+
+## Current critical path
+
+1. Finish and commit checker-derived closed object shapes.
+2. Add object allocation and fixed-offset field load/store through MIR/LLVM.
+3. Reuse the same shape model for classes and direct/devirtualized methods.
+4. Add closures and specialization/monomorphization.
+5. Consolidate heap allocation and introduce mark/sweep GC.
+6. Add dynamic `JSValue` boundaries only after static paths are mature.
+7. Add differential/performance suites and incremental/parallel build infrastructure.

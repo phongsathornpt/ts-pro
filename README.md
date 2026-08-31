@@ -17,7 +17,7 @@ Goal: compile strongly typed TypeScript 7 programs into native binaries without 
 
 ## Current native MVP
 
-The first end-to-end path is working for the typed scalar subset. From the project root:
+The end-to-end native path now covers typed scalars, mutable SSA control flow, specialized `number[]`, and native strings. From the project root:
 
 ```bash
 go build -o build/tsnative ./cmd/tsnative
@@ -32,6 +32,8 @@ Expected output:
 ```
 
 The generated program is a native executable linked against the small tsnative C runtime and the platform C library; Node.js and V8 are not part of the runtime path.
+
+Committed native coverage includes direct/recursive functions, numeric arithmetic and comparisons, mutable locals, `if`/`while`/`for` with SSA phi nodes, contiguous `number[]`, UTF-8 strings and concatenation, and native number/string console output. Closed object shapes are the active in-progress milestone.
 
 Build optimization flags currently accepted are `-O0`, `-O1`, `-O2`, `-O3`, and `-Oz`. Use `-p <tsconfig.json>` to select the TypeScript project configuration.
 
@@ -52,4 +54,4 @@ Build optimization flags currently accepted are `-O0`, `-O1`, `-O2`, `-O3`, and 
 - `eval`, `new Function`, Proxy, prototype mutation, or runtime-created modules.
 - Embedding Node.js/V8 as the default execution engine.
 
-See `docs/ARCHITECTURE.md`, `docs/TYPESCRIPT_LS.md`, and `TODO.md`.
+See `docs/STATUS.md` for the current implementation boundary, then `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/TYPESCRIPT_LS.md`, and `TODO.md`.

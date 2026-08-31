@@ -18,13 +18,13 @@ The compiler must not spawn a fresh `tsc`/LS process per source file. LSP/JSON-R
 
 1. Unboxed scalar representations.
 2. Direct function calls and devirtualization.
-3. Typed arrays and closed object shapes.
+3. Specialized typed arrays (implemented for `number[]`) and closed object shapes (in progress).
 4. Monomorphized generics and specialized functions.
 5. Escape analysis and scalar replacement.
 6. Runtime calls only for dynamic/complex semantics.
 7. LLVM optimization after high-quality MIR exists.
 
-LLVM cannot recover performance lost by boxing every value or hiding hot operations behind opaque runtime calls.
+LLVM cannot recover performance lost by boxing every value or hiding hot operations behind opaque runtime calls. The current compiler already keeps numeric loops in SSA, uses phi nodes for loop-carried values, stores `number[]` as contiguous doubles, and represents strings as native references rather than `JSValue`.
 
 ## Target behavior
 
@@ -38,3 +38,8 @@ LLVM cannot recover performance lost by boxing every value or hiding hot operati
 ## Measure separately
 
 Track TypeScript-LS startup, project load, semantic extraction, HIR/MIR lowering, LLVM codegen, link time, binary startup, steady-state throughput, RSS, boxing sites, and dynamic-dispatch sites as separate metrics.
+
+
+## Current representation policy
+
+TypeScript `number` remains `F64` unless a future range analysis proves that `I32`/`I64` narrowing is semantics-preserving. Integer-looking syntax alone is not sufficient proof. Specialized `number[]` uses contiguous F64 storage; strings use a length-aware UTF-8 native representation. Closed object shapes are the active next representation milestone.
