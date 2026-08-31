@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
@@ -50,6 +51,9 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	defer func() { _ = client.ReleaseSnapshot(context.Background(), snapshot.Snapshot) }()
 	project, err := selectProject(snapshot.Projects, options.Input)
 	if err != nil {
+		return BuildResult{}, err
+	}
+	if err := validateDiagnostics(ctx, client, snapshot.Snapshot, project.ID, options.Input); err != nil {
 		return BuildResult{}, err
 	}
 	semantic, err := frontend.ExtractFile(ctx, client, snapshot.Snapshot, project.ID, options.Input)
@@ -184,4 +188,64 @@ func formatRepresentationDiagnostics(diagnostics []repranalysis.Diagnostic) stri
 		result += fmt.Sprintf("f%d: %s", diagnostic.Function, diagnostic.Message)
 	}
 	return result
+}
+
+func validateDiagnostics(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, file string) error {
+	var diagnostics []tsls.APIDiagnostic
+	collect := func(items []tsls.APIDiagnostic, err error) error {
+		if err != nil {
+			return err
+		}
+		diagnostics = append(diagnostics, items...)
+		return nil
+	}
+	if err := collect(client.GetConfigDiagnostics(ctx, snapshot, project)); err != nil {
+		return err
+	}
+	if err := collect(client.GetProgramDiagnostics(ctx, snapshot, project)); err != nil {
+		return err
+	}
+	if err := collect(client.GetGlobalDiagnostics(ctx, snapshot, project)); err != nil {
+		return err
+	}
+	if err := collect(client.GetSyntacticDiagnostics(ctx, snapshot, project, file)); err != nil {
+		return err
+	}
+	if err := collect(client.GetSemanticDiagnostics(ctx, snapshot, project, file)); err != nil {
+		return err
+	}
+	var errors []tsls.APIDiagnostic
+	for _, diagnostic := range diagnostics {
+		if diagnostic.IsError() {
+			errors = append(errors, diagnostic)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	message := "TypeScript 7 check failed"
+	for _, diagnostic := range errors {
+		message += "\n" + renderAPIDiagnostic(diagnostic)
+	}
+	return fmt.Errorf("%s", message)
+}
+
+func renderAPIDiagnostic(diagnostic tsls.APIDiagnostic) string {
+	fileName := diagnostic.FileName
+	if fileName == "" {
+		fileName = "<project>"
+		return fmt.Sprintf("%s: error TS%d: %s", fileName, diagnostic.Code, diagnostic.Text)
+	}
+	data, err := os.ReadFile(fileName)
+	if err != nil || diagnostic.Pos < 0 || diagnostic.Pos > len(data) {
+		return fmt.Sprintf("%s:%d: error TS%d: %s", fileName, diagnostic.Pos, diagnostic.Code, diagnostic.Text)
+	}
+	prefix := string(data[:diagnostic.Pos])
+	line := strings.Count(prefix, "\n") + 1
+	lastNewline := strings.LastIndex(prefix, "\n")
+	column := diagnostic.Pos + 1
+	if lastNewline >= 0 {
+		column = diagnostic.Pos - lastNewline
+	}
+	return fmt.Sprintf("%s:%d:%d: error TS%d: %s", fileName, line, column, diagnostic.Code, diagnostic.Text)
 }

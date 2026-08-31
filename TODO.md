@@ -22,6 +22,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add request cancellation and timeouts.
 - [ ] Add LS crash detection and restart policy.
 - [x] Capture TypeScript diagnostics into Go DTOs.
+- [x] Gate native builds on TypeScript 7 API diagnostics before lowering.
 - [x] Resolve compiler project files and config through the TypeScript 7 API snapshot.
 
 ## Semantic bridge

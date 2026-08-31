@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -43,5 +44,28 @@ func TestNormalizeRejectsUnknownOptimization(t *testing.T) {
 	_, err := normalizeOptions(BuildOptions{Root: ".", Input: "x.ts", Optimization: "-Ofast"})
 	if err == nil {
 		t.Fatal("expected optimization validation error")
+	}
+}
+
+func TestBuildStopsOnTypeScriptErrors(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(root, "examples", "__tsnative_invalid_build_test.ts")
+	source := "const value: number = \"not-a-number\";\nconsole.log(1);\n"
+	if err := os.WriteFile(input, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(input)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{Root: root, Input: input, Output: filepath.Join(t.TempDir(), "invalid")})
+	if err == nil {
+		t.Fatal("expected TypeScript diagnostic failure")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "TS2322") || !strings.Contains(message, ":1:7:") {
+		t.Fatalf("diagnostic = %q", message)
 	}
 }
