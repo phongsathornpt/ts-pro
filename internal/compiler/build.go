@@ -297,7 +297,7 @@ type runtimeCompileResult struct {
 }
 
 func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
-	sources := []string{"console.c", "array_f64.c", "string.c", "object.c"}
+	sources := []string{"heap.c", "console.c", "array_f64.c", "string.c", "object.c"}
 	results := make(chan runtimeCompileResult, len(sources))
 	for i, source := range sources {
 		go func(index int, name string) {

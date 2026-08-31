@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdint.h>
+#include "heap.h"
 #include <stdlib.h>
 
 typedef struct {
@@ -8,8 +9,7 @@ typedef struct {
 } tsnative_array_f64;
 
 void *tsnative_array_f64_new(uint64_t len) {
-  tsnative_array_f64 *array = malloc(sizeof(*array) + sizeof(double) * len);
-  if (!array) abort();
+  tsnative_array_f64 *array = tsnative_heap_alloc(sizeof(*array) + sizeof(double) * len);
   array->len = len;
   return array;
 }

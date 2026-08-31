@@ -61,7 +61,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Compile and run `fib.ts`, loop, numeric-array, string, and closed-object acceptance programs.
 - [x] Add specialized native F64-array runtime support.
 - [x] Add native length-aware UTF-8 string runtime support.
-- [ ] Add heap allocator ownership model shared by strings/arrays/objects.
+- [x] Add shared heap ownership for strings, arrays, objects, and closure environments/values, with deterministic shutdown from native `main`.
 - [ ] Add initial mark/sweep GC once object/closure allocation is live.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 

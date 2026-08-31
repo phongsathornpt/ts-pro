@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include "heap.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,8 +10,7 @@ typedef struct {
 } tsnative_string;
 
 void *tsnative_string_new(const char *data, uint64_t len) {
-  tsnative_string *value = malloc(sizeof(*value) + len);
-  if (!value) abort();
+  tsnative_string *value = tsnative_heap_alloc(sizeof(*value) + len);
   value->len = len;
   if (len != 0 && data) memcpy(value->data, data, len);
   return value;
