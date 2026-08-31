@@ -66,6 +66,29 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			fields = append(fields, value)
 		}
 		return f.emit(expr.Type, hir.ObjectNewOp{Shape: hir.NewShapeID(uint32(shape)), Fields: fields}), nil
+	case frontend.ExprNewClass:
+		if expr.Constructor == nil {
+			return 0, fmt.Errorf("native class construction has no constructor target")
+		}
+		if int(expr.Type) >= len(f.module.source.Types) {
+			return 0, fmt.Errorf("native class construction has invalid type")
+		}
+		shape := f.module.source.Types[expr.Type].Shape
+		object := f.emit(expr.Type, hir.ObjectAllocOp{Shape: hir.NewShapeID(uint32(shape))})
+		args := []hir.ValueID{object}
+		for _, arg := range expr.Args {
+			value, err := f.lowerExpr(arg)
+			if err != nil {
+				return 0, err
+			}
+			args = append(args, value)
+		}
+		voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+		if !ok {
+			return 0, fmt.Errorf("native constructor call requires void type")
+		}
+		f.emit(voidType, hir.CallOp{Callee: hir.NewFunctionID(uint32(*expr.Constructor)), Args: args})
+		return object, nil
 	case frontend.ExprFieldGet:
 		object, err := f.lowerExpr(expr.Object)
 		if err != nil {

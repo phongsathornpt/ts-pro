@@ -139,6 +139,13 @@ type ObjectNew struct {
 	Shape  ShapeID
 	Fields []ValueID
 }
+type ObjectAlloc struct{ Shape ShapeID }
+type FieldSet struct {
+	Object ValueID
+	Shape  ShapeID
+	Field  uint32
+	Value  ValueID
+}
 type FieldGet struct {
 	Object ValueID
 	Shape  ShapeID
@@ -165,6 +172,8 @@ func (ArrayNewF64) isOperation()    {}
 func (ArrayLengthF64) isOperation() {}
 func (ArrayGetF64) isOperation()    {}
 func (ObjectNew) isOperation()      {}
+func (ObjectAlloc) isOperation()    {}
+func (FieldSet) isOperation()       {}
 func (FieldGet) isOperation()       {}
 func (ClosureNew) isOperation()     {}
 func (ClosureCall) isOperation()    {}

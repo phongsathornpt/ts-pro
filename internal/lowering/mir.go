@@ -116,6 +116,10 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			fields[i] = mir.ValueID(value)
 		}
 		result.Op = mir.ObjectNew{Shape: mir.ShapeID(op.Shape), Fields: fields}
+	case hir.ObjectAllocOp:
+		result.Op = mir.ObjectAlloc{Shape: mir.ShapeID(op.Shape)}
+	case hir.FieldSetOp:
+		result.Op = mir.FieldSet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field, Value: mir.ValueID(op.Value)}
 	case hir.FieldGetOp:
 		result.Op = mir.FieldGet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field}
 	case hir.ClosureNewOp:

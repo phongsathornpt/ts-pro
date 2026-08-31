@@ -86,6 +86,13 @@ type ObjectNewOp struct {
 	Shape  ShapeID
 	Fields []ValueID
 }
+type ObjectAllocOp struct{ Shape ShapeID }
+type FieldSetOp struct {
+	Object ValueID
+	Shape  ShapeID
+	Field  uint32
+	Value  ValueID
+}
 type FieldGetOp struct {
 	Object ValueID
 	Shape  ShapeID
@@ -110,6 +117,8 @@ func (ArrayNewOp) isOperation()      {}
 func (ArrayLengthOp) isOperation()   {}
 func (ArrayGetOp) isOperation()      {}
 func (ObjectNewOp) isOperation()     {}
+func (ObjectAllocOp) isOperation()   {}
+func (FieldSetOp) isOperation()      {}
 func (FieldGetOp) isOperation()      {}
 func (ClosureNewOp) isOperation()    {}
 func (ClosureCallOp) isOperation()   {}

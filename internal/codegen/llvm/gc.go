@@ -46,7 +46,7 @@ func isGCReference(repr mir.Repr) bool {
 
 func emitsGCAllocation(op mir.Operation) bool {
 	switch op.(type) {
-	case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ObjectNew, mir.ClosureNew:
+	case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew:
 		return true
 	default:
 		return false

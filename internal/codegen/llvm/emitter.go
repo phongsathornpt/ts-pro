@@ -241,6 +241,52 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, value, name, i)
 		}
 		return nil
+	case mir.ObjectAlloc:
+		shape, ok := e.shapes[op.Shape]
+		if !ok {
+			return fmt.Errorf("unknown object shape s%d", op.Shape)
+		}
+		name := valueName(inst.Result)
+		typeName := shapeTypeName(op.Shape)
+		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
+		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		for i, field := range shape.Fields {
+			fieldType, err := llvmType(field.Repr)
+			if err != nil {
+				return err
+			}
+			zero, err := llvmZero(field.Repr)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, i)
+			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, zero, name, i)
+		}
+		return nil
+	case mir.FieldSet:
+		shape, ok := e.shapes[op.Shape]
+		if !ok || int(op.Field) >= len(shape.Fields) {
+			return fmt.Errorf("invalid field store s%d.%d", op.Shape, op.Field)
+		}
+		object, err := operand(values, op.Object)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		typeName := shapeTypeName(op.Shape)
+		fieldType, err := llvmType(shape.Fields[op.Field].Repr)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, op.Field)
+		fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
+		values[inst.Result] = value
+		return nil
 	case mir.ClosureNew:
 		return e.emitClosureNew(b, inst, op, values)
 	case mir.ClosureCall:
@@ -345,7 +391,11 @@ func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Ca
 		return err
 	}
 	name := valueName(inst.Result)
-	fmt.Fprintf(b, "  %s = call %s @%s(", name, retType, functionName(callee.ID))
+	if callee.ReturnRepr == mir.ReprVoid {
+		fmt.Fprintf(b, "  call %s @%s(", retType, functionName(callee.ID))
+	} else {
+		fmt.Fprintf(b, "  %s = call %s @%s(", name, retType, functionName(callee.ID))
+	}
 	for i, arg := range call.Args {
 		if i != 0 {
 			b.WriteString(", ")
@@ -361,7 +411,9 @@ func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Ca
 		fmt.Fprintf(b, "%s %s", typ, op)
 	}
 	b.WriteString(")\n")
-	values[inst.Result] = name
+	if callee.ReturnRepr != mir.ReprVoid {
+		values[inst.Result] = name
+	}
 	return nil
 }
 
@@ -419,6 +471,19 @@ func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.T
 		return nil
 	default:
 		return fmt.Errorf("unsupported MIR terminator %T", term)
+	}
+}
+
+func llvmZero(repr mir.Repr) (string, error) {
+	switch repr {
+	case mir.ReprBool, mir.ReprI32, mir.ReprI64, mir.ReprTagged, mir.ReprJSValue:
+		return "0", nil
+	case mir.ReprF64:
+		return "0.000000e+00", nil
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef:
+		return "null", nil
+	default:
+		return "", fmt.Errorf("no zero initializer for representation %d", repr)
 	}
 }
 

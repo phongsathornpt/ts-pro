@@ -148,6 +148,24 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		return f.lowerLoop(stmt.Expr, stmt.Then, stmt.Update)
 	case frontend.StmtClosureBind:
 		return nil
+	case frontend.StmtFieldAssign:
+		if stmt.Object == nil || stmt.Value == nil {
+			return fmt.Errorf("field assignment %q is incomplete", stmt.Field)
+		}
+		object, err := f.lowerExpr(stmt.Object)
+		if err != nil {
+			return err
+		}
+		value, err := f.lowerExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		if int(stmt.Object.Type) >= len(f.module.source.Types) {
+			return fmt.Errorf("field assignment has invalid receiver type")
+		}
+		shape := f.module.source.Types[stmt.Object.Type].Shape
+		f.emit(stmt.Type, hir.FieldSetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: stmt.FieldIndex, Value: value})
+		return nil
 	default:
 		return fmt.Errorf("unsupported semantic statement kind %d", stmt.Kind)
 	}

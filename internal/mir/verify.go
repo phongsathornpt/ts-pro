@@ -168,6 +168,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case ObjectAlloc:
+				if _, ok := shapes[op.Shape]; !ok {
+					return fmt.Errorf("object alloc v%d references unknown shape s%d", inst.Result, op.Shape)
+				}
+			case FieldSet:
+				shape, ok := shapes[op.Shape]
+				if !ok {
+					return fmt.Errorf("field set v%d references unknown shape s%d", inst.Result, op.Shape)
+				}
+				if int(op.Field) >= len(shape.Fields) {
+					return fmt.Errorf("field set v%d references invalid field %d of shape s%d", inst.Result, op.Field, op.Shape)
+				}
+				if err := checkValue(op.Object); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
 			case FieldGet:
 				shape, ok := shapes[op.Shape]
 				if !ok {

@@ -13,18 +13,29 @@ import (
 )
 
 type pendingFunctionBody struct {
-	Function FunctionID
-	Node     tsast.Node
-	This     *SymbolID
+	Function    FunctionID
+	Node        tsast.Node
+	This        *SymbolID
+	Constructor *classInfo
+}
+
+type classFieldInitializer struct {
+	Field int
+	Node  tsast.Node
 }
 
 type classInfo struct {
+	Node              tsast.Node
 	Name              string
 	Type              TypeID
 	Shape             ShapeID
 	ConstructorParams []Parameter
 	FieldParam        []int
-	FieldInitializers map[int]tsast.Node
+	Initializers      []classFieldInitializer
+	ConstructorNode   tsast.Node
+	HasConstructor    bool
+	Constructor       FunctionID
+	ConstructorThis   SymbolID
 }
 
 type extractor struct {
@@ -47,6 +58,7 @@ type extractor struct {
 	symbolSubstitutions map[uint64]SymbolID
 	pending             []pendingFunctionBody
 	currentThis         *SymbolID
+	parameterAliases    map[string]SymbolID
 }
 
 func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, fileName string) (Snapshot, error) {
@@ -106,7 +118,13 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 	}
 	for _, pending := range e.pending {
 		e.currentThis = pending.This
-		body, err := e.extractFunctionBody(pending.Node)
+		var body []Statement
+		var err error
+		if pending.Constructor != nil {
+			body, err = e.extractNativeConstructorBody(pending.Constructor)
+		} else {
+			body, err = e.extractFunctionBody(pending.Node)
+		}
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -435,14 +453,21 @@ func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
 			return Statement{}, false, nil
 		}
 		left, ok := node.NamedChild("left")
-		if !ok || left.Kind() != tsast.KindIdentifier {
-			return Statement{}, true, fmt.Errorf("native assignment at %d requires identifier target", node.Pos())
+		if !ok {
+			return Statement{}, true, fmt.Errorf("assignment at %d has no target", node.Pos())
 		}
 		right, ok := node.NamedChild("right")
 		if !ok {
 			return Statement{}, true, fmt.Errorf("assignment at %d has no value", node.Pos())
 		}
-		return e.buildAssignment(node, left, right, 0)
+		switch left.Kind() {
+		case tsast.KindIdentifier:
+			return e.buildAssignment(node, left, right, 0)
+		case tsast.KindPropertyAccessExpression:
+			return e.buildFieldAssignment(node, left, right)
+		default:
+			return Statement{}, true, fmt.Errorf("native assignment at %d does not support %s target", node.Pos(), tsast.KindName(left.Kind()))
+		}
 	}
 	if node.Kind() == tsast.KindPrefixUnaryExpression || node.Kind() == tsast.KindPostfixUnaryExpression {
 		op, ok := node.UnaryOperatorKind()
@@ -519,6 +544,10 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 	case tsast.KindIdentifier:
 		expr.Kind = ExprIdentifier
 		expr.Name, _ = node.Text()
+		if alias, ok := e.parameterAliases[expr.Name]; ok {
+			expr.Symbol = alias
+			return expr, nil
+		}
 		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.fileName))
 		if err != nil {
 			return nil, err
@@ -1135,7 +1164,7 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 		return fmt.Errorf("class %s does not have a closed object type", name)
 	}
 	shapeID := e.result.Types[typeID].Shape
-	info := &classInfo{Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields)), FieldInitializers: map[int]tsast.Node{}}
+	info := &classInfo{Node: node, Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields))}
 	for i := range info.FieldParam {
 		info.FieldParam[i] = -1
 	}
@@ -1148,12 +1177,12 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 func (e *extractor) extractClassMembers(node tsast.Node, info *classInfo) error {
 	members, ok := node.NamedChild("members")
 	if !ok || !members.IsList() {
-		return nil
+		return e.finalizeConstructorSignature(info)
 	}
 	for _, member := range members.ListElements() {
 		switch member.Kind() {
 		case tsast.KindConstructor:
-			if len(info.ConstructorParams) != 0 {
+			if info.HasConstructor {
 				return fmt.Errorf("class %s has multiple constructors", info.Name)
 			}
 			if err := e.extractConstructor(member, info); err != nil {
@@ -1174,10 +1203,12 @@ func (e *extractor) extractClassMembers(node tsast.Node, info *classInfo) error 
 			return fmt.Errorf("unsupported class member %s in %s", tsast.KindName(member.Kind()), info.Name)
 		}
 	}
-	return nil
+	return e.finalizeConstructorSignature(info)
 }
 
 func (e *extractor) extractConstructor(node tsast.Node, info *classInfo) error {
+	info.HasConstructor = true
+	info.ConstructorNode = node
 	params, _ := node.NamedChild("parameters")
 	if params.IsList() {
 		for index, paramNode := range params.ListElements() {
@@ -1197,17 +1228,8 @@ func (e *extractor) extractConstructor(node tsast.Node, info *classInfo) error {
 			}
 		}
 	}
-	body, ok := node.NamedChild("body")
-	if !ok {
+	if _, ok := node.NamedChild("body"); !ok {
 		return fmt.Errorf("constructor for %s has no body", info.Name)
-	}
-	statements, ok := body.NamedChild("statements")
-	if ok && statements.IsList() {
-		for _, statement := range statements.ListElements() {
-			if err := e.extractConstructorFieldAssignment(statement, info); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }
@@ -1294,22 +1316,8 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 	if len(args) != len(class.ConstructorParams) {
 		return nil, fmt.Errorf("constructor %s expects %d arguments; got %d", class.Name, len(class.ConstructorParams), len(args))
 	}
-	expr.Kind, expr.Type = ExprObject, class.Type
-	for fieldIndex, field := range e.result.Shapes[class.Shape].Fields {
-		paramIndex := class.FieldParam[fieldIndex]
-		var value *Expr
-		if paramIndex >= 0 && paramIndex < len(args) {
-			value = args[paramIndex]
-		} else if initializer, ok := class.FieldInitializers[fieldIndex]; ok {
-			value, err = e.extractExpr(initializer)
-			if err != nil {
-				return nil, fmt.Errorf("class %s field %s initializer: %w", class.Name, field.Name, err)
-			}
-		} else {
-			return nil, fmt.Errorf("class %s field %s has no native initializer", class.Name, field.Name)
-		}
-		expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(fieldIndex), Value: value})
-	}
+	constructor := class.Constructor
+	expr.Kind, expr.Type, expr.Args, expr.Constructor = ExprNewClass, class.Type, args, &constructor
 	return expr, nil
 }
 
@@ -1325,66 +1333,10 @@ func (e *extractor) validateClassProperty(node tsast.Node, info *classInfo) erro
 	for fieldIndex, field := range e.result.Shapes[info.Shape].Fields {
 		if field.Name == name {
 			if initializer, ok := node.NamedChild("initializer"); ok {
-				info.FieldInitializers[fieldIndex] = initializer
+				info.Initializers = append(info.Initializers, classFieldInitializer{Field: fieldIndex, Node: initializer})
 			}
 			return nil
 		}
 	}
 	return fmt.Errorf("class %s property %s is missing from checker-derived shape", info.Name, name)
-}
-
-func (e *extractor) extractConstructorFieldAssignment(node tsast.Node, info *classInfo) error {
-	if node.Kind() != tsast.KindExpressionStatement {
-		return fmt.Errorf("constructor %s only supports field assignment statements", info.Name)
-	}
-	expression, ok := node.NamedChild("expression")
-	if !ok || expression.Kind() != tsast.KindBinaryExpression {
-		return fmt.Errorf("constructor %s only supports this.field = parameter assignments", info.Name)
-	}
-	op, ok := expression.NamedChild("operatorToken")
-	if !ok || op.Kind() != tsast.KindEqualsToken {
-		return fmt.Errorf("constructor %s only supports simple field assignments", info.Name)
-	}
-	left, lok := expression.NamedChild("left")
-	right, rok := expression.NamedChild("right")
-	if !lok || !rok || left.Kind() != tsast.KindPropertyAccessExpression || right.Kind() != tsast.KindIdentifier {
-		return fmt.Errorf("constructor %s only supports this.field = parameter assignments", info.Name)
-	}
-	receiver, ok := left.NamedChild("expression")
-	if !ok || receiver.Kind() != tsast.KindThisKeyword {
-		return fmt.Errorf("constructor %s assignment target must be this.field", info.Name)
-	}
-	nameNode, ok := left.NamedChild("name")
-	if !ok || nameNode.Kind() != tsast.KindIdentifier {
-		return fmt.Errorf("constructor %s assignment has invalid field", info.Name)
-	}
-	fieldName, _ := nameNode.Text()
-	rightSymbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, right.Handle(e.fileName))
-	if err != nil || rightSymbol == nil {
-		if err == nil {
-			err = fmt.Errorf("constructor %s assignment source has no symbol", info.Name)
-		}
-		return err
-	}
-	paramSymbol, ok := e.symbols[rightSymbol.ID]
-	if !ok {
-		return fmt.Errorf("constructor %s assignment source is not a constructor parameter", info.Name)
-	}
-	paramIndex := -1
-	for i, param := range info.ConstructorParams {
-		if param.Symbol == paramSymbol {
-			paramIndex = i
-			break
-		}
-	}
-	if paramIndex < 0 {
-		return fmt.Errorf("constructor %s assignment source is not a constructor parameter", info.Name)
-	}
-	for fieldIndex, field := range e.result.Shapes[info.Shape].Fields {
-		if field.Name == fieldName {
-			info.FieldParam[fieldIndex] = paramIndex
-			return nil
-		}
-	}
-	return fmt.Errorf("constructor %s assigns unknown field %s", info.Name, fieldName)
 }

@@ -202,6 +202,18 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, field := range op.Fields {
 					checkValue(field)
 				}
+			case ObjectAllocOp:
+				if int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("object allocation references unknown shape s%d", op.Shape))
+				}
+			case FieldSetOp:
+				checkValue(op.Object)
+				checkValue(op.Value)
+				if int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("field store references unknown shape s%d", op.Shape))
+				} else if int(op.Field) >= len(m.Shapes[op.Shape].Fields) {
+					add(fmt.Sprintf("field store s%d.%d is out of range", op.Shape, op.Field))
+				}
 			case FieldGetOp:
 				checkValue(op.Object)
 				if int(op.Shape) >= len(m.Shapes) {

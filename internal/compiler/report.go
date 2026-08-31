@@ -72,7 +72,7 @@ func countRuntimeCalls(module mir.Module) int {
 			for _, inst := range block.Instructions {
 				switch inst.Op.(type) {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
-					mir.ArrayGetF64, mir.ObjectNew, mir.ClosureNew, mir.IntrinsicCall:
+					mir.ArrayGetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew, mir.IntrinsicCall:
 					count++
 				}
 			}

@@ -15,6 +15,7 @@ const (
 	ExprObject
 	ExprFieldGet
 	ExprClosure
+	ExprNewClass
 )
 
 type IntrinsicKind uint8
@@ -48,27 +49,28 @@ type ObjectFieldExpr struct {
 }
 
 type Expr struct {
-	Kind       ExprKind
-	Type       TypeID
-	Symbol     SymbolID
-	Name       string
-	Number     float64
-	String     string
-	Operator   BinaryOperator
-	Left       *Expr
-	Right      *Expr
-	Callee     *Expr
-	Args       []*Expr
-	CallTarget *FunctionID
-	Intrinsic  IntrinsicKind
-	Elements   []*Expr
-	Object     *Expr
-	Index      *Expr
-	Fields     []ObjectFieldExpr
-	Captures   []*Expr
-	Field      string
-	FieldIndex uint32
-	Span       Span
+	Kind        ExprKind
+	Type        TypeID
+	Symbol      SymbolID
+	Name        string
+	Number      float64
+	String      string
+	Operator    BinaryOperator
+	Left        *Expr
+	Right       *Expr
+	Callee      *Expr
+	Args        []*Expr
+	CallTarget  *FunctionID
+	Intrinsic   IntrinsicKind
+	Elements    []*Expr
+	Object      *Expr
+	Index       *Expr
+	Fields      []ObjectFieldExpr
+	Captures    []*Expr
+	Field       string
+	FieldIndex  uint32
+	Constructor *FunctionID
+	Span        Span
 }
 
 type StmtKind uint8
@@ -84,6 +86,7 @@ const (
 	StmtWhile
 	StmtFor
 	StmtClosureBind
+	StmtFieldAssign
 )
 
 type Statement struct {
@@ -94,10 +97,13 @@ type Statement struct {
 	Else   []Statement
 	Return *Expr
 
-	Symbol SymbolID
-	Name   string
-	Type   TypeID
-	Value  *Expr
-	Init   []Statement
-	Update []Statement
+	Symbol     SymbolID
+	Name       string
+	Type       TypeID
+	Value      *Expr
+	Object     *Expr
+	Field      string
+	FieldIndex uint32
+	Init       []Statement
+	Update     []Statement
 }

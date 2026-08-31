@@ -185,7 +185,7 @@ func TestBuildClassMethodNativeExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Functions != 2 {
+	if result.Functions != 3 {
 		t.Fatalf("functions = %d", result.Functions)
 	}
 	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
@@ -214,7 +214,7 @@ func TestBuildExplicitClassFieldsNativeExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Functions != 2 {
+	if result.Functions != 3 {
 		t.Fatalf("functions = %d", result.Functions)
 	}
 	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
