@@ -58,6 +58,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
   - [ ] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
 - [ ] Exceptions, Promise, and async/await.
+- [ ] Expand native array coverage beyond `number[]`: indexed writes, string/object arrays, typed generic arrays, and common mutators.
+- [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
+- [ ] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/do-while/for-of, templates, default/optional params, enums, and module linking.
+- [ ] Add selected standard-library/runtime APIs such as JSON, Map/Set, Date, and RegExp after their representation contracts are defined.
 
 ## LLVM, runtime, and build
 
@@ -70,6 +74,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [x] Add shared heap ownership for strings, arrays, objects, and closure environments/values, with deterministic shutdown from native `main`.
 - [x] Add initial mark/sweep GC with explicit native shadow roots, compiler safepoints, conservative heap tracing, and sweep reclamation.
+- [ ] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and eventually generational collection.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
 ## Dynamic boundary, correctness, and performance
