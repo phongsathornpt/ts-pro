@@ -5,6 +5,10 @@ import "math/bits"
 var childProperties = map[uint32][]string{
 	KindSourceFile:                  {"statements", "endOfFileToken"},
 	KindFunctionDeclaration:         {"modifiers", "asteriskToken", "name", "typeParameters", "parameters", "type", "body"},
+	KindClassDeclaration:            {"modifiers", "name", "typeParameters", "heritageClauses", "members"},
+	KindConstructor:                 {"modifiers", "typeParameters", "parameters", "type", "body"},
+	KindMethodDeclaration:           {"modifiers", "asteriskToken", "name", "postfixToken", "typeParameters", "parameters", "type", "body"},
+	KindPropertyDeclaration:         {"modifiers", "name", "postfixToken", "type", "initializer"},
 	KindParameter:                   {"modifiers", "dotDotDotToken", "name", "questionToken", "type", "initializer"},
 	KindBlock:                       {"statements"},
 	KindIfStatement:                 {"expression", "thenStatement", "elseStatement"},
@@ -16,6 +20,7 @@ var childProperties = map[uint32][]string{
 	KindObjectLiteralExpression:     {"properties"},
 	KindElementAccessExpression:     {"expression", "questionDotToken", "argumentExpression"},
 	KindCallExpression:              {"expression", "questionDotToken", "typeArguments", "arguments"},
+	KindNewExpression:               {"expression", "typeArguments", "arguments"},
 	KindVariableStatement:           {"modifiers", "declarationList"},
 	KindVariableDeclarationList:     {"declarations"},
 	KindVariableDeclaration:         {"name", "exclamationToken", "type", "initializer"},

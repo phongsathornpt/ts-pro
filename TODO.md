@@ -41,7 +41,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Native UTF-8 string literals, string parameters/returns, and concatenation.
 - [x] `console.log(number)` and `console.log(string)` intrinsics.
 - [x] Object literals and fixed-offset property reads through closed shapes.
-- [ ] Classes, constructors, fields, and devirtualized methods.
+- [~] Classes, constructors, fields, and devirtualized methods.
+  - [x] Parameter-property constructors with closed instance shapes.
+  - [x] Direct instance-method calls with a native hidden `this` parameter.
+  - [ ] General constructor bodies, explicit property initializers, inheritance, and virtual dispatch.
 - [ ] Closures and captured environments.
 - [ ] Generic monomorphization and call-site specialization.
 - [ ] Exceptions, Promise, and async/await.

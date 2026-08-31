@@ -167,3 +167,32 @@ func TestBuildClosedObjectNativeExecutable(t *testing.T) {
 		t.Fatalf("native object output = %q", got)
 	}
 }
+
+func TestBuildClassMethodNativeExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "classes")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/classes.ts", Output: output, Optimization: "-O2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Functions != 2 {
+		t.Fatalf("functions = %d", result.Functions)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native class binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "7" {
+		t.Fatalf("native class output = %q", got)
+	}
+}

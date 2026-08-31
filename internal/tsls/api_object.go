@@ -21,3 +21,13 @@ func (c *APIClient) GetTypeOfSymbol(ctx context.Context, snapshot uint64, projec
 	}, &result)
 	return result, err
 }
+
+func (c *APIClient) GetDeclaredTypeOfSymbol(ctx context.Context, snapshot uint64, project string, symbolID uint64) (*APIType, error) {
+	var result *APIType
+	err := c.request(ctx, "getDeclaredTypeOfSymbol", map[string]any{
+		"snapshot": snapshot,
+		"project":  project,
+		"symbol":   symbolID,
+	}, &result)
+	return result, err
+}

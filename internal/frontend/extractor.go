@@ -12,18 +12,35 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/tsls"
 )
 
+type pendingFunctionBody struct {
+	Function FunctionID
+	Node     tsast.Node
+	This     *SymbolID
+}
+
+type classInfo struct {
+	Name              string
+	Type              TypeID
+	Shape             ShapeID
+	ConstructorParams []Parameter
+	FieldParam        []int
+}
+
 type extractor struct {
-	ctx        context.Context
-	client     *tsls.APIClient
-	snapshot   uint64
-	project    string
-	fileName   string
-	sourceText string
-	result     Snapshot
-	types      map[uint64]TypeID
-	symbols    map[uint64]SymbolID
-	functions  map[uint64]FunctionID
-	shapes     map[uint64]ShapeID
+	ctx         context.Context
+	client      *tsls.APIClient
+	snapshot    uint64
+	project     string
+	fileName    string
+	sourceText  string
+	result      Snapshot
+	types       map[uint64]TypeID
+	symbols     map[uint64]SymbolID
+	functions   map[uint64]FunctionID
+	shapes      map[uint64]ShapeID
+	classes     map[uint64]*classInfo
+	pending     []pendingFunctionBody
+	currentThis *SymbolID
 }
 
 func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, fileName string) (Snapshot, error) {
@@ -54,30 +71,36 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		symbols:    map[uint64]SymbolID{},
 		functions:  map[uint64]FunctionID{},
 		shapes:     map[uint64]ShapeID{},
+		classes:    map[uint64]*classInfo{},
 	}
 	e.result.Sources = append(e.result.Sources, Source{ID: 0, URI: "file://" + filepath.ToSlash(abs), Path: abs})
 
-	var declarations []tsast.Node
 	for _, node := range file.Root().Children() {
-		if node.Kind() == tsast.KindFunctionDeclaration {
-			declarations = append(declarations, node)
+		switch node.Kind() {
+		case tsast.KindFunctionDeclaration:
+			functionID, err := e.extractFunctionSignature(node)
+			if err != nil {
+				return Snapshot{}, err
+			}
+			e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node})
+		case tsast.KindClassDeclaration:
+			if err := e.extractClassSignatures(node); err != nil {
+				return Snapshot{}, err
+			}
 		}
 	}
-	for _, node := range declarations {
-		if err := e.extractFunctionSignature(node); err != nil {
-			return Snapshot{}, err
-		}
-	}
-	for i, node := range declarations {
-		body, err := e.extractFunctionBody(node)
+	for _, pending := range e.pending {
+		e.currentThis = pending.This
+		body, err := e.extractFunctionBody(pending.Node)
 		if err != nil {
 			return Snapshot{}, err
 		}
-		e.result.Functions[i].Body = body
+		e.result.Functions[pending.Function].Body = body
 	}
+	e.currentThis = nil
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
-		case tsast.KindFunctionDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEndOfFile:
+		case tsast.KindFunctionDeclaration, tsast.KindClassDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEndOfFile:
 			continue
 		case tsast.KindExpressionStatement:
 			stmt, err := e.extractStatement(node)
@@ -92,18 +115,18 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 	return e.result, nil
 }
 
-func (e *extractor) extractFunctionSignature(node tsast.Node) error {
+func (e *extractor) extractFunctionSignature(node tsast.Node) (FunctionID, error) {
 	nameNode, ok := node.NamedChild("name")
 	if !ok {
-		return fmt.Errorf("function declaration at %d has no name", node.Pos())
+		return 0, fmt.Errorf("function declaration at %d has no name", node.Pos())
 	}
 	name, _ := nameNode.Text()
 	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if symbol == nil {
-		return fmt.Errorf("function %s has no TypeScript symbol", name)
+		return 0, fmt.Errorf("function %s has no TypeScript symbol", name)
 	}
 	functionID := FunctionID(len(e.result.Functions))
 	functionSymbol := e.internSymbol(symbol, SymbolFunction, nameNode)
@@ -121,22 +144,22 @@ func (e *extractor) extractFunctionSignature(node tsast.Node) error {
 		for _, paramNode := range params.ListElements() {
 			param, err := e.extractParameter(paramNode)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			fn.Params = append(fn.Params, param)
 		}
 	}
 	returnTypeNode, ok := node.NamedChild("type")
 	if !ok {
-		return fmt.Errorf("function %s requires an explicit return type for native lowering", name)
+		return 0, fmt.Errorf("function %s requires an explicit return type for native lowering", name)
 	}
 	returnType, err := e.typeAt(returnTypeNode)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	fn.ReturnType = returnType
 	e.result.Functions = append(e.result.Functions, fn)
-	return nil
+	return functionID, nil
 }
 
 func (e *extractor) extractParameter(node tsast.Node) (Parameter, error) {
@@ -457,6 +480,14 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 	}
 	expr := &Expr{Type: typeID, Span: e.span(node)}
 	switch node.Kind() {
+	case tsast.KindThisKeyword:
+		if e.currentThis == nil {
+			return nil, fmt.Errorf("this at %d is outside a native method", node.Pos())
+		}
+		expr.Kind = ExprIdentifier
+		expr.Name = "this"
+		expr.Symbol = *e.currentThis
+		return expr, nil
 	case tsast.KindIdentifier:
 		expr.Kind = ExprIdentifier
 		expr.Name, _ = node.Text()
@@ -496,6 +527,8 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		return e.extractBinary(node, expr)
 	case tsast.KindCallExpression:
 		return e.extractCall(node, expr)
+	case tsast.KindNewExpression:
+		return e.extractNew(node, expr)
 	case tsast.KindArrayLiteralExpression:
 		expr.Kind = ExprArray
 		elements, ok := node.NamedChild("elements")
@@ -694,11 +727,39 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			}
 		}
 	case tsast.KindPropertyAccessExpression:
-		if !isConsoleLog(calleeNode) {
-			return nil, fmt.Errorf("property call at %d is not a supported native intrinsic", calleeNode.Pos())
+		if isConsoleLog(calleeNode) {
+			expr.Callee = &Expr{Kind: ExprIdentifier, Name: "console.log", Span: e.span(calleeNode)}
+			consoleCall = true
+			break
 		}
-		expr.Callee = &Expr{Kind: ExprIdentifier, Name: "console.log", Span: e.span(calleeNode)}
-		consoleCall = true
+		receiverNode, ok := calleeNode.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("method call at %d has no receiver", calleeNode.Pos())
+		}
+		nameNode, ok := calleeNode.NamedChild("name")
+		if !ok || nameNode.Kind() != tsast.KindIdentifier {
+			return nil, fmt.Errorf("method call at %d has no method name", calleeNode.Pos())
+		}
+		receiver, err := e.extractExpr(receiverNode)
+		if err != nil {
+			return nil, err
+		}
+		method, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+		if err != nil {
+			return nil, err
+		}
+		if method == nil {
+			return nil, fmt.Errorf("method call at %d has no TypeScript symbol", calleeNode.Pos())
+		}
+		target, ok := e.functions[method.ID]
+		if !ok {
+			return nil, fmt.Errorf("method %s is not a devirtualized native target", method.Name)
+		}
+		name, _ := nameNode.Text()
+		expr.Callee = &Expr{Kind: ExprIdentifier, Name: name, Span: e.span(calleeNode)}
+		targetCopy := target
+		expr.CallTarget = &targetCopy
+		expr.Args = append(expr.Args, receiver)
 	default:
 		return nil, fmt.Errorf("callee %s at %d is not supported by the native MVP", tsast.KindName(calleeNode.Kind()), calleeNode.Pos())
 	}
@@ -814,6 +875,9 @@ func (e *extractor) internObjectShape(info *tsls.APIType, name string) (ShapeID,
 	sort.Slice(properties, func(i, j int) bool { return properties[i].Name < properties[j].Name })
 	fields := make([]ShapeField, 0, len(properties))
 	for _, property := range properties {
+		if property.Flags&4 == 0 {
+			continue
+		}
 		propertyType, err := e.client.GetTypeOfSymbol(e.ctx, e.snapshot, e.project, property.ID)
 		if err != nil {
 			return 0, err
@@ -926,4 +990,196 @@ func hasModifier(node tsast.Node, kind uint32) bool {
 		}
 	}
 	return false
+}
+
+func (e *extractor) extractClassSignatures(node tsast.Node) error {
+	nameNode, ok := node.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return fmt.Errorf("native class at %d requires an identifier name", node.Pos())
+	}
+	name, _ := nameNode.Text()
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("class %s has no TypeScript symbol", name)
+		}
+		return err
+	}
+	declared, err := e.client.GetDeclaredTypeOfSymbol(e.ctx, e.snapshot, e.project, symbol.ID)
+	if err != nil || declared == nil {
+		if err == nil {
+			err = fmt.Errorf("class %s has no declared instance type", name)
+		}
+		return err
+	}
+	typeID, err := e.internAPIType(declared)
+	if err != nil {
+		return err
+	}
+	if int(typeID) >= len(e.result.Types) || e.result.Types[typeID].Kind != TypeObject {
+		return fmt.Errorf("class %s does not have a closed object type", name)
+	}
+	shapeID := e.result.Types[typeID].Shape
+	info := &classInfo{Name: name, Type: typeID, Shape: shapeID, FieldParam: make([]int, len(e.result.Shapes[shapeID].Fields))}
+	for i := range info.FieldParam {
+		info.FieldParam[i] = -1
+	}
+	e.classes[symbol.ID] = info
+	classSymbol := e.internSymbol(symbol, SymbolClass, nameNode)
+	e.result.Symbols[classSymbol].Type = typeID
+	return e.extractClassMembers(node, info)
+}
+
+func (e *extractor) extractClassMembers(node tsast.Node, info *classInfo) error {
+	members, ok := node.NamedChild("members")
+	if !ok || !members.IsList() {
+		return nil
+	}
+	for _, member := range members.ListElements() {
+		switch member.Kind() {
+		case tsast.KindConstructor:
+			if len(info.ConstructorParams) != 0 {
+				return fmt.Errorf("class %s has multiple constructors", info.Name)
+			}
+			if err := e.extractConstructor(member, info); err != nil {
+				return err
+			}
+		case tsast.KindMethodDeclaration:
+			if hasModifier(member, tsast.KindStaticKeyword) {
+				return fmt.Errorf("static method in class %s is not supported yet", info.Name)
+			}
+			if err := e.extractMethodSignature(member, info); err != nil {
+				return err
+			}
+		case tsast.KindPropertyDeclaration:
+			return fmt.Errorf("explicit property declaration in class %s is not supported yet; use constructor parameter-properties", info.Name)
+		default:
+			return fmt.Errorf("unsupported class member %s in %s", tsast.KindName(member.Kind()), info.Name)
+		}
+	}
+	return nil
+}
+
+func (e *extractor) extractConstructor(node tsast.Node, info *classInfo) error {
+	params, _ := node.NamedChild("parameters")
+	if params.IsList() {
+		for index, paramNode := range params.ListElements() {
+			param, err := e.extractParameter(paramNode)
+			if err != nil {
+				return err
+			}
+			info.ConstructorParams = append(info.ConstructorParams, param)
+			if !isParameterProperty(paramNode) {
+				continue
+			}
+			for fieldIndex, field := range e.result.Shapes[info.Shape].Fields {
+				if field.Name == param.Name {
+					info.FieldParam[fieldIndex] = index
+					break
+				}
+			}
+		}
+	}
+	body, ok := node.NamedChild("body")
+	if !ok {
+		return fmt.Errorf("constructor for %s has no body", info.Name)
+	}
+	statements, ok := body.NamedChild("statements")
+	if ok && statements.IsList() && len(statements.ListElements()) != 0 {
+		return fmt.Errorf("constructor body for %s is not supported yet; use parameter-properties with an empty body", info.Name)
+	}
+	return nil
+}
+
+func (e *extractor) extractMethodSignature(node tsast.Node, info *classInfo) error {
+	nameNode, ok := node.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return fmt.Errorf("method in %s requires an identifier name", info.Name)
+	}
+	name, _ := nameNode.Text()
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("method %s.%s has no TypeScript symbol", info.Name, name)
+		}
+		return err
+	}
+	functionID := FunctionID(len(e.result.Functions))
+	methodSymbol := e.internSymbol(symbol, SymbolMethod, nameNode)
+	e.functions[symbol.ID] = functionID
+	thisSymbol := e.newSyntheticSymbol("this", SymbolParameter, info.Type, node)
+	fn := Function{ID: functionID, Symbol: methodSymbol, Name: info.Name + "." + name, Source: 0, Span: e.span(node)}
+	fn.Params = append(fn.Params, Parameter{Symbol: thisSymbol, Name: "this", Type: info.Type, Span: e.span(node)})
+	if params, ok := node.NamedChild("parameters"); ok {
+		for _, paramNode := range params.ListElements() {
+			param, err := e.extractParameter(paramNode)
+			if err != nil {
+				return err
+			}
+			fn.Params = append(fn.Params, param)
+		}
+	}
+	returnTypeNode, ok := node.NamedChild("type")
+	if !ok {
+		return fmt.Errorf("method %s.%s requires an explicit return type", info.Name, name)
+	}
+	fn.ReturnType, err = e.typeAt(returnTypeNode)
+	if err != nil {
+		return err
+	}
+	e.result.Functions = append(e.result.Functions, fn)
+	thisCopy := thisSymbol
+	e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node, This: &thisCopy})
+	return nil
+}
+
+func (e *extractor) newSyntheticSymbol(name string, kind SymbolKind, typeID TypeID, node tsast.Node) SymbolID {
+	id := SymbolID(len(e.result.Symbols))
+	e.result.Symbols = append(e.result.Symbols, Symbol{ID: id, Name: name, Kind: kind, Type: typeID, Decl: e.span(node)})
+	return id
+}
+
+func isParameterProperty(node tsast.Node) bool {
+	return hasModifier(node, tsast.KindPublicKeyword) || hasModifier(node, tsast.KindPrivateKeyword) ||
+		hasModifier(node, tsast.KindProtectedKeyword) || hasModifier(node, tsast.KindReadonlyKeyword)
+}
+
+func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
+	callee, ok := node.NamedChild("expression")
+	if !ok || callee.Kind() != tsast.KindIdentifier {
+		return nil, fmt.Errorf("native new at %d requires a class identifier", node.Pos())
+	}
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, callee.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("new target at %d has no TypeScript symbol", node.Pos())
+		}
+		return nil, err
+	}
+	class, ok := e.classes[symbol.ID]
+	if !ok {
+		return nil, fmt.Errorf("new target %s is not a native class", symbol.Name)
+	}
+	var args []*Expr
+	if arguments, ok := node.NamedChild("arguments"); ok {
+		for _, argNode := range arguments.ListElements() {
+			arg, err := e.extractExpr(argNode)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+		}
+	}
+	if len(args) != len(class.ConstructorParams) {
+		return nil, fmt.Errorf("constructor %s expects %d arguments; got %d", class.Name, len(class.ConstructorParams), len(args))
+	}
+	expr.Kind, expr.Type = ExprObject, class.Type
+	for fieldIndex, field := range e.result.Shapes[class.Shape].Fields {
+		paramIndex := class.FieldParam[fieldIndex]
+		if paramIndex < 0 || paramIndex >= len(args) {
+			return nil, fmt.Errorf("class %s field %s is not initialized by a constructor parameter-property", class.Name, field.Name)
+		}
+		expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(fieldIndex), Value: args[paramIndex]})
+	}
+	return expr, nil
 }
