@@ -1,0 +1,10 @@
+/target/
+/node_modules/
+/build/
+/dist/
+*.o
+*.ll
+*.bc
+*.profraw
+*.profdata
+.DS_Store
