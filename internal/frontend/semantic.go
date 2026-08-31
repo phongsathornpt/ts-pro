@@ -81,6 +81,7 @@ const (
 	StmtAssign
 	StmtWhile
 	StmtFor
+	StmtClosureBind
 )
 
 type Statement struct {

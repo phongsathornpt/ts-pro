@@ -39,6 +39,7 @@ type extractor struct {
 	functions   map[uint64]FunctionID
 	shapes      map[uint64]ShapeID
 	classes     map[uint64]*classInfo
+	closures    map[uint64]closureInfo
 	pending     []pendingFunctionBody
 	currentThis *SymbolID
 }
@@ -72,6 +73,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		functions:  map[uint64]FunctionID{},
 		shapes:     map[uint64]ShapeID{},
 		classes:    map[uint64]*classInfo{},
+		closures:   map[uint64]closureInfo{},
 	}
 	e.result.Sources = append(e.result.Sources, Source{ID: 0, URI: "file://" + filepath.ToSlash(abs), Path: abs})
 
@@ -322,6 +324,14 @@ func (e *extractor) extractVariableDeclaration(node tsast.Node) (Statement, erro
 	initializer, ok := node.NamedChild("initializer")
 	if !ok {
 		return Statement{}, fmt.Errorf("native variable %s requires an initializer", name)
+	}
+	if initializer.Kind() == tsast.KindArrowFunction || initializer.Kind() == tsast.KindFunctionExpression {
+		closure, err := e.extractLocalClosure(name, symbol, initializer)
+		if err != nil {
+			return Statement{}, err
+		}
+		e.closures[symbol.ID] = closure
+		return Statement{Kind: StmtClosureBind, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID}, nil
 	}
 	value, err := e.extractExpr(initializer)
 	if err != nil {
@@ -721,7 +731,11 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			return nil, err
 		}
 		if symbol != nil {
-			if target, ok := e.functions[symbol.ID]; ok {
+			if closure, ok := e.closures[symbol.ID]; ok {
+				targetCopy := closure.Function
+				expr.CallTarget = &targetCopy
+				expr.Args = append(expr.Args, e.closureCaptureArgs(closure, e.span(calleeNode))...)
+			} else if target, ok := e.functions[symbol.ID]; ok {
 				targetCopy := target
 				expr.CallTarget = &targetCopy
 			}

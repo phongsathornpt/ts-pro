@@ -146,6 +146,8 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			return err
 		}
 		return f.lowerLoop(stmt.Expr, stmt.Then, stmt.Update)
+	case frontend.StmtClosureBind:
+		return nil
 	default:
 		return fmt.Errorf("unsupported semantic statement kind %d", stmt.Kind)
 	}

@@ -46,7 +46,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Direct instance-method calls with a native hidden `this` parameter.
   - [x] Explicit field declarations with `this.field = parameter` constructor assignment bodies.
   - [ ] Property initializers, arbitrary constructor side effects, inheritance, and virtual dispatch.
-- [ ] Closures and captured environments.
+- [~] Closures and captured environments (non-escaping captured arrow functions are closure-converted to hidden direct-call parameters; escaping function values pending).
 - [ ] Generic monomorphization and call-site specialization.
 - [ ] Exceptions, Promise, and async/await.
 
