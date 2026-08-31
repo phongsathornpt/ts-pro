@@ -51,3 +51,9 @@ No fallback to SWC is planned.
 The pinned server responds normally to `initialize`, but may not answer the standard `shutdown` request. The Go client therefore treats `shutdown` as best-effort with a short deadline and always sends `exit`, which terminates the server cleanly.
 
 This behavior is covered by an integration test and must be rechecked on each TypeScript upgrade.
+
+## Compiler semantic API
+
+TypeScript 7.0.2 also ships `tsc --api --async`, an official JSON-RPC compiler API exposing snapshots, projects, source files, AST handles, symbols, types, signatures, and checker queries. The native compiler uses this API for lowering data that standard LSP does not expose.
+
+The IDE/diagnostic path remains `tsc --lsp --stdio`. Both processes use the same pinned TypeScript 7 implementation and the same `tsconfig.json`; no SWC/Babel/Oxc parser is introduced. When LSP-hosted `custom/initializeAPISession` becomes reliable for the pinned release, the API transport can be switched to the shared LSP session without changing frontend DTOs or HIR.

@@ -27,10 +27,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Semantic bridge
 
 - [x] Define compiler-owned source/symbol/type/function DTOs.
-- [ ] Determine the minimum semantic data required to lower TypeScript to HIR.
-- [ ] Implement semantic extraction on top of TypeScript 7.
-- [ ] Isolate version-specific/custom TypeScript-LS methods in `internal/tsls`.
-- [ ] Add compatibility tests for the pinned TypeScript 7 version.
+- [x] Determine the minimum semantic data required to lower TypeScript to HIR.
+- [~] Implement semantic extraction on top of TypeScript 7.
+- [x] Isolate version-specific TypeScript LSP/API protocol in `internal/tsls`.
+- [x] Add compatibility tests for the pinned TypeScript 7 version.
 - [ ] Verify that the compiler path contains no SWC/Babel/Oxc frontend.
 
 ## HIR in Go
