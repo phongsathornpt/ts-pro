@@ -14,8 +14,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Query exact AST-node symbols/types through the TypeScript checker.
 - [x] Gate native builds on TypeScript diagnostics before lowering.
 - [x] Regression-test that SWC/Babel/Oxc are absent from the active compiler path.
-- [ ] Keep one long-lived TypeScript-LS process per IDE workspace.
-- [ ] Add TypeScript-LS crash detection and restart policy.
+- [x] Keep one long-lived TypeScript-LS process per IDE workspace through the Go workspace manager.
+- [x] Add TypeScript-LS crash detection and generation-based restart policy.
 
 ## HIR, representation, and MIR
 

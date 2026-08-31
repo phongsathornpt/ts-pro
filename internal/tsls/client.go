@@ -23,6 +23,7 @@ type Client struct {
 	stderr    *bytes.Buffer
 
 	nextID  atomic.Int64
+	exited  atomic.Bool
 	pending sync.Map
 }
 
@@ -75,9 +76,18 @@ func Start(root string) (*Client, error) {
 		stderr:    stderr,
 	}
 	go client.readLoop()
-	go func() { client.waitDone <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		client.exited.Store(true)
+		client.waitDone <- err
+	}()
 	return client, nil
 }
+
+func (c *Client) Alive() bool {
+	return c != nil && !c.exited.Load()
+}
+
 func (c *Client) readLoop() {
 	for {
 		message, err := c.conn.read()
