@@ -1,0 +1,54 @@
+package hir
+
+type TypeKind uint8
+
+const (
+	TypeInvalid TypeKind = iota
+	TypeAny
+	TypeUnknown
+	TypeNever
+	TypeVoid
+	TypeUndefined
+	TypeNull
+	TypeBoolean
+	TypeNumber
+	TypeString
+	TypeObject
+	TypeArray
+	TypeUnion
+	TypeFunction
+)
+
+type SemanticType struct {
+	Kind       TypeKind
+	Shape      ShapeID
+	Element    TypeID
+	Members    []TypeID
+	Params     []TypeID
+	ReturnType TypeID
+}
+type ReprKind uint8
+
+const (
+	ReprUnproven ReprKind = iota
+	ReprVoid
+	ReprBool
+	ReprI32
+	ReprI64
+	ReprF64
+	ReprStringRef
+	ReprArrayRef
+	ReprObjectRef
+	ReprFunctionRef
+	ReprTaggedUnion
+	ReprJSValue
+)
+
+type Repr struct {
+	Kind  ReprKind
+	Shape ShapeID
+}
+
+func (r Repr) Proven() bool {
+	return r.Kind != ReprUnproven
+}
