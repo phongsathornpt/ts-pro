@@ -44,8 +44,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Native representation / MIR
 
-- [ ] Add `Bool`, `I32`, `I64`, `F64`, and reference representations.
-- [ ] Add representation-proof diagnostics.
+- [~] Add `Bool`, `I32`, `I64`, `F64`, and reference representations (Bool/F64/reference proof pass implemented; integer refinement pending).
+- [~] Add representation-proof diagnostics (analysis diagnostics implemented; CLI reporting pending).
 - [ ] Lower HIR to MIR/SSA.
 - [ ] Add direct-call and scalar fast paths.
 - [ ] Add typed-array and closed-shape representation rules.
