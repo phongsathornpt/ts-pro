@@ -94,6 +94,7 @@ type Function struct {
 	Async      bool
 	Generator  bool
 	Exported   bool
+	Body       []Statement
 }
 
 type Snapshot struct {
