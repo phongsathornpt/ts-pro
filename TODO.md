@@ -31,7 +31,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Implement semantic extraction on top of TypeScript 7 for the typed MVP subset.
 - [x] Isolate version-specific TypeScript LSP/API protocol in `internal/tsls`.
 - [x] Add compatibility tests for the pinned TypeScript 7 version.
-- [ ] Verify that the compiler path contains no SWC/Babel/Oxc frontend.
+- [x] Verify and regression-test that the active compiler path contains no SWC/Babel/Oxc frontend.
 
 ## HIR in Go
 
