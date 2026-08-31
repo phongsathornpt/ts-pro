@@ -22,16 +22,16 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete.
 
 ## HIR
 
-- [ ] Define HIR module/function/block/value IDs.
-- [ ] Define primitive semantic types.
-- [ ] Define expressions and terminators.
+- [x] Define HIR module/function/block/value IDs.
+- [x] Define primitive semantic types.
+- [x] Define expressions and terminators.
 - [ ] Add HIR verifier.
 - [ ] Add stable textual HIR dump.
 
 ## Native representation / MIR
 
-- [ ] Separate TypeScript semantic type from native `Repr`.
-- [ ] Add `Bool`, `I32`, `I64`, `F64`, and reference representations.
+- [x] Separate TypeScript semantic type from native `Repr`.
+- [x] Add `Bool`, `I32`, `I64`, `F64`, and reference representations.
 - [ ] Add representation proof diagnostics.
 - [ ] Lower HIR to MIR/SSA.
 - [ ] Add direct-call and scalar fast paths.
