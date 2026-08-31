@@ -34,7 +34,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Functions, recursion, returns, and direct calls.
 - [x] Native numeric arithmetic: `+ - * /`.
 - [x] Native numeric comparisons: `< <= > >= == !=`.
-- [x] Mutable locals and assignment.
+- [x] Mutable locals and assignment, including top-level `const`/`let` entry bindings.
 - [x] `if`, `while`, and `for` control flow.
 - [x] `i++` / `i--` lowering.
 - [x] Specialized unboxed `number[]` literals, `.length`, and indexed reads.
