@@ -6,9 +6,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Create architecture/type/performance/native-config documentation.
 - [S] Rust workspace, Rust CLI, and Rust HIR prototype.
-- [ ] Add `go.mod` and Go package layout.
-- [ ] Add `cmd/tsnative` Go CLI.
-- [ ] Add Go test/lint/build commands.
+- [x] Add `go.mod` and Go package layout.
+- [x] Add `cmd/tsnative` Go CLI.
+- [x] Add Go test/lint/build commands.
 - [ ] Remove Rust from the active build after Go parity is reached.
 
 ## TypeScript 7 / TypeScript-LS
