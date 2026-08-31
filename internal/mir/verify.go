@@ -117,6 +117,20 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case DispatchCall:
+				if len(op.Cases) == 0 || len(op.Args) == 0 {
+					return fmt.Errorf("dispatch v%d requires targets and receiver", inst.Result)
+				}
+				for _, target := range op.Cases {
+					if _, ok := functions[target.Callee]; !ok {
+						return fmt.Errorf("dispatch v%d references unknown callee f%d", inst.Result, target.Callee)
+					}
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
+				}
 			case IntrinsicCall:
 				if op.Intrinsic == IntrinsicInvalid {
 					return fmt.Errorf("invalid intrinsic")

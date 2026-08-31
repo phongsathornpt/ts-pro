@@ -57,6 +57,16 @@ type CallOp struct {
 	Args   []ValueID
 }
 
+type DispatchCase struct {
+	ClassTag uint32
+	Callee   FunctionID
+}
+
+type DispatchCallOp struct {
+	Args  []ValueID
+	Cases []DispatchCase
+}
+
 type IntrinsicKind uint8
 
 const (
@@ -111,6 +121,7 @@ func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
 func (BinaryExpr) isOperation()      {}
 func (CallOp) isOperation()          {}
+func (DispatchCallOp) isOperation()  {}
 func (IntrinsicCallOp) isOperation() {}
 func (PhiOp) isOperation()           {}
 func (ArrayNewOp) isOperation()      {}

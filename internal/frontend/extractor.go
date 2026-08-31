@@ -37,6 +37,7 @@ type classInfo struct {
 	Constructor       FunctionID
 	ConstructorThis   SymbolID
 	Base              *classInfo
+	Methods           map[string]FunctionID
 }
 
 type extractor struct {
@@ -52,6 +53,8 @@ type extractor struct {
 	functions           map[uint64]FunctionID
 	shapes              map[uint64]ShapeID
 	classes             map[uint64]*classInfo
+	classesByType       map[TypeID]*classInfo
+	concreteClasses     map[SymbolID]*classInfo
 	closures            map[uint64]closureInfo
 	generics            map[uint64]genericInfo
 	specializations     map[string]FunctionID
@@ -91,6 +94,8 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		functions:       map[uint64]FunctionID{},
 		shapes:          map[uint64]ShapeID{},
 		classes:         map[uint64]*classInfo{},
+		classesByType:   map[TypeID]*classInfo{},
+		concreteClasses: map[SymbolID]*classInfo{},
 		closures:        map[uint64]closureInfo{},
 		generics:        map[uint64]genericInfo{},
 		specializations: map[string]FunctionID{},
@@ -119,6 +124,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 	}
 	for _, pending := range e.pending {
 		e.currentThis = pending.This
+		e.concreteClasses = map[SymbolID]*classInfo{}
 		var body []Statement
 		var err error
 		if pending.Constructor != nil {
@@ -266,21 +272,33 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
+		before := cloneConcreteClasses(e.concreteClasses)
 		thenNode, ok := node.NamedChild("thenStatement")
 		if !ok {
 			return Statement{}, fmt.Errorf("if statement at %d has no then branch", node.Pos())
 		}
-		thenBody, err := e.extractStatementBody(thenNode)
+		var thenBody []Statement
+		thenState, err := e.withConcreteSnapshot(func() error {
+			var inner error
+			thenBody, inner = e.extractStatementBody(thenNode)
+			return inner
+		})
 		if err != nil {
 			return Statement{}, err
 		}
 		stmt := Statement{Kind: StmtIf, Span: e.span(node), Expr: condition, Then: thenBody}
+		elseState := before
 		if elseNode, ok := node.NamedChild("elseStatement"); ok {
-			stmt.Else, err = e.extractStatementBody(elseNode)
+			elseState, err = e.withConcreteSnapshot(func() error {
+				var inner error
+				stmt.Else, inner = e.extractStatementBody(elseNode)
+				return inner
+			})
 			if err != nil {
 				return Statement{}, err
 			}
 		}
+		e.concreteClasses = mergeConcreteClasses(thenState, elseState)
 		return stmt, nil
 	case tsast.KindBlock:
 		body, err := e.extractBlock(node)
@@ -375,6 +393,7 @@ func (e *extractor) extractVariableDeclaration(node tsast.Node) (Statement, erro
 	if err != nil {
 		return Statement{}, err
 	}
+	e.recordConcreteClass(symbolID, value)
 	return Statement{Kind: StmtVar, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, nil
 }
 
@@ -391,10 +410,12 @@ func (e *extractor) extractWhile(node tsast.Node) (Statement, error) {
 	if !ok {
 		return Statement{}, fmt.Errorf("while at %d has no body", node.Pos())
 	}
+	before := cloneConcreteClasses(e.concreteClasses)
 	body, err := e.extractStatementBody(bodyNode)
 	if err != nil {
 		return Statement{}, err
 	}
+	e.concreteClasses = mergeConcreteClasses(before, e.concreteClasses)
 	return Statement{Kind: StmtWhile, Span: e.span(node), Expr: condition, Then: body}, nil
 }
 
@@ -429,6 +450,15 @@ func (e *extractor) extractFor(node tsast.Node) (Statement, error) {
 		return Statement{}, err
 	}
 	stmt.Expr = condition
+	loopEntry := cloneConcreteClasses(e.concreteClasses)
+	bodyNode, ok := node.NamedChild("statement")
+	if !ok {
+		return Statement{}, fmt.Errorf("for at %d has no body", node.Pos())
+	}
+	stmt.Then, err = e.extractStatementBody(bodyNode)
+	if err != nil {
+		return Statement{}, err
+	}
 	if incrementor, ok := node.NamedChild("incrementor"); ok {
 		mutation, matched, err := e.extractMutation(incrementor)
 		if err != nil {
@@ -439,12 +469,8 @@ func (e *extractor) extractFor(node tsast.Node) (Statement, error) {
 		}
 		stmt.Update = []Statement{mutation}
 	}
-	bodyNode, ok := node.NamedChild("statement")
-	if !ok {
-		return Statement{}, fmt.Errorf("for at %d has no body", node.Pos())
-	}
-	stmt.Then, err = e.extractStatementBody(bodyNode)
-	return stmt, err
+	e.concreteClasses = mergeConcreteClasses(loopEntry, e.concreteClasses)
+	return stmt, nil
 }
 
 func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
@@ -514,6 +540,7 @@ func (e *extractor) buildAssignment(node, target, rhs tsast.Node, unary uint32) 
 	if err != nil {
 		return Statement{}, true, err
 	}
+	e.recordConcreteClass(symbolID, value)
 	return Statement{Kind: StmtAssign, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, true, nil
 }
 
@@ -573,6 +600,9 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			}
 			expr.Symbol = e.internSymbol(symbol, SymbolVariable, node)
 			e.result.Symbols[expr.Symbol].Type = typeID
+			if concrete, ok := e.concreteClasses[expr.Symbol]; ok {
+				expr.ConcreteType, expr.ConcreteKnown = concrete.Type, true
+			}
 		}
 		return expr, nil
 	case tsast.KindNumericLiteral:
@@ -837,14 +867,30 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		if method == nil {
 			return nil, fmt.Errorf("method call at %d has no TypeScript symbol", calleeNode.Pos())
 		}
-		target, ok := e.functions[method.ID]
-		if !ok {
-			return nil, fmt.Errorf("method %s is not a devirtualized native target", method.Name)
+		var target FunctionID
+		var targetOK bool
+		if receiver.ConcreteKnown {
+			if concrete, ok := e.classesByType[receiver.ConcreteType]; ok {
+				target, targetOK = e.findClassMethod(concrete, method.Name)
+			}
+		}
+		if !targetOK {
+			target, targetOK = e.functions[method.ID]
+			if targetOK {
+				if staticClass, ok := e.classesByType[receiver.Type]; ok && e.hasKnownOverride(staticClass, method.Name, target) {
+					expr.Dispatch = e.dispatchTargets(staticClass, method.Name)
+				}
+			}
+		}
+		if !targetOK {
+			return nil, fmt.Errorf("method %s is not a native target", method.Name)
 		}
 		name, _ := nameNode.Text()
 		expr.Callee = &Expr{Kind: ExprIdentifier, Name: name, Span: e.span(calleeNode)}
-		targetCopy := target
-		expr.CallTarget = &targetCopy
+		if len(expr.Dispatch) == 0 {
+			targetCopy := target
+			expr.CallTarget = &targetCopy
+		}
 		expr.Args = append(expr.Args, receiver)
 	default:
 		callee, err := e.extractExpr(calleeNode)
@@ -884,7 +930,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		}
 		return expr, nil
 	}
-	if expr.CallTarget == nil {
+	if expr.CallTarget == nil && len(expr.Dispatch) == 0 {
 		if expr.Callee == nil || int(expr.Callee.Type) >= len(e.result.Types) || e.result.Types[expr.Callee.Type].Kind != TypeFunction {
 			return nil, fmt.Errorf("dynamic call at %d is not a proven native function value", node.Pos())
 		}
@@ -1165,8 +1211,10 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 		return fmt.Errorf("class %s does not have a closed object type", name)
 	}
 	shapeID := e.result.Types[typeID].Shape
-	info := &classInfo{Node: node, Name: name, Type: typeID, Shape: shapeID}
+	e.result.Shapes[shapeID].ClassTag = uint32(shapeID) + 1
+	info := &classInfo{Node: node, Name: name, Type: typeID, Shape: shapeID, Methods: map[string]FunctionID{}}
 	e.classes[symbol.ID] = info
+	e.classesByType[typeID] = info
 	if err := e.resolveBaseClass(node, info); err != nil {
 		return err
 	}
@@ -1255,6 +1303,7 @@ func (e *extractor) extractMethodSignature(node tsast.Node, info *classInfo) err
 	functionID := FunctionID(len(e.result.Functions))
 	methodSymbol := e.internSymbol(symbol, SymbolMethod, nameNode)
 	e.functions[symbol.ID] = functionID
+	info.Methods[name] = functionID
 	thisSymbol := e.newSyntheticSymbol("this", SymbolParameter, info.Type, node)
 	fn := Function{ID: functionID, Symbol: methodSymbol, Name: info.Name + "." + name, Source: 0, Span: e.span(node)}
 	fn.Params = append(fn.Params, Parameter{Symbol: thisSymbol, Name: "this", Type: info.Type, Span: e.span(node)})
@@ -1323,6 +1372,7 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 	}
 	constructor := class.Constructor
 	expr.Kind, expr.Type, expr.Args, expr.Constructor = ExprNewClass, class.Type, args, &constructor
+	expr.ConcreteType, expr.ConcreteKnown = class.Type, true
 	return expr, nil
 }
 

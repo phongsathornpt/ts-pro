@@ -42,6 +42,11 @@ const (
 	BinaryNotEqual
 )
 
+type DispatchTarget struct {
+	ClassTag uint32
+	Function FunctionID
+}
+
 type ObjectFieldExpr struct {
 	Name  string
 	Index uint32
@@ -49,28 +54,31 @@ type ObjectFieldExpr struct {
 }
 
 type Expr struct {
-	Kind        ExprKind
-	Type        TypeID
-	Symbol      SymbolID
-	Name        string
-	Number      float64
-	String      string
-	Operator    BinaryOperator
-	Left        *Expr
-	Right       *Expr
-	Callee      *Expr
-	Args        []*Expr
-	CallTarget  *FunctionID
-	Intrinsic   IntrinsicKind
-	Elements    []*Expr
-	Object      *Expr
-	Index       *Expr
-	Fields      []ObjectFieldExpr
-	Captures    []*Expr
-	Field       string
-	FieldIndex  uint32
-	Constructor *FunctionID
-	Span        Span
+	Kind          ExprKind
+	Type          TypeID
+	Symbol        SymbolID
+	Name          string
+	Number        float64
+	String        string
+	Operator      BinaryOperator
+	Left          *Expr
+	Right         *Expr
+	Callee        *Expr
+	Args          []*Expr
+	CallTarget    *FunctionID
+	Intrinsic     IntrinsicKind
+	Elements      []*Expr
+	Object        *Expr
+	Index         *Expr
+	Fields        []ObjectFieldExpr
+	Captures      []*Expr
+	Field         string
+	FieldIndex    uint32
+	Constructor   *FunctionID
+	Dispatch      []DispatchTarget
+	ConcreteType  TypeID
+	ConcreteKnown bool
+	Span          Span
 }
 
 type StmtKind uint8

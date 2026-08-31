@@ -114,7 +114,7 @@ func (l *moduleLowerer) lowerTypes() error {
 
 func (l *moduleLowerer) lowerShapes() error {
 	for _, shape := range l.source.Shapes {
-		lowered := hir.Shape{ID: hir.NewShapeID(uint32(shape.ID)), Name: shape.Name}
+		lowered := hir.Shape{ID: hir.NewShapeID(uint32(shape.ID)), Name: shape.Name, ClassTag: shape.ClassTag}
 		for _, field := range shape.Fields {
 			typeID, ok := l.types[field.Type]
 			if !ok {

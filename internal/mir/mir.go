@@ -28,9 +28,10 @@ type ShapeField struct {
 }
 
 type Shape struct {
-	ID     ShapeID
-	Name   string
-	Fields []ShapeField
+	ID       ShapeID
+	Name     string
+	ClassTag uint32
+	Fields   []ShapeField
 }
 
 type Module struct {
@@ -110,6 +111,16 @@ type Call struct {
 	Args   []ValueID
 }
 
+type DispatchCase struct {
+	ClassTag uint32
+	Callee   FunctionID
+}
+
+type DispatchCall struct {
+	Args  []ValueID
+	Cases []DispatchCase
+}
+
 type Intrinsic uint8
 
 const (
@@ -166,6 +177,7 @@ func (StringConcat) isOperation()   {}
 func (FloatBinary) isOperation()    {}
 func (FloatCompare) isOperation()   {}
 func (Call) isOperation()           {}
+func (DispatchCall) isOperation()   {}
 func (IntrinsicCall) isOperation()  {}
 func (Phi) isOperation()            {}
 func (ArrayNewF64) isOperation()    {}

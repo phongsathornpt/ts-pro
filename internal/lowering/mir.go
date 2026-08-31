@@ -10,7 +10,7 @@ import (
 func LowerMIR(source hir.Module) (mir.Module, error) {
 	result := mir.Module{Name: source.Name}
 	for _, shape := range source.Shapes {
-		lowered := mir.Shape{ID: mir.ShapeID(shape.ID), Name: shape.Name}
+		lowered := mir.Shape{ID: mir.ShapeID(shape.ID), Name: shape.Name, ClassTag: shape.ClassTag}
 		for _, field := range shape.Fields {
 			repr, err := lowerRepr(field.Repr)
 			if err != nil {
@@ -100,6 +100,16 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.Call{Callee: mir.FunctionID(op.Callee), Args: args}
+	case hir.DispatchCallOp:
+		args := make([]mir.ValueID, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = mir.ValueID(arg)
+		}
+		cases := make([]mir.DispatchCase, len(op.Cases))
+		for i, target := range op.Cases {
+			cases[i] = mir.DispatchCase{ClassTag: target.ClassTag, Callee: mir.FunctionID(target.Callee)}
+		}
+		result.Op = mir.DispatchCall{Args: args, Cases: cases}
 	case hir.ArrayNewOp:
 		elements := make([]mir.ValueID, len(op.Elements))
 		for i, value := range op.Elements {

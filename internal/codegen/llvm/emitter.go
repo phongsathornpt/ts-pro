@@ -55,8 +55,13 @@ func Emit(module mir.Module) (string, error) {
 	sort.Slice(shapes, func(i, j int) bool { return shapes[i].ID < shapes[j].ID })
 	for _, shape := range shapes {
 		b.WriteString(shapeTypeName(shape.ID) + " = type { ")
-		for i, field := range shape.Fields {
-			if i != 0 {
+		written := false
+		if shape.ClassTag != 0 {
+			b.WriteString("i32")
+			written = true
+		}
+		for _, field := range shape.Fields {
+			if written {
 				b.WriteString(", ")
 			}
 			typ, err := llvmType(field.Repr)
@@ -64,6 +69,7 @@ func Emit(module mir.Module) (string, error) {
 				return "", fmt.Errorf("shape s%d field %s: %w", shape.ID, field.Name, err)
 			}
 			b.WriteString(typ)
+			written = true
 		}
 		b.WriteString(" }\n")
 	}
@@ -228,6 +234,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
 		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		if shape.ClassTag != 0 {
+			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
+			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)
+		}
 		for i, fieldValue := range op.Fields {
 			value, err := operand(values, fieldValue)
 			if err != nil {
@@ -237,7 +247,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, i)
+			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, shapeFieldIndex(shape, uint32(i)))
 			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, value, name, i)
 		}
 		return nil
@@ -251,6 +261,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
 		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		if shape.ClassTag != 0 {
+			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
+			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)
+		}
 		for i, field := range shape.Fields {
 			fieldType, err := llvmType(field.Repr)
 			if err != nil {
@@ -260,7 +274,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, i)
+			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, shapeFieldIndex(shape, uint32(i)))
 			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, zero, name, i)
 		}
 		return nil
@@ -283,7 +297,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			return err
 		}
 		name := valueName(inst.Result)
-		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, op.Field)
+		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
 		fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
 		values[inst.Result] = value
 		return nil
@@ -309,7 +323,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, op.Field)
+		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
 		fmt.Fprintf(b, "  %s = load %s, ptr %s.ptr\n", name, fieldType, name)
 		return nil
 	case mir.Phi:
@@ -371,6 +385,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		return nil
 	case mir.Call:
 		return e.emitCall(b, inst, op, values)
+	case mir.DispatchCall:
+		return e.emitDispatchCall(b, inst, op, values)
 	case mir.IntrinsicCall:
 		return e.emitIntrinsicCall(b, inst, op, values)
 	default:
@@ -415,6 +431,81 @@ func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Ca
 		values[inst.Result] = name
 	}
 	return nil
+}
+
+func (e *emitter) emitDispatchCall(b *strings.Builder, inst mir.Instruction, call mir.DispatchCall, values map[mir.ValueID]string) error {
+	if len(call.Args) == 0 || len(call.Cases) == 0 {
+		return fmt.Errorf("dispatch requires receiver and targets")
+	}
+	receiver, err := operand(values, call.Args[0])
+	if err != nil {
+		return err
+	}
+	base, ok := e.functions[call.Cases[0].Callee]
+	if !ok {
+		return fmt.Errorf("dispatch references unknown callee f%d", call.Cases[0].Callee)
+	}
+	if len(base.Params) != len(call.Args) {
+		return fmt.Errorf("dispatch f%d has %d args; expected %d", base.ID, len(call.Args), len(base.Params))
+	}
+	for _, target := range call.Cases[1:] {
+		fn, ok := e.functions[target.Callee]
+		if !ok {
+			return fmt.Errorf("dispatch references unknown callee f%d", target.Callee)
+		}
+		if !sameDispatchSignature(base, fn) {
+			return fmt.Errorf("dispatch targets f%d and f%d have incompatible native signatures", base.ID, fn.ID)
+		}
+	}
+	name := valueName(inst.Result)
+	fmt.Fprintf(b, "  %s.tag = load i32, ptr %s\n", name, receiver)
+	selected := "@" + functionName(base.ID)
+	for i, target := range call.Cases[1:] {
+		fmt.Fprintf(b, "  %s.tagcmp.%d = icmp eq i32 %s.tag, %d\n", name, i, name, target.ClassTag)
+		choice := fmt.Sprintf("%s.fn.%d", name, i)
+		fmt.Fprintf(b, "  %s = select i1 %s.tagcmp.%d, ptr @%s, ptr %s\n", choice, name, i, functionName(target.Callee), selected)
+		selected = choice
+	}
+	retType, err := llvmType(base.ReturnRepr)
+	if err != nil {
+		return err
+	}
+	if base.ReturnRepr == mir.ReprVoid {
+		fmt.Fprintf(b, "  call %s %s(", retType, selected)
+	} else {
+		fmt.Fprintf(b, "  %s = call %s %s(", name, retType, selected)
+	}
+	for i, arg := range call.Args {
+		if i != 0 {
+			b.WriteString(", ")
+		}
+		typ, err := llvmType(base.Params[i].Repr)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, arg)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "%s %s", typ, value)
+	}
+	b.WriteString(")\n")
+	if base.ReturnRepr != mir.ReprVoid {
+		values[inst.Result] = name
+	}
+	return nil
+}
+
+func sameDispatchSignature(left, right mir.Function) bool {
+	if left.ReturnRepr != right.ReturnRepr || len(left.Params) != len(right.Params) {
+		return false
+	}
+	for i := range left.Params {
+		if left.Params[i].Repr != right.Params[i].Repr {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, call mir.IntrinsicCall, values map[mir.ValueID]string) error {
@@ -592,4 +683,11 @@ func buildValueReprs(fn mir.Function) map[mir.ValueID]mir.Repr {
 		}
 	}
 	return result
+}
+
+func shapeFieldIndex(shape mir.Shape, field uint32) uint32 {
+	if shape.ClassTag != 0 {
+		return field + 1
+	}
+	return field
 }

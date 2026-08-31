@@ -56,8 +56,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Closed-world inheritance and virtual dispatch.
     - [x] Single-inheritance frontend: exact TypeScript 7 heritage-clause decoding, base-class resolution, derived-shape prefix layout, and `super(...)` constructor chaining.
     - [x] Native inheritance acceptance + differential coverage for inherited fields/methods and base-constructor effects.
-    - [ ] Base-typed references holding derived instances and override dispatch/devirtualization.
-    - [ ] General virtual dispatch/vtable or type-tag strategy where closed-world devirtualization cannot prove a single target.
+    - [x] Base-typed references holding derived instances with provenance-based devirtualization when concrete type is proven.
+    - [x] Single-module closed-world virtual dispatch using hidden class tags and typed native function-pointer selection when devirtualization cannot prove one target.
+    - [ ] Cross-module subclass discovery/dispatch-table extension once multi-module compilation is implemented.
 - [x] Closures and captured environments, with direct-call conversion for non-escaping closures and native `{code, env}` function values for escaping closures.
 - [~] Generic monomorphization and call-site specialization.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).

@@ -84,6 +84,16 @@ func formatOperation(op Operation) string {
 			args[i] = fmt.Sprintf("v%d", arg)
 		}
 		return fmt.Sprintf("call f%d(%s)", op.Callee, strings.Join(args, ", "))
+	case DispatchCallOp:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = fmt.Sprintf("v%d", arg)
+		}
+		cases := make([]string, len(op.Cases))
+		for i, target := range op.Cases {
+			cases[i] = fmt.Sprintf("%d:f%d", target.ClassTag, target.Callee)
+		}
+		return fmt.Sprintf("dispatch [%s](%s)", strings.Join(cases, ","), strings.Join(args, ", "))
 	case ObjectAllocOp:
 		return fmt.Sprintf("object.alloc s%d", op.Shape)
 	case FieldSetOp:

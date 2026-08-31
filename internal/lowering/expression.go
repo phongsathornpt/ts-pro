@@ -182,6 +182,17 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		return f.emit(expr.Type, hir.IntrinsicCallOp{Intrinsic: intrinsic, Args: args}), nil
 	}
+	if len(expr.Dispatch) != 0 {
+		args, err := lowerArgs()
+		if err != nil {
+			return 0, err
+		}
+		cases := make([]hir.DispatchCase, 0, len(expr.Dispatch))
+		for _, target := range expr.Dispatch {
+			cases = append(cases, hir.DispatchCase{ClassTag: target.ClassTag, Callee: hir.NewFunctionID(uint32(target.Function))})
+		}
+		return f.emit(expr.Type, hir.DispatchCallOp{Args: args, Cases: cases}), nil
+	}
 	if expr.CallTarget != nil {
 		args, err := lowerArgs()
 		if err != nil {

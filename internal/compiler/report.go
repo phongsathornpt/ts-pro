@@ -61,8 +61,23 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 			}
 		}
 	}
+	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
 	return metrics
+}
+
+func countDynamicDispatch(module mir.Module) int {
+	count := 0
+	for _, fn := range module.Functions {
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				if _, ok := inst.Op.(mir.DispatchCall); ok {
+					count++
+				}
+			}
+		}
+	}
+	return count
 }
 
 func countRuntimeCalls(module mir.Module) int {

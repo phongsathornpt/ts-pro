@@ -171,6 +171,18 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
+			case DispatchCallOp:
+				if len(op.Cases) == 0 {
+					add(fmt.Sprintf("dispatch v%d has no targets", instruction.Result))
+				}
+				for _, target := range op.Cases {
+					if _, exists := functionIDs[target.Callee]; !exists {
+						add(fmt.Sprintf("dispatch references unknown function f%d", target.Callee))
+					}
+				}
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
 			case IntrinsicCallOp:
 				if op.Intrinsic == IntrinsicInvalid {
 					add(fmt.Sprintf("instruction v%d has invalid intrinsic", instruction.Result))

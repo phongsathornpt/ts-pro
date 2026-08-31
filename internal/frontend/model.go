@@ -85,9 +85,10 @@ type ShapeField struct {
 }
 
 type Shape struct {
-	ID     ShapeID
-	Name   string
-	Fields []ShapeField
+	ID       ShapeID
+	Name     string
+	ClassTag uint32
+	Fields   []ShapeField
 }
 
 type Parameter struct {
