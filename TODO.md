@@ -67,7 +67,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [ ] Add tagged `JSValue` only for values that cannot keep a proven native representation.
 - [ ] Add checked conversions and dynamic operator/property slow paths.
-- [ ] Add differential tests against the TypeScript 7 → JavaScript reference path.
+- [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [ ] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [ ] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and cache hit rate.
 - [ ] Add ThinLTO after module/object caching is established.
