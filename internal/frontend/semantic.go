@@ -12,6 +12,8 @@ const (
 	ExprArray
 	ExprIndex
 	ExprArrayLength
+	ExprObject
+	ExprFieldGet
 )
 
 type IntrinsicKind uint8
@@ -38,6 +40,12 @@ const (
 	BinaryNotEqual
 )
 
+type ObjectFieldExpr struct {
+	Name  string
+	Index uint32
+	Value *Expr
+}
+
 type Expr struct {
 	Kind       ExprKind
 	Type       TypeID
@@ -55,6 +63,9 @@ type Expr struct {
 	Elements   []*Expr
 	Object     *Expr
 	Index      *Expr
+	Fields     []ObjectFieldExpr
+	Field      string
+	FieldIndex uint32
 	Span       Span
 }
 

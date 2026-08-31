@@ -27,6 +27,7 @@ func (e VerificationErrors) Error() string {
 func (m Module) Verify() error {
 	var errors VerificationErrors
 	errors = append(errors, m.verifyTypes()...)
+	errors = append(errors, m.verifyShapes()...)
 	errors = append(errors, m.verifyFunctions()...)
 	if len(errors) == 0 {
 		return nil
@@ -53,6 +54,30 @@ func (m Module) verifyTypes() VerificationErrors {
 				check(param)
 			}
 			check(semantic.ReturnType)
+		}
+	}
+	return errors
+}
+
+func (m Module) verifyShapes() VerificationErrors {
+	var errors VerificationErrors
+	seen := map[ShapeID]struct{}{}
+	for _, shape := range m.Shapes {
+		if _, ok := seen[shape.ID]; ok {
+			errors = append(errors, VerificationError{Message: fmt.Sprintf("duplicate shape s%d", shape.ID)})
+		}
+		seen[shape.ID] = struct{}{}
+		for _, field := range shape.Fields {
+			if int(field.SemanticType) >= len(m.Types) {
+				errors = append(errors, VerificationError{Message: fmt.Sprintf("shape s%d field %s references invalid type t%d", shape.ID, field.Name, field.SemanticType)})
+			}
+		}
+	}
+	for i, typ := range m.Types {
+		if typ.Kind == TypeObject {
+			if _, ok := seen[typ.Shape]; !ok {
+				errors = append(errors, VerificationError{Message: fmt.Sprintf("object type t%d references unknown shape s%d", i, typ.Shape)})
+			}
 		}
 	}
 	return errors
@@ -170,6 +195,20 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case ArrayGetOp:
 				checkValue(op.Array)
 				checkValue(op.Index)
+			case ObjectNewOp:
+				if int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("object allocation references unknown shape s%d", op.Shape))
+				}
+				for _, field := range op.Fields {
+					checkValue(field)
+				}
+			case FieldGetOp:
+				checkValue(op.Object)
+				if int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("field access references unknown shape s%d", op.Shape))
+				} else if int(op.Field) >= len(m.Shapes[op.Shape].Fields) {
+					add(fmt.Sprintf("field access s%d.%d is out of range", op.Shape, op.Field))
+				}
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

@@ -12,6 +12,7 @@ import (
 type emitter struct {
 	module        mir.Module
 	functions     map[mir.FunctionID]mir.Function
+	shapes        map[mir.ShapeID]mir.Shape
 	stringGlobals map[string]string
 }
 
@@ -19,9 +20,12 @@ func Emit(module mir.Module) (string, error) {
 	if err := module.Verify(); err != nil {
 		return "", fmt.Errorf("verify MIR before LLVM emission: %w", err)
 	}
-	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, stringGlobals: map[string]string{}}
+	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
+	}
+	for _, shape := range module.Shapes {
+		e.shapes[shape.ID] = shape
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "; tsnative module %s\n", strconv.Quote(module.Name))
@@ -33,7 +37,27 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
-	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n\n")
+	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
+	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n\n")
+	shapes := append([]mir.Shape(nil), module.Shapes...)
+	sort.Slice(shapes, func(i, j int) bool { return shapes[i].ID < shapes[j].ID })
+	for _, shape := range shapes {
+		b.WriteString(shapeTypeName(shape.ID) + " = type { ")
+		for i, field := range shape.Fields {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			typ, err := llvmType(field.Repr)
+			if err != nil {
+				return "", fmt.Errorf("shape s%d field %s: %w", shape.ID, field.Name, err)
+			}
+			b.WriteString(typ)
+		}
+		b.WriteString(" }\n")
+	}
+	if len(shapes) != 0 {
+		b.WriteString("\n")
+	}
 	for _, global := range e.collectStringGlobals() {
 		fmt.Fprintf(&b, "%s = private unnamed_addr constant [%d x i8] c\"%s\", align 1\n", global.name, len(global.value), escapeLLVMBytes(global.value))
 	}
@@ -151,6 +175,50 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call double @tsnative_array_f64_get(ptr %s, double %s)\n", name, array, index)
+		return nil
+	case mir.ObjectNew:
+		shape, ok := e.shapes[op.Shape]
+		if !ok {
+			return fmt.Errorf("unknown object shape s%d", op.Shape)
+		}
+		name := valueName(inst.Result)
+		typeName := shapeTypeName(op.Shape)
+		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
+		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		for i, fieldValue := range op.Fields {
+			value, err := operand(values, fieldValue)
+			if err != nil {
+				return err
+			}
+			fieldType, err := llvmType(shape.Fields[i].Repr)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  %s.f%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, i, typeName, name, i)
+			fmt.Fprintf(b, "  store %s %s, ptr %s.f%d\n", fieldType, value, name, i)
+		}
+		return nil
+	case mir.FieldGet:
+		shape, ok := e.shapes[op.Shape]
+		if !ok {
+			return fmt.Errorf("unknown field shape s%d", op.Shape)
+		}
+		if int(op.Field) >= len(shape.Fields) {
+			return fmt.Errorf("invalid field %d for shape s%d", op.Field, op.Shape)
+		}
+		object, err := operand(values, op.Object)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		typeName := shapeTypeName(op.Shape)
+		fieldType, err := llvmType(shape.Fields[op.Field].Repr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, op.Field)
+		fmt.Fprintf(b, "  %s = load %s, ptr %s.ptr\n", name, fieldType, name)
 		return nil
 	case mir.Phi:
 		typ, err := llvmType(inst.Repr)
@@ -393,4 +461,5 @@ func operand(values map[mir.ValueID]string, value mir.ValueID) (string, error) {
 
 func valueName(value mir.ValueID) string    { return fmt.Sprintf("%%v%d", value) }
 func functionName(id mir.FunctionID) string { return fmt.Sprintf("tsnative_f%d", id) }
+func shapeTypeName(id mir.ShapeID) string   { return fmt.Sprintf("%%tsnative_shape_s%d", id) }
 func formatF64(value float64) string        { return strconv.FormatFloat(value, 'e', 6, 64) }

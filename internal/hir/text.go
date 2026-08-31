@@ -15,6 +15,16 @@ func DumpText(module Module) string {
 	for i, typ := range module.Types {
 		fmt.Fprintf(&b, "  type t%d = %s\n", i, formatType(typ))
 	}
+	for _, shape := range module.Shapes {
+		fmt.Fprintf(&b, "  shape s%d %s {", shape.ID, quoteName(shape.Name))
+		for i, field := range shape.Fields {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%s:t%d", quoteName(field.Name), field.SemanticType)
+		}
+		b.WriteString("}\n")
+	}
 	if module.Entry != nil {
 		fmt.Fprintf(&b, "  entry f%d\n", *module.Entry)
 	}

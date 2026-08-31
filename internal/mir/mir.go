@@ -3,6 +3,7 @@ package mir
 type FunctionID uint32
 type BlockID uint32
 type ValueID uint32
+type ShapeID uint32
 
 type Repr uint8
 
@@ -21,8 +22,20 @@ const (
 	ReprJSValue
 )
 
+type ShapeField struct {
+	Name string
+	Repr Repr
+}
+
+type Shape struct {
+	ID     ShapeID
+	Name   string
+	Fields []ShapeField
+}
+
 type Module struct {
 	Name      string
+	Shapes    []Shape
 	Functions []Function
 	Entry     *FunctionID
 }
@@ -122,6 +135,15 @@ type Phi struct {
 type ArrayNewF64 struct{ Elements []ValueID }
 type ArrayLengthF64 struct{ Array ValueID }
 type ArrayGetF64 struct{ Array, Index ValueID }
+type ObjectNew struct {
+	Shape  ShapeID
+	Fields []ValueID
+}
+type FieldGet struct {
+	Object ValueID
+	Shape  ShapeID
+	Field  uint32
+}
 
 func (ConstF64) isOperation()       {}
 func (ConstString) isOperation()    {}
@@ -134,6 +156,8 @@ func (Phi) isOperation()            {}
 func (ArrayNewF64) isOperation()    {}
 func (ArrayLengthF64) isOperation() {}
 func (ArrayGetF64) isOperation()    {}
+func (ObjectNew) isOperation()      {}
+func (FieldGet) isOperation()       {}
 
 type Terminator interface{ isTerminator() }
 

@@ -27,6 +27,18 @@ type SemanticType struct {
 	Params     []TypeID
 	ReturnType TypeID
 }
+type ShapeField struct {
+	Name         string
+	SemanticType TypeID
+	Repr         Repr
+}
+
+type Shape struct {
+	ID     ShapeID
+	Name   string
+	Fields []ShapeField
+}
+
 type ReprKind uint8
 
 const (

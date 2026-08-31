@@ -23,6 +23,7 @@ const (
 	KindNumberKeyword                uint32 = 150
 	KindParameter                    uint32 = 170
 	KindArrayLiteralExpression       uint32 = 210
+	KindObjectLiteralExpression      uint32 = 211
 	KindPropertyAccessExpression     uint32 = 212
 	KindElementAccessExpression      uint32 = 213
 	KindCallExpression               uint32 = 214
@@ -40,6 +41,10 @@ const (
 	KindVariableDeclaration          uint32 = 261
 	KindVariableDeclarationList      uint32 = 262
 	KindFunctionDeclaration          uint32 = 263
+	KindInterfaceDeclaration         uint32 = 265
+	KindTypeAliasDeclaration         uint32 = 266
+	KindPropertyAssignment           uint32 = 303
+	KindShorthandPropertyAssignment  uint32 = 304
 	KindSourceFile                   uint32 = 307
 	KindIdentifier                   uint32 = 79
 )
@@ -52,12 +57,14 @@ var kindNames = map[uint32]string{
 	KindPlusToken: "PlusToken", KindMinusToken: "MinusToken", KindAsteriskToken: "AsteriskToken", KindSlashToken: "SlashToken",
 	KindPlusPlusToken: "PlusPlusToken", KindMinusMinusToken: "MinusMinusToken", KindEqualsToken: "EqualsToken",
 	KindExportKeyword: "ExportKeyword", KindIdentifier: "Identifier", KindNumberKeyword: "NumberKeyword",
-	KindParameter: "Parameter", KindArrayLiteralExpression: "ArrayLiteralExpression", KindPropertyAccessExpression: "PropertyAccessExpression",
+	KindParameter: "Parameter", KindArrayLiteralExpression: "ArrayLiteralExpression", KindObjectLiteralExpression: "ObjectLiteralExpression", KindPropertyAccessExpression: "PropertyAccessExpression",
 	KindElementAccessExpression: "ElementAccessExpression", KindCallExpression: "CallExpression",
 	KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
 	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement",
 	KindVariableDeclaration: "VariableDeclaration", KindVariableDeclarationList: "VariableDeclarationList", KindFunctionDeclaration: "FunctionDeclaration",
+	KindInterfaceDeclaration: "InterfaceDeclaration", KindTypeAliasDeclaration: "TypeAliasDeclaration",
+	KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",
 	KindSourceFile: "SourceFile", KindNodeList: "NodeList",
 }
 

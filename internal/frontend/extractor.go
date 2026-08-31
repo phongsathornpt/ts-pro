@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,7 @@ type extractor struct {
 	types      map[uint64]TypeID
 	symbols    map[uint64]SymbolID
 	functions  map[uint64]FunctionID
+	shapes     map[uint64]ShapeID
 }
 
 func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, fileName string) (Snapshot, error) {
@@ -51,6 +53,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		types:      map[uint64]TypeID{},
 		symbols:    map[uint64]SymbolID{},
 		functions:  map[uint64]FunctionID{},
+		shapes:     map[uint64]ShapeID{},
 	}
 	e.result.Sources = append(e.result.Sources, Source{ID: 0, URI: "file://" + filepath.ToSlash(abs), Path: abs})
 
@@ -74,7 +77,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 	}
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
-		case tsast.KindFunctionDeclaration, tsast.KindEndOfFile:
+		case tsast.KindFunctionDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEndOfFile:
 			continue
 		case tsast.KindExpressionStatement:
 			stmt, err := e.extractStatement(node)
@@ -510,6 +513,53 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			expr.Elements = append(expr.Elements, element)
 		}
 		return expr, nil
+	case tsast.KindObjectLiteralExpression:
+		if int(typeID) >= len(e.result.Types) || e.result.Types[typeID].Kind != TypeObject {
+			return nil, fmt.Errorf("object literal at %d has non-object type", node.Pos())
+		}
+		shapeID := e.result.Types[typeID].Shape
+		if int(shapeID) >= len(e.result.Shapes) {
+			return nil, fmt.Errorf("object literal at %d has invalid shape s%d", node.Pos(), shapeID)
+		}
+		propertiesNode, ok := node.NamedChild("properties")
+		if !ok || !propertiesNode.IsList() {
+			return nil, fmt.Errorf("object literal at %d has no properties", node.Pos())
+		}
+		values := map[string]*Expr{}
+		for _, property := range propertiesNode.ListElements() {
+			nameNode, ok := property.NamedChild("name")
+			if !ok || nameNode.Kind() != tsast.KindIdentifier {
+				return nil, fmt.Errorf("native object property at %d requires identifier name", property.Pos())
+			}
+			name, _ := nameNode.Text()
+			var value *Expr
+			var err error
+			switch property.Kind() {
+			case tsast.KindPropertyAssignment:
+				initializer, ok := property.NamedChild("initializer")
+				if !ok {
+					return nil, fmt.Errorf("object property %s has no initializer", name)
+				}
+				value, err = e.extractExpr(initializer)
+			case tsast.KindShorthandPropertyAssignment:
+				value, err = e.extractExpr(nameNode)
+			default:
+				return nil, fmt.Errorf("unsupported object property %s at %d", tsast.KindName(property.Kind()), property.Pos())
+			}
+			if err != nil {
+				return nil, err
+			}
+			values[name] = value
+		}
+		expr.Kind = ExprObject
+		for i, field := range e.result.Shapes[shapeID].Fields {
+			value, ok := values[field.Name]
+			if !ok {
+				return nil, fmt.Errorf("object literal at %d is missing shape field %s", node.Pos(), field.Name)
+			}
+			expr.Fields = append(expr.Fields, ObjectFieldExpr{Name: field.Name, Index: uint32(i), Value: value})
+		}
+		return expr, nil
 	case tsast.KindElementAccessExpression:
 		objectNode, ok := node.NamedChild("expression")
 		if !ok {
@@ -539,18 +589,29 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("property access at %d has no name", node.Pos())
 		}
 		name, _ := nameNode.Text()
-		if name != "length" {
-			return nil, fmt.Errorf("native property %q at %d is not supported", name, node.Pos())
-		}
 		object, err := e.extractExpr(objectNode)
 		if err != nil {
 			return nil, err
 		}
-		if int(object.Type) >= len(e.result.Types) || e.result.Types[object.Type].Kind != TypeArray {
-			return nil, fmt.Errorf(".length at %d currently requires a native array", node.Pos())
+		if int(object.Type) >= len(e.result.Types) {
+			return nil, fmt.Errorf("property access at %d has invalid object type", node.Pos())
 		}
-		expr.Kind, expr.Object = ExprArrayLength, object
-		return expr, nil
+		objectType := e.result.Types[object.Type]
+		if objectType.Kind == TypeArray && name == "length" {
+			expr.Kind, expr.Object = ExprArrayLength, object
+			return expr, nil
+		}
+		if objectType.Kind != TypeObject || int(objectType.Shape) >= len(e.result.Shapes) {
+			return nil, fmt.Errorf("native property %q at %d requires a closed object shape", name, node.Pos())
+		}
+		shape := e.result.Shapes[objectType.Shape]
+		for i, field := range shape.Fields {
+			if field.Name == name {
+				expr.Kind, expr.Object, expr.Field, expr.FieldIndex = ExprFieldGet, object, name, uint32(i)
+				return expr, nil
+			}
+		}
+		return nil, fmt.Errorf("shape %s has no field %q", shape.Name, name)
 	case tsast.KindNonNullExpression:
 		innerNode, ok := node.NamedChild("expression")
 		if !ok {
@@ -692,6 +753,13 @@ func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
 	if info == nil {
 		return 0, fmt.Errorf("node %s at %d has no TypeScript type", tsast.KindName(node.Kind()), node.Pos())
 	}
+	return e.internAPIType(info)
+}
+
+func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
+	if info == nil {
+		return 0, fmt.Errorf("nil TypeScript type")
+	}
 	if id, ok := e.types[info.ID]; ok {
 		return id, nil
 	}
@@ -702,6 +770,11 @@ func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
 	kind := classifyType(text)
 	if kind == TypeNumber && text == "number" {
 		id := e.ensureSemanticType(TypeNumber, "number")
+		e.types[info.ID] = id
+		return id, nil
+	}
+	if kind == TypeString && text == "string" {
+		id := e.ensureSemanticType(TypeString, "string")
 		e.types[info.ID] = id
 		return id, nil
 	}
@@ -717,6 +790,44 @@ func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
 	typ.ID = id
 	e.result.Types = append(e.result.Types, typ)
 	e.types[info.ID] = id
+	if kind == TypeObject {
+		shape, err := e.internObjectShape(info, text)
+		if err != nil {
+			return 0, err
+		}
+		e.result.Types[id].Shape = shape
+	}
+	return id, nil
+}
+
+func (e *extractor) internObjectShape(info *tsls.APIType, name string) (ShapeID, error) {
+	if id, ok := e.shapes[info.ID]; ok {
+		return id, nil
+	}
+	id := ShapeID(len(e.result.Shapes))
+	e.shapes[info.ID] = id
+	e.result.Shapes = append(e.result.Shapes, Shape{ID: id, Name: name})
+	properties, err := e.client.GetPropertiesOfType(e.ctx, e.snapshot, e.project, info.ID)
+	if err != nil {
+		return 0, err
+	}
+	sort.Slice(properties, func(i, j int) bool { return properties[i].Name < properties[j].Name })
+	fields := make([]ShapeField, 0, len(properties))
+	for _, property := range properties {
+		propertyType, err := e.client.GetTypeOfSymbol(e.ctx, e.snapshot, e.project, property.ID)
+		if err != nil {
+			return 0, err
+		}
+		if propertyType == nil {
+			return 0, fmt.Errorf("property %s on %s has no TypeScript type", property.Name, name)
+		}
+		fieldType, err := e.internAPIType(propertyType)
+		if err != nil {
+			return 0, err
+		}
+		fields = append(fields, ShapeField{Name: property.Name, Type: fieldType})
+	}
+	e.result.Shapes[id].Fields = fields
 	return id, nil
 }
 

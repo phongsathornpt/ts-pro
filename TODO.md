@@ -27,7 +27,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add SSA phi nodes for mutable loop-carried values.
 - [x] Add direct-call and scalar fast paths.
 - [ ] Add conservative integer range proof before enabling `I32`/`I64` narrowing.
-- [~] Add checker-derived closed object-shape representation and fixed field layout.
+- [x] Add checker-derived closed object-shape representation and fixed field layout.
 
 ## Native language coverage
 
@@ -40,7 +40,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Specialized unboxed `number[]` literals, `.length`, and indexed reads.
 - [x] Native UTF-8 string literals, string parameters/returns, and concatenation.
 - [x] `console.log(number)` and `console.log(string)` intrinsics.
-- [~] Object literals and fixed-offset property reads through closed shapes.
+- [x] Object literals and fixed-offset property reads through closed shapes.
 - [ ] Classes, constructors, fields, and devirtualized methods.
 - [ ] Closures and captured environments.
 - [ ] Generic monomorphization and call-site specialization.
@@ -52,7 +52,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Compile LLVM IR and runtime C sources through the clang toolchain wrapper.
 - [x] Link native executables without Node/V8.
 - [x] Support `-O0/-O1/-O2/-O3/-Oz`.
-- [x] Compile and run `fib.ts`, loop, numeric-array, and string acceptance programs.
+- [x] Compile and run `fib.ts`, loop, numeric-array, string, and closed-object acceptance programs.
 - [x] Add specialized native F64-array runtime support.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [ ] Add heap allocator ownership model shared by strings/arrays/objects.

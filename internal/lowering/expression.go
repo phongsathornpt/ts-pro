@@ -52,6 +52,30 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.ArrayGetOp{Array: array, Index: index}), nil
+	case frontend.ExprObject:
+		if int(expr.Type) >= len(f.module.source.Types) {
+			return 0, fmt.Errorf("object expression has invalid type t%d", expr.Type)
+		}
+		shape := f.module.source.Types[expr.Type].Shape
+		fields := make([]hir.ValueID, 0, len(expr.Fields))
+		for _, field := range expr.Fields {
+			value, err := f.lowerExpr(field.Value)
+			if err != nil {
+				return 0, err
+			}
+			fields = append(fields, value)
+		}
+		return f.emit(expr.Type, hir.ObjectNewOp{Shape: hir.NewShapeID(uint32(shape)), Fields: fields}), nil
+	case frontend.ExprFieldGet:
+		object, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		if int(expr.Object.Type) >= len(f.module.source.Types) {
+			return 0, fmt.Errorf("field access has invalid object type")
+		}
+		shape := f.module.source.Types[expr.Object.Type].Shape
+		return f.emit(expr.Type, hir.FieldGetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: expr.FieldIndex}), nil
 	default:
 		return 0, fmt.Errorf("unsupported semantic expression kind %d", expr.Kind)
 	}

@@ -4,6 +4,7 @@ type SourceID uint32
 type SymbolID uint32
 type TypeID uint32
 type FunctionID uint32
+type ShapeID uint32
 
 type Position struct {
 	Line      uint32
@@ -74,6 +75,18 @@ type Type struct {
 	Params     []TypeID
 	ReturnType TypeID
 	Properties []SymbolID
+	Shape      ShapeID
+}
+
+type ShapeField struct {
+	Name string
+	Type TypeID
+}
+
+type Shape struct {
+	ID     ShapeID
+	Name   string
+	Fields []ShapeField
 }
 
 type Parameter struct {
@@ -103,6 +116,7 @@ type Snapshot struct {
 	Symbols        []Symbol
 	Types          []Type
 	Functions      []Function
+	Shapes         []Shape
 	Entry          []Statement
 }
 

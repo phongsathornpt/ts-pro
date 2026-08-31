@@ -4,6 +4,7 @@ type Module struct {
 	ID        ModuleID
 	Name      string
 	Types     []SemanticType
+	Shapes    []Shape
 	Functions []Function
 	Entry     *FunctionID
 }
@@ -81,6 +82,15 @@ type PhiOp struct {
 type ArrayNewOp struct{ Elements []ValueID }
 type ArrayLengthOp struct{ Array ValueID }
 type ArrayGetOp struct{ Array, Index ValueID }
+type ObjectNewOp struct {
+	Shape  ShapeID
+	Fields []ValueID
+}
+type FieldGetOp struct {
+	Object ValueID
+	Shape  ShapeID
+	Field  uint32
+}
 
 func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
@@ -91,6 +101,8 @@ func (PhiOp) isOperation()           {}
 func (ArrayNewOp) isOperation()      {}
 func (ArrayLengthOp) isOperation()   {}
 func (ArrayGetOp) isOperation()      {}
+func (ObjectNewOp) isOperation()     {}
+func (FieldGetOp) isOperation()      {}
 
 type LiteralKind uint8
 

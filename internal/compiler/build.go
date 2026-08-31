@@ -93,7 +93,7 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 	objects := []string{moduleObj}
-	runtimeSources := []string{"console.c", "array_f64.c", "string.c"}
+	runtimeSources := []string{"console.c", "array_f64.c", "string.c", "object.c"}
 	for i, source := range runtimeSources {
 		runtimeObj := filepath.Join(workDir, fmt.Sprintf("runtime-%d.o", i))
 		runtimeSource := filepath.Join(options.Root, "runtime", "core", source)

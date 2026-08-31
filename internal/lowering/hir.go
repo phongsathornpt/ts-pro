@@ -22,6 +22,9 @@ func LowerHIR(source frontend.Snapshot, name string) (hir.Module, error) {
 	if err := lowerer.lowerTypes(); err != nil {
 		return hir.Module{}, err
 	}
+	if err := lowerer.lowerShapes(); err != nil {
+		return hir.Module{}, err
+	}
 	for _, fn := range source.Functions {
 		lowered, err := lowerer.lowerFunction(fn)
 		if err != nil {
@@ -65,6 +68,9 @@ func (l *moduleLowerer) lowerTypes() error {
 		}
 		id := hir.NewTypeID(uint32(len(l.module.Types)))
 		semantic := hir.SemanticType{Kind: kind}
+		if typ.Kind == frontend.TypeObject {
+			semantic.Shape = hir.NewShapeID(uint32(typ.Shape))
+		}
 		if typ.Kind == frontend.TypeArray {
 			element, ok := l.types[typ.Element]
 			if !ok {
@@ -77,6 +83,21 @@ func (l *moduleLowerer) lowerTypes() error {
 		if isScalarType(typ.Kind) {
 			canonical[typ.Kind] = id
 		}
+	}
+	return nil
+}
+
+func (l *moduleLowerer) lowerShapes() error {
+	for _, shape := range l.source.Shapes {
+		lowered := hir.Shape{ID: hir.NewShapeID(uint32(shape.ID)), Name: shape.Name}
+		for _, field := range shape.Fields {
+			typeID, ok := l.types[field.Type]
+			if !ok {
+				return fmt.Errorf("shape %s field %s references unavailable type t%d", shape.Name, field.Name, field.Type)
+			}
+			lowered.Fields = append(lowered.Fields, hir.ShapeField{Name: field.Name, SemanticType: typeID})
+		}
+		l.module.Shapes = append(l.module.Shapes, lowered)
 	}
 	return nil
 }

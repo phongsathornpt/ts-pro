@@ -13,6 +13,7 @@ import (
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
 	"github.com/projectthorn/tsv7-bin/internal/frontend"
 	"github.com/projectthorn/tsv7-bin/internal/lowering"
+	"github.com/projectthorn/tsv7-bin/internal/mir"
 	"github.com/projectthorn/tsv7-bin/internal/toolchain"
 	"github.com/projectthorn/tsv7-bin/internal/tsls"
 )
@@ -99,4 +100,31 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 		t.Fatalf("native output = %q", got)
 	}
 
+}
+
+func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
+	ret := mir.ValueID(4)
+	module := mir.Module{
+		Name: "object",
+		Shapes: []mir.Shape{{ID: 0, Name: "Point", Fields: []mir.ShapeField{
+			{Name: "x", Repr: mir.ReprF64}, {Name: "y", Repr: mir.ReprF64},
+		}}},
+		Functions: []mir.Function{{ID: 0, Name: "pointX", ReturnRepr: mir.ReprF64, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 3}},
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 4}},
+				{Result: 2, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0, 1}}},
+				{Result: 4, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 2, Shape: 0, Field: 0}},
+			}, Terminator: mir.Return{Value: &ret}}},
+		}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"%tsnative_shape_s0 = type { double, double }", "@tsnative_object_alloc", "getelementptr %tsnative_shape_s0", "load double"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
 }

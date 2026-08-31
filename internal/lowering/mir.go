@@ -9,6 +9,17 @@ import (
 
 func LowerMIR(source hir.Module) (mir.Module, error) {
 	result := mir.Module{Name: source.Name}
+	for _, shape := range source.Shapes {
+		lowered := mir.Shape{ID: mir.ShapeID(shape.ID), Name: shape.Name}
+		for _, field := range shape.Fields {
+			repr, err := lowerRepr(field.Repr)
+			if err != nil {
+				return mir.Module{}, fmt.Errorf("shape %s field %s: %w", shape.Name, field.Name, err)
+			}
+			lowered.Fields = append(lowered.Fields, mir.ShapeField{Name: field.Name, Repr: repr})
+		}
+		result.Shapes = append(result.Shapes, lowered)
+	}
 	if source.Entry != nil {
 		entry := mir.FunctionID(*source.Entry)
 		result.Entry = &entry
@@ -99,6 +110,14 @@ func lowerMIRInstruction(source hir.Instruction) (mir.Instruction, error) {
 		result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
 	case hir.ArrayGetOp:
 		result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+	case hir.ObjectNewOp:
+		fields := make([]mir.ValueID, len(op.Fields))
+		for i, value := range op.Fields {
+			fields[i] = mir.ValueID(value)
+		}
+		result.Op = mir.ObjectNew{Shape: mir.ShapeID(op.Shape), Fields: fields}
+	case hir.FieldGetOp:
+		result.Op = mir.FieldGet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {

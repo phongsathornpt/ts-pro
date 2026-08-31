@@ -3,6 +3,18 @@ package mir
 import "fmt"
 
 func (m Module) Verify() error {
+	shapes := map[ShapeID]Shape{}
+	for _, shape := range m.Shapes {
+		if _, ok := shapes[shape.ID]; ok {
+			return fmt.Errorf("duplicate MIR shape s%d", shape.ID)
+		}
+		for i, field := range shape.Fields {
+			if field.Repr == ReprInvalid || field.Repr == ReprVoid {
+				return fmt.Errorf("shape s%d field %d has invalid representation %d", shape.ID, i, field.Repr)
+			}
+		}
+		shapes[shape.ID] = shape
+	}
 	functions := map[FunctionID]struct{}{}
 	for _, fn := range m.Functions {
 		if _, ok := functions[fn.ID]; ok {
@@ -24,14 +36,14 @@ func (m Module) Verify() error {
 		}
 	}
 	for _, fn := range m.Functions {
-		if err := verifyFunction(fn, functions); err != nil {
+		if err := verifyFunction(fn, functions, shapes); err != nil {
 			return fmt.Errorf("function f%d: %w", fn.ID, err)
 		}
 	}
 	return nil
 }
 
-func verifyFunction(fn Function, functions map[FunctionID]struct{}) error {
+func verifyFunction(fn Function, functions map[FunctionID]struct{}, shapes map[ShapeID]Shape) error {
 	blocks := map[BlockID]struct{}{}
 	values := map[ValueID]struct{}{}
 	for _, param := range fn.Params {
@@ -61,10 +73,10 @@ func verifyFunction(fn Function, functions map[FunctionID]struct{}) error {
 	if _, ok := blocks[fn.Entry]; !ok {
 		return fmt.Errorf("missing entry block b%d", fn.Entry)
 	}
-	return verifyUses(fn, functions, blocks, values)
+	return verifyUses(fn, functions, shapes, blocks, values)
 }
 
-func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[BlockID]struct{}, values map[ValueID]struct{}) error {
+func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[ShapeID]Shape, blocks map[BlockID]struct{}, values map[ValueID]struct{}) error {
 	checkValue := func(v ValueID) error {
 		if _, ok := values[v]; !ok {
 			return fmt.Errorf("unknown value v%d", v)
@@ -141,6 +153,30 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[Block
 					return err
 				}
 				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+			case ObjectNew:
+				shape, ok := shapes[op.Shape]
+				if !ok {
+					return fmt.Errorf("object v%d references unknown shape s%d", inst.Result, op.Shape)
+				}
+				if len(op.Fields) != len(shape.Fields) {
+					return fmt.Errorf("object v%d has %d fields; shape s%d requires %d", inst.Result, len(op.Fields), op.Shape, len(shape.Fields))
+				}
+				for _, field := range op.Fields {
+					if err := checkValue(field); err != nil {
+						return err
+					}
+				}
+			case FieldGet:
+				shape, ok := shapes[op.Shape]
+				if !ok {
+					return fmt.Errorf("field get v%d references unknown shape s%d", inst.Result, op.Shape)
+				}
+				if int(op.Field) >= len(shape.Fields) {
+					return fmt.Errorf("field get v%d references invalid field %d of shape s%d", inst.Result, op.Field, op.Shape)
+				}
+				if err := checkValue(op.Object); err != nil {
 					return err
 				}
 			default:

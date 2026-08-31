@@ -17,6 +17,12 @@ type Diagnostic struct {
 // is represented as IEEE-754 f64 until range analysis proves a narrower integer.
 func Analyze(module *hir.Module) []Diagnostic {
 	var diagnostics []Diagnostic
+	for si := range module.Shapes {
+		for fi := range module.Shapes[si].Fields {
+			field := &module.Shapes[si].Fields[fi]
+			field.Repr, diagnostics = assignType(module, 0, nil, field.SemanticType, diagnostics)
+		}
+	}
 	for fi := range module.Functions {
 		fn := &module.Functions[fi]
 		fn.ReturnRepr, diagnostics = assignType(module, fn.ID, nil, fn.ReturnType, diagnostics)
