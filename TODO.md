@@ -14,10 +14,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete.
 ## TypeScript 7 frontend
 
 - [x] Locate and validate the official TypeScript 7 CLI.
-- [~] Define frontend adapter trait/contracts.
+- [x] Define frontend adapter trait/contracts.
 - [x] Run TS7 type checking before native compilation.
 - [~] Parse project config and entry points through the adapter.
-- [ ] Normalize diagnostics into compiler-owned structures.
+- [x] Normalize diagnostics into compiler-owned structures.
 - [ ] Define semantic type/symbol DTOs without leaking TS AST internals.
 
 ## HIR
@@ -25,7 +25,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete.
 - [x] Define HIR module/function/block/value IDs.
 - [x] Define primitive semantic types.
 - [x] Define expressions and terminators.
-- [ ] Add HIR verifier.
+- [x] Add HIR verifier.
 - [ ] Add stable textual HIR dump.
 
 ## Native representation / MIR

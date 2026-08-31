@@ -60,3 +60,42 @@ pub enum HirInstructionKind {
         args: Vec<ValueId>,
     },
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum HirLiteral {
+    Boolean(bool),
+    Number(f64),
+    String(String),
+    Null,
+    Undefined,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnaryOp {
+    Negate,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    LessThan,
+    LessEqual,
+    GreaterThan,
+    GreaterEqual,
+    Equal,
+    NotEqual,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum HirTerminator {
+    Return(Option<ValueId>),
+    Jump(BlockId),
+    Branch {
+        condition: ValueId,
+        then_block: BlockId,
+        else_block: BlockId,
+    },
+}
