@@ -1,0 +1,121 @@
+package mir
+
+import "fmt"
+
+func (m Module) Verify() error {
+	functions := map[FunctionID]struct{}{}
+	for _, fn := range m.Functions {
+		if _, ok := functions[fn.ID]; ok {
+			return fmt.Errorf("duplicate MIR function f%d", fn.ID)
+		}
+		functions[fn.ID] = struct{}{}
+	}
+	for _, fn := range m.Functions {
+		if err := verifyFunction(fn, functions); err != nil {
+			return fmt.Errorf("function f%d: %w", fn.ID, err)
+		}
+	}
+	return nil
+}
+
+func verifyFunction(fn Function, functions map[FunctionID]struct{}) error {
+	blocks := map[BlockID]struct{}{}
+	values := map[ValueID]struct{}{}
+	for _, param := range fn.Params {
+		if param.Repr == ReprInvalid {
+			return fmt.Errorf("parameter v%d has invalid representation", param.Value)
+		}
+		if _, ok := values[param.Value]; ok {
+			return fmt.Errorf("duplicate value v%d", param.Value)
+		}
+		values[param.Value] = struct{}{}
+	}
+	for _, block := range fn.Blocks {
+		if _, ok := blocks[block.ID]; ok {
+			return fmt.Errorf("duplicate block b%d", block.ID)
+		}
+		blocks[block.ID] = struct{}{}
+		for _, inst := range block.Instructions {
+			if inst.Repr == ReprInvalid || inst.Op == nil {
+				return fmt.Errorf("invalid instruction v%d", inst.Result)
+			}
+			if _, ok := values[inst.Result]; ok {
+				return fmt.Errorf("duplicate value v%d", inst.Result)
+			}
+			values[inst.Result] = struct{}{}
+		}
+	}
+	if _, ok := blocks[fn.Entry]; !ok {
+		return fmt.Errorf("missing entry block b%d", fn.Entry)
+	}
+	return verifyUses(fn, functions, blocks, values)
+}
+
+func verifyUses(fn Function, functions map[FunctionID]struct{}, blocks map[BlockID]struct{}, values map[ValueID]struct{}) error {
+	checkValue := func(v ValueID) error {
+		if _, ok := values[v]; !ok {
+			return fmt.Errorf("unknown value v%d", v)
+		}
+		return nil
+	}
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			switch op := inst.Op.(type) {
+			case ConstF64:
+			case FloatBinary:
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
+			case FloatCompare:
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
+			case Call:
+				if _, ok := functions[op.Callee]; !ok {
+					return fmt.Errorf("unknown callee f%d", op.Callee)
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
+				}
+			default:
+				return fmt.Errorf("unsupported operation %T", inst.Op)
+			}
+		}
+		if block.Terminator == nil {
+			return fmt.Errorf("block b%d has no terminator", block.ID)
+		}
+		switch term := block.Terminator.(type) {
+		case Return:
+			if term.Value != nil {
+				if err := checkValue(*term.Value); err != nil {
+					return err
+				}
+			}
+		case Jump:
+			if _, ok := blocks[term.Target]; !ok {
+				return fmt.Errorf("unknown block b%d", term.Target)
+			}
+		case Branch:
+			if err := checkValue(term.Condition); err != nil {
+				return err
+			}
+			if _, ok := blocks[term.Then]; !ok {
+				return fmt.Errorf("unknown block b%d", term.Then)
+			}
+			if _, ok := blocks[term.Else]; !ok {
+				return fmt.Errorf("unknown block b%d", term.Else)
+			}
+		default:
+			return fmt.Errorf("unsupported terminator %T", block.Terminator)
+		}
+	}
+	return nil
+}

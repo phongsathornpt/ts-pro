@@ -46,8 +46,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [~] Add `Bool`, `I32`, `I64`, `F64`, and reference representations (Bool/F64/reference proof pass implemented; integer refinement pending).
 - [~] Add representation-proof diagnostics (analysis diagnostics implemented; CLI reporting pending).
-- [ ] Lower HIR to MIR/SSA.
-- [ ] Add direct-call and scalar fast paths.
+- [x] Lower proven scalar HIR to MIR/SSA.
+- [~] Add direct-call and scalar fast paths (MIR direct calls/F64 ops implemented; backend emission pending).
 - [ ] Add typed-array and closed-shape representation rules.
 
 ## LLVM / executable
