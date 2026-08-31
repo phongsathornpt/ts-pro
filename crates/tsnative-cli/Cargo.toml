@@ -5,4 +5,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "tsnative"
+path = "src/main.rs"
+
 [dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tsnative-compiler = { path = "../tsnative-compiler" }
