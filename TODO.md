@@ -38,7 +38,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Port HIR module/function/block/value IDs from the Rust prototype.
 - [x] Port semantic type and `Repr` separation.
 - [x] Define expressions, instructions, and terminators.
-- [ ] Add HIR verifier.
+- [x] Add HIR verifier.
 - [ ] Add deterministic textual HIR dump.
 - [ ] Lower the first typed function from TypeScript-LS semantic DTOs.
 

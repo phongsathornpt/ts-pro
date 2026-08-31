@@ -1,0 +1,164 @@
+package hir
+
+import (
+	"fmt"
+	"strings"
+)
+
+type VerificationError struct {
+	Function *FunctionID
+	Message  string
+}
+
+type VerificationErrors []VerificationError
+
+func (e VerificationErrors) Error() string {
+	parts := make([]string, 0, len(e))
+	for _, item := range e {
+		if item.Function == nil {
+			parts = append(parts, item.Message)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("function f%d: %s", *item.Function, item.Message))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (m Module) Verify() error {
+	var errors VerificationErrors
+	errors = append(errors, m.verifyTypes()...)
+	errors = append(errors, m.verifyFunctions()...)
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+func (m Module) verifyTypes() VerificationErrors {
+	var errors VerificationErrors
+	for index, semantic := range m.Types {
+		check := func(target TypeID) {
+			if int(target) >= len(m.Types) {
+				errors = append(errors, VerificationError{Message: fmt.Sprintf("type t%d references invalid type t%d", index, target)})
+			}
+		}
+		switch semantic.Kind {
+		case TypeArray:
+			check(semantic.Element)
+		case TypeUnion:
+			for _, member := range semantic.Members {
+				check(member)
+			}
+		case TypeFunction:
+			for _, param := range semantic.Params {
+				check(param)
+			}
+			check(semantic.ReturnType)
+		}
+	}
+	return errors
+}
+
+func (m Module) verifyFunctions() VerificationErrors {
+	var errors VerificationErrors
+	functionIDs := make(map[FunctionID]struct{}, len(m.Functions))
+	for _, function := range m.Functions {
+		if _, exists := functionIDs[function.ID]; exists {
+			errors = append(errors, VerificationError{Message: fmt.Sprintf("duplicate function id f%d", function.ID)})
+		}
+		functionIDs[function.ID] = struct{}{}
+	}
+	for i := range m.Functions {
+		errors = append(errors, m.verifyFunction(&m.Functions[i], functionIDs)...)
+	}
+	return errors
+}
+func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]struct{}) VerificationErrors {
+	var errors VerificationErrors
+	add := func(message string) {
+		id := function.ID
+		errors = append(errors, VerificationError{Function: &id, Message: message})
+	}
+	checkType := func(typeID TypeID) {
+		if int(typeID) >= len(m.Types) {
+			add(fmt.Sprintf("references invalid type t%d", typeID))
+		}
+	}
+
+	checkType(function.ReturnType)
+	blockIDs := make(map[BlockID]struct{}, len(function.Blocks))
+	for _, block := range function.Blocks {
+		if _, exists := blockIDs[block.ID]; exists {
+			add(fmt.Sprintf("duplicate block id b%d", block.ID))
+		}
+		blockIDs[block.ID] = struct{}{}
+	}
+	if _, exists := blockIDs[function.Entry]; !exists {
+		add(fmt.Sprintf("missing entry block b%d", function.Entry))
+	}
+
+	values := make(map[ValueID]struct{})
+	for _, param := range function.Params {
+		checkType(param.SemanticType)
+		if _, exists := values[param.Value]; exists {
+			add(fmt.Sprintf("duplicate value id v%d", param.Value))
+		}
+		values[param.Value] = struct{}{}
+	}
+	for _, block := range function.Blocks {
+		for _, instruction := range block.Instructions {
+			checkType(instruction.SemanticType)
+			if _, exists := values[instruction.Result]; exists {
+				add(fmt.Sprintf("duplicate value id v%d", instruction.Result))
+			}
+			values[instruction.Result] = struct{}{}
+		}
+	}
+
+	checkValue := func(value ValueID) {
+		if _, exists := values[value]; !exists {
+			add(fmt.Sprintf("references unknown value v%d", value))
+		}
+	}
+	checkBlock := func(block BlockID) {
+		if _, exists := blockIDs[block]; !exists {
+			add(fmt.Sprintf("references unknown block b%d", block))
+		}
+	}
+
+	for _, block := range function.Blocks {
+		for _, instruction := range block.Instructions {
+			switch op := instruction.Op.(type) {
+			case ConstOp:
+			case UnaryExpr:
+				checkValue(op.Operand)
+			case BinaryExpr:
+				checkValue(op.Left)
+				checkValue(op.Right)
+			case CallOp:
+				if _, exists := functionIDs[op.Callee]; !exists {
+					add(fmt.Sprintf("calls unknown function f%d", op.Callee))
+				}
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
+			case nil:
+				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
+			}
+		}
+		switch term := block.Terminator.(type) {
+		case ReturnTerm:
+			if term.Value != nil {
+				checkValue(*term.Value)
+			}
+		case JumpTerm:
+			checkBlock(term.Target)
+		case BranchTerm:
+			checkValue(term.Condition)
+			checkBlock(term.Then)
+			checkBlock(term.Else)
+		case nil:
+			add(fmt.Sprintf("block b%d has nil terminator", block.ID))
+		}
+	}
+	return errors
+}
