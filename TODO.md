@@ -39,7 +39,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Port semantic type and `Repr` separation.
 - [x] Define expressions, instructions, and terminators.
 - [x] Add HIR verifier.
-- [ ] Add deterministic textual HIR dump.
+- [x] Add deterministic textual HIR dump.
 - [ ] Lower the first typed function from TypeScript-LS semantic DTOs.
 
 ## Native representation / MIR
