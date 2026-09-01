@@ -41,6 +41,9 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_box_object(ptr)\ndeclare ptr @tsnative_jsvalue_box_function(ptr)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
+	b.WriteString("declare double @tsnative_jsvalue_sub(ptr, ptr)\ndeclare double @tsnative_jsvalue_mul(ptr, ptr)\ndeclare double @tsnative_jsvalue_div(ptr, ptr)\n")
+	b.WriteString("declare i8 @tsnative_jsvalue_lt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_le(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_gt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_ge(ptr, ptr)\n")
+	b.WriteString("declare i8 @tsnative_jsvalue_eq(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_ne(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_strict_eq(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_strict_ne(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
@@ -535,6 +538,35 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_add(ptr %s, ptr %s)\n", name, left, right)
+		values[inst.Result] = name
+		return nil
+	case mir.DynamicBinaryJSValue:
+		left, err := operand(values, op.Left)
+		if err != nil {
+			return err
+		}
+		right, err := operand(values, op.Right)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		floatFn := map[mir.DynamicJSBinaryOp]string{mir.DynamicJSSub: "tsnative_jsvalue_sub", mir.DynamicJSMul: "tsnative_jsvalue_mul", mir.DynamicJSDiv: "tsnative_jsvalue_div"}[op.Operator]
+		if floatFn != "" {
+			fmt.Fprintf(b, "  %s = call double @%s(ptr %s, ptr %s)\n", name, floatFn, left, right)
+			values[inst.Result] = name
+			return nil
+		}
+		boolFn := map[mir.DynamicJSBinaryOp]string{
+			mir.DynamicJSLessThan: "tsnative_jsvalue_lt", mir.DynamicJSLessEqual: "tsnative_jsvalue_le",
+			mir.DynamicJSGreaterThan: "tsnative_jsvalue_gt", mir.DynamicJSGreaterEqual: "tsnative_jsvalue_ge",
+			mir.DynamicJSEqual: "tsnative_jsvalue_eq", mir.DynamicJSNotEqual: "tsnative_jsvalue_ne",
+			mir.DynamicJSStrictEqual: "tsnative_jsvalue_strict_eq", mir.DynamicJSStrictNotEqual: "tsnative_jsvalue_strict_ne",
+		}[op.Operator]
+		if boolFn == "" {
+			return fmt.Errorf("unsupported dynamic JS binary operator %d", op.Operator)
+		}
+		fmt.Fprintf(b, "  %s.raw = call i8 @%s(ptr %s, ptr %s)\n", name, boolFn, left, right)
+		fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
 		values[inst.Result] = name
 		return nil
 	case mir.ProvenIntBinary:

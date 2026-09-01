@@ -219,6 +219,8 @@ const (
 	BinaryGreaterEqual
 	BinaryEqual
 	BinaryNotEqual
+	BinaryStrictEqual
+	BinaryStrictNotEqual
 )
 
 type Terminator interface {

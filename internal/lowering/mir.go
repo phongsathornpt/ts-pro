@@ -132,10 +132,21 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		}
 		result.Op = mir.BoxJSValue{Kind: kind, Value: mir.ValueID(op.Value)}
 	case hir.DynamicBinaryOp:
-		if op.Operator != hir.BinaryAdd {
+		if op.Operator == hir.BinaryAdd {
+			result.Op = mir.DynamicAddJSValue{Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
+			break
+		}
+		operator := map[hir.BinaryOperator]mir.DynamicJSBinaryOp{
+			hir.BinarySub: mir.DynamicJSSub, hir.BinaryMul: mir.DynamicJSMul, hir.BinaryDiv: mir.DynamicJSDiv,
+			hir.BinaryLessThan: mir.DynamicJSLessThan, hir.BinaryLessEqual: mir.DynamicJSLessEqual,
+			hir.BinaryGreaterThan: mir.DynamicJSGreaterThan, hir.BinaryGreaterEqual: mir.DynamicJSGreaterEqual,
+			hir.BinaryEqual: mir.DynamicJSEqual, hir.BinaryNotEqual: mir.DynamicJSNotEqual,
+			hir.BinaryStrictEqual: mir.DynamicJSStrictEqual, hir.BinaryStrictNotEqual: mir.DynamicJSStrictNotEqual,
+		}[op.Operator]
+		if operator == mir.DynamicJSInvalid {
 			return mir.Instruction{}, fmt.Errorf("unsupported dynamic binary operator %d", op.Operator)
 		}
-		result.Op = mir.DynamicAddJSValue{Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
+		result.Op = mir.DynamicBinaryJSValue{Operator: operator, Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
 	case hir.CallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {
@@ -247,6 +258,7 @@ func lowerMIRBinary(op hir.BinaryExpr, repr mir.Repr) (mir.Operation, error) {
 			hir.BinaryLessThan: mir.FloatLessThan, hir.BinaryLessEqual: mir.FloatLessEqual,
 			hir.BinaryGreaterThan: mir.FloatGreaterThan, hir.BinaryGreaterEqual: mir.FloatGreaterEqual,
 			hir.BinaryEqual: mir.FloatEqual, hir.BinaryNotEqual: mir.FloatNotEqual,
+			hir.BinaryStrictEqual: mir.FloatEqual, hir.BinaryStrictNotEqual: mir.FloatNotEqual,
 		}[op.Operator]
 		if operator == 0 {
 			return nil, fmt.Errorf("unsupported boolean binary operator %d", op.Operator)

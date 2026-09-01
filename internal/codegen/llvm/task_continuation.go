@@ -26,6 +26,7 @@ const (
 	taskStepStringConcat
 	taskStepBoxJSValue
 	taskStepDynamicAddJSValue
+	taskStepDynamicBinaryJSValue
 	taskStepArrayLengthF64
 	taskStepArrayGetF64
 	taskStepNativeOp
@@ -190,6 +191,13 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepDynamicAddJSValue, Result: inst.Result, Inst: inst})
+			case mir.DynamicBinaryJSValue:
+				if !available[op.Left] || !available[op.Right] || (inst.Repr != mir.ReprF64 && inst.Repr != mir.ReprBool) {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepDynamicBinaryJSValue, Result: inst.Result, Inst: inst})
 			case mir.ArrayLengthF64:
 				if !available[op.Array] || inst.Repr != mir.ReprF64 {
 					return nil
@@ -412,6 +420,14 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 			}
 			values[valueID] = value
 		}
+	case mir.DynamicBinaryJSValue:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
 	case mir.ArrayLengthF64:
 		value, _, err := continuationOperand(b, fn, descriptor, op.Array, suffix)
 		if err != nil {
@@ -596,7 +612,7 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			b.WriteString("  ret void\n")
 			continue
 		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare,
-			taskStepConstString, taskStepStringConcat, taskStepBoxJSValue, taskStepDynamicAddJSValue,
+			taskStepConstString, taskStepStringConcat, taskStepBoxJSValue, taskStepDynamicAddJSValue, taskStepDynamicBinaryJSValue,
 			taskStepArrayLengthF64, taskStepArrayGetF64, taskStepNativeOp:
 			if err := e.emitPureContinuationStep(b, descriptor, fn, step, fmt.Sprintf("p%d", i)); err != nil {
 				return err

@@ -145,6 +145,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Right); err != nil {
 					return err
 				}
+			case DynamicBinaryJSValue:
+				if op.Operator == DynamicJSInvalid {
+					return fmt.Errorf("dynamic binary v%d has invalid operator", inst.Result)
+				}
+				want := ReprBool
+				if op.Operator == DynamicJSSub || op.Operator == DynamicJSMul || op.Operator == DynamicJSDiv {
+					want = ReprF64
+				}
+				if inst.Repr != want {
+					return fmt.Errorf("dynamic binary v%d has repr %d; want %d", inst.Result, inst.Repr, want)
+				}
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
 			case Call:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("unknown callee f%d", op.Callee)

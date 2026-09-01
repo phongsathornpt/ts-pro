@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
+	"unicode/utf16"
 	"unsafe"
 )
 
@@ -104,6 +106,66 @@ func nativeJSStringLiteral(text string) unsafe.Pointer {
 	return tsnative_string_new(unsafe.Pointer(&bytes[0]), C.uint64_t(len(bytes)))
 }
 
+func nativeJSStringToNumber(raw unsafe.Pointer) float64 {
+	text := strings.TrimSpace(string(nativeStringBytes(raw)))
+	if text == "" {
+		return 0
+	}
+	switch text {
+	case "Infinity", "+Infinity":
+		return math.Inf(1)
+	case "-Infinity":
+		return math.Inf(-1)
+	}
+	if len(text) > 2 && text[0] == '0' {
+		base := 0
+		switch text[1] {
+		case 'x', 'X':
+			base = 16
+		case 'b', 'B':
+			base = 2
+		case 'o', 'O':
+			base = 8
+		}
+		if base != 0 {
+			n, err := strconv.ParseUint(text[2:], base, 64)
+			if err != nil {
+				return math.NaN()
+			}
+			return float64(n)
+		}
+	}
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return math.NaN()
+	}
+	return number
+}
+
+func nativeJSCompareUTF16(left, right unsafe.Pointer) int {
+	a := utf16.Encode([]rune(string(nativeStringBytes(left))))
+	b := utf16.Encode([]rune(string(nativeStringBytes(right))))
+	limit := len(a)
+	if len(b) < limit {
+		limit = len(b)
+	}
+	for i := 0; i < limit; i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return 0
+}
+
 func nativeJSNumberToString(number float64) unsafe.Pointer {
 	text := strconv.FormatFloat(number, 'g', 17, 64)
 	if len(text) == 0 {
@@ -143,6 +205,8 @@ func nativeJSToNumber(value *nativeJSValue) float64 {
 	switch value.tag {
 	case nativeJSTagNumber:
 		return nativeJSNumber(value)
+	case nativeJSTagString:
+		return nativeJSStringToNumber(nativeJSRef(value))
 	case nativeJSTagBoolean:
 		if nativeJSBool(value) {
 			return 1
@@ -158,6 +222,110 @@ func nativeJSToNumber(value *nativeJSValue) float64 {
 	}
 }
 
+func nativeJSRelationalCompare(left, right *nativeJSValue) (int, bool) {
+	if left == nil || right == nil {
+		C.abort()
+	}
+	if left.tag == nativeJSTagString && right.tag == nativeJSTagString {
+		return nativeJSCompareUTF16(nativeJSRef(left), nativeJSRef(right)), true
+	}
+	a, b := nativeJSToNumber(left), nativeJSToNumber(right)
+	if math.IsNaN(a) || math.IsNaN(b) {
+		return 0, false
+	}
+	if a < b {
+		return -1, true
+	}
+	if a > b {
+		return 1, true
+	}
+	return 0, true
+}
+
+func nativeJSStrictEqual(left, right *nativeJSValue) bool {
+	if left == nil || right == nil || left.tag != right.tag {
+		return false
+	}
+	switch left.tag {
+	case nativeJSTagNumber:
+		a, b := nativeJSNumber(left), nativeJSNumber(right)
+		return !math.IsNaN(a) && !math.IsNaN(b) && a == b
+	case nativeJSTagString:
+		return string(nativeStringBytes(nativeJSRef(left))) == string(nativeStringBytes(nativeJSRef(right)))
+	case nativeJSTagBoolean:
+		return nativeJSBool(left) == nativeJSBool(right)
+	case nativeJSTagNull, nativeJSTagUndefined:
+		return true
+	case nativeJSTagObject, nativeJSTagFunction:
+		return nativeJSRef(left) == nativeJSRef(right)
+	default:
+		return false
+	}
+}
+
+func nativeJSEqualNumber(number float64, other *nativeJSValue) bool {
+	if math.IsNaN(number) || other == nil {
+		return false
+	}
+	switch other.tag {
+	case nativeJSTagNumber:
+		value := nativeJSNumber(other)
+		return !math.IsNaN(value) && number == value
+	case nativeJSTagString:
+		value := nativeJSStringToNumber(nativeJSRef(other))
+		return !math.IsNaN(value) && number == value
+	case nativeJSTagBoolean:
+		if nativeJSBool(other) {
+			return number == 1
+		}
+		return number == 0
+	case nativeJSTagNull, nativeJSTagUndefined:
+		return false
+	case nativeJSTagObject, nativeJSTagFunction:
+		C.abort()
+	}
+	return false
+}
+
+func nativeJSLooseEqual(left, right *nativeJSValue) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	if left.tag == right.tag {
+		return nativeJSStrictEqual(left, right)
+	}
+	if (left.tag == nativeJSTagNull && right.tag == nativeJSTagUndefined) || (left.tag == nativeJSTagUndefined && right.tag == nativeJSTagNull) {
+		return true
+	}
+	if left.tag == nativeJSTagNumber {
+		return nativeJSEqualNumber(nativeJSNumber(left), right)
+	}
+	if right.tag == nativeJSTagNumber {
+		return nativeJSEqualNumber(nativeJSNumber(right), left)
+	}
+	if left.tag == nativeJSTagBoolean {
+		n := 0.0
+		if nativeJSBool(left) {
+			n = 1
+		}
+		return nativeJSEqualNumber(n, right)
+	}
+	if right.tag == nativeJSTagBoolean {
+		n := 0.0
+		if nativeJSBool(right) {
+			n = 1
+		}
+		return nativeJSEqualNumber(n, left)
+	}
+	if left.tag == nativeJSTagString && right.tag == nativeJSTagString {
+		return nativeJSStrictEqual(left, right)
+	}
+	if left.tag == nativeJSTagObject || left.tag == nativeJSTagFunction || right.tag == nativeJSTagObject || right.tag == nativeJSTagFunction {
+		C.abort()
+	}
+	return false
+}
+
 //export tsnative_jsvalue_add
 func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 	left := (*nativeJSValue)(leftRaw)
@@ -170,6 +338,72 @@ func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 		return tsnative_jsvalue_box_string(combined)
 	}
 	return tsnative_jsvalue_box_f64(C.double(nativeJSToNumber(left) + nativeJSToNumber(right)))
+}
+
+//export tsnative_jsvalue_sub
+func tsnative_jsvalue_sub(leftRaw, rightRaw unsafe.Pointer) C.double {
+	return C.double(nativeJSToNumber((*nativeJSValue)(leftRaw)) - nativeJSToNumber((*nativeJSValue)(rightRaw)))
+}
+
+//export tsnative_jsvalue_mul
+func tsnative_jsvalue_mul(leftRaw, rightRaw unsafe.Pointer) C.double {
+	return C.double(nativeJSToNumber((*nativeJSValue)(leftRaw)) * nativeJSToNumber((*nativeJSValue)(rightRaw)))
+}
+
+//export tsnative_jsvalue_div
+func tsnative_jsvalue_div(leftRaw, rightRaw unsafe.Pointer) C.double {
+	return C.double(nativeJSToNumber((*nativeJSValue)(leftRaw)) / nativeJSToNumber((*nativeJSValue)(rightRaw)))
+}
+
+func nativeJSBoolResult(value bool) C.uint8_t {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+//export tsnative_jsvalue_lt
+func tsnative_jsvalue_lt(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
+	return nativeJSBoolResult(ok && cmp < 0)
+}
+
+//export tsnative_jsvalue_le
+func tsnative_jsvalue_le(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
+	return nativeJSBoolResult(ok && cmp <= 0)
+}
+
+//export tsnative_jsvalue_gt
+func tsnative_jsvalue_gt(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
+	return nativeJSBoolResult(ok && cmp > 0)
+}
+
+//export tsnative_jsvalue_ge
+func tsnative_jsvalue_ge(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
+	return nativeJSBoolResult(ok && cmp >= 0)
+}
+
+//export tsnative_jsvalue_eq
+func tsnative_jsvalue_eq(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	return nativeJSBoolResult(nativeJSLooseEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
+}
+
+//export tsnative_jsvalue_ne
+func tsnative_jsvalue_ne(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	return nativeJSBoolResult(!nativeJSLooseEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
+}
+
+//export tsnative_jsvalue_strict_eq
+func tsnative_jsvalue_strict_eq(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	return nativeJSBoolResult(nativeJSStrictEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
+}
+
+//export tsnative_jsvalue_strict_ne
+func tsnative_jsvalue_strict_ne(leftRaw, rightRaw unsafe.Pointer) C.uint8_t {
+	return nativeJSBoolResult(!nativeJSStrictEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
 }
 
 //export tsnative_console_log_jsvalue

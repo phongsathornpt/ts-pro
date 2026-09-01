@@ -53,6 +53,8 @@ const (
 	BinaryGreaterEqual
 	BinaryEqual
 	BinaryNotEqual
+	BinaryStrictEqual
+	BinaryStrictNotEqual
 )
 
 type DispatchTarget struct {

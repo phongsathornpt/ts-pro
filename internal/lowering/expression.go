@@ -226,18 +226,32 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 		op = hir.BinaryEqual
 	case frontend.BinaryNotEqual:
 		op = hir.BinaryNotEqual
+	case frontend.BinaryStrictEqual:
+		op = hir.BinaryStrictEqual
+	case frontend.BinaryStrictNotEqual:
+		op = hir.BinaryStrictNotEqual
 	default:
 		return 0, fmt.Errorf("unsupported semantic binary operator %d", expr.Operator)
 	}
-	if int(expr.Type) < len(f.module.source.Types) && f.module.source.Types[expr.Type].Kind == frontend.TypeAny {
-		if op != hir.BinaryAdd {
-			return 0, fmt.Errorf("dynamic any binary operator %d is not supported yet", expr.Operator)
+	dynamicType := frontend.TypeID(0)
+	dynamic := false
+	for _, operand := range []*frontend.Expr{expr.Left, expr.Right} {
+		if operand == nil || int(operand.Type) >= len(f.module.source.Types) {
+			continue
 		}
-		left, err := f.lowerExprAs(expr.Left, expr.Type)
+		kind := f.module.source.Types[operand.Type].Kind
+		if kind == frontend.TypeAny || kind == frontend.TypeUnion {
+			dynamicType = operand.Type
+			dynamic = true
+			break
+		}
+	}
+	if dynamic {
+		left, err := f.lowerExprAs(expr.Left, dynamicType)
 		if err != nil {
 			return 0, err
 		}
-		right, err := f.lowerExprAs(expr.Right, expr.Type)
+		right, err := f.lowerExprAs(expr.Right, dynamicType)
 		if err != nil {
 			return 0, err
 		}

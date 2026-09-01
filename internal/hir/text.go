@@ -193,7 +193,7 @@ func formatUnary(op UnaryOperator) string {
 }
 
 func formatBinary(op BinaryOperator) string {
-	names := map[BinaryOperator]string{BinaryAdd: "add", BinarySub: "sub", BinaryMul: "mul", BinaryDiv: "div", BinaryLessThan: "lt", BinaryLessEqual: "le", BinaryGreaterThan: "gt", BinaryGreaterEqual: "ge", BinaryEqual: "eq", BinaryNotEqual: "ne"}
+	names := map[BinaryOperator]string{BinaryAdd: "add", BinarySub: "sub", BinaryMul: "mul", BinaryDiv: "div", BinaryLessThan: "lt", BinaryLessEqual: "le", BinaryGreaterThan: "gt", BinaryGreaterEqual: "ge", BinaryEqual: "eq", BinaryNotEqual: "ne", BinaryStrictEqual: "seq", BinaryStrictNotEqual: "sne"}
 	if name, ok := names[op]; ok {
 		return name
 	}

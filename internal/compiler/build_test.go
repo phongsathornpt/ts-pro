@@ -797,3 +797,57 @@ func TestBuildNativeTaggedUnionBoundary(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeDynamicPrimitiveOperators(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-ops")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_ops.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.RuntimeCalls < 12 {
+		t.Fatalf("runtime calls = %d", result.Metrics.RuntimeCalls)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic ops: %v: %s", err, got)
+	}
+	want := "5\n42\n12\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\ntrue"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestBuildNativeAsyncDynamicOperatorSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "async-dynamic-ops")
+	_, err = Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_async_dynamic_ops.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run async dynamic ops: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42" {
+		t.Fatalf("output = %q", got)
+	}
+}

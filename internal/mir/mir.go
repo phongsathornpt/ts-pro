@@ -153,6 +153,29 @@ type DynamicAddJSValue struct {
 	Right ValueID
 }
 
+type DynamicJSBinaryOp uint8
+
+const (
+	DynamicJSInvalid DynamicJSBinaryOp = iota
+	DynamicJSSub
+	DynamicJSMul
+	DynamicJSDiv
+	DynamicJSLessThan
+	DynamicJSLessEqual
+	DynamicJSGreaterThan
+	DynamicJSGreaterEqual
+	DynamicJSEqual
+	DynamicJSNotEqual
+	DynamicJSStrictEqual
+	DynamicJSStrictNotEqual
+)
+
+type DynamicBinaryJSValue struct {
+	Operator DynamicJSBinaryOp
+	Left     ValueID
+	Right    ValueID
+}
+
 type Call struct {
 	Callee FunctionID
 	Args   []ValueID
@@ -232,39 +255,40 @@ type ChannelSendF64 struct{ Channel, Value ValueID }
 type ChannelRecvF64 struct{ Channel ValueID }
 type Sleep struct{ Duration ValueID }
 
-func (ConstJSValue) isOperation()        {}
-func (ConstBool) isOperation()           {}
-func (ConstF64) isOperation()            {}
-func (ConstString) isOperation()         {}
-func (StringConcat) isOperation()        {}
-func (FloatBinary) isOperation()         {}
-func (ProvenIntBinary) isOperation()     {}
-func (FloatCompare) isOperation()        {}
-func (Call) isOperation()                {}
-func (DispatchCall) isOperation()        {}
-func (IntrinsicCall) isOperation()       {}
-func (Phi) isOperation()                 {}
-func (ArrayNewF64) isOperation()         {}
-func (ArrayLengthF64) isOperation()      {}
-func (ArrayGetF64) isOperation()         {}
-func (ArraySetF64) isOperation()         {}
-func (ObjectNew) isOperation()           {}
-func (ObjectAlloc) isOperation()         {}
-func (FieldSet) isOperation()            {}
-func (FieldGet) isOperation()            {}
-func (ClosureNew) isOperation()          {}
-func (ClosureCall) isOperation()         {}
-func (TaskSpawn) isOperation()           {}
-func (TaskJoin) isOperation()            {}
-func (TaskYield) isOperation()           {}
-func (ChannelNewF64) isOperation()       {}
-func (ChannelTrySendF64) isOperation()   {}
-func (ChannelTryRecvOrF64) isOperation() {}
-func (ChannelSendF64) isOperation()      {}
-func (ChannelRecvF64) isOperation()      {}
-func (Sleep) isOperation()               {}
-func (BoxJSValue) isOperation()          {}
-func (DynamicAddJSValue) isOperation()   {}
+func (ConstJSValue) isOperation()         {}
+func (ConstBool) isOperation()            {}
+func (ConstF64) isOperation()             {}
+func (ConstString) isOperation()          {}
+func (StringConcat) isOperation()         {}
+func (FloatBinary) isOperation()          {}
+func (ProvenIntBinary) isOperation()      {}
+func (FloatCompare) isOperation()         {}
+func (Call) isOperation()                 {}
+func (DispatchCall) isOperation()         {}
+func (IntrinsicCall) isOperation()        {}
+func (Phi) isOperation()                  {}
+func (ArrayNewF64) isOperation()          {}
+func (ArrayLengthF64) isOperation()       {}
+func (ArrayGetF64) isOperation()          {}
+func (ArraySetF64) isOperation()          {}
+func (ObjectNew) isOperation()            {}
+func (ObjectAlloc) isOperation()          {}
+func (FieldSet) isOperation()             {}
+func (FieldGet) isOperation()             {}
+func (ClosureNew) isOperation()           {}
+func (ClosureCall) isOperation()          {}
+func (TaskSpawn) isOperation()            {}
+func (TaskJoin) isOperation()             {}
+func (TaskYield) isOperation()            {}
+func (ChannelNewF64) isOperation()        {}
+func (ChannelTrySendF64) isOperation()    {}
+func (ChannelTryRecvOrF64) isOperation()  {}
+func (ChannelSendF64) isOperation()       {}
+func (ChannelRecvF64) isOperation()       {}
+func (Sleep) isOperation()                {}
+func (BoxJSValue) isOperation()           {}
+func (DynamicAddJSValue) isOperation()    {}
+func (DynamicBinaryJSValue) isOperation() {}
 
 type Terminator interface{ isTerminator() }
 
