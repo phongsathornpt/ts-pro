@@ -37,25 +37,29 @@ type nativeRootFrame struct {
 
 var nativeHeap = struct {
 	sync.Mutex
-	blocks       map[uintptr]*nativeHeapBlock
-	roots        map[uintptr]*nativeRootFrame
-	threadStacks map[int][]uintptr
-	tokenPages   [][]byte
-	tokenFree    []unsafe.Pointer
-	allocators   map[int]*nativeWorkerAllocator
-	spans        map[*nativeHeapSpan]struct{}
-	freeSpans    [nativeSizeClassCount][]*nativeHeapSpan
-	bytes        uintptr
-	allocations  uintptr
-	collections  uintptr
-	threshold    uintptr
-	handoffs     uintptr
+	blocks        map[uintptr]*nativeHeapBlock
+	roots         map[uintptr]*nativeRootFrame
+	threadStacks  map[int][]uintptr
+	tokenPages    [][]byte
+	tokenFree     []unsafe.Pointer
+	allocators    map[int]*nativeWorkerAllocator
+	spans         map[*nativeHeapSpan]struct{}
+	spanPages     map[uintptr]*nativeHeapSpan
+	freeSpans     [nativeSizeClassCount][]*nativeHeapSpan
+	remoteFrees   uint64
+	spanTransfers uint64
+	bytes         uintptr
+	allocations   uintptr
+	collections   uintptr
+	threshold     uintptr
+	handoffs      uintptr
 }{
 	blocks:       map[uintptr]*nativeHeapBlock{},
 	roots:        map[uintptr]*nativeRootFrame{},
 	threadStacks: map[int][]uintptr{},
 	allocators:   map[int]*nativeWorkerAllocator{},
 	spans:        map[*nativeHeapSpan]struct{}{},
+	spanPages:    map[uintptr]*nativeHeapSpan{},
 	threshold:    initialGCThreshold,
 }
 
@@ -239,6 +243,17 @@ func markCandidateLocked(candidate uintptr) {
 		return
 	}
 	block := nativeHeap.blocks[candidate]
+	if block == nil {
+		if span := nativeHeapSpanForPointerLocked(candidate); span != nil {
+			base := uintptr(span.base)
+			end := base + uintptr(len(span.data))
+			if candidate >= base && candidate < end {
+				offset := candidate - base
+				slotBase := base + (offset/span.classSize)*span.classSize
+				block = nativeHeap.blocks[slotBase]
+			}
+		}
+	}
 	if block == nil || block.marked {
 		return
 	}
@@ -384,11 +399,14 @@ func tsnative_heap_shutdown() {
 	nativeHeap.roots = map[uintptr]*nativeRootFrame{}
 	nativeHeap.threadStacks = map[int][]uintptr{}
 	nativeHeap.allocators = map[int]*nativeWorkerAllocator{}
+	nativeHeap.remoteFrees = 0
+	nativeHeap.spanTransfers = 0
 	spans := make([]*nativeHeapSpan, 0, len(nativeHeap.spans))
 	for span := range nativeHeap.spans {
 		spans = append(spans, span)
 	}
 	nativeHeap.spans = map[*nativeHeapSpan]struct{}{}
+	nativeHeap.spanPages = map[uintptr]*nativeHeapSpan{}
 	nativeHeap.freeSpans = [nativeSizeClassCount][]*nativeHeapSpan{}
 	tokenPages := nativeHeap.tokenPages
 	nativeHeap.tokenPages = nil

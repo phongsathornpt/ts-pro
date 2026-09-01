@@ -1,6 +1,9 @@
 package main
 
-import "unsafe"
+import (
+	"os"
+	"unsafe"
+)
 
 const (
 	nativeSizeClassCount        = 8
@@ -10,6 +13,7 @@ const (
 )
 
 var nativeSizeClasses = [nativeSizeClassCount]uintptr{16, 32, 64, 128, 256, 512, 1024, 2048}
+var nativeAllocatorPageSize = uintptr(os.Getpagesize())
 
 type nativeHeapSpan struct {
 	data       []byte
@@ -71,7 +75,30 @@ func newNativeHeapSpanLocked(classIndex, owner int) *nativeHeapSpan {
 		capacity:   uint32(uintptr(len(data)) / classSize),
 	}
 	nativeHeap.spans[span] = struct{}{}
+	registerNativeSpanPagesLocked(span)
 	return span
+}
+
+func nativeAllocatorPageBase(address uintptr) uintptr {
+	return address &^ (nativeAllocatorPageSize - 1)
+}
+
+func registerNativeSpanPagesLocked(span *nativeHeapSpan) {
+	base := uintptr(span.base)
+	for offset := uintptr(0); offset < uintptr(len(span.data)); offset += nativeAllocatorPageSize {
+		nativeHeap.spanPages[nativeAllocatorPageBase(base+offset)] = span
+	}
+}
+
+func unregisterNativeSpanPagesLocked(span *nativeHeapSpan) {
+	base := uintptr(span.base)
+	for offset := uintptr(0); offset < uintptr(len(span.data)); offset += nativeAllocatorPageSize {
+		delete(nativeHeap.spanPages, nativeAllocatorPageBase(base+offset))
+	}
+}
+
+func nativeHeapSpanForPointerLocked(pointer uintptr) *nativeHeapSpan {
+	return nativeHeap.spanPages[nativeAllocatorPageBase(pointer)]
 }
 
 func nativeSpanHasSpace(span *nativeHeapSpan) bool {
@@ -88,6 +115,9 @@ func takeReusableNativeSpanLocked(classIndex, owner int) *nativeHeapSpan {
 		nativeHeap.freeSpans[classIndex] = spans
 		span.listed = false
 		if nativeSpanHasSpace(span) {
+			if span.owner != owner {
+				nativeHeap.spanTransfers++
+			}
 			span.owner = owner
 			return span
 		}
@@ -171,6 +201,9 @@ func releaseNativeHeapBlockStorageLocked(block *nativeHeapBlock) []byte {
 		return nil
 	}
 	span.live--
+	if owner := nativeAllocatorOwner(); span.owner >= 0 && owner != span.owner {
+		nativeHeap.remoteFrees++
+	}
 	span.free = append(span.free, block.slot)
 
 	if !nativeSpanIsActiveLocked(span) && !span.listed {
@@ -182,6 +215,7 @@ func releaseNativeHeapBlockStorageLocked(block *nativeHeapBlock) []byte {
 	if span.live == 0 && span.listed && len(cache) > nativeFreeSpanCachePerClass {
 		removeReusableNativeSpanLocked(span)
 		delete(nativeHeap.spans, span)
+		unregisterNativeSpanPagesLocked(span)
 		data := span.data
 		span.data = nil
 		span.base = nil
@@ -198,4 +232,18 @@ func releaseNativeHeapBlockStorage(block *nativeHeapBlock) []byte {
 	data := releaseNativeHeapBlockStorageLocked(block)
 	nativeHeap.Unlock()
 	return data
+}
+
+func nativeAllocatorRemoteFrees() uint64 {
+	nativeHeap.Lock()
+	value := nativeHeap.remoteFrees
+	nativeHeap.Unlock()
+	return value
+}
+
+func nativeAllocatorSpanTransfers() uint64 {
+	nativeHeap.Lock()
+	value := nativeHeap.spanTransfers
+	nativeHeap.Unlock()
+	return value
 }

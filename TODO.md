@@ -148,8 +148,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Keep task state/result/context/failure references rooted for the complete task lifetime; reference-channel buffered/queued values own persistent roots, while timer waiters retain opaque task handles whose task state remains rooted.
   - [x] Add deferred heap-threshold GC requests and retry collection at scheduler task-return, wait, park, and execution-budget safepoints; collection waits until foreign native root stacks are quiescent or the only active stack is the paused current thread.
 - [~] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
-  - [x] Add bounded worker-local recycled native heap blocks by size class; finalizer-bearing blocks remain directly reclaimed.
-  - [ ] Add bump-pointer nurseries and precise size-class/page metadata before local mark-page work.
+  - [x] Add worker-owned size-class spans with bump-pointer slots, zeroed slot reuse, bounded recycled-span caching, and finalizer-safe recycling.
+  - [x] Add page-to-span metadata for interior-pointer resolution plus remote-free and reusable-span ownership-transfer accounting.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.

@@ -258,3 +258,127 @@ func TestWorkerAllocatorsUseDistinctActiveSpans(t *testing.T) {
 		t.Fatalf("worker spans not isolated: worker0=%+v worker1=%+v", span0, span1)
 	}
 }
+
+func TestHeapShutdownFinalizesBufferedReferenceChannelRoots(t *testing.T) {
+	tsnative_heap_shutdown()
+
+	channel := newNativeRefChannel(1)
+	payload := tsnative_heap_alloc(16)
+	if tsnative_channel_ref_try_send(channel, payload) != 1 {
+		t.Fatal("reference channel send failed")
+	}
+
+	tsnative_heap_shutdown()
+	if lookupNativeRefChannel(channel) != nil {
+		t.Fatal("reference channel state survived heap shutdown")
+	}
+	nativeHeap.Lock()
+	rootCount := len(nativeHeap.roots)
+	spanCount := len(nativeHeap.spans)
+	nativeHeap.Unlock()
+	if rootCount != 0 || spanCount != 0 {
+		t.Fatalf("heap shutdown leaked roots/spans: roots=%d spans=%d", rootCount, spanCount)
+	}
+}
+
+func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	schedulerSetThread(0, 0)
+	for index := uint32(0); index <= uint32(nativeSpanSize/2048); index++ {
+		if raw := tsnative_heap_alloc(2048); raw == nil {
+			t.Fatalf("allocation %d failed", index)
+		}
+	}
+
+	nativeHeap.Lock()
+	var pageSpan *nativeHeapSpan
+	for span := range nativeHeap.spans {
+		if span.classIndex == nativeSizeClassCount-1 && span.owner == 0 && span.next == span.capacity {
+			pageSpan = span
+			break
+		}
+	}
+	if pageSpan == nil {
+		nativeHeap.Unlock()
+		t.Fatal("worker 0 did not create a 2 KiB span")
+	}
+	if got := nativeHeapSpanForPointerLocked(uintptr(pageSpan.base)); got != pageSpan {
+		nativeHeap.Unlock()
+		t.Fatal("span page metadata did not resolve its base pointer")
+	}
+	transfersBefore := nativeHeap.spanTransfers
+	remoteFreesBefore := nativeHeap.remoteFrees
+	nativeHeap.Unlock()
+
+	schedulerSetThread(1, 0)
+	tsnative_gc_collect()
+	_ = tsnative_heap_alloc(2048)
+
+	nativeHeap.Lock()
+	transfersAfter := nativeHeap.spanTransfers
+	remoteFreesAfter := nativeHeap.remoteFrees
+	owner := pageSpan.owner
+	nativeHeap.Unlock()
+	if remoteFreesAfter <= remoteFreesBefore {
+		t.Fatalf("remote span reclamation was not counted: before=%d after=%d", remoteFreesBefore, remoteFreesAfter)
+	}
+	if transfersAfter <= transfersBefore || owner != 1 {
+		t.Fatalf("span reuse was not transferred to worker 1: before=%d after=%d owner=%d", transfersBefore, transfersAfter, owner)
+	}
+}
+
+func TestHeapPageMetadataKeepsInteriorPointerAlive(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	raw := tsnative_heap_alloc(32)
+	if raw == nil {
+		t.Fatal("allocation failed")
+	}
+	interior := unsafe.Add(raw, 7)
+	root := tsnative_gc_root_register(unsafe.Pointer(&interior))
+	if root == nil {
+		t.Fatal("interior root registration failed")
+	}
+	tsnative_gc_collect()
+	if !nativeHeapContains(raw) {
+		t.Fatal("page metadata failed to resolve interior pointer")
+	}
+	tsnative_gc_root_unregister(root)
+	tsnative_gc_collect()
+	if nativeHeapContains(raw) {
+		t.Fatal("allocation survived after interior root release")
+	}
+}
+
+func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	schedulerSetThread(0, 0)
+	classIndex := nativeSizeClassIndex(32)
+	capacity := int(nativeSpanSize / nativeSizeClasses[classIndex])
+	for i := 0; i <= capacity; i++ {
+		if tsnative_heap_alloc(32) == nil {
+			t.Fatalf("allocation %d failed", i)
+		}
+	}
+
+	schedulerSetThread(1, 0)
+	tsnative_gc_collect()
+	if got := nativeAllocatorRemoteFrees(); got == 0 {
+		t.Fatal("cross-worker collection recorded no remote frees")
+	}
+	before := nativeAllocatorSpanTransfers()
+	if tsnative_heap_alloc(32) == nil {
+		t.Fatal("worker 1 allocation failed")
+	}
+	if got := nativeAllocatorSpanTransfers(); got <= before {
+		t.Fatalf("span transfer count = %d, want > %d", got, before)
+	}
+	schedulerSetThread(-1, 0)
+}
