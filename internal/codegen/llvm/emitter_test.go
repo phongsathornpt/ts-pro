@@ -639,8 +639,9 @@ func TestEmitStacklessLoopPhiContinuation(t *testing.T) {
 		"store double 0.000000e+00, ptr %spill0.ptr",
 		"store double 0.000000e+00, ptr %spill1.ptr",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
-		"store double %spill.3.j6.phi0, ptr %spill0.ptr",
-		"store double %spill.4.j6.phi1, ptr %spill1.ptr",
+		"call i32 @tsnative_task_budget_poll_task()",
+		"store double %spill.3.j7.phi0, ptr %spill0.ptr",
+		"store double %spill.4.j7.phi1, ptr %spill1.ptr",
 		"br label %step1",
 	} {
 		if !strings.Contains(text, want) {

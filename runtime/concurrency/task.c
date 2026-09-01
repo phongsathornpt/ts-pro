@@ -26,6 +26,7 @@ static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, ts
   task->entry = entry;
   task->state = state;
   task->result_kind = kind;
+  atomic_store_explicit(&task->budget_remaining, 256u, memory_order_relaxed);
   task->destroy_completed = destroy_task_storage;
   if (kind == TSNATIVE_TASK_RESULT_F64) task->transfer_completion = transfer_f64;
   else if (kind == TSNATIVE_TASK_RESULT_BOOL) task->transfer_completion = transfer_bool;
@@ -224,6 +225,15 @@ int tsnative_task_is_cancelled(void) {
   tsnative_task *task = tsnative_scheduler_current_task();
   if (!task) return 0;
   return atomic_load_explicit(&task->cancel_requested, memory_order_acquire) ? 1 : 0;
+}
+
+int tsnative_task_budget_poll_task(void) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) return 1;
+  uint32_t previous = atomic_fetch_sub_explicit(&task->budget_remaining, 1u, memory_order_relaxed);
+  if (previous > 1u) return 1;
+  atomic_store_explicit(&task->budget_remaining, 256u, memory_order_relaxed);
+  return tsnative_task_yield_task() == 0 ? 0 : -1;
 }
 
 int tsnative_task_yield_task(void) {

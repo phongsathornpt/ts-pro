@@ -128,7 +128,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
-  - [ ] Inject bounded execution-budget polls at proven loop backedges/function safepoints and requeue when the budget expires.
+  - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.
 - [ ] Stress-test 1/100/10k/100k tasks, CPU fan-out, channel contention, cancellation, GC churn, and blocking calls.
 
 ## Remaining native language/runtime coverage

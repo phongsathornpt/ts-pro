@@ -19,6 +19,7 @@ const (
 	taskSuspendRecvRef
 	taskSuspendSleep
 	taskSuspendYield
+	taskSuspendBudgetPoll
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
 	taskSuspendAwaitRef
@@ -373,6 +374,10 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			}
 			cont.Steps = append(cont.Steps, step)
 		case mir.Jump:
+			if term.Target <= block.ID {
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendBudgetPoll})
+			}
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepJump, Target: term.Target, Block: block.ID})
 		case mir.Branch:
 			if !available[term.Condition] {
@@ -691,6 +696,8 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 				return fmt.Errorf("task continuation sleep duration must be F64")
 			}
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_sleep_task(double %s)\n", i, duration)
+		case taskSuspendBudgetPoll:
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_budget_poll_task()\n", i)
 		case taskSuspendYield:
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_yield_task()\n", i)
 		case taskSuspendSendF64:
