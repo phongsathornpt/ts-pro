@@ -55,6 +55,13 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare i32 @tsnative_channel_f64_send_task(ptr, double)\n")
 	b.WriteString("declare double @tsnative_channel_f64_recv_cooperative(ptr)\n")
 	b.WriteString("declare i32 @tsnative_channel_f64_recv_task(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_channel_bool_new_checked(double)\n")
+	b.WriteString("declare i32 @tsnative_channel_bool_try_send(ptr, i8)\n")
+	b.WriteString("declare i8 @tsnative_channel_bool_try_recv_or(ptr, i8)\n")
+	b.WriteString("declare void @tsnative_channel_bool_send_cooperative(ptr, i8)\n")
+	b.WriteString("declare i32 @tsnative_channel_bool_send_task(ptr, i8)\n")
+	b.WriteString("declare i8 @tsnative_channel_bool_recv_cooperative(ptr)\n")
+	b.WriteString("declare i32 @tsnative_channel_bool_recv_task(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_channel_ref_new_checked(double)\n")
 	b.WriteString("declare i32 @tsnative_channel_ref_try_send(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_channel_ref_try_recv_or(ptr, ptr)\n")
@@ -447,6 +454,68 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call double @tsnative_channel_f64_recv_cooperative(ptr %s)\n", name, channel)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelNewBool:
+		capacity, err := operand(values, op.Capacity)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_channel_bool_new_checked(double %s)\n", name, capacity)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTrySendBool:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.value = zext i1 %s to i8\n", name, value)
+		fmt.Fprintf(b, "  %s.raw = call i32 @tsnative_channel_bool_try_send(ptr %s, i8 %s.value)\n", name, channel, name)
+		fmt.Fprintf(b, "  %s = icmp eq i32 %s.raw, 1\n", name, name)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTryRecvOrBool:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		fallback, err := operand(values, op.Fallback)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.fallback = zext i1 %s to i8\n", name, fallback)
+		fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_channel_bool_try_recv_or(ptr %s, i8 %s.fallback)\n", name, channel, name)
+		fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelSendBool:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		tmp := valueName(inst.Result) + ".value"
+		fmt.Fprintf(b, "  %s = zext i1 %s to i8\n", tmp, value)
+		fmt.Fprintf(b, "  call void @tsnative_channel_bool_send_cooperative(ptr %s, i8 %s)\n", channel, tmp)
+		return nil
+	case mir.ChannelRecvBool:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_channel_bool_recv_cooperative(ptr %s)\n", name, channel)
+		fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
 		values[inst.Result] = name
 		return nil
 	case mir.ChannelNewRef:

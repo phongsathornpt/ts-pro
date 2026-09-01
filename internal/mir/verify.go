@@ -390,6 +390,50 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Channel); err != nil {
 					return err
 				}
+			case ChannelNewBool:
+				if inst.Repr != ReprChannelRef {
+					return fmt.Errorf("boolean channel new v%d must produce ChannelRef", inst.Result)
+				}
+				if err := checkValue(op.Capacity); err != nil {
+					return err
+				}
+			case ChannelTrySendBool:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("boolean channel try send v%d must produce Bool", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ChannelTryRecvOrBool:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("boolean channel try recv v%d must produce Bool", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Fallback); err != nil {
+					return err
+				}
+			case ChannelSendBool:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("boolean channel send v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ChannelRecvBool:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("boolean channel recv v%d must produce Bool", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
 			case ChannelNewRef:
 				if inst.Repr != ReprChannelRef {
 					return fmt.Errorf("reference channel new v%d must produce ChannelRef", inst.Result)

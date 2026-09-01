@@ -269,6 +269,11 @@ type ChannelTrySendF64 struct{ Channel, Value ValueID }
 type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
 type ChannelSendF64 struct{ Channel, Value ValueID }
 type ChannelRecvF64 struct{ Channel ValueID }
+type ChannelNewBool struct{ Capacity ValueID }
+type ChannelTrySendBool struct{ Channel, Value ValueID }
+type ChannelTryRecvOrBool struct{ Channel, Fallback ValueID }
+type ChannelSendBool struct{ Channel, Value ValueID }
+type ChannelRecvBool struct{ Channel ValueID }
 type ChannelNewRef struct{ Capacity ValueID }
 type ChannelTrySendRef struct{ Channel, Value ValueID }
 type ChannelTryRecvOrRef struct{ Channel, Fallback ValueID }
@@ -306,6 +311,11 @@ func (ChannelTrySendF64) isOperation()    {}
 func (ChannelTryRecvOrF64) isOperation()  {}
 func (ChannelSendF64) isOperation()       {}
 func (ChannelRecvF64) isOperation()       {}
+func (ChannelNewBool) isOperation()       {}
+func (ChannelTrySendBool) isOperation()   {}
+func (ChannelTryRecvOrBool) isOperation() {}
+func (ChannelSendBool) isOperation()      {}
+func (ChannelRecvBool) isOperation()      {}
 func (ChannelNewRef) isOperation()        {}
 func (ChannelTrySendRef) isOperation()    {}
 func (ChannelTryRecvOrRef) isOperation()  {}

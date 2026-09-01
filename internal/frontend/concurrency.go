@@ -153,7 +153,7 @@ func (e *extractor) channelElement(typeID TypeID) (TypeID, TypeKind, bool) {
 	}
 	kind := e.result.Types[typ.Element].Kind
 	switch kind {
-	case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
+	case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
 		return typ.Element, kind, true
 	default:
 		return typ.Element, kind, false

@@ -18,7 +18,7 @@ func taskTargetHasSuspension(fn mir.Function) bool {
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			switch inst.Op.(type) {
-			case mir.TaskJoin, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
+			case mir.TaskJoin, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 				return true
 			}
 		}

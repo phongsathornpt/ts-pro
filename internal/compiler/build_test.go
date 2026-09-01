@@ -908,3 +908,32 @@ func TestBuildNativeReferenceChannelSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeBooleanChannelSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "channel-bool")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_channel_bool_blocking.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.ChannelCreates != 1 || result.Metrics.ChannelSends != 1 || result.Metrics.ChannelRecvs != 1 {
+		t.Fatalf("channel metrics = %d/%d/%d", result.Metrics.ChannelCreates, result.Metrics.ChannelSends, result.Metrics.ChannelRecvs)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run boolean channel: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "1" {
+		t.Fatalf("output = %q", got)
+	}
+}

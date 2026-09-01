@@ -1114,7 +1114,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			return 0, elementErr
 		}
 		switch e.result.Types[elementID].Kind {
-		case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined, TypeParameter:
+		case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined, TypeParameter:
 		default:
 			return 0, fmt.Errorf("native channel element type %q is not supported yet", e.result.Types[elementID].Name)
 		}

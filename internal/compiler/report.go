@@ -164,15 +164,15 @@ func countChannelOps(module mir.Module) (creates, trySends, tryRecvs, sends, rec
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
 				switch inst.Op.(type) {
-				case mir.ChannelNewF64, mir.ChannelNewRef:
+				case mir.ChannelNewF64, mir.ChannelNewBool, mir.ChannelNewRef:
 					creates++
-				case mir.ChannelTrySendF64, mir.ChannelTrySendRef:
+				case mir.ChannelTrySendF64, mir.ChannelTrySendBool, mir.ChannelTrySendRef:
 					trySends++
-				case mir.ChannelTryRecvOrF64, mir.ChannelTryRecvOrRef:
+				case mir.ChannelTryRecvOrF64, mir.ChannelTryRecvOrBool, mir.ChannelTryRecvOrRef:
 					tryRecvs++
-				case mir.ChannelSendF64, mir.ChannelSendRef:
+				case mir.ChannelSendF64, mir.ChannelSendBool, mir.ChannelSendRef:
 					sends++
-				case mir.ChannelRecvF64, mir.ChannelRecvRef:
+				case mir.ChannelRecvF64, mir.ChannelRecvBool, mir.ChannelRecvRef:
 					recvs++
 				}
 			}
@@ -204,7 +204,7 @@ func countRuntimeCalls(module mir.Module) int {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
 					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
-					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
+					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 					count++
 				}
 			}

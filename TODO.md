@@ -81,7 +81,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Extend rooted reference results to object/array/function values and GC-managed `JSValue` results using TypeScript checker `getTypeArguments` instead of generic type-string parsing.
   - [x] Add unboxed `Task<boolean>` result slots and native bool join ABI; boolean literals now lower natively as `i1`.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
-- [~] Add typed channels with task parking and native representation specialization.
+- [x] Add typed channels with task parking and native representation specialization for supported native scalar/reference values.
   - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer, unbuffered rendezvous, and nonblocking `try_send`/`try_recv` transitions plus pthread regression coverage.
   - [x] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
     - [x] Runtime `WAITING -> RUNNABLE` park/wake lifecycle with race-safe pending wake and worker=1 resume regression.
@@ -92,6 +92,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Linear single-block continuations with multiple channel/sleep suspension points and F64 receive-value spills across later suspensions.
         - [x] Spill arbitrary native representations and support branch/loop continuation CFGs.
   - [x] Add compiler-known typed channel operations and scheduler/channel metrics for currently supported native element representations.
+    - [x] Add unboxed `channel<boolean>` with uint8 runtime ABI, buffered try operations, and stackless unbuffered worker=1 send/recv.
     - [x] Compiler-known `channel<number>` operations through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
     - [x] Add StringRef/ObjectRef/ArrayRef/FunctionRef/JSValue-backed channel specialization using GC-rooted Go runtime queues, including buffered try operations and stackless blocking worker=1 send/recv regressions.
     - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.
@@ -187,10 +188,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Add reference/JSValue typed channel specializations and broader channel/select semantics; spawned blocking-task fallbacks are now eliminated.
-2. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
-3. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.
-4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
-5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
-6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-7. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+1. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
+2. Migrate scheduler/tasks to Go concurrency primitives where ABI-safe, then remove the remaining handwritten C runtime path.
+3. Integrate task/channel/timer state with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
+5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+6. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.

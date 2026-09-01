@@ -167,6 +167,7 @@ type ChannelElementKind uint8
 const (
 	ChannelElementInvalid ChannelElementKind = iota
 	ChannelElementF64
+	ChannelElementBool
 	ChannelElementRef
 )
 

@@ -19,6 +19,8 @@ func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (front
 	switch kind {
 	case frontend.TypeNumber:
 		return typ.Element, hir.ChannelElementF64, nil
+	case frontend.TypeBoolean:
+		return typ.Element, hir.ChannelElementBool, nil
 	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
 		return typ.Element, hir.ChannelElementRef, nil
 	default:

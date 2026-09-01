@@ -67,3 +67,22 @@ func TestNativeRefChannelBuffersKeepPayloadRooted(t *testing.T) {
 		t.Fatal("reference channel payload survived after receive and channel root release")
 	}
 }
+
+func TestNativeBoolChannelTryOperations(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	raw := newNativeBoolChannel(1)
+	if tsnative_channel_bool_try_send(raw, 1) != 1 {
+		t.Fatal("boolean channel try send failed")
+	}
+	if got := tsnative_channel_bool_try_recv_or(raw, 0); got != 1 {
+		t.Fatalf("boolean channel recv = %d", got)
+	}
+	if got := tsnative_channel_bool_try_recv_or(raw, 0); got != 0 {
+		t.Fatalf("boolean channel fallback = %d", got)
+	}
+	tsnative_gc_collect()
+	if lookupNativeBoolChannel(raw) != nil {
+		t.Fatal("unrooted boolean channel survived collection")
+	}
+}

@@ -231,6 +231,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ChannelElementF64:
 			result.Op = mir.ChannelNewF64{Capacity: mir.ValueID(op.Capacity)}
+		case hir.ChannelElementBool:
+			result.Op = mir.ChannelNewBool{Capacity: mir.ValueID(op.Capacity)}
 		case hir.ChannelElementRef:
 			result.Op = mir.ChannelNewRef{Capacity: mir.ValueID(op.Capacity)}
 		default:
@@ -240,6 +242,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ChannelElementF64:
 			result.Op = mir.ChannelTrySendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		case hir.ChannelElementBool:
+			result.Op = mir.ChannelTrySendBool{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
 		case hir.ChannelElementRef:
 			result.Op = mir.ChannelTrySendRef{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
 		default:
@@ -249,6 +253,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ChannelElementF64:
 			result.Op = mir.ChannelTryRecvOrF64{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
+		case hir.ChannelElementBool:
+			result.Op = mir.ChannelTryRecvOrBool{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
 		case hir.ChannelElementRef:
 			result.Op = mir.ChannelTryRecvOrRef{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
 		default:
@@ -258,6 +264,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ChannelElementF64:
 			result.Op = mir.ChannelSendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		case hir.ChannelElementBool:
+			result.Op = mir.ChannelSendBool{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
 		case hir.ChannelElementRef:
 			result.Op = mir.ChannelSendRef{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
 		default:
@@ -267,6 +275,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ChannelElementF64:
 			result.Op = mir.ChannelRecvF64{Channel: mir.ValueID(op.Channel)}
+		case hir.ChannelElementBool:
+			result.Op = mir.ChannelRecvBool{Channel: mir.ValueID(op.Channel)}
 		case hir.ChannelElementRef:
 			result.Op = mir.ChannelRecvRef{Channel: mir.ValueID(op.Channel)}
 		default:
