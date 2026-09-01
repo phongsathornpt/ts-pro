@@ -121,6 +121,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Remove remaining spawned-task cooperative channel/sleep fallback shapes with compile-time continuation enforcement.
   - [~] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
     - [x] Async `throw` lowers to a GC-rooted JSValue task failure, propagates through stackless await completion waiters, and terminates an uncaught top-level join with the rejection value.
+    - [x] Add non-aborting failed-task inspection with GC-root lifetime tests, and release context/failure persistent roots when task handles are destroyed.
     - [ ] Add native `try`/`catch`/`finally`, rejection recovery, and selected Promise combinators.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.

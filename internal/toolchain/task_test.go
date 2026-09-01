@@ -590,3 +590,78 @@ int main(void) {
 		t.Fatalf("run 100k task stress: %v: %s", err, output)
 	}
 }
+
+func TestNativeTaskFailureCanBeInspectedWithoutAbort(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "task_failure_test.c")
+	program := `#include <assert.h>
+#include <stddef.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *, void *);
+tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *);
+int tsnative_task_get_failure(tsnative_task *, void **);
+void tsnative_task_fail_current(void *);
+void tsnative_task_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+void *tsnative_heap_alloc(size_t);
+void tsnative_gc_collect(void);
+size_t tsnative_heap_live_allocations(void);
+static void fail_job(void *state, void *result_slot) {
+  (void)state; (void)result_slot;
+  void *payload = tsnative_heap_alloc(16);
+  assert(payload);
+  tsnative_task_fail_current(payload);
+}
+int main(void) {
+  tsnative_task *task = tsnative_task_spawn(fail_job, 0);
+  assert(task);
+  assert(tsnative_task_join(task) == -1);
+  void *failure = 0;
+  assert(tsnative_task_get_failure(task, &failure) == 1);
+  assert(failure);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 1);
+  tsnative_task_release(task);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	binary := filepath.Join(dir, "task_failure_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run task failure inspection: %v: %s", err, output)
+	}
+}

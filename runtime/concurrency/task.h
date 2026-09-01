@@ -39,6 +39,7 @@ tsnative_task *tsnative_task_group_spawn_ref_or_abort(tsnative_task_group *group
 int tsnative_task_group_cancel(tsnative_task_group *group);
 int tsnative_task_group_join_release(tsnative_task_group *group);
 int tsnative_task_join(tsnative_task *task);
+int tsnative_task_get_failure(tsnative_task *task, void **out);
 int tsnative_task_await_task(tsnative_task *task);
 int tsnative_task_await_f64_task(tsnative_task *task, double *out);
 int tsnative_task_await_bool_task(tsnative_task *task, uint8_t *out);

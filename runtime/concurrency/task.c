@@ -214,6 +214,21 @@ int tsnative_task_join(tsnative_task *task) {
   return tsnative_scheduler_wait(task);
 }
 
+int tsnative_task_get_failure(tsnative_task *task, void **out) {
+  if (!task || !out) return -1;
+  *out = NULL;
+  (void)tsnative_scheduler_wait(task);
+  pthread_mutex_lock(&task->completion_mutex);
+  int status = atomic_load_explicit(&task->status, memory_order_acquire);
+  if (status == TSNATIVE_TASK_FAILED && task->failure_ref) {
+    *out = task->failure_ref;
+    pthread_mutex_unlock(&task->completion_mutex);
+    return 1;
+  }
+  pthread_mutex_unlock(&task->completion_mutex);
+  return status == TSNATIVE_TASK_DONE ? 0 : -1;
+}
+
 int tsnative_task_await_task(tsnative_task *task) {
   if (!task) return -1;
   tsnative_task *waiter = tsnative_scheduler_current_task();
@@ -280,6 +295,8 @@ static void destroy_task_storage(tsnative_task *task) {
   if (!task) return;
   if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
   if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+  if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
+  if (task->failure_gc_root_token) tsnative_gc_root_unregister(task->failure_gc_root_token);
   if (task->completion_handoff) {
     task->completion_handoff = 0;
     tsnative_gc_handoff_end();
