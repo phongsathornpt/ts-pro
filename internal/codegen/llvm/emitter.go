@@ -65,7 +65,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\n")
-	b.WriteString("declare void @tsnative_task_join_release(ptr)\n")
+	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")

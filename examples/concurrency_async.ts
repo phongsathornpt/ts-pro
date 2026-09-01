@@ -1,10 +1,10 @@
 async function asyncLeaf(base: number): Promise<number> {
   sleep(1);
-  return base + 2;
+  return base;
 }
 
 async function asyncParent(): Promise<number> {
-  const value = await asyncLeaf(40);
+  const value = await asyncLeaf(42);
   return value;
 }
 

@@ -454,3 +454,32 @@ func TestEmitMultiSuspendTaskContinuation(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessF64AwaitContinuation(t *testing.T) {
+	module := mir.Module{Name: "stackless-await", Functions: []mir.Function{
+		{ID: 0, Name: "child", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+		}, Terminator: mir.Return{Value: valueIDPtr(0)}}}},
+		{ID: 1, Name: "parent", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprF64, Op: mir.TaskJoin{Task: 0}},
+		}, Terminator: mir.Return{Value: valueIDPtr(1)}}}},
+		{ID: 2, Name: "launcher", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f1 = type { i32, double }",
+		"call i32 @tsnative_task_await_f64_task(ptr",
+		"store i32 1, ptr %pc.ptr",
+		"store double %spill.0.ret, ptr %result_slot",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

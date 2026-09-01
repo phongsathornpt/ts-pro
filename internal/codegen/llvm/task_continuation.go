@@ -14,6 +14,7 @@ const (
 	taskSuspendSendF64 taskSuspendKind = iota + 1
 	taskSuspendRecvF64
 	taskSuspendSleep
+	taskSuspendAwaitF64
 )
 
 type taskSuspendStep struct {
@@ -22,6 +23,9 @@ type taskSuspendStep struct {
 	Value    mir.ValueID
 	Result   mir.ValueID
 	Duration mir.ValueID
+	Callee   mir.FunctionID
+	Captures []mir.ValueID
+	Task     mir.ValueID
 }
 
 type taskContinuation struct {
@@ -47,11 +51,33 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	for _, param := range fn.Params {
 		available[param.Value] = true
 	}
+	var pendingSpawn *mir.TaskSpawn
+	var pendingTask mir.ValueID
 	for _, inst := range block.Instructions {
+		if pendingSpawn != nil {
+			join, ok := inst.Op.(mir.TaskJoin)
+			if !ok || join.Task != pendingTask || inst.Repr != mir.ReprF64 {
+				return nil
+			}
+			cont.RecvSlots[inst.Result] = len(cont.RecvSlots)
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendAwaitF64, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
+			pendingSpawn = nil
+			continue
+		}
 		switch op := inst.Op.(type) {
 		case mir.ConstF64:
 			cont.Consts[inst.Result] = op.Value
 			available[inst.Result] = true
+		case mir.TaskSpawn:
+			for _, capture := range op.Captures {
+				if !available[capture] {
+					return nil
+				}
+			}
+			copy := op
+			pendingSpawn = &copy
+			pendingTask = inst.Result
 		case mir.ChannelSendF64:
 			if !available[op.Channel] || !available[op.Value] {
 				return nil
@@ -72,6 +98,9 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		default:
 			return nil
 		}
+	}
+	if pendingSpawn != nil {
+		return nil
 	}
 	if len(cont.Steps) == 0 {
 		return nil
@@ -185,6 +214,22 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			}
 			slot := cont.RecvSlots[step.Result]
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_f64_recv_task(ptr %s, ptr %%recv%d.ptr)\n", i, channel, slot)
+		case taskSuspendAwaitF64:
+			values := map[mir.ValueID]string{}
+			for _, capture := range step.Captures {
+				value, _, err := continuationOperand(b, fn, descriptor, capture, fmt.Sprintf("a%d", i))
+				if err != nil {
+					return err
+				}
+				values[capture] = value
+			}
+			spawnInst := mir.Instruction{Result: step.Task, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: step.Callee, Captures: step.Captures}}
+			if err := e.emitTaskSpawn(b, spawnInst, spawnInst.Op.(mir.TaskSpawn), values); err != nil {
+				return err
+			}
+			child := values[step.Task]
+			slot := cont.RecvSlots[step.Result]
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_await_f64_task(ptr %s, ptr %%recv%d.ptr)\n", i, child, slot)
 		default:
 			return fmt.Errorf("unsupported task suspension kind %d", step.Kind)
 		}

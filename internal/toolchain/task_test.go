@@ -377,3 +377,81 @@ int main(void) {
 		t.Fatalf("run task park/wake test: %v: %s", err, output)
 	}
 }
+
+func TestNativeTaskCompletionAwaitParksParent(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "task_await_test.c")
+	program := `#include <assert.h>
+#include <stdatomic.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*task_entry)(void *, void *);
+tsnative_task *tsnative_task_spawn(task_entry, void *);
+int tsnative_task_await_task(tsnative_task *);
+int tsnative_task_join(tsnative_task *);
+void tsnative_task_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+static atomic_int phase;
+static tsnative_task *child;
+static void child_entry(void *state, void *result) { (void)state; (void)result; atomic_store(&phase, 2); }
+static void parent_entry(void *state, void *result) {
+  (void)state; (void)result;
+  int p = atomic_load(&phase);
+  if (p == 0) {
+    child = tsnative_task_spawn(child_entry, 0); assert(child);
+    atomic_store(&phase, 1);
+    assert(tsnative_task_await_task(child) == 0);
+    return;
+  }
+  assert(p == 2);
+  assert(tsnative_task_join(child) == 0);
+  tsnative_task_release(child);
+  atomic_store(&phase, 3);
+}
+int main(void) {
+  tsnative_task *parent = tsnative_task_spawn(parent_entry, 0); assert(parent);
+  assert(tsnative_task_join(parent) == 0);
+  assert(atomic_load(&phase) == 3);
+  tsnative_task_release(parent);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "task_await_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run task await: %v: %s", err, output)
+	}
+}

@@ -180,11 +180,24 @@ static void execute_task(tsnative_task *task) {
     pthread_mutex_unlock(&scheduler.mutex);
     return;
   }
+  pthread_mutex_lock(&task->completion_mutex);
   atomic_store_explicit(&task->status, TSNATIVE_TASK_DONE, memory_order_release);
   atomic_fetch_sub_explicit(&scheduler.active_tasks, 1, memory_order_relaxed);
   atomic_fetch_add_explicit(&scheduler.completed_tasks, 1, memory_order_relaxed);
+  tsnative_task *completion_waiter = task->completion_waiter;
+  void *completion_out = task->completion_out;
+  int completion_consume = task->completion_consume;
+  task->completion_waiter = NULL;
+  task->completion_out = NULL;
+  task->completion_consume = 0;
+  if (completion_waiter && completion_out && task->result_kind == TSNATIVE_TASK_RESULT_F64) {
+    *(double *)completion_out = task->result.f64;
+  }
   pthread_cond_broadcast(&scheduler.task_done);
   pthread_mutex_unlock(&scheduler.mutex);
+  pthread_mutex_unlock(&task->completion_mutex);
+  if (completion_waiter) (void)tsnative_scheduler_wake(completion_waiter);
+  if (completion_consume && task->destroy_completed) task->destroy_completed(task);
 }
 
 static void *worker_main(void *arg) {
