@@ -78,7 +78,7 @@ func (e *emitter) emitTaskTypes(b *strings.Builder) error {
 			}
 			b.WriteString("i32")
 			written = true
-			if descriptor.Continuation.Kind == taskSuspendRecvF64 {
+			for range descriptor.Continuation.recvSlotCount() {
 				b.WriteString(", double")
 			}
 		}
@@ -177,9 +177,9 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 			pcIndex := descriptor.CaptureCount
 			fmt.Fprintf(b, "  %s.pc = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, taskEnvTypeName(op.Callee), state, pcIndex)
 			fmt.Fprintf(b, "  store i32 0, ptr %s.pc\n", state)
-			if descriptor.Continuation.Kind == taskSuspendRecvF64 {
-				fmt.Fprintf(b, "  %s.recv = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, taskEnvTypeName(op.Callee), state, pcIndex+1)
-				fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.recv\n", state)
+			for slot := 0; slot < descriptor.Continuation.recvSlotCount(); slot++ {
+				fmt.Fprintf(b, "  %s.recv%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, slot, taskEnvTypeName(op.Callee), state, pcIndex+1+slot)
+				fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.recv%d\n", state, slot)
 			}
 		}
 	}

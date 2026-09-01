@@ -88,7 +88,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Wire F64 channel sender/receiver waiter queues onto park/wake, with operation-complete-before-wake handoff and worker=1 buffered/unbuffered regressions.
     - [~] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
       - [x] Stackless task wrappers for proven single-block closures with one F64 channel send/recv suspension point, using heap-owned `pc`/recv spill state and task-aware channel park/wake ABI.
-      - [ ] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
+      - [~] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
+        - [x] Linear single-block continuations with multiple channel/sleep suspension points and F64 receive-value spills across later suspensions.
+        - [ ] Spill arbitrary native representations and support branch/loop continuation CFGs.
   - [~] Add compiler-known `channel<number>` operations and scheduler/channel metrics.
     - [x] Compiler-known `channel<number>`, `channelTrySend`, and `channelTryRecvOr` through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
     - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.

@@ -383,7 +383,7 @@ func TestEmitStacklessChannelTaskContinuation(t *testing.T) {
 		"%tsnative_task_env_f0 = type { ptr, i32 }",
 		"%tsnative_task_env_f1 = type { ptr, i32, double }",
 		"call i32 @tsnative_channel_f64_send_task(ptr %capture0, double 4.200000e+01)",
-		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv.ptr)",
+		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv0.ptr)",
 		"switch i32 %pc",
 		"store i32 1, ptr %pc.ptr",
 	} {
@@ -416,6 +416,38 @@ func TestEmitStacklessSleepTaskContinuation(t *testing.T) {
 		"call i32 @tsnative_sleep_task(double 2.000000e+01)",
 		"switch i32 %pc",
 		"store i32 1, ptr %pc.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestEmitMultiSuspendTaskContinuation(t *testing.T) {
+	module := mir.Module{Name: "multi-suspend", Functions: []mir.Function{
+		{ID: 0, Name: "receiver", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprF64, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ChannelRecvF64{Channel: 0}},
+				{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+				{Result: 3, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 2}},
+			}, Terminator: mir.Return{Value: valueIDPtr(1)}}}},
+		{ID: 1, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}},
+			}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { ptr, i32, double }",
+		"i32 0, label %step0 i32 1, label %step1 i32 2, label %step2",
+		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv0.ptr)",
+		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
+		"%spill.0.ret = load double, ptr %recv0.ptr",
+		"store i32 1, ptr %pc.ptr",
+		"store i32 2, ptr %pc.ptr",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

@@ -864,7 +864,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 				expr.CallTarget = &targetCopy
 			}
 		}
-		if expr.CallTarget == nil && generic == nil {
+		if expr.CallTarget == nil && generic == nil && !isConcurrencyIntrinsic(calleeIdentifier) {
 			callee, err := e.extractExpr(calleeNode)
 			if err != nil {
 				return nil, err
@@ -937,7 +937,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
-	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" || calleeIdentifier == "channel" || calleeIdentifier == "channelTrySend" || calleeIdentifier == "channelTryRecvOr" || calleeIdentifier == "channelSend" || calleeIdentifier == "channelRecv" || calleeIdentifier == "sleep" {
+	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
 	if generic != nil {

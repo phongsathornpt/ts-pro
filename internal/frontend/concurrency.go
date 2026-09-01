@@ -135,3 +135,12 @@ func (e *extractor) isNumberChannel(typeID TypeID) bool {
 	typ := e.result.Types[typeID]
 	return typ.Kind == TypeChannel && int(typ.Element) < len(e.result.Types) && e.result.Types[typ.Element].Kind == TypeNumber
 }
+
+func isConcurrencyIntrinsic(name string) bool {
+	switch name {
+	case "spawn", "join", "yieldNow", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
+		return true
+	default:
+		return false
+	}
+}
