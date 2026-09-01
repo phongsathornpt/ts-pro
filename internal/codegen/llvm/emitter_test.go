@@ -445,7 +445,7 @@ func TestEmitMultiSuspendTaskContinuation(t *testing.T) {
 		"i32 0, label %step0 i32 1, label %step1 i32 2, label %step2",
 		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %spill0.ptr)",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
-		"%spill.0.ret = load double, ptr %spill0.ptr",
+		"%spill.0.ret2 = load double, ptr %spill0.ptr",
 		"store i32 1, ptr %pc.ptr",
 		"store i32 2, ptr %pc.ptr",
 	} {
@@ -476,7 +476,7 @@ func TestEmitStacklessF64AwaitContinuation(t *testing.T) {
 		"%tsnative_task_env_f1 = type { i32, double }",
 		"call i32 @tsnative_task_await_f64_task(ptr",
 		"store i32 1, ptr %pc.ptr",
-		"store double %spill.0.ret, ptr %result_slot",
+		"store double %spill.0.ret1, ptr %result_slot",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
@@ -494,7 +494,7 @@ func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_task_env_f1 = type { i32, i1 }", "call i32 @tsnative_task_await_bool_task(ptr", "store i1 %spill.0.ret, ptr %result_slot"} {
+	for _, want := range []string{"%tsnative_task_env_f1 = type { i32, i1 }", "call i32 @tsnative_task_await_bool_task(ptr", "store i1 %spill.0.ret1, ptr %result_slot"} {
 		if !strings.Contains(boolIR, want) {
 			t.Fatalf("bool LLVM IR missing %q:\n%s", want, boolIR)
 		}
@@ -509,7 +509,7 @@ func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_task_env_f1 = type { ptr, i32, ptr }", "call i32 @tsnative_task_await_ref_task(ptr", "store ptr %spill.0.ret, ptr %result_slot"} {
+	for _, want := range []string{"%tsnative_task_env_f1 = type { ptr, i32, ptr }", "call i32 @tsnative_task_await_ref_task(ptr", "store ptr %spill.0.ret1, ptr %result_slot"} {
 		if !strings.Contains(refIR, want) {
 			t.Fatalf("ref LLVM IR missing %q:\n%s", want, refIR)
 		}
@@ -541,7 +541,7 @@ func TestEmitStacklessLinearSSAContinuation(t *testing.T) {
 		"store double %v3, ptr %spill1.ptr",
 		"fcmp ogt double",
 		"store i1 %v7, ptr %spill2.ptr",
-		"store i1 %spill.2.ret, ptr %result_slot",
+		"store i1 %spill.2.ret4, ptr %result_slot",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
@@ -583,6 +583,34 @@ func TestEmitStacklessReferenceAndJSValueLinearContinuation(t *testing.T) {
 		"call ptr @tsnative_jsvalue_add(ptr",
 		"call void @tsnative_gc_safepoint()",
 		"store ptr %v4, ptr %spill4.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestEmitStacklessBranchContinuation(t *testing.T) {
+	resultTrue := mir.ValueID(2)
+	resultFalse := mir.ValueID(3)
+	module := mir.Module{Name: "stackless-branch", Functions: []mir.Function{
+		{ID: 0, Name: "choose", Params: []mir.Param{{Value: 0, Name: "flag", Repr: mir.ReprBool}}, ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}}, {Result: 4, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 1}}}, Terminator: mir.Branch{Condition: 0, Then: 1, Else: 2}},
+			{ID: 1, Instructions: []mir.Instruction{{Result: resultTrue, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}}}, Terminator: mir.Return{Value: &resultTrue}},
+			{ID: 2, Instructions: []mir.Instruction{{Result: resultFalse, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}}}, Terminator: mir.Return{Value: &resultFalse}},
+		}},
+		{ID: 1, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "flag", Repr: mir.ReprBool}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}}}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { i1, i32 }",
+		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
+		"br i1 %capture0, label %step2, label %step3",
+		"store double 4.200000e+01, ptr %result_slot",
+		"store double 7.000000e+00, ptr %result_slot",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

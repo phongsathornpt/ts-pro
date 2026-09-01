@@ -2,6 +2,7 @@ package llvm
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/projectthorn/tsv7-bin/internal/mir"
@@ -25,6 +26,9 @@ const (
 	taskStepDynamicAddJSValue
 	taskStepArrayLengthF64
 	taskStepArrayGetF64
+	taskStepBranch
+	taskStepJump
+	taskStepReturn
 )
 
 type taskSuspendStep struct {
@@ -37,6 +41,10 @@ type taskSuspendStep struct {
 	Captures []mir.ValueID
 	Task     mir.ValueID
 	Inst     mir.Instruction
+	Target   mir.BlockID
+	Then     mir.BlockID
+	Else     mir.BlockID
+	HasValue bool
 }
 
 type taskSpillSlot struct {
@@ -49,172 +57,187 @@ type taskContinuation struct {
 	Consts     map[mir.ValueID]float64
 	BoolConsts map[mir.ValueID]bool
 	SpillSlots map[mir.ValueID]taskSpillSlot
+	BlockPC    map[mir.BlockID]int
 }
 
 func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
-	if len(fn.Blocks) != 1 {
-		return nil
-	}
-	block := fn.Blocks[0]
-	ret, ok := block.Terminator.(mir.Return)
-	if !ok {
+	if len(fn.Blocks) == 0 {
 		return nil
 	}
 	cont := &taskContinuation{
 		Consts:     map[mir.ValueID]float64{},
 		BoolConsts: map[mir.ValueID]bool{},
 		SpillSlots: map[mir.ValueID]taskSpillSlot{},
+		BlockPC:    map[mir.BlockID]int{},
 	}
 	available := map[mir.ValueID]bool{}
 	for _, param := range fn.Params {
 		available[param.Value] = true
 	}
-	var pendingSpawn *mir.TaskSpawn
-	var pendingTask mir.ValueID
+	blocks := append([]mir.Block(nil), fn.Blocks...)
+	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
 	hasSuspend := false
-	for _, inst := range block.Instructions {
-		if pendingSpawn != nil {
-			join, ok := inst.Op.(mir.TaskJoin)
-			if !ok || join.Task != pendingTask {
-				return nil
+	for _, block := range blocks {
+		cont.BlockPC[block.ID] = len(cont.Steps)
+		var pendingSpawn *mir.TaskSpawn
+		var pendingTask mir.ValueID
+		for _, inst := range block.Instructions {
+			if pendingSpawn != nil {
+				join, ok := inst.Op.(mir.TaskJoin)
+				if !ok || join.Task != pendingTask {
+					return nil
+				}
+				kind := taskSuspendKind(0)
+				switch inst.Repr {
+				case mir.ReprF64:
+					kind = taskSuspendAwaitF64
+				case mir.ReprBool:
+					kind = taskSuspendAwaitBool
+				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+					kind = taskSuspendAwaitRef
+				default:
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
+				pendingSpawn = nil
+				continue
 			}
-			kind := taskSuspendKind(0)
-			switch inst.Repr {
-			case mir.ReprF64:
-				kind = taskSuspendAwaitF64
-			case mir.ReprBool:
-				kind = taskSuspendAwaitBool
-			case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
-				kind = taskSuspendAwaitRef
+			switch op := inst.Op.(type) {
+			case mir.ConstF64:
+				cont.Consts[inst.Result] = op.Value
+				available[inst.Result] = true
+			case mir.ConstBool:
+				cont.BoolConsts[inst.Result] = op.Value
+				available[inst.Result] = true
+			case mir.FloatBinary:
+				if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatBinary, Result: inst.Result, Inst: inst})
+			case mir.ProvenIntBinary:
+				if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepProvenIntBinary, Result: inst.Result, Inst: inst})
+			case mir.FloatCompare:
+				if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprBool {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprBool}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatCompare, Result: inst.Result, Inst: inst})
+			case mir.ConstString:
+				if inst.Repr != mir.ReprStringRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepConstString, Result: inst.Result, Inst: inst})
+			case mir.StringConcat:
+				if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprStringRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepStringConcat, Result: inst.Result, Inst: inst})
+			case mir.BoxJSValue:
+				if !available[op.Value] || inst.Repr != mir.ReprJSValue {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBoxJSValue, Result: inst.Result, Inst: inst})
+			case mir.DynamicAddJSValue:
+				if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprJSValue {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepDynamicAddJSValue, Result: inst.Result, Inst: inst})
+			case mir.ArrayLengthF64:
+				if !available[op.Array] || inst.Repr != mir.ReprF64 {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayLengthF64, Result: inst.Result, Inst: inst})
+			case mir.ArrayGetF64:
+				if !available[op.Array] || !available[op.Index] || inst.Repr != mir.ReprF64 {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayGetF64, Result: inst.Result, Inst: inst})
+			case mir.TaskSpawn:
+				for _, capture := range op.Captures {
+					if !available[capture] {
+						return nil
+					}
+				}
+				copy := op
+				pendingSpawn = &copy
+				pendingTask = inst.Result
+			case mir.ChannelSendF64:
+				if !available[op.Channel] || !available[op.Value] {
+					return nil
+				}
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSendF64, Channel: op.Channel, Value: op.Value})
+			case mir.ChannelRecvF64:
+				if !available[op.Channel] {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
+				available[inst.Result] = true
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvF64, Channel: op.Channel, Result: inst.Result})
+			case mir.Sleep:
+				if !available[op.Duration] {
+					return nil
+				}
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSleep, Duration: op.Duration})
+			case mir.Phi:
+				return nil
 			default:
 				return nil
 			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			hasSuspend = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
-			pendingSpawn = nil
-			continue
 		}
-		switch op := inst.Op.(type) {
-		case mir.ConstF64:
-			cont.Consts[inst.Result] = op.Value
-			available[inst.Result] = true
-		case mir.ConstBool:
-			cont.BoolConsts[inst.Result] = op.Value
-			available[inst.Result] = true
-		case mir.FloatBinary:
-			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatBinary, Result: inst.Result, Inst: inst})
-		case mir.ProvenIntBinary:
-			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepProvenIntBinary, Result: inst.Result, Inst: inst})
-		case mir.FloatCompare:
-			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprBool {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprBool}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatCompare, Result: inst.Result, Inst: inst})
-		case mir.ConstString:
-			if inst.Repr != mir.ReprStringRef {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepConstString, Result: inst.Result, Inst: inst})
-		case mir.StringConcat:
-			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprStringRef {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepStringConcat, Result: inst.Result, Inst: inst})
-		case mir.BoxJSValue:
-			if !available[op.Value] || inst.Repr != mir.ReprJSValue {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBoxJSValue, Result: inst.Result, Inst: inst})
-		case mir.DynamicAddJSValue:
-			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprJSValue {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepDynamicAddJSValue, Result: inst.Result, Inst: inst})
-		case mir.ArrayLengthF64:
-			if !available[op.Array] || inst.Repr != mir.ReprF64 {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayLengthF64, Result: inst.Result, Inst: inst})
-		case mir.ArrayGetF64:
-			if !available[op.Array] || !available[op.Index] || inst.Repr != mir.ReprF64 {
-				return nil
-			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayGetF64, Result: inst.Result, Inst: inst})
-		case mir.TaskSpawn:
-			for _, capture := range op.Captures {
-				if !available[capture] {
+		if pendingSpawn != nil {
+			return nil
+		}
+		switch term := block.Terminator.(type) {
+		case mir.Return:
+			step := taskSuspendStep{Kind: taskStepReturn}
+			if term.Value != nil {
+				if !available[*term.Value] {
 					return nil
 				}
-			}
-			copy := op
-			pendingSpawn = &copy
-			pendingTask = inst.Result
-		case mir.ChannelSendF64:
-			if !available[op.Channel] || !available[op.Value] {
+				step.Value = *term.Value
+				step.HasValue = true
+			} else if fn.ReturnRepr != mir.ReprVoid {
 				return nil
 			}
-			hasSuspend = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSendF64, Channel: op.Channel, Value: op.Value})
-		case mir.ChannelRecvF64:
-			if !available[op.Channel] {
+			cont.Steps = append(cont.Steps, step)
+		case mir.Jump:
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepJump, Target: term.Target})
+		case mir.Branch:
+			if !available[term.Condition] {
 				return nil
 			}
-			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
-			available[inst.Result] = true
-			hasSuspend = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvF64, Channel: op.Channel, Result: inst.Result})
-		case mir.Sleep:
-			if !available[op.Duration] {
-				return nil
-			}
-			hasSuspend = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSleep, Duration: op.Duration})
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBranch, Value: term.Condition, Then: term.Then, Else: term.Else})
 		default:
 			return nil
 		}
 	}
-	if pendingSpawn != nil {
-		return nil
-	}
 	if !hasSuspend {
-		return nil
-	}
-	switch fn.ReturnRepr {
-	case mir.ReprVoid:
-		if ret.Value != nil {
-			return nil
-		}
-	case mir.ReprF64, mir.ReprBool, mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
-		if ret.Value == nil || !available[*ret.Value] {
-			return nil
-		}
-	default:
 		return nil
 	}
 	return cont
@@ -371,7 +394,7 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 	}
 	b.WriteString("  %pc = load i32, ptr %pc.ptr\n")
 	fmt.Fprintf(b, "  switch i32 %%pc, label %%invalid [")
-	for i := 0; i <= len(cont.Steps); i++ {
+	for i := 0; i < len(cont.Steps); i++ {
 		fmt.Fprintf(b, " i32 %d, label %%step%d", i, i)
 	}
 	b.WriteString(" ]\n")
@@ -380,6 +403,47 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 		next := fmt.Sprintf("%%step%d", i+1)
 		park := fmt.Sprintf("%%park%d", i)
 		switch step.Kind {
+		case taskStepBranch:
+			condition, repr, err := continuationOperand(b, fn, descriptor, step.Value, fmt.Sprintf("br%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprBool {
+				return fmt.Errorf("task continuation branch condition must be Bool")
+			}
+			thenPC, thenOK := cont.BlockPC[step.Then]
+			elsePC, elseOK := cont.BlockPC[step.Else]
+			if !thenOK || !elseOK {
+				return fmt.Errorf("task continuation branch targets are unavailable")
+			}
+			fmt.Fprintf(b, "  br i1 %s, label %%step%d, label %%step%d\n", condition, thenPC, elsePC)
+			continue
+		case taskStepJump:
+			targetPC, ok := cont.BlockPC[step.Target]
+			if !ok {
+				return fmt.Errorf("task continuation jump target b%d is unavailable", step.Target)
+			}
+			fmt.Fprintf(b, "  br label %%step%d\n", targetPC)
+			continue
+		case taskStepReturn:
+			if step.HasValue {
+				value, repr, err := continuationOperand(b, fn, descriptor, step.Value, fmt.Sprintf("ret%d", i))
+				if err != nil {
+					return err
+				}
+				if repr != fn.ReturnRepr {
+					return fmt.Errorf("task continuation result repr %d does not match function repr %d", repr, fn.ReturnRepr)
+				}
+				typ, err := llvmType(repr)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  store %s %s, ptr %%result_slot\n", typ, value)
+			} else if fn.ReturnRepr != mir.ReprVoid {
+				return fmt.Errorf("task continuation non-void return has no value")
+			}
+			b.WriteString("  ret void\n")
+			continue
 		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare,
 			taskStepConstString, taskStepStringConcat, taskStepBoxJSValue, taskStepDynamicAddJSValue,
 			taskStepArrayLengthF64, taskStepArrayGetF64:
@@ -451,22 +515,6 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 		fmt.Fprintf(b, "  switch i32 %%status%d, label %%invalid [ i32 0, label %s i32 1, label %s ]\n", i, park, next)
 		fmt.Fprintf(b, "park%d:\n  store i32 %d, ptr %%pc.ptr\n  ret void\n", i, i+1)
 	}
-	fmt.Fprintf(b, "step%d:\n", len(cont.Steps))
-	ret := fn.Blocks[0].Terminator.(mir.Return)
-	if fn.ReturnRepr != mir.ReprVoid {
-		value, repr, err := continuationOperand(b, fn, descriptor, *ret.Value, "ret")
-		if err != nil {
-			return err
-		}
-		if repr != fn.ReturnRepr {
-			return fmt.Errorf("task continuation result repr %d does not match function repr %d", repr, fn.ReturnRepr)
-		}
-		typ, err := llvmType(repr)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(b, "  store %s %s, ptr %%result_slot\n", typ, value)
-	}
-	b.WriteString("  ret void\ninvalid:\n  unreachable\n}\n\n")
+	b.WriteString("invalid:\n  unreachable\n}\n\n")
 	return nil
 }
