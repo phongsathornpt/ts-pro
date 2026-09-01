@@ -285,3 +285,32 @@ func TestBuildNativeF64TaskResultExecutable(t *testing.T) {
 		t.Fatalf("native task result output = %q", got)
 	}
 }
+
+func TestBuildNativeStringTaskResultExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "task-string-result")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_string_results.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 1 || result.Metrics.TaskJoins != 1 {
+		t.Fatalf("task metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	command := exec.CommandContext(ctx, output)
+	command.Env = append(os.Environ(), "TSNATIVE_WORKERS=2")
+	nativeOutput, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native string task result binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "task-string" {
+		t.Fatalf("native task string result output = %q", got)
+	}
+}

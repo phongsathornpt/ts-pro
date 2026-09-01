@@ -53,8 +53,10 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\n")
 	b.WriteString("declare void @tsnative_task_join_release(ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
+	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
 	b.WriteString("declare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
@@ -347,6 +349,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		case mir.ReprF64:
 			name := valueName(inst.Result)
 			fmt.Fprintf(b, "  %s = call double @tsnative_task_join_f64_release(ptr %s)\n", name, task)
+			values[inst.Result] = name
+		case mir.ReprStringRef:
+			name := valueName(inst.Result)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_task_join_ref_release(ptr %s)\n", name, task)
 			values[inst.Result] = name
 		default:
 			return fmt.Errorf("unsupported task join result representation %d", inst.Repr)

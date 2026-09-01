@@ -24,7 +24,7 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 			return nil, fmt.Errorf("spawn at %d requires a zero-argument closure with a supported result", node.Pos())
 		}
 		returnKind := e.result.Types[target.ReturnType].Kind
-		if returnKind != TypeVoid && returnKind != TypeNumber {
+		if returnKind != TypeVoid && returnKind != TypeNumber && returnKind != TypeString {
 			return nil, fmt.Errorf("spawn at %d does not support task result type %q yet", node.Pos(), e.result.Types[target.ReturnType].Name)
 		}
 		if int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeTask || !e.compatibleTaskResult(e.result.Types[expr.Type].ReturnType, target.ReturnType) {

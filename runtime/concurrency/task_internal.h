@@ -10,6 +10,7 @@ struct tsnative_task {
   tsnative_task_entry entry;
   void *state;
   void *gc_root_token;
+  void *result_gc_root_token;
   uint64_t id;
   _Atomic int status;
   tsnative_task_result_kind result_kind;

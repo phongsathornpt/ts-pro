@@ -1032,6 +1032,8 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			typ.ReturnType = e.ensureSemanticType(TypeVoid, "void")
 		case "number":
 			typ.ReturnType = e.ensureSemanticType(TypeNumber, "number")
+		case "string":
+			typ.ReturnType = e.ensureSemanticType(TypeString, "string")
 		case "T":
 			typ.ReturnType = e.ensureSemanticType(TypeParameter, "T")
 		default:

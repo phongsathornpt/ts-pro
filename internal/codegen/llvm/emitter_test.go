@@ -244,3 +244,29 @@ func TestEmitF64TaskResult(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStringTaskResult(t *testing.T) {
+	result := mir.ValueID(0)
+	module := mir.Module{Name: "task-string", Functions: []mir.Function{
+		{ID: 0, Name: "worker", ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "task-string"}}}, Terminator: mir.Return{Value: &result}}}},
+		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprStringRef, Op: mir.TaskJoin{Task: 0}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	entry := mir.FunctionID(1)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"call ptr @tsnative_task_spawn_ref_or_abort",
+		"store ptr %result, ptr %result_slot",
+		"call ptr @tsnative_task_join_ref_release",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

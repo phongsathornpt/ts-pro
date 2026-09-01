@@ -77,7 +77,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add GC-safe captured task state with compiler-generated task environments pinned as persistent runtime roots until task release.
 - [~] Add typed task-result storage/join ABI for returning spawned closures.
   - [x] Unboxed `Task<number>` result slots and `join()` returning native F64 with captured-task support and differential/native regression coverage.
-  - [ ] GC-rooted reference result transfer for `Task<string>`/object/function results, then `JSValue` result specialization for dynamic tasks.
+  - [x] GC-rooted `Task<string>` result transfer with persistent task-result roots until `join()` transfers ownership to the caller shadow root.
+  - [ ] Extend rooted reference results to object/function values, then add `JSValue` result specialization for dynamic tasks.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
 - [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
@@ -130,7 +131,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Finish GC-safe reference task results (`Task<string>` first), then object/function/JSValue result specialization.
+1. Extend typed task results from completed F64/string support to object/function references and dynamic `JSValue` results.
 2. Add typed channels with task parking, starting with unboxed `channel<number>`, then reference/JSValue channel specializations.
 3. Add timers/sleep and a bounded blocking-call pool, then lower Promise/async/await onto resumable task state machines.
 4. Add cancellation/task groups, task-local context, exception propagation, and cooperative execution budgets/preemption polling.

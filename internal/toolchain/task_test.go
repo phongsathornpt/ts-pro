@@ -201,3 +201,79 @@ int main(void) {
 		}
 	}
 }
+
+func TestNativeTaskReferenceResultStaysRootedUntilRelease(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "task_ref_test.c")
+	program := `#include <assert.h>
+#include <stddef.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *, void *);
+tsnative_task *tsnative_task_spawn_ref(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *);
+void *tsnative_task_join_ref_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+void *tsnative_heap_alloc(size_t);
+void tsnative_heap_shutdown(void);
+void tsnative_gc_collect(void);
+size_t tsnative_heap_live_allocations(void);
+static void make_ref(void *state, void *result_slot) {
+  (void)state;
+  unsigned char *value = tsnative_heap_alloc(16);
+  value[0] = 99;
+  *(void **)result_slot = value;
+}
+int main(void) {
+  tsnative_task *task = tsnative_task_spawn_ref(make_ref, 0);
+  assert(task);
+  assert(tsnative_task_join(task) == 0);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 1);
+  unsigned char *result = tsnative_task_join_ref_release(task);
+  assert(result && result[0] == 99);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
+  tsnative_scheduler_shutdown();
+  tsnative_heap_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "task_ref_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=2")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run task ref result test: %v: %s", err, output)
+	}
+}

@@ -84,8 +84,8 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 	}
 	for _, descriptor := range descriptors {
 		fn := e.functions[descriptor.Callee]
-		if (fn.ReturnRepr != mir.ReprVoid && fn.ReturnRepr != mir.ReprF64) || len(fn.Params) != descriptor.CaptureCount {
-			return fmt.Errorf("task target f%d must be a zero-argument source closure with void or f64 result", descriptor.Callee)
+		if (fn.ReturnRepr != mir.ReprVoid && fn.ReturnRepr != mir.ReprF64 && fn.ReturnRepr != mir.ReprStringRef) || len(fn.Params) != descriptor.CaptureCount {
+			return fmt.Errorf("task target f%d must be a zero-argument source closure with void, f64, or string result", descriptor.Callee)
 		}
 		fmt.Fprintf(b, "define void @%s(ptr %%state, ptr %%result_slot) {\nentry:\n", taskWrapperName(descriptor.Callee))
 		for i := 0; i < descriptor.CaptureCount; i++ {
@@ -97,7 +97,7 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			fmt.Fprintf(b, "  %%capture%d = load %s, ptr %%capture%d.ptr\n", i, typ, i)
 		}
 		prefix := "  "
-		if fn.ReturnRepr == mir.ReprF64 {
+		if fn.ReturnRepr == mir.ReprF64 || fn.ReturnRepr == mir.ReprStringRef {
 			prefix = "  %result = "
 		}
 		retType, err := llvmType(fn.ReturnRepr)
@@ -115,6 +115,8 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 		b.WriteString(")\n")
 		if fn.ReturnRepr == mir.ReprF64 {
 			b.WriteString("  store double %result, ptr %result_slot\n")
+		} else if fn.ReturnRepr == mir.ReprStringRef {
+			b.WriteString("  store ptr %result, ptr %result_slot\n")
 		}
 		b.WriteString("  ret void\n}\n\n")
 	}
@@ -149,6 +151,8 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 	spawnName := "tsnative_task_spawn_or_abort"
 	if fn.ReturnRepr == mir.ReprF64 {
 		spawnName = "tsnative_task_spawn_f64_or_abort"
+	} else if fn.ReturnRepr == mir.ReprStringRef {
+		spawnName = "tsnative_task_spawn_ref_or_abort"
 	} else if fn.ReturnRepr != mir.ReprVoid {
 		return fmt.Errorf("unsupported task result representation %d", fn.ReturnRepr)
 	}
