@@ -183,7 +183,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
     - [x] Isolate task execution/completion/status/park-wake transitions behind an internal opaque task contract so scheduler logic no longer manipulates task state fields directly; intrusive queue links remain in C pending Go queue migration.
     - [x] Move production scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go goroutines while preserving the existing task/LLVM C ABI; workers lock OS threads to preserve native TLS current-task semantics, and strong Go ABI symbols override the weak C fallback used by standalone harnesses.
-    - [ ] Migrate task handle ownership/completion groups/context into Go, then remove the weak C scheduler fallback and intrusive queue links from the task layout.
+    - [~] Migrate task handle ownership/completion groups/context into Go, then remove the weak C scheduler fallback and intrusive queue links from the task layout.
+      - [x] Move production task-group ownership, child tracking, join coordination, and cancellation iteration to Go maps/condition variables; strong Go group ABI symbols override the weak C fallback while attaching children before scheduler submission.
+      - [ ] Move remaining task completion ownership, context/failure/result roots, and handle destruction into Go, then remove C group/intrusive queue fields and the weak scheduler fallback.
   - [x] Migrate channels, timers, and the blocking-call pool.
     - [x] Migrate timers/sleep to Go `time` primitives with scheduler hook binding, tracked pending waits, cooperative fallback, and deterministic shutdown.
     - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.

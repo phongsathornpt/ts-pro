@@ -3,6 +3,7 @@ package main
 /*
 #cgo CFLAGS: -I../runtime/concurrency
 #include <stdint.h>
+#define TSNATIVE_CGO_TASKGROUP_EXPORTS 1
 #include "../runtime/concurrency/task_internal.h"
 
 static _Thread_local long long tsnative_go_worker_tls = -1;
@@ -249,6 +250,7 @@ func schedulerExecuteTask(task uintptr) {
 	goScheduler.mu.Unlock()
 
 	if kind == int(C.TSNATIVE_TASK_EXEC_TERMINAL) {
+		taskGroupDetach(task)
 		C.tsnative_task_notify_completed_internal(ptr)
 		if execution.completion_waiter != nil {
 			_ = schedulerWakeTask(uintptr(unsafe.Pointer(execution.completion_waiter)))

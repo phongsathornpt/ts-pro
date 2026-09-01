@@ -42,6 +42,14 @@ struct tsnative_task {
   } result;
 };
 
+
+tsnative_task *tsnative_task_create_unsubmitted_internal(tsnative_task_entry entry, void *state, tsnative_task_result_kind kind);
+void tsnative_task_destroy_unsubmitted_internal(tsnative_task *task);
+
+static inline void tsnative_task_request_cancel_internal(tsnative_task *task) {
+  if (task) atomic_store_explicit(&task->cancel_requested, 1, memory_order_release);
+}
+
 typedef enum {
   TSNATIVE_TASK_EXEC_WAITING = 0,
   TSNATIVE_TASK_EXEC_REQUEUE = 1,

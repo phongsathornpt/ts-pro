@@ -31,6 +31,7 @@ tsnative_task *tsnative_task_spawn_bool(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_bool_or_abort(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_ref(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_ref_or_abort(tsnative_task_entry entry, void *state);
+#ifndef TSNATIVE_CGO_TASKGROUP_EXPORTS
 tsnative_task_group *tsnative_task_group_new(void);
 tsnative_task *tsnative_task_group_spawn_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_group_spawn_f64_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
@@ -38,6 +39,7 @@ tsnative_task *tsnative_task_group_spawn_bool_or_abort(tsnative_task_group *grou
 tsnative_task *tsnative_task_group_spawn_ref_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
 int tsnative_task_group_cancel(tsnative_task_group *group);
 int tsnative_task_group_join_release(tsnative_task_group *group);
+#endif
 int tsnative_task_join(tsnative_task *task);
 int tsnative_task_get_failure(tsnative_task *task, void **out);
 uint8_t tsnative_task_wait_status(tsnative_task *task);
