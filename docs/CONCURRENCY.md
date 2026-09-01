@@ -188,7 +188,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Page-to-span metadata resolves interior pointers in O(1), and remote frees / reusable-span ownership transfers are explicitly counted.
     - Remote frees now enter the owning worker allocator inbox and are drained before its next allocation; only fully drained inactive spans become transferable.
     - Recursive tracing has been replaced by iterative owner-local mark work queues with cross-owner switching, removing native heap graph depth from the Go call stack.
-    - Page-batched mark queues and parallel/idle-worker GC assist remain before global heap locking can be reduced further.
+    - Owner queues now batch marked blocks by native page before scanning, reducing queue churn and improving locality.
+    - Bounded parallel/idle-worker GC assist remains before global heap locking can be reduced further.
 
 15. `runtime: add Green-Tea-style local mark-page work`
     - Page/span marking queues per worker after size-class spans and precise pointer metadata exist.

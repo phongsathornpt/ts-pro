@@ -456,3 +456,34 @@ func TestGCMarkQueueSwitchesAcrossSpanOwners(t *testing.T) {
 	tsnative_gc_root_unregister(root)
 	schedulerSetThread(-1, 0)
 }
+
+func TestGCMarkBatchesBlocksByPage(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	schedulerSetThread(0, 0)
+	defer schedulerSetThread(-1, 0)
+	container := tsnative_heap_alloc(128)
+	if container == nil {
+		t.Fatal("container allocation failed")
+	}
+	for i := 0; i < 10; i++ {
+		child := tsnative_heap_alloc(16)
+		if child == nil {
+			t.Fatalf("child allocation %d failed", i)
+		}
+		*(*unsafe.Pointer)(unsafe.Add(container, uintptr(i)*unsafe.Sizeof(uintptr(0)))) = child
+	}
+	rooted := container
+	root := tsnative_gc_root_register(unsafe.Pointer(&rooted))
+	if root == nil {
+		t.Fatal("page batch root registration failed")
+	}
+	tsnative_gc_collect()
+	work, _ := nativeGCMarkWork()
+	pages := nativeGCMarkPages()
+	if work < 11 || pages == 0 || pages >= work {
+		t.Fatalf("mark batching work=%d pages=%d", work, pages)
+	}
+	tsnative_gc_root_unregister(root)
+}

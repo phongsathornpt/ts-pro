@@ -2,10 +2,18 @@ package main
 
 import "unsafe"
 
+type nativeGCMarkPage struct {
+	owner  int
+	blocks []*nativeHeapBlock
+	queued bool
+}
+
 type nativeGCMarkState struct {
 	collectorOwner int
 	currentOwner   int
-	queues         map[int][]*nativeHeapBlock
+	currentPage    uintptr
+	pages          map[uintptr]*nativeGCMarkPage
+	ownerQueues    map[int][]uintptr
 	pendingOwners  []int
 }
 
@@ -13,7 +21,8 @@ func newNativeGCMarkState(owner int) *nativeGCMarkState {
 	return &nativeGCMarkState{
 		collectorOwner: owner,
 		currentOwner:   owner,
-		queues:         make(map[int][]*nativeHeapBlock),
+		pages:          make(map[uintptr]*nativeGCMarkPage),
+		ownerQueues:    make(map[int][]uintptr),
 	}
 }
 
@@ -45,29 +54,55 @@ func resolveNativeHeapBlockLocked(candidate uintptr) *nativeHeapBlock {
 	return nativeHeap.blocks[slotBase]
 }
 
+func nativeGCMarkPageKey(block *nativeHeapBlock) uintptr {
+	if block == nil {
+		return 0
+	}
+	return nativeAllocatorPageBase(block.ptr)
+}
+
 func (state *nativeGCMarkState) enqueue(candidate uintptr) {
 	block := resolveNativeHeapBlockLocked(candidate)
 	if block == nil || block.marked {
 		return
 	}
 	block.marked = true
-	owner := nativeHeapBlockOwner(block)
-	queue := state.queues[owner]
-	wasEmpty := len(queue) == 0
-	state.queues[owner] = append(queue, block)
-	if wasEmpty && owner != state.currentOwner {
-		state.pendingOwners = append(state.pendingOwners, owner)
+	pageKey := nativeGCMarkPageKey(block)
+	page := state.pages[pageKey]
+	if page == nil {
+		page = &nativeGCMarkPage{owner: nativeHeapBlockOwner(block)}
+		state.pages[pageKey] = page
+	}
+	page.blocks = append(page.blocks, block)
+	if page.queued || pageKey == state.currentPage {
+		return
+	}
+	ownerQueue := state.ownerQueues[page.owner]
+	wasEmpty := len(ownerQueue) == 0
+	state.ownerQueues[page.owner] = append(ownerQueue, pageKey)
+	page.queued = true
+	if wasEmpty && page.owner != state.currentOwner {
+		state.pendingOwners = append(state.pendingOwners, page.owner)
 	}
 }
 
-func (state *nativeGCMarkState) pop() *nativeHeapBlock {
+func (state *nativeGCMarkState) popPage() *nativeGCMarkPage {
 	for {
-		queue := state.queues[state.currentOwner]
+		queue := state.ownerQueues[state.currentOwner]
 		if count := len(queue); count != 0 {
-			block := queue[count-1]
-			queue[count-1] = nil
-			state.queues[state.currentOwner] = queue[:count-1]
-			return block
+			pageKey := queue[count-1]
+			state.ownerQueues[state.currentOwner] = queue[:count-1]
+			page := state.pages[pageKey]
+			if page == nil || len(page.blocks) == 0 {
+				if page != nil {
+					page.queued = false
+				}
+				continue
+			}
+			page.queued = false
+			state.currentPage = pageKey
+			nativeHeap.markPages++
+			return page
 		}
 		if len(state.pendingOwners) == 0 {
 			return nil
@@ -75,7 +110,7 @@ func (state *nativeGCMarkState) pop() *nativeHeapBlock {
 		last := len(state.pendingOwners) - 1
 		owner := state.pendingOwners[last]
 		state.pendingOwners = state.pendingOwners[:last]
-		if len(state.queues[owner]) == 0 {
+		if len(state.ownerQueues[owner]) == 0 {
 			continue
 		}
 		state.currentOwner = owner
@@ -83,6 +118,23 @@ func (state *nativeGCMarkState) pop() *nativeHeapBlock {
 			nativeHeap.markQueueSwitches++
 		}
 	}
+}
+
+func (state *nativeGCMarkState) drainPage(page *nativeGCMarkPage) {
+	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
+	for len(page.blocks) != 0 {
+		last := len(page.blocks) - 1
+		block := page.blocks[last]
+		page.blocks[last] = nil
+		page.blocks = page.blocks[:last]
+		nativeHeap.markWork++
+		count := block.size / wordSize
+		for i := uintptr(0); i < count; i++ {
+			word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
+			state.enqueue(word)
+		}
+	}
+	state.currentPage = 0
 }
 
 func markNativeHeapRootsLocked() {
@@ -95,16 +147,11 @@ func markNativeHeapRootsLocked() {
 		}
 	}
 	for {
-		block := state.pop()
-		if block == nil {
+		page := state.popPage()
+		if page == nil {
 			return
 		}
-		nativeHeap.markWork++
-		count := block.size / wordSize
-		for i := uintptr(0); i < count; i++ {
-			word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
-			state.enqueue(word)
-		}
+		state.drainPage(page)
 	}
 }
 
@@ -114,4 +161,11 @@ func nativeGCMarkWork() (uint64, uint64) {
 	switches := nativeHeap.markQueueSwitches
 	nativeHeap.Unlock()
 	return work, switches
+}
+
+func nativeGCMarkPages() uint64 {
+	nativeHeap.Lock()
+	pages := nativeHeap.markPages
+	nativeHeap.Unlock()
+	return pages
 }
