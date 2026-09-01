@@ -170,7 +170,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Migrate specialized F64 arrays to the Go c-archive while preserving the `{len,data[]}` ABI, checked-index behavior, and shared heap/GC ownership.
     - [x] Migrate object allocation/runtime helpers to the Go c-archive while preserving the existing heap-owned pointer ABI.
     - [x] Migrate JSValue boxing/dynamic helpers to the Go c-archive while preserving the tagged 16-byte ABI, dynamic `+`, and console output behavior.
-  - [ ] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
+  - [~] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
+    - [x] Isolate task execution/completion/status/park-wake transitions behind an internal opaque task contract so scheduler logic no longer manipulates task state fields directly; intrusive queue links remain in C pending Go queue migration.
+    - [ ] Move scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go while preserving the existing task/LLVM C ABI, then migrate task handle ownership.
   - [x] Migrate channels, timers, and the blocking-call pool.
     - [x] Migrate timers/sleep to Go `time` primitives with scheduler hook binding, tracked pending waits, cooperative fallback, and deterministic shutdown.
     - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.

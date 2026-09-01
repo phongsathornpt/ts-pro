@@ -76,10 +76,6 @@ static size_t configured_max_tasks(void) {
   return parse_limit("TSNATIVE_MAX_TASKS", TSNATIVE_DEFAULT_MAX_TASKS, TSNATIVE_HARD_MAX_TASKS);
 }
 
-static int terminal(int status) {
-  return status == TSNATIVE_TASK_DONE || status == TSNATIVE_TASK_CANCELLED || status == TSNATIVE_TASK_FAILED;
-}
-
 static void worker_push_tail(tsnative_worker *worker, tsnative_task *task) {
   pthread_mutex_lock(&worker->deque_mutex);
   task->next = NULL;
@@ -162,57 +158,28 @@ static tsnative_task *take_work(tsnative_worker *worker) {
 }
 
 static void execute_task(tsnative_task *task) {
-  atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNING, memory_order_release);
-  atomic_store_explicit(&task->park_requested, 0, memory_order_release);
-  atomic_store_explicit(&task->wake_requested, 0, memory_order_release);
   tsnative_task *previous_task = current_task;
   current_task = task;
-  if (!atomic_load_explicit(&task->failure_requested, memory_order_acquire)) {
-    task->entry(task->state, &task->result);
-  }
+  tsnative_task_execution execution = tsnative_task_execute_once_internal(task);
   current_task = previous_task;
 
   pthread_mutex_lock(&scheduler.mutex);
-  if (atomic_load_explicit(&task->park_requested, memory_order_acquire)) {
-    if (atomic_exchange_explicit(&task->wake_requested, 0, memory_order_acq_rel)) {
-      atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNABLE, memory_order_release);
-      injection_push_locked(task);
-      atomic_fetch_add_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
-      pthread_cond_signal(&scheduler.wake);
-    } else {
-      atomic_store_explicit(&task->status, TSNATIVE_TASK_WAITING, memory_order_release);
-    }
-    pthread_cond_broadcast(&scheduler.task_done);
-    pthread_mutex_unlock(&scheduler.mutex);
-    return;
-  }
-  pthread_mutex_lock(&task->completion_mutex);
-  int failed = atomic_load_explicit(&task->failure_requested, memory_order_acquire);
-  atomic_store_explicit(&task->status, failed ? TSNATIVE_TASK_FAILED : TSNATIVE_TASK_DONE, memory_order_release);
-  atomic_fetch_sub_explicit(&scheduler.active_tasks, 1, memory_order_relaxed);
-  atomic_fetch_add_explicit(&scheduler.completed_tasks, 1, memory_order_relaxed);
-  tsnative_task *completion_waiter = task->completion_waiter;
-  void *completion_out = task->completion_out;
-  int completion_consume = task->completion_consume;
-  int completion_status_only = task->completion_status_only;
-  task->completion_waiter = NULL;
-  task->completion_out = NULL;
-  task->completion_consume = 0;
-  task->completion_status_only = 0;
-  if (completion_waiter && completion_status_only && completion_out) {
-    *(uint8_t *)completion_out = failed ? 0 : 1;
-  } else if (completion_waiter && failed) {
-    completion_waiter->failure_ref = task->failure_ref;
-    atomic_store_explicit(&completion_waiter->failure_requested, 1, memory_order_release);
-  } else if (completion_waiter && completion_out && task->transfer_completion) {
-    task->transfer_completion(task, completion_out);
+  if (execution.kind == TSNATIVE_TASK_EXEC_REQUEUE) {
+    injection_push_locked(task);
+    atomic_fetch_add_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
+    pthread_cond_signal(&scheduler.wake);
+  } else if (execution.kind == TSNATIVE_TASK_EXEC_TERMINAL) {
+    atomic_fetch_sub_explicit(&scheduler.active_tasks, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&scheduler.completed_tasks, 1, memory_order_relaxed);
   }
   pthread_cond_broadcast(&scheduler.task_done);
   pthread_mutex_unlock(&scheduler.mutex);
-  pthread_mutex_unlock(&task->completion_mutex);
-  if (task->notify_completed) task->notify_completed(task);
-  if (completion_waiter) (void)tsnative_scheduler_wake(completion_waiter);
-  if (completion_consume && task->destroy_completed) task->destroy_completed(task);
+
+  if (execution.kind == TSNATIVE_TASK_EXEC_TERMINAL) {
+    tsnative_task_notify_completed_internal(task);
+    if (execution.completion_waiter) (void)tsnative_scheduler_wake(execution.completion_waiter);
+    tsnative_task_destroy_completed_internal(task, execution.completion_consume);
+  }
 }
 
 static void *worker_main(void *arg) {
@@ -334,8 +301,7 @@ int tsnative_scheduler_submit(tsnative_task *task) {
     return -1;
   }
 
-  task->id = ++scheduler.next_task_id;
-  atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNABLE, memory_order_release);
+  tsnative_task_mark_submitted_internal(task, ++scheduler.next_task_id);
   active = atomic_fetch_add_explicit(&scheduler.active_tasks, 1, memory_order_relaxed) + 1;
   atomic_fetch_add_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
   atomic_fetch_add_explicit(&scheduler.spawned_tasks, 1, memory_order_relaxed);
@@ -351,7 +317,7 @@ int tsnative_scheduler_submit(tsnative_task *task) {
 
 int tsnative_scheduler_wait(tsnative_task *task) {
   if (!task) return -1;
-  while (!terminal(atomic_load_explicit(&task->status, memory_order_acquire))) {
+  while (!tsnative_task_is_terminal_internal(task)) {
     if (current_worker) {
       tsnative_task *help = take_work(current_worker);
       if (help) {
@@ -360,17 +326,17 @@ int tsnative_scheduler_wait(tsnative_task *task) {
       }
     }
     pthread_mutex_lock(&scheduler.mutex);
-    if (!terminal(atomic_load_explicit(&task->status, memory_order_acquire))) {
+    if (!tsnative_task_is_terminal_internal(task)) {
       pthread_cond_wait(&scheduler.task_done, &scheduler.mutex);
     }
     pthread_mutex_unlock(&scheduler.mutex);
   }
-  return atomic_load_explicit(&task->status, memory_order_acquire) == TSNATIVE_TASK_DONE ? 0 : -1;
+  return tsnative_task_status_internal(task) == TSNATIVE_TASK_DONE ? 0 : -1;
 }
 
 tsnative_task_status tsnative_scheduler_task_status(tsnative_task *task) {
   if (!task) return TSNATIVE_TASK_FAILED;
-  return (tsnative_task_status)atomic_load_explicit(&task->status, memory_order_acquire);
+  return tsnative_task_status_internal(task);
 }
 
 int tsnative_scheduler_help_once(void) {
@@ -433,33 +399,23 @@ tsnative_task *tsnative_scheduler_current_task(void) { return current_task; }
 
 int tsnative_scheduler_prepare_park(void) {
   if (!current_task) return -1;
-  atomic_store_explicit(&current_task->park_requested, 1, memory_order_release);
-  return 0;
+  return tsnative_task_prepare_park_internal(current_task);
 }
 
 void tsnative_scheduler_cancel_park(void) {
   if (!current_task) return;
-  atomic_store_explicit(&current_task->park_requested, 0, memory_order_release);
-  atomic_store_explicit(&current_task->wake_requested, 0, memory_order_release);
+  tsnative_task_cancel_park_internal(current_task);
 }
 
 int tsnative_scheduler_wake(tsnative_task *task) {
   if (!task) return -1;
   pthread_mutex_lock(&scheduler.mutex);
-  int status = atomic_load_explicit(&task->status, memory_order_acquire);
-  if (status == TSNATIVE_TASK_WAITING) {
-    atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNABLE, memory_order_release);
+  int wake = tsnative_task_wake_internal(task);
+  if (wake == 1) {
     injection_push_locked(task);
     atomic_fetch_add_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
     pthread_cond_signal(&scheduler.wake);
-    pthread_mutex_unlock(&scheduler.mutex);
-    return 0;
-  }
-  if (status == TSNATIVE_TASK_RUNNING && atomic_load_explicit(&task->park_requested, memory_order_acquire)) {
-    atomic_store_explicit(&task->wake_requested, 1, memory_order_release);
-    pthread_mutex_unlock(&scheduler.mutex);
-    return 0;
   }
   pthread_mutex_unlock(&scheduler.mutex);
-  return status == TSNATIVE_TASK_RUNNABLE ? 0 : -1;
+  return wake < 0 ? -1 : 0;
 }

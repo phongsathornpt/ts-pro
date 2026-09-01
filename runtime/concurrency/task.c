@@ -10,6 +10,7 @@
 extern void tsnative_console_log_jsvalue(void *value);
 
 static void destroy_task_storage(tsnative_task *task);
+
 struct tsnative_task_group {
   pthread_mutex_t mutex;
   pthread_cond_t done;
