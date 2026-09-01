@@ -1000,7 +1000,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Intrinsic = IntrinsicConsoleLogF64
 		case TypeString:
 			expr.Intrinsic = IntrinsicConsoleLogString
-		case TypeAny:
+		case TypeAny, TypeUnion:
 			expr.Intrinsic = IntrinsicConsoleLogJSValue
 		default:
 			return nil, fmt.Errorf("console.log native MVP does not support argument type %q at %d", e.result.Types[expr.Args[0].Type].Name, node.Pos())
@@ -1057,6 +1057,8 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 	kind := classifyType(text)
 	if info.Flags&typeFlagTypeParameter != 0 {
 		kind = TypeParameter
+	} else if info.Flags&typeFlagUnion != 0 && !(kind == TypeBoolean && text == "boolean") {
+		kind = TypeUnion
 	}
 	if kind == TypeNumber && text == "number" {
 		id := e.ensureSemanticType(TypeNumber, "number")
@@ -1118,6 +1120,22 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			return 0, fmt.Errorf("native array type %q is not supported", text)
 		}
 		typ.Element = e.ensureSemanticType(TypeNumber, "number")
+	}
+	if kind == TypeUnion {
+		members, membersErr := e.client.GetTypesOfType(e.ctx, e.snapshot, e.project, info.ID)
+		if membersErr != nil || len(members) == 0 {
+			if membersErr == nil {
+				membersErr = fmt.Errorf("union has no constituent types")
+			}
+			return 0, fmt.Errorf("resolve native union type %q: %w", text, membersErr)
+		}
+		for i := range members {
+			memberID, memberErr := e.internAPIType(&members[i])
+			if memberErr != nil {
+				return 0, memberErr
+			}
+			typ.Members = append(typ.Members, memberID)
+		}
 	}
 	id := TypeID(len(e.result.Types))
 	typ.ID = id

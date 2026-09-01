@@ -769,3 +769,31 @@ func TestBuildNativeDynamicReferenceBoxing(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeTaggedUnionBoundary(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-union")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_union.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.BoxingSites != 6 {
+		t.Fatalf("boxing sites = %d; want 6", result.Metrics.BoxingSites)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic union: %v: %s", err, got)
+	}
+	want := "42\nunion\ntrue\nnull\nundefined\n1\n1\n1"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q", got)
+	}
+}

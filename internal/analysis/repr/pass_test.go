@@ -31,3 +31,24 @@ func TestAnalyzeProvesScalarRepresentations(t *testing.T) {
 		t.Fatalf("condition repr = %+v", fn.Blocks[0].Instructions[1].Repr)
 	}
 }
+
+func TestAnalyzeRejectsUnsupportedTaggedUnionMember(t *testing.T) {
+	union := hir.NewTypeID(0)
+	task := hir.NewTypeID(1)
+	module := hir.Module{
+		Types: []hir.SemanticType{
+			{Kind: hir.TypeUnion, Members: []hir.TypeID{hir.NewTypeID(2), task}},
+			{Kind: hir.TypeTask},
+			{Kind: hir.TypeNumber},
+		},
+		Functions: []hir.Function{{
+			ID: hir.NewFunctionID(0), Name: "f", ReturnType: union, Entry: hir.NewBlockID(0),
+			Params: []hir.Param{{Value: hir.NewValueID(0), Name: "x", SemanticType: union}},
+			Blocks: []hir.Block{{ID: hir.NewBlockID(0), Terminator: hir.ReturnTerm{Value: func() *hir.ValueID { v := hir.NewValueID(0); return &v }()}}},
+		}},
+	}
+	diagnostics := Analyze(&module)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected unsupported union member diagnostic")
+	}
+}

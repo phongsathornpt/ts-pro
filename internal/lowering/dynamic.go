@@ -17,11 +17,14 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 	}
 	targetKind := f.module.source.Types[target].Kind
 	sourceKind := f.module.source.Types[expr.Type].Kind
-	if targetKind != frontend.TypeAny || sourceKind == frontend.TypeAny || sourceKind == frontend.TypeNull || sourceKind == frontend.TypeUndefined {
+	if targetKind != frontend.TypeAny && targetKind != frontend.TypeUnion {
+		return value, nil
+	}
+	if sourceKind == frontend.TypeAny || sourceKind == frontend.TypeUnion || sourceKind == frontend.TypeNull || sourceKind == frontend.TypeUndefined {
 		return value, nil
 	}
 	kind := hir.BoxInvalid
-	switch f.module.source.Types[expr.Type].Kind {
+	switch sourceKind {
 	case frontend.TypeNumber:
 		kind = hir.BoxNumber
 	case frontend.TypeString:
@@ -33,7 +36,7 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 	case frontend.TypeFunction:
 		kind = hir.BoxFunction
 	default:
-		return 0, fmt.Errorf("cannot box semantic type %q into any", f.module.source.Types[expr.Type].Name)
+		return 0, fmt.Errorf("cannot box semantic type %q into dynamic value", f.module.source.Types[expr.Type].Name)
 	}
 	return f.emit(target, hir.BoxOp{Kind: kind, Value: value}), nil
 }

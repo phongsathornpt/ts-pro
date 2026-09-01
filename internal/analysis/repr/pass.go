@@ -68,7 +68,15 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 	case hir.TypeChannel:
 		return hir.Repr{Kind: hir.ReprChannelRef}, diagnostics
 	case hir.TypeUnion:
-		return hir.Repr{Kind: hir.ReprTaggedUnion}, diagnostics
+		for _, memberID := range typ.Members {
+			if int(memberID) >= len(module.Types) || !jsValueUnionMember(module.Types[memberID].Kind) {
+				diagnostics = append(diagnostics, Diagnostic{
+					Function: fn, Value: value,
+					Message: fmt.Sprintf("t%d union member t%d requires unsupported dynamic semantics", typeID, memberID),
+				})
+			}
+		}
+		return hir.Repr{Kind: hir.ReprJSValue}, diagnostics
 	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull:
 		return hir.Repr{Kind: hir.ReprJSValue}, diagnostics
 	case hir.TypeUnknown:
@@ -82,5 +90,14 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 	default:
 		diagnostics = append(diagnostics, Diagnostic{Function: fn, Value: value, Message: fmt.Sprintf("t%d has no proven native representation", typeID)})
 		return hir.Repr{}, diagnostics
+	}
+}
+
+func jsValueUnionMember(kind hir.TypeKind) bool {
+	switch kind {
+	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull, hir.TypeBoolean, hir.TypeNumber, hir.TypeString, hir.TypeObject, hir.TypeArray, hir.TypeFunction, hir.TypeUnion:
+		return true
+	default:
+		return false
 	}
 }

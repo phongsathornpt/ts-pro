@@ -54,7 +54,10 @@ func (e *extractor) specializeGenericCall(info genericInfo, args []*Expr, result
 	return e.buildGenericSpecialization(functionID, info, paramNodes, args, resultType)
 }
 
-const typeFlagTypeParameter uint32 = 524288
+const (
+	typeFlagTypeParameter uint32 = 524288
+	typeFlagUnion         uint32 = 134217728
+)
 
 func (e *extractor) buildGenericSpecialization(id FunctionID, info genericInfo, paramNodes []tsast.Node, args []*Expr, resultType TypeID) (FunctionID, error) {
 	nameNode, _ := info.Node.NamedChild("name")
