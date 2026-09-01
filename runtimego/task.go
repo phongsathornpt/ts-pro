@@ -597,6 +597,7 @@ func tsnative_task_fail_current(errorRef unsafe.Pointer) {
 
 //export tsnative_task_budget_poll_task
 func tsnative_task_budget_poll_task() int32 {
+	tsnative_gc_safepoint()
 	task := lookupNativeTask(schedulerCurrentTaskPtr())
 	if task == nil {
 		return 1

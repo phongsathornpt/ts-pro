@@ -4,15 +4,7 @@ package main
 #include <stdint.h>
 #include <stdlib.h>
 typedef void (*tsnative_blocking_entry_fn)(void *);
-typedef void *(*tsnative_blocking_current_fn)(void);
-typedef int (*tsnative_blocking_int0_fn)(void);
-typedef void (*tsnative_blocking_void0_fn)(void);
-typedef int (*tsnative_blocking_wake_fn)(void *);
 static void tsnative_blocking_call_entry(uintptr_t fn, void *state) { ((tsnative_blocking_entry_fn)fn)(state); }
-static void *tsnative_blocking_call_current(uintptr_t fn) { return fn ? ((tsnative_blocking_current_fn)fn)() : NULL; }
-static int tsnative_blocking_call_int0(uintptr_t fn) { return fn ? ((tsnative_blocking_int0_fn)fn)() : -1; }
-static void tsnative_blocking_call_void0(uintptr_t fn) { if (fn) ((tsnative_blocking_void0_fn)fn)(); }
-static int tsnative_blocking_call_wake(uintptr_t fn, void *task) { return fn ? ((tsnative_blocking_wake_fn)fn)(task) : -1; }
 */
 import "C"
 
@@ -31,14 +23,6 @@ const (
 	hardMaxBlockingJobs    = 1_000_000
 )
 
-type nativeBlockingSchedulerHooks struct {
-	current uintptr
-	prepare uintptr
-	cancel  uintptr
-	wake    uintptr
-	help    uintptr
-}
-
 type nativeBlockingJob struct {
 	token  uintptr
 	entry  uintptr
@@ -47,11 +31,6 @@ type nativeBlockingJob struct {
 	once   sync.Once
 	mu     sync.Mutex
 	waiter uintptr
-}
-
-var nativeBlockingScheduler struct {
-	sync.RWMutex
-	hooks nativeBlockingSchedulerHooks
 }
 
 var nativeBlocking = struct {
@@ -70,18 +49,7 @@ var nativeBlocking = struct {
 }{jobs: map[uintptr]*nativeBlockingJob{}}
 
 //export tsnative_blocking_bind_scheduler
-func tsnative_blocking_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {
-	nativeBlockingScheduler.Lock()
-	nativeBlockingScheduler.hooks = nativeBlockingSchedulerHooks{uintptr(current), uintptr(prepare), uintptr(cancel), uintptr(wake), uintptr(help)}
-	nativeBlockingScheduler.Unlock()
-}
-
-func blockingSchedulerHooks() nativeBlockingSchedulerHooks {
-	nativeBlockingScheduler.RLock()
-	hooks := nativeBlockingScheduler.hooks
-	nativeBlockingScheduler.RUnlock()
-	return hooks
-}
+func tsnative_blocking_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
 
 func parseBlockingLimit(name string, fallback, hardMax int) int {
 	raw := os.Getenv(name)
@@ -154,8 +122,7 @@ func completeNativeBlockingJob(job *nativeBlockingJob) {
 		close(job.done)
 		job.mu.Unlock()
 		if waiter != 0 {
-			hooks := blockingSchedulerHooks()
-			_ = C.tsnative_blocking_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter))
+			_ = schedulerWakeTask(waiter)
 		}
 	})
 }
@@ -200,25 +167,24 @@ func tsnative_blocking_job_wait_task(raw unsafe.Pointer) C.int {
 		return 1
 	default:
 	}
-	hooks := blockingSchedulerHooks()
-	task := C.tsnative_blocking_call_current(C.uintptr_t(hooks.current))
-	if task == nil || C.tsnative_blocking_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 || tsnative_scheduler_prepare_park() != 0 {
 		return -1
 	}
 	job.mu.Lock()
 	select {
 	case <-job.done:
 		job.mu.Unlock()
-		C.tsnative_blocking_call_void0(C.uintptr_t(hooks.cancel))
+		tsnative_scheduler_cancel_park()
 		return 1
 	default:
 	}
 	if job.waiter != 0 {
 		job.mu.Unlock()
-		C.tsnative_blocking_call_void0(C.uintptr_t(hooks.cancel))
+		tsnative_scheduler_cancel_park()
 		return -1
 	}
-	job.waiter = uintptr(task)
+	job.waiter = task
 	job.mu.Unlock()
 	return 0
 }
@@ -229,14 +195,13 @@ func tsnative_blocking_job_wait_cooperative(raw unsafe.Pointer) {
 	if job == nil {
 		C.abort()
 	}
-	hooks := blockingSchedulerHooks()
 	for {
 		select {
 		case <-job.done:
 			return
 		default:
 		}
-		if hooks.help != 0 && C.tsnative_blocking_call_int0(C.uintptr_t(hooks.help)) != 0 {
+		if tsnative_scheduler_help_once() != 0 {
 			continue
 		}
 		select {

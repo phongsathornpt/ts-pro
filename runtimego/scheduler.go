@@ -2,16 +2,6 @@ package main
 
 /*
 #include <stdint.h>
-extern void *tsnative_scheduler_current_task(void);
-extern int tsnative_scheduler_prepare_park(void);
-extern void tsnative_scheduler_cancel_park(void);
-extern int tsnative_scheduler_wake(void *task);
-extern int tsnative_scheduler_help_once(void);
-static uintptr_t tsnative_go_addr_current(void) { return (uintptr_t)&tsnative_scheduler_current_task; }
-static uintptr_t tsnative_go_addr_prepare(void) { return (uintptr_t)&tsnative_scheduler_prepare_park; }
-static uintptr_t tsnative_go_addr_cancel(void) { return (uintptr_t)&tsnative_scheduler_cancel_park; }
-static uintptr_t tsnative_go_addr_wake(void) { return (uintptr_t)&tsnative_scheduler_wake; }
-static uintptr_t tsnative_go_addr_help(void) { return (uintptr_t)&tsnative_scheduler_help_once; }
 */
 import "C"
 
@@ -272,6 +262,7 @@ func schedulerExecuteTask(handle uintptr) {
 	previous := schedulerSetCurrentTask(handle)
 	execution := executeNativeTaskOnce(task)
 	schedulerSetCurrentTask(previous)
+	tsnative_gc_safepoint()
 
 	goScheduler.mu.Lock()
 	switch execution.kind {
@@ -322,17 +313,6 @@ func schedulerWorkerLoop(worker *nativeSchedulerWorker) {
 	}
 }
 
-func bindGoSchedulerHooks() {
-	current := C.uintptr_t(C.tsnative_go_addr_current())
-	prepare := C.uintptr_t(C.tsnative_go_addr_prepare())
-	cancel := C.uintptr_t(C.tsnative_go_addr_cancel())
-	wake := C.uintptr_t(C.tsnative_go_addr_wake())
-	help := C.uintptr_t(C.tsnative_go_addr_help())
-	tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help)
-	tsnative_blocking_bind_scheduler(current, prepare, cancel, wake, help)
-	tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help)
-}
-
 //export tsnative_scheduler_init
 func tsnative_scheduler_init() int32 {
 	goScheduler.mu.Lock()
@@ -354,7 +334,6 @@ func tsnative_scheduler_init() int32 {
 	workers := append([]*nativeSchedulerWorker(nil), goScheduler.workers...)
 	goScheduler.mu.Unlock()
 
-	bindGoSchedulerHooks()
 	for _, worker := range workers {
 		goScheduler.wg.Add(1)
 		go func(w *nativeSchedulerWorker) {
@@ -416,6 +395,7 @@ func tsnative_scheduler_wait(raw unsafe.Pointer) int32 {
 		}
 		goScheduler.mu.Unlock()
 	}
+	tsnative_gc_safepoint()
 	if task.status.Load() == nativeTaskDone {
 		return 0
 	}
@@ -519,6 +499,7 @@ func tsnative_scheduler_current_task() unsafe.Pointer {
 
 //export tsnative_scheduler_prepare_park
 func tsnative_scheduler_prepare_park() int32 {
+	tsnative_gc_safepoint()
 	task := lookupNativeTask(schedulerCurrentTaskPtr())
 	return nativeTaskPreparePark(task)
 }

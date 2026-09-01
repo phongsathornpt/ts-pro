@@ -120,7 +120,7 @@ A `channel<number>` therefore remains an F64 channel and does not become `JSValu
 
 ## Implementation and commit sequence
 
-Steps 1-12 and 16 are implemented. Steps 13-15 remain active work. Each additional step must compile, test, and commit independently.
+Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each additional step must compile, test, and commit independently.
 
 1. `runtime: add bounded native scheduler core`
    - Worker lifecycle, CPU-count default, `TSNATIVE_WORKERS`, shutdown.
@@ -177,9 +177,10 @@ Steps 1-12 and 16 are implemented. Steps 13-15 remain active work. Each addition
     - Task groups, child ownership, join-on-scope-exit, cancellation tokens.
     - Cancellation is observed at compiler/runtime safepoints.
 
-13. `runtime: integrate scheduler with GC`
-    - Task state, channel waiters, timers, and queues become precise GC roots.
-    - Idle workers may assist GC without violating scheduler fairness.
+13. `runtime: integrate scheduler with GC` ✅
+    - Task state/result/context/failure roots and queued reference-channel values have explicit lifetime roots; timer waiters retain opaque task handles whose task-owned state remains rooted.
+    - Heap-threshold GC requests defer while foreign native root stacks are active and retry at task-return, wait, park, and execution-budget safepoints.
+    - Idle-worker GC assistance remains an optional later optimization; correctness no longer depends on it.
 
 14. `runtime: add per-worker allocator caches`
     - Task/continuation/closure fast allocations become worker-local.

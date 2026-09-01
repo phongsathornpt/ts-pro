@@ -144,7 +144,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
   - [x] Add GC-rooted task-local JSValue context with automatic parent-to-child inheritance across worker migration/suspension and worker=1 regression coverage.
-- [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
+- [x] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
+  - [x] Keep task state/result/context/failure references rooted for the complete task lifetime; reference-channel buffered/queued values own persistent roots, while timer waiters retain opaque task handles whose task state remains rooted.
+  - [x] Add deferred heap-threshold GC requests and retry collection at scheduler task-return, wait, park, and execution-budget safepoints; collection waits until foreign native root stacks are quiescent or the only active stack is the paused current thread.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.

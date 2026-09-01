@@ -3,14 +3,6 @@ package main
 /*
 #include <stdint.h>
 #include <stdlib.h>
-typedef void *(*tsnative_channel_current_fn)(void);
-typedef int (*tsnative_channel_int0_fn)(void);
-typedef void (*tsnative_channel_void0_fn)(void);
-typedef int (*tsnative_channel_wake_fn)(void *);
-static void *tsnative_channel_call_current(uintptr_t fn) { return fn ? ((tsnative_channel_current_fn)fn)() : NULL; }
-static int tsnative_channel_call_int0(uintptr_t fn) { return fn ? ((tsnative_channel_int0_fn)fn)() : -1; }
-static void tsnative_channel_call_void0(uintptr_t fn) { if (fn) ((tsnative_channel_void0_fn)fn)(); }
-static int tsnative_channel_call_wake(uintptr_t fn, void *task) { return fn ? ((tsnative_channel_wake_fn)fn)(task) : -1; }
 */
 import "C"
 
@@ -21,14 +13,6 @@ import (
 	"time"
 	"unsafe"
 )
-
-type nativeChannelSchedulerHooks struct {
-	current uintptr
-	prepare uintptr
-	cancel  uintptr
-	wake    uintptr
-	help    uintptr
-}
 
 type nativeF64ChannelWaiter struct {
 	task        uintptr
@@ -53,29 +37,13 @@ type nativeF64Channel struct {
 	recvQueue []*nativeF64ChannelWaiter
 }
 
-var nativeChannelScheduler struct {
-	sync.RWMutex
-	hooks nativeChannelSchedulerHooks
-}
-
 var nativeChannels = struct {
 	sync.Mutex
 	byHandle map[uintptr]*nativeF64Channel
 }{byHandle: map[uintptr]*nativeF64Channel{}}
 
 //export tsnative_channel_bind_scheduler
-func tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {
-	nativeChannelScheduler.Lock()
-	nativeChannelScheduler.hooks = nativeChannelSchedulerHooks{uintptr(current), uintptr(prepare), uintptr(cancel), uintptr(wake), uintptr(help)}
-	nativeChannelScheduler.Unlock()
-}
-
-func channelSchedulerHooks() nativeChannelSchedulerHooks {
-	nativeChannelScheduler.RLock()
-	hooks := nativeChannelScheduler.hooks
-	nativeChannelScheduler.RUnlock()
-	return hooks
-}
+func tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
 
 func lookupNativeF64Channel(raw unsafe.Pointer) *nativeF64Channel {
 	if raw == nil {
@@ -133,8 +101,7 @@ func finishNativeChannelWaiter(waiter *nativeF64ChannelWaiter) {
 			close(waiter.done)
 			return
 		}
-		hooks := channelSchedulerHooks()
-		_ = C.tsnative_channel_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter.task))
+		_ = schedulerWakeTask(waiter.task)
 	})
 }
 
@@ -331,9 +298,8 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value C.double) C.int {
 	if channel == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	channel.mu.Lock()
@@ -351,11 +317,11 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value C.double) C.int {
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.sendQueue = append(channel.sendQueue, &nativeF64ChannelWaiter{task: uintptr(task), value: float64(value)})
+	channel.sendQueue = append(channel.sendQueue, &nativeF64ChannelWaiter{task: task, value: float64(value)})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
@@ -367,9 +333,8 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
 	if channel == nil || out == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	channel.mu.Lock()
@@ -401,25 +366,24 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeF64ChannelWaiter{task: uintptr(task), out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeF64ChannelWaiter{task: task, out: uintptr(out)})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
 }
 
 func waitNativeChannelCooperatively(waiter *nativeF64ChannelWaiter) {
-	hooks := channelSchedulerHooks()
 	for {
 		select {
 		case <-waiter.done:
 			return
 		default:
 		}
-		if hooks.help != 0 && C.tsnative_channel_call_int0(C.uintptr_t(hooks.help)) != 0 {
+		if tsnative_scheduler_help_once() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -437,8 +401,8 @@ func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value C.double) {
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		tsnative_channel_f64_send(raw, value)
 		return
 	}
@@ -458,7 +422,7 @@ func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value C.double) {
 		return
 	}
 	waiter := &nativeF64ChannelWaiter{
-		task:  uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))),
+		task:  currentTask,
 		value: float64(value), cooperative: true, done: make(chan struct{}),
 	}
 	channel.sendQueue = append(channel.sendQueue, waiter)
@@ -472,8 +436,8 @@ func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		return tsnative_channel_f64_recv(raw)
 	}
 	channel.mu.Lock()
@@ -499,7 +463,7 @@ func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
 		return C.double(value)
 	}
 	waiter := &nativeF64ChannelWaiter{
-		task:        uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))),
+		task:        currentTask,
 		cooperative: true, done: make(chan struct{}),
 	}
 	channel.recvQueue = append(channel.recvQueue, waiter)
@@ -653,8 +617,7 @@ func finishNativeRefWaiter(waiter *nativeRefChannelWaiter) {
 			close(waiter.done)
 			return
 		}
-		hooks := channelSchedulerHooks()
-		_ = C.tsnative_channel_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter.task))
+		_ = schedulerWakeTask(waiter.task)
 	})
 }
 
@@ -873,9 +836,8 @@ func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) C.int {
 	if channel == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	root := newNativeRefRoot(value)
@@ -892,12 +854,12 @@ func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		root.release()
 		return -1
 	}
-	channel.sendQueue = append(channel.sendQueue, &nativeRefChannelWaiter{task: uintptr(task), value: root})
+	channel.sendQueue = append(channel.sendQueue, &nativeRefChannelWaiter{task: task, value: root})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
@@ -909,9 +871,8 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 	if channel == nil || out == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	channel.mu.Lock()
@@ -946,25 +907,24 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeRefChannelWaiter{task: uintptr(task), out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeRefChannelWaiter{task: task, out: uintptr(out)})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
 }
 
 func waitNativeRefChannelCooperatively(waiter *nativeRefChannelWaiter) {
-	hooks := channelSchedulerHooks()
 	for {
 		select {
 		case <-waiter.done:
 			return
 		default:
 		}
-		if hooks.help != 0 && C.tsnative_channel_call_int0(C.uintptr_t(hooks.help)) != 0 {
+		if tsnative_scheduler_help_once() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -982,8 +942,8 @@ func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		nativeRefSend(raw, value)
 		return
 	}
@@ -1001,7 +961,7 @@ func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
 		channel.mu.Unlock()
 		return
 	}
-	waiter := &nativeRefChannelWaiter{task: uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))), value: root, cooperative: true, done: make(chan struct{})}
+	waiter := &nativeRefChannelWaiter{task: currentTask, value: root, cooperative: true, done: make(chan struct{})}
 	channel.sendQueue = append(channel.sendQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeRefChannelCooperatively(waiter)
@@ -1013,8 +973,8 @@ func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		return nativeRefRecv(raw)
 	}
 	channel.mu.Lock()
@@ -1049,7 +1009,7 @@ func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
 		root.release()
 		return value
 	}
-	waiter := &nativeRefChannelWaiter{task: uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))), cooperative: true, done: make(chan struct{})}
+	waiter := &nativeRefChannelWaiter{task: currentTask, cooperative: true, done: make(chan struct{})}
 	channel.recvQueue = append(channel.recvQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeRefChannelCooperatively(waiter)
@@ -1145,8 +1105,7 @@ func finishNativeBoolWaiter(waiter *nativeBoolChannelWaiter) {
 			close(waiter.done)
 			return
 		}
-		hooks := channelSchedulerHooks()
-		_ = C.tsnative_channel_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter.task))
+		_ = schedulerWakeTask(waiter.task)
 	})
 }
 
@@ -1240,9 +1199,8 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value C.uint8_t) C.int 
 	if channel == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	v := uint8(value)
@@ -1261,11 +1219,11 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value C.uint8_t) C.int 
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.sendQueue = append(channel.sendQueue, &nativeBoolChannelWaiter{task: uintptr(task), value: v})
+	channel.sendQueue = append(channel.sendQueue, &nativeBoolChannelWaiter{task: task, value: v})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
@@ -1277,9 +1235,8 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
 	if channel == nil || out == nil {
 		return -1
 	}
-	hooks := channelSchedulerHooks()
-	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
-	if task == nil {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 {
 		return -1
 	}
 	channel.mu.Lock()
@@ -1311,25 +1268,24 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return 1
 	}
-	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	if tsnative_scheduler_prepare_park() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeBoolChannelWaiter{task: uintptr(task), out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeBoolChannelWaiter{task: task, out: uintptr(out)})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
 }
 
 func waitNativeBoolChannelCooperatively(waiter *nativeBoolChannelWaiter) {
-	hooks := channelSchedulerHooks()
 	for {
 		select {
 		case <-waiter.done:
 			return
 		default:
 		}
-		if hooks.help != 0 && C.tsnative_channel_call_int0(C.uintptr_t(hooks.help)) != 0 {
+		if tsnative_scheduler_help_once() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -1347,8 +1303,8 @@ func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value C.uint8_t)
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		v := uint8(value)
 		channel.mu.Lock()
 		if receiver := popBoolChannelWaiter(&channel.recvQueue); receiver != nil {
@@ -1418,8 +1374,8 @@ func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) C.uint8_t {
 	if channel == nil {
 		C.abort()
 	}
-	hooks := channelSchedulerHooks()
-	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+	currentTask := schedulerCurrentTaskPtr()
+	if currentTask == 0 {
 		channel.mu.Lock()
 		for {
 			if channel.capacity != 0 && channel.count != 0 {

@@ -3,14 +3,6 @@ package main
 /*
 #include <stdint.h>
 #include <stdlib.h>
-typedef void *(*tsnative_timer_current_fn)(void);
-typedef int (*tsnative_timer_int0_fn)(void);
-typedef void (*tsnative_timer_void0_fn)(void);
-typedef int (*tsnative_timer_wake_fn)(void *);
-static void *tsnative_timer_call_current(uintptr_t fn) { return fn ? ((tsnative_timer_current_fn)fn)() : NULL; }
-static int tsnative_timer_call_int0(uintptr_t fn) { return fn ? ((tsnative_timer_int0_fn)fn)() : -1; }
-static void tsnative_timer_call_void0(uintptr_t fn) { if (fn) ((tsnative_timer_void0_fn)fn)(); }
-static int tsnative_timer_call_wake(uintptr_t fn, void *task) { return fn ? ((tsnative_timer_wake_fn)fn)(task) : -1; }
 */
 import "C"
 
@@ -18,7 +10,6 @@ import (
 	"math"
 	"sync"
 	"time"
-	"unsafe"
 )
 
 type nativeTimerWaiter struct {
@@ -35,32 +26,8 @@ var nativeTimers = struct {
 	stopping bool
 }{waiters: map[*nativeTimerWaiter]struct{}{}}
 
-type nativeTimerSchedulerHooks struct {
-	current uintptr
-	prepare uintptr
-	cancel  uintptr
-	wake    uintptr
-	help    uintptr
-}
-
-var nativeTimerScheduler struct {
-	sync.RWMutex
-	hooks nativeTimerSchedulerHooks
-}
-
 //export tsnative_timer_bind_scheduler
-func tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {
-	nativeTimerScheduler.Lock()
-	nativeTimerScheduler.hooks = nativeTimerSchedulerHooks{uintptr(current), uintptr(prepare), uintptr(cancel), uintptr(wake), uintptr(help)}
-	nativeTimerScheduler.Unlock()
-}
-
-func timerSchedulerHooks() nativeTimerSchedulerHooks {
-	nativeTimerScheduler.RLock()
-	hooks := nativeTimerScheduler.hooks
-	nativeTimerScheduler.RUnlock()
-	return hooks
-}
+func tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
 
 func nativeTimerDuration(milliseconds float64) time.Duration {
 	if math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds < 0 {
@@ -82,8 +49,7 @@ func completeNativeTimer(waiter *nativeTimerWaiter) {
 			close(waiter.done)
 			return
 		}
-		hooks := timerSchedulerHooks()
-		_ = C.tsnative_timer_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter.task))
+		_ = schedulerWakeTask(waiter.task)
 	})
 }
 
@@ -106,13 +72,12 @@ func tsnative_sleep_task(milliseconds C.double) C.int {
 	if duration == 0 {
 		return 1
 	}
-	hooks := timerSchedulerHooks()
-	task := C.tsnative_timer_call_current(C.uintptr_t(hooks.current))
-	if task == nil || C.tsnative_timer_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+	task := schedulerCurrentTaskPtr()
+	if task == 0 || tsnative_scheduler_prepare_park() != 0 {
 		return -1
 	}
-	if scheduleNativeTimer(duration, uintptr(unsafe.Pointer(task)), false) == nil {
-		C.tsnative_timer_call_void0(C.uintptr_t(hooks.cancel))
+	if scheduleNativeTimer(duration, task, false) == nil {
+		tsnative_scheduler_cancel_park()
 		return -1
 	}
 	return 0
@@ -124,8 +89,7 @@ func tsnative_sleep_cooperative(milliseconds C.double) {
 	if duration == 0 {
 		return
 	}
-	hooks := timerSchedulerHooks()
-	if C.tsnative_timer_call_current(C.uintptr_t(hooks.current)) == nil {
+	if schedulerCurrentTaskPtr() == 0 {
 		time.Sleep(duration)
 		return
 	}
@@ -139,7 +103,7 @@ func tsnative_sleep_cooperative(milliseconds C.double) {
 			return
 		default:
 		}
-		if hooks.help != 0 && C.tsnative_timer_call_int0(C.uintptr_t(hooks.help)) != 0 {
+		if tsnative_scheduler_help_once() != 0 {
 			continue
 		}
 		select {

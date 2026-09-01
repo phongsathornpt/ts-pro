@@ -74,7 +74,7 @@ func (c *ObjectCache) BuildGoArchive(ctx context.Context, root, packagePath stri
 	header := strings.TrimSuffix(temp, ".a") + ".h"
 	defer os.Remove(temp)
 	defer os.Remove(header)
-	cmd := exec.CommandContext(ctx, goPath, "build", "-trimpath", "-buildmode=c-archive", "-o", temp, packagePath)
+	cmd := exec.CommandContext(ctx, goPath, "build", "-trimpath", "-buildvcs=false", "-buildmode=c-archive", "-o", temp, packagePath)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
 	if data, runErr := cmd.CombinedOutput(); runErr != nil {

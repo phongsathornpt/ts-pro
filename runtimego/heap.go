@@ -25,8 +25,8 @@ type nativeHeapBlock struct {
 }
 
 type nativeRootFrame struct {
-	token      uintptr
-	slots      uintptr
+	token      unsafe.Pointer
+	slots      unsafe.Pointer
 	count      uintptr
 	persistent bool
 	tid        int
@@ -37,6 +37,8 @@ var nativeHeap = struct {
 	blocks       map[uintptr]*nativeHeapBlock
 	roots        map[uintptr]*nativeRootFrame
 	threadStacks map[int][]uintptr
+	tokenPages   [][]byte
+	tokenFree    []unsafe.Pointer
 	bytes        uintptr
 	allocations  uintptr
 	collections  uintptr
@@ -49,7 +51,7 @@ var nativeHeap = struct {
 	threshold:    initialGCThreshold,
 }
 
-var nativeRootToken atomic.Uint64
+var nativeGCRequested atomic.Bool
 
 func nativeAbortSignal() {
 	_ = syscall.Kill(syscall.Getpid(), syscall.SIGABRT)
@@ -100,8 +102,28 @@ func registerNativeHeapFinalizer(raw unsafe.Pointer, finalizer func()) {
 	nativeHeap.Unlock()
 }
 
-func allocToken() uintptr {
-	return uintptr(nativeRootToken.Add(1))
+const nativeRootTokenSize = uintptr(unsafe.Sizeof(uintptr(0)))
+
+func allocRootTokenLocked() unsafe.Pointer {
+	if count := len(nativeHeap.tokenFree); count != 0 {
+		token := nativeHeap.tokenFree[count-1]
+		nativeHeap.tokenFree[count-1] = nil
+		nativeHeap.tokenFree = nativeHeap.tokenFree[:count-1]
+		return token
+	}
+	_, page := nativeMap(uintptr(os.Getpagesize()))
+	base := unsafe.Pointer(&page[0])
+	for offset := nativeRootTokenSize; offset+nativeRootTokenSize <= uintptr(len(page)); offset += nativeRootTokenSize {
+		nativeHeap.tokenFree = append(nativeHeap.tokenFree, unsafe.Add(base, offset))
+	}
+	nativeHeap.tokenPages = append(nativeHeap.tokenPages, page)
+	return base
+}
+
+func freeRootTokenLocked(token unsafe.Pointer) {
+	if token != nil {
+		nativeHeap.tokenFree = append(nativeHeap.tokenFree, token)
+	}
 }
 
 //export tsnative_heap_alloc
@@ -111,20 +133,24 @@ func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	nativeHeap.blocks[ptr] = &nativeHeapBlock{ptr: ptr, size: size, data: data}
 	nativeHeap.bytes += size
 	nativeHeap.allocations++
+	if nativeHeap.bytes >= nativeHeap.threshold {
+		nativeGCRequested.Store(true)
+	}
 	nativeHeap.Unlock()
 	return unsafe.Pointer(ptr)
 }
 
 //export tsnative_gc_enter
 func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
-	token := allocToken()
 	tid := syscall.Gettid()
-	frame := &nativeRootFrame{token: token, slots: uintptr(slots), count: count, tid: tid}
 	nativeHeap.Lock()
-	nativeHeap.roots[token] = frame
-	nativeHeap.threadStacks[tid] = append(nativeHeap.threadStacks[tid], token)
+	token := allocRootTokenLocked()
+	key := uintptr(token)
+	frame := &nativeRootFrame{token: token, slots: slots, count: count, tid: tid}
+	nativeHeap.roots[key] = frame
+	nativeHeap.threadStacks[tid] = append(nativeHeap.threadStacks[tid], key)
 	nativeHeap.Unlock()
-	return unsafe.Pointer(token)
+	return token
 }
 
 //export tsnative_gc_leave
@@ -140,6 +166,7 @@ func tsnative_gc_leave(raw unsafe.Pointer) {
 		return
 	}
 	delete(nativeHeap.roots, token)
+	freeRootTokenLocked(frame.token)
 	stack = stack[:len(stack)-1]
 	if len(stack) == 0 {
 		delete(nativeHeap.threadStacks, tid)
@@ -154,12 +181,11 @@ func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
 	if slot == nil {
 		return nil
 	}
-	token := allocToken()
-	frame := &nativeRootFrame{token: token, slots: uintptr(slot), count: 1, persistent: true}
 	nativeHeap.Lock()
-	nativeHeap.roots[token] = frame
+	token := allocRootTokenLocked()
+	nativeHeap.roots[uintptr(token)] = &nativeRootFrame{token: token, slots: slot, count: 1, persistent: true}
 	nativeHeap.Unlock()
-	return unsafe.Pointer(token)
+	return token
 }
 
 //export tsnative_gc_root_unregister
@@ -176,6 +202,7 @@ func tsnative_gc_root_unregister(raw unsafe.Pointer) {
 		return
 	}
 	delete(nativeHeap.roots, token)
+	freeRootTokenLocked(frame.token)
 	nativeHeap.Unlock()
 }
 
@@ -215,6 +242,32 @@ func markCandidateLocked(candidate uintptr) {
 	}
 }
 
+func gcCanCollectLocked(tid int) bool {
+	if nativeHeap.handoffs != 0 {
+		return false
+	}
+	if len(nativeHeap.threadStacks) == 0 {
+		return true
+	}
+	if len(nativeHeap.threadStacks) != 1 {
+		return false
+	}
+	_, ownsActiveStack := nativeHeap.threadStacks[tid]
+	return ownsActiveStack
+}
+
+func collectIfSafeLocked(tid int, force bool) []*nativeHeapBlock {
+	if !force && !nativeGCRequested.Load() {
+		return nil
+	}
+	if !gcCanCollectLocked(tid) {
+		return nil
+	}
+	blocks := collectLocked()
+	nativeGCRequested.Store(false)
+	return blocks
+}
+
 func collectLocked() []*nativeHeapBlock {
 	for _, block := range nativeHeap.blocks {
 		block.marked = false
@@ -222,8 +275,8 @@ func collectLocked() []*nativeHeapBlock {
 	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
 	for _, frame := range nativeHeap.roots {
 		for i := uintptr(0); i < frame.count; i++ {
-			slotAddr := frame.slots + i*wordSize
-			candidate := *(*uintptr)(unsafe.Pointer(slotAddr))
+			slotAddr := unsafe.Add(frame.slots, i*wordSize)
+			candidate := *(*uintptr)(slotAddr)
 			markCandidateLocked(candidate)
 		}
 	}
@@ -257,22 +310,22 @@ func finalizeNativeHeapBlocks(blocks []*nativeHeapBlock) {
 
 //export tsnative_gc_collect
 func tsnative_gc_collect() {
-	var blocks []*nativeHeapBlock
+	nativeGCRequested.Store(true)
+	tid := syscall.Gettid()
 	nativeHeap.Lock()
-	if len(nativeHeap.threadStacks) <= 1 && nativeHeap.handoffs == 0 {
-		blocks = collectLocked()
-	}
+	blocks := collectIfSafeLocked(tid, true)
 	nativeHeap.Unlock()
 	finalizeNativeHeapBlocks(blocks)
 }
 
 //export tsnative_gc_safepoint
 func tsnative_gc_safepoint() {
-	var blocks []*nativeHeapBlock
-	nativeHeap.Lock()
-	if nativeHeap.bytes >= nativeHeap.threshold && len(nativeHeap.threadStacks) <= 1 && nativeHeap.handoffs == 0 {
-		blocks = collectLocked()
+	if !nativeGCRequested.Load() {
+		return
 	}
+	tid := syscall.Gettid()
+	nativeHeap.Lock()
+	blocks := collectIfSafeLocked(tid, false)
 	nativeHeap.Unlock()
 	finalizeNativeHeapBlocks(blocks)
 }
@@ -289,10 +342,17 @@ func tsnative_heap_shutdown() {
 	nativeHeap.allocations = 0
 	nativeHeap.threshold = initialGCThreshold
 	nativeHeap.handoffs = 0
+	nativeGCRequested.Store(false)
 	nativeHeap.roots = map[uintptr]*nativeRootFrame{}
 	nativeHeap.threadStacks = map[int][]uintptr{}
+	tokenPages := nativeHeap.tokenPages
+	nativeHeap.tokenPages = nil
+	nativeHeap.tokenFree = nil
 	nativeHeap.Unlock()
 	finalizeNativeHeapBlocks(blocks)
+	for _, page := range tokenPages {
+		nativeUnmap(page)
+	}
 }
 
 //export tsnative_heap_live_bytes

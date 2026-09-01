@@ -56,6 +56,6 @@ bounded worker scheduler
 
 ## Remaining sequencing rule
 
-The next concurrency/runtime work is scheduler/GC precision and allocator locality, not another scheduler rewrite. Task/channel/timer waiter state must become precise GC roots/safepoints before per-worker nurseries or Green-Tea-style local mark-page queues are introduced.
+Scheduler/GC lifecycle integration is now in place: task-owned reference state and queued reference-channel values remain explicitly rooted, heap-threshold collection requests are deferred safely across active foreign root stacks, and scheduler return/wait/park/budget paths retry GC at safepoints. The next concurrency/runtime work is allocator locality: per-worker allocation caches/nurseries first, then Green-Tea-style local mark-page queues after size-class/page metadata is available.
 
 Every milestone must pass `go test ./...`, native acceptance where applicable, and `git diff --check` before commit.
