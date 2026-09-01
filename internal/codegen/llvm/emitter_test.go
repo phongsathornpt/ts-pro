@@ -548,3 +548,44 @@ func TestEmitStacklessLinearSSAContinuation(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessReferenceAndJSValueLinearContinuation(t *testing.T) {
+	module := mir.Module{Name: "stackless-ref-js", Functions: []mir.Function{
+		{ID: 0, Name: "stringWorker", ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "pre:"}},
+			{Result: 1, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},
+			{Result: 2, Repr: mir.ReprStringRef, Op: mir.StringConcat{Left: 0, Right: 1}},
+			{Result: 3, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+			{Result: 4, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 3}},
+		}, Terminator: mir.Return{Value: valueIDPtr(2)}}}},
+		{ID: 1, Name: "dynamicWorker", ReturnRepr: mir.ReprJSValue, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},
+			{Result: 1, Repr: mir.ReprJSValue, Op: mir.BoxJSValue{Kind: mir.BoxJSString, Value: 0}},
+			{Result: 2, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "-any"}},
+			{Result: 3, Repr: mir.ReprJSValue, Op: mir.BoxJSValue{Kind: mir.BoxJSString, Value: 2}},
+			{Result: 4, Repr: mir.ReprJSValue, Op: mir.DynamicAddJSValue{Left: 1, Right: 3}},
+			{Result: 5, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+			{Result: 6, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 5}},
+		}, Terminator: mir.Return{Value: valueIDPtr(4)}}}},
+		{ID: 2, Name: "launcher", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { i32, ptr, ptr, ptr }",
+		"call ptr @tsnative_string_concat(ptr",
+		"call ptr @tsnative_jsvalue_box_string(ptr",
+		"call ptr @tsnative_jsvalue_add(ptr",
+		"call void @tsnative_gc_safepoint()",
+		"store ptr %v4, ptr %spill4.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

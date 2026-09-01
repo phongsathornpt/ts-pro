@@ -19,6 +19,12 @@ const (
 	taskStepFloatBinary
 	taskStepProvenIntBinary
 	taskStepFloatCompare
+	taskStepConstString
+	taskStepStringConcat
+	taskStepBoxJSValue
+	taskStepDynamicAddJSValue
+	taskStepArrayLengthF64
+	taskStepArrayGetF64
 )
 
 type taskSuspendStep struct {
@@ -118,6 +124,48 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprBool}
 			available[inst.Result] = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatCompare, Result: inst.Result, Inst: inst})
+		case mir.ConstString:
+			if inst.Repr != mir.ReprStringRef {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepConstString, Result: inst.Result, Inst: inst})
+		case mir.StringConcat:
+			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprStringRef {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepStringConcat, Result: inst.Result, Inst: inst})
+		case mir.BoxJSValue:
+			if !available[op.Value] || inst.Repr != mir.ReprJSValue {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBoxJSValue, Result: inst.Result, Inst: inst})
+		case mir.DynamicAddJSValue:
+			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprJSValue {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepDynamicAddJSValue, Result: inst.Result, Inst: inst})
+		case mir.ArrayLengthF64:
+			if !available[op.Array] || inst.Repr != mir.ReprF64 {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayLengthF64, Result: inst.Result, Inst: inst})
+		case mir.ArrayGetF64:
+			if !available[op.Array] || !available[op.Index] || inst.Repr != mir.ReprF64 {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayGetF64, Result: inst.Result, Inst: inst})
 		case mir.TaskSpawn:
 			for _, capture := range op.Captures {
 				if !available[capture] {
@@ -218,6 +266,8 @@ func continuationOperand(b *strings.Builder, fn mir.Function, descriptor taskDes
 func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDescriptor, fn mir.Function, step taskSuspendStep, suffix string) error {
 	values := map[mir.ValueID]string{}
 	switch op := step.Inst.Op.(type) {
+	case mir.ConstString:
+		// no operands
 	case mir.FloatBinary:
 		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
 			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
@@ -242,11 +292,53 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 			}
 			values[valueID] = value
 		}
+	case mir.StringConcat:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
+	case mir.BoxJSValue:
+		value, _, err := continuationOperand(b, fn, descriptor, op.Value, suffix)
+		if err != nil {
+			return err
+		}
+		values[op.Value] = value
+	case mir.DynamicAddJSValue:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
+	case mir.ArrayLengthF64:
+		value, _, err := continuationOperand(b, fn, descriptor, op.Array, suffix)
+		if err != nil {
+			return err
+		}
+		values[op.Array] = value
+	case mir.ArrayGetF64:
+		for _, valueID := range []mir.ValueID{op.Array, op.Index} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
 	default:
 		return fmt.Errorf("unsupported pure continuation op %T", step.Inst.Op)
 	}
+	if emitsGCAllocation(step.Inst.Op) {
+		b.WriteString("  call void @tsnative_gc_safepoint()\n")
+	}
 	if err := e.emitInstruction(b, fn, step.Inst, values); err != nil {
 		return err
+	}
+	if _, ok := values[step.Inst.Result]; !ok && step.Inst.Repr != mir.ReprVoid {
+		values[step.Inst.Result] = valueName(step.Inst.Result)
 	}
 	result, ok := values[step.Inst.Result]
 	if !ok {
@@ -288,7 +380,9 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 		next := fmt.Sprintf("%%step%d", i+1)
 		park := fmt.Sprintf("%%park%d", i)
 		switch step.Kind {
-		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare:
+		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare,
+			taskStepConstString, taskStepStringConcat, taskStepBoxJSValue, taskStepDynamicAddJSValue,
+			taskStepArrayLengthF64, taskStepArrayGetF64:
 			if err := e.emitPureContinuationStep(b, descriptor, fn, step, fmt.Sprintf("p%d", i)); err != nil {
 				return err
 			}
