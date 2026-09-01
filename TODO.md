@@ -85,7 +85,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer, unbuffered rendezvous, and nonblocking `try_send`/`try_recv` transitions plus pthread regression coverage.
   - [~] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
     - [x] Runtime `WAITING -> RUNNABLE` park/wake lifecycle with race-safe pending wake and worker=1 resume regression.
-    - [ ] Wire channel waiter queues and compiler-generated continuation state onto the park/wake lifecycle.
+    - [x] Wire F64 channel sender/receiver waiter queues onto park/wake, with operation-complete-before-wake handoff and worker=1 buffered/unbuffered regressions.
+    - [ ] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
   - [ ] Add compiler-known `channel<number>`/send/recv intrinsics and scheduler/channel metrics.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
