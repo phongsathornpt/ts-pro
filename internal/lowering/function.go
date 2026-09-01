@@ -18,8 +18,9 @@ type functionLowerer struct {
 	current          int
 	terminated       bool
 	handlers         []exceptionHandler
-	returnFinalizers [][]frontend.Statement
-	throwFinalizers  [][]frontend.Statement
+	returnFinalizers []finalizerFrame
+	throwFinalizers  []finalizerFrame
+	nextFinalizer    uint32
 }
 
 type localState struct {
@@ -37,6 +38,11 @@ type exceptionHandler struct {
 	incoming []hir.PhiIncoming
 	symbol   frontend.SymbolID
 	typeID   frontend.TypeID
+}
+
+type finalizerFrame struct {
+	id         uint32
+	statements []frontend.Statement
 }
 
 func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, error) {
@@ -234,9 +240,27 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 	}
 }
 
-func (f *functionLowerer) lowerCompletionFinalizers(finalizers [][]frontend.Statement) error {
+func finalizersBefore(stack []finalizerFrame, id uint32) []finalizerFrame {
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i].id == id {
+			return stack[:i]
+		}
+	}
+	return stack
+}
+
+func (f *functionLowerer) lowerCompletionFinalizers(finalizers []finalizerFrame) error {
+	savedReturn := f.returnFinalizers
+	savedThrow := f.throwFinalizers
+	defer func() {
+		f.returnFinalizers = savedReturn
+		f.throwFinalizers = savedThrow
+	}()
 	for i := len(finalizers) - 1; i >= 0; i-- {
-		if err := f.lowerStatements(finalizers[i]); err != nil {
+		frame := finalizers[i]
+		f.returnFinalizers = finalizersBefore(savedReturn, frame.id)
+		f.throwFinalizers = finalizersBefore(savedThrow, frame.id)
+		if err := f.lowerStatements(frame.statements); err != nil {
 			return err
 		}
 		if f.terminated {
@@ -251,8 +275,11 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 	catchID := f.newBlockID()
 	continueID := f.newBlockID()
 	hasFinally := len(stmt.Finally) != 0
+	frame := finalizerFrame{}
 	if hasFinally {
-		f.returnFinalizers = append(f.returnFinalizers, stmt.Finally)
+		frame = finalizerFrame{id: f.nextFinalizer, statements: stmt.Finally}
+		f.nextFinalizer++
+		f.returnFinalizers = append(f.returnFinalizers, frame)
 	}
 	f.handlers = append(f.handlers, exceptionHandler{block: catchID, symbol: stmt.CatchSymbol, typeID: stmt.CatchType})
 	if err := f.lowerStatements(stmt.Then); err != nil {
@@ -275,7 +302,7 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 		exception := f.emit(handler.typeID, hir.PhiOp{Incoming: handler.incoming})
 		f.locals[handler.symbol] = exception
 		if hasFinally {
-			f.throwFinalizers = append(f.throwFinalizers, stmt.Finally)
+			f.throwFinalizers = append(f.throwFinalizers, frame)
 		}
 		if err := f.lowerStatements(stmt.Catch); err != nil {
 			return err

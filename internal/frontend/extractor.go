@@ -475,9 +475,6 @@ func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
-		if statementsContainReturn(finallyBody) || statementsContainThrow(finallyBody) {
-			return Statement{}, fmt.Errorf("finally at %d does not yet support return/throw completion override", node.Pos())
-		}
 	}
 	return Statement{Kind: StmtTry, Span: e.span(node), Then: tryBody, Catch: catchBody, Finally: finallyBody, CatchSymbol: catchSymbol, CatchType: anyType}, nil
 }

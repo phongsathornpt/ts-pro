@@ -1257,3 +1257,32 @@ func TestBuildNativeAsyncFinallyCompletionSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeAsyncFinallyOverrideSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "async-finally-override")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_async_finally_override.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 3 || result.Metrics.TaskJoins != 3 {
+		t.Fatalf("finally override metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run finally override: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "99\nfinally-override\n42" {
+		t.Fatalf("output = %q", got)
+	}
+}
