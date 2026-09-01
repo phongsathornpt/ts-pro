@@ -24,6 +24,10 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralNumber, Number: expr.Number}}), nil
 	case frontend.ExprString:
 		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralString, String: expr.String}}), nil
+	case frontend.ExprNull:
+		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralNull}}), nil
+	case frontend.ExprUndefined:
+		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralUndefined}}), nil
 	case frontend.ExprBinary:
 		return f.lowerBinary(expr)
 	case frontend.ExprCall:

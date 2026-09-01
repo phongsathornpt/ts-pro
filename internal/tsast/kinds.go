@@ -22,6 +22,7 @@ const (
 	KindExportKeyword                uint32 = 94
 	KindExtendsKeyword               uint32 = 95
 	KindFalseKeyword                 uint32 = 96
+	KindNullKeyword                  uint32 = 105
 	KindSuperKeyword                 uint32 = 107
 	KindThisKeyword                  uint32 = 109
 	KindTrueKeyword                  uint32 = 111
@@ -78,7 +79,7 @@ var kindNames = map[uint32]string{
 	KindEqualsEqualsEqualsToken: "EqualsEqualsEqualsToken", KindExclamationEqualsEqualsToken: "ExclamationEqualsEqualsToken",
 	KindPlusToken: "PlusToken", KindMinusToken: "MinusToken", KindAsteriskToken: "AsteriskToken", KindSlashToken: "SlashToken",
 	KindPlusPlusToken: "PlusPlusToken", KindMinusMinusToken: "MinusMinusToken", KindEqualsToken: "EqualsToken",
-	KindExportKeyword: "ExportKeyword", KindExtendsKeyword: "ExtendsKeyword", KindFalseKeyword: "FalseKeyword", KindSuperKeyword: "SuperKeyword", KindThisKeyword: "ThisKeyword", KindTrueKeyword: "TrueKeyword",
+	KindExportKeyword: "ExportKeyword", KindExtendsKeyword: "ExtendsKeyword", KindFalseKeyword: "FalseKeyword", KindNullKeyword: "NullKeyword", KindSuperKeyword: "SuperKeyword", KindThisKeyword: "ThisKeyword", KindTrueKeyword: "TrueKeyword",
 	KindAsyncKeyword: "AsyncKeyword", KindPrivateKeyword: "PrivateKeyword", KindProtectedKeyword: "ProtectedKeyword", KindPublicKeyword: "PublicKeyword", KindStaticKeyword: "StaticKeyword", KindReadonlyKeyword: "ReadonlyKeyword",
 	KindIdentifier: "Identifier", KindNumberKeyword: "NumberKeyword",
 	KindParameter: "Parameter", KindPropertyDeclaration: "PropertyDeclaration", KindMethodDeclaration: "MethodDeclaration", KindConstructor: "Constructor",

@@ -27,6 +27,8 @@ extern void *tsnative_string_new(const char *data, uint64_t len);
 extern void *tsnative_jsvalue_box_f64(double value);
 extern void *tsnative_jsvalue_box_string(void *value);
 extern void *tsnative_jsvalue_box_bool(uint8_t value);
+extern void *tsnative_jsvalue_null(void);
+extern void *tsnative_jsvalue_undefined(void);
 extern void *tsnative_jsvalue_add(void *left, void *right);
 extern void tsnative_console_log_jsvalue(void *value);
 extern void tsnative_heap_shutdown(void);
@@ -47,6 +49,15 @@ extern void tsnative_heap_shutdown(void);
   void *bool_prefix_string = tsnative_string_new("bool=", 5);
   void *bool_prefix = tsnative_jsvalue_box_string(bool_prefix_string);
   tsnative_console_log_jsvalue(tsnative_jsvalue_add(bool_prefix, truth));
+  void *null_value = tsnative_jsvalue_null();
+  void *undefined_value = tsnative_jsvalue_undefined();
+  tsnative_console_log_jsvalue(null_value);
+  tsnative_console_log_jsvalue(undefined_value);
+  tsnative_console_log_jsvalue(tsnative_jsvalue_add(null_value, two));
+  void *null_prefix_string = tsnative_string_new("null=", 5);
+  void *null_prefix = tsnative_jsvalue_box_string(null_prefix_string);
+  tsnative_console_log_jsvalue(tsnative_jsvalue_add(null_prefix, null_value));
+  tsnative_console_log_jsvalue(tsnative_jsvalue_add(undefined_value, two));
   tsnative_heap_shutdown();
   return 0;
 }
@@ -67,7 +78,7 @@ extern void tsnative_heap_shutdown(void);
 	if err != nil {
 		t.Fatalf("run Go JSValue runtime test: %v: %s", err, output)
 	}
-	if string(output) != "42\nvalue=42\ntrue\n3\nbool=true\n" {
+	if string(output) != "42\nvalue=42\ntrue\n3\nbool=true\nnull\nundefined\n2\nnull=null\nNaN\n" {
 		t.Fatalf("output = %q", output)
 	}
 }

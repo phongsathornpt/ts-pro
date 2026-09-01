@@ -92,6 +92,10 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			result.Op = mir.ConstF64{Value: op.Literal.Number}
 		case op.Literal.Kind == hir.LiteralString && repr == mir.ReprStringRef:
 			result.Op = mir.ConstString{Value: op.Literal.String}
+		case op.Literal.Kind == hir.LiteralNull && repr == mir.ReprJSValue:
+			result.Op = mir.ConstJSValue{Kind: mir.ConstJSNull}
+		case op.Literal.Kind == hir.LiteralUndefined && repr == mir.ReprJSValue:
+			result.Op = mir.ConstJSValue{Kind: mir.ConstJSUndefined}
 		default:
 			return mir.Instruction{}, fmt.Errorf("unsupported const kind %d representation %v", op.Literal.Kind, repr)
 		}

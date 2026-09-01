@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	nativeJSTagNumber  uint32 = 1
-	nativeJSTagString  uint32 = 2
-	nativeJSTagBoolean uint32 = 3
+	nativeJSTagNumber    uint32 = 1
+	nativeJSTagString    uint32 = 2
+	nativeJSTagBoolean   uint32 = 3
+	nativeJSTagNull      uint32 = 4
+	nativeJSTagUndefined uint32 = 5
 )
 
 type nativeJSValue struct {
@@ -68,6 +70,16 @@ func tsnative_jsvalue_box_bool(raw C.uint8_t) unsafe.Pointer {
 	return unsafe.Pointer(value)
 }
 
+//export tsnative_jsvalue_null
+func tsnative_jsvalue_null() unsafe.Pointer {
+	return unsafe.Pointer(newNativeJSValue(nativeJSTagNull))
+}
+
+//export tsnative_jsvalue_undefined
+func tsnative_jsvalue_undefined() unsafe.Pointer {
+	return unsafe.Pointer(newNativeJSValue(nativeJSTagUndefined))
+}
+
 func nativeJSStringLiteral(text string) unsafe.Pointer {
 	if len(text) == 0 {
 		return tsnative_string_new(nil, 0)
@@ -98,6 +110,10 @@ func nativeJSToString(value *nativeJSValue) unsafe.Pointer {
 			return nativeJSStringLiteral("true")
 		}
 		return nativeJSStringLiteral("false")
+	case nativeJSTagNull:
+		return nativeJSStringLiteral("null")
+	case nativeJSTagUndefined:
+		return nativeJSStringLiteral("undefined")
 	default:
 		C.abort()
 		return nil
@@ -116,6 +132,10 @@ func nativeJSToNumber(value *nativeJSValue) float64 {
 			return 1
 		}
 		return 0
+	case nativeJSTagNull:
+		return 0
+	case nativeJSTagUndefined:
+		return math.NaN()
 	default:
 		C.abort()
 		return 0
@@ -153,6 +173,10 @@ func tsnative_console_log_jsvalue(raw unsafe.Pointer) {
 		} else {
 			fmt.Println("false")
 		}
+	case nativeJSTagNull:
+		fmt.Println("null")
+	case nativeJSTagUndefined:
+		fmt.Println("undefined")
 	default:
 		C.abort()
 	}

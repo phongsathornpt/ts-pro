@@ -15,7 +15,9 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 	if expr == nil || int(target) >= len(f.module.source.Types) || int(expr.Type) >= len(f.module.source.Types) {
 		return value, nil
 	}
-	if f.module.source.Types[target].Kind != frontend.TypeAny || f.module.source.Types[expr.Type].Kind == frontend.TypeAny {
+	targetKind := f.module.source.Types[target].Kind
+	sourceKind := f.module.source.Types[expr.Type].Kind
+	if targetKind != frontend.TypeAny || sourceKind == frontend.TypeAny || sourceKind == frontend.TypeNull || sourceKind == frontend.TypeUndefined {
 		return value, nil
 	}
 	kind := hir.BoxInvalid

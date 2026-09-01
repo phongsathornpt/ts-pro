@@ -75,6 +75,15 @@ type Operation interface{ isOperation() }
 type ConstBool struct{ Value bool }
 type ConstF64 struct{ Value float64 }
 type ConstString struct{ Value string }
+
+type ConstJSKind uint8
+
+const (
+	ConstJSNull ConstJSKind = iota + 1
+	ConstJSUndefined
+)
+
+type ConstJSValue struct{ Kind ConstJSKind }
 type StringConcat struct{ Left, Right ValueID }
 
 type FloatBinaryOp uint8
@@ -221,6 +230,7 @@ type ChannelSendF64 struct{ Channel, Value ValueID }
 type ChannelRecvF64 struct{ Channel ValueID }
 type Sleep struct{ Duration ValueID }
 
+func (ConstJSValue) isOperation()        {}
 func (ConstBool) isOperation()           {}
 func (ConstF64) isOperation()            {}
 func (ConstString) isOperation()         {}

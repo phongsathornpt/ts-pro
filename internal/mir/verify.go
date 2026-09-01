@@ -86,6 +86,10 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			switch op := inst.Op.(type) {
+			case ConstJSValue:
+				if inst.Repr != ReprJSValue || (op.Kind != ConstJSNull && op.Kind != ConstJSUndefined) {
+					return fmt.Errorf("JSValue const v%d has invalid kind/repr", inst.Result)
+				}
 			case ConstBool, ConstF64, ConstString:
 			case StringConcat:
 				if err := checkValue(op.Left); err != nil {

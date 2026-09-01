@@ -583,9 +583,16 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		expr.Kind = ExprBoolean
 		expr.Boolean = node.Kind() == tsast.KindTrueKeyword
 		return expr, nil
+	case tsast.KindNullKeyword:
+		expr.Kind = ExprNull
+		return expr, nil
 	case tsast.KindIdentifier:
 		expr.Kind = ExprIdentifier
 		expr.Name, _ = node.Text()
+		if expr.Name == "undefined" && int(typeID) < len(e.result.Types) && e.result.Types[typeID].Kind == TypeUndefined {
+			expr.Kind = ExprUndefined
+			return expr, nil
+		}
 		if alias, ok := e.parameterAliases[expr.Name]; ok {
 			expr.Symbol = alias
 			return expr, nil

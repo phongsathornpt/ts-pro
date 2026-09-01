@@ -39,7 +39,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_console_log_string(ptr)\n")
 	b.WriteString("declare void @tsnative_console_log_jsvalue(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
-	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
@@ -488,6 +488,18 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "[ %s, %%b%d ]", value, incoming.Block)
 		}
 		b.WriteString("\n")
+		return nil
+	case mir.ConstJSValue:
+		name := valueName(inst.Result)
+		switch op.Kind {
+		case mir.ConstJSNull:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_null()\n", name)
+		case mir.ConstJSUndefined:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_undefined()\n", name)
+		default:
+			return fmt.Errorf("unsupported JSValue const kind %d", op.Kind)
+		}
+		values[inst.Result] = name
 		return nil
 	case mir.BoxJSValue:
 		value, err := operand(values, op.Value)

@@ -102,6 +102,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return []mir.ValueID{op.Channel, op.Value}, true
 	case mir.ChannelTryRecvOrF64:
 		return []mir.ValueID{op.Channel, op.Fallback}, true
+	case mir.ConstJSValue:
+		return nil, true
 	case mir.TaskSpawn:
 		return append([]mir.ValueID(nil), op.Captures...), true
 	case mir.TaskYield:

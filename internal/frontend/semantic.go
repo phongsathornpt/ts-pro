@@ -8,6 +8,8 @@ const (
 	ExprBoolean
 	ExprNumber
 	ExprString
+	ExprNull
+	ExprUndefined
 	ExprBinary
 	ExprCall
 	ExprArray
