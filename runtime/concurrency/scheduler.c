@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,20 +13,33 @@
 #define TSNATIVE_DEFAULT_MAX_TASKS 1000000u
 #define TSNATIVE_HARD_MAX_TASKS 10000000u
 
+typedef struct tsnative_worker {
+  pthread_t thread;
+  pthread_mutex_t deque_mutex;
+  tsnative_task *head;
+  tsnative_task *tail;
+  size_t index;
+} tsnative_worker;
+
 typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t wake;
-  pthread_t *threads;
+  pthread_cond_t task_done;
+  tsnative_worker *workers;
   size_t worker_count;
   size_t max_tasks;
   tsnative_task *head;
   tsnative_task *tail;
-  size_t active_tasks;
-  size_t peak_active_tasks;
-  size_t runnable_tasks;
+  _Atomic size_t active_tasks;
+  _Atomic size_t peak_active_tasks;
+  _Atomic size_t runnable_tasks;
   uint64_t next_task_id;
-  uint64_t spawned_tasks;
-  uint64_t completed_tasks;
+  _Atomic uint64_t spawned_tasks;
+  _Atomic uint64_t completed_tasks;
+  _Atomic uint64_t steal_attempts;
+  _Atomic uint64_t successful_steals;
+  _Atomic uint64_t worker_parks;
+  _Atomic uint64_t worker_wakeups;
   int started;
   int stopping;
 } tsnative_scheduler;
@@ -33,7 +47,9 @@ typedef struct {
 static tsnative_scheduler scheduler = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .wake = PTHREAD_COND_INITIALIZER,
+    .task_done = PTHREAD_COND_INITIALIZER,
 };
+static _Thread_local tsnative_worker *current_worker;
 
 static size_t parse_limit(const char *name, size_t fallback, size_t hard_max) {
   const char *raw = getenv(name);
@@ -45,6 +61,7 @@ static size_t parse_limit(const char *name, size_t fallback, size_t hard_max) {
   size_t value = (size_t)parsed;
   return value > hard_max ? hard_max : value;
 }
+
 static size_t configured_workers(void) {
   long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
   size_t fallback = cpu_count > 0 ? (size_t)cpu_count : 1u;
@@ -55,42 +72,141 @@ static size_t configured_max_tasks(void) {
   return parse_limit("TSNATIVE_MAX_TASKS", TSNATIVE_DEFAULT_MAX_TASKS, TSNATIVE_HARD_MAX_TASKS);
 }
 
-static tsnative_task *pop_task(void) {
-  tsnative_task *task = scheduler.head;
-  if (!task) return NULL;
-  scheduler.head = task->next;
-  if (!scheduler.head) scheduler.tail = NULL;
+static int terminal(int status) {
+  return status == TSNATIVE_TASK_DONE || status == TSNATIVE_TASK_CANCELLED || status == TSNATIVE_TASK_FAILED;
+}
+
+static void worker_push_tail(tsnative_worker *worker, tsnative_task *task) {
+  pthread_mutex_lock(&worker->deque_mutex);
   task->next = NULL;
-  if (scheduler.runnable_tasks) scheduler.runnable_tasks--;
+  task->prev = worker->tail;
+  if (worker->tail) worker->tail->next = task;
+  else worker->head = task;
+  worker->tail = task;
+  pthread_mutex_unlock(&worker->deque_mutex);
+}
+
+static tsnative_task *worker_pop_tail(tsnative_worker *worker) {
+  pthread_mutex_lock(&worker->deque_mutex);
+  tsnative_task *task = worker->tail;
+  if (task) {
+    worker->tail = task->prev;
+    if (worker->tail) worker->tail->next = NULL;
+    else worker->head = NULL;
+    task->next = task->prev = NULL;
+  }
+  pthread_mutex_unlock(&worker->deque_mutex);
   return task;
 }
 
-static int terminal(tsnative_task_status status) {
-  return status == TSNATIVE_TASK_DONE || status == TSNATIVE_TASK_CANCELLED || status == TSNATIVE_TASK_FAILED;
-}
-static void *worker_main(void *unused) {
-  (void)unused;
-  pthread_mutex_lock(&scheduler.mutex);
-  for (;;) {
-    while (!scheduler.head && !scheduler.stopping) {
-      pthread_cond_wait(&scheduler.wake, &scheduler.mutex);
-    }
-    if (!scheduler.head && scheduler.stopping) break;
-    tsnative_task *task = pop_task();
-    task->status = TSNATIVE_TASK_RUNNING;
-    pthread_mutex_unlock(&scheduler.mutex);
-
-    task->entry(task->state);
-
-    pthread_mutex_lock(&scheduler.mutex);
-    task->status = TSNATIVE_TASK_DONE;
-    if (scheduler.active_tasks) scheduler.active_tasks--;
-    scheduler.completed_tasks++;
-    pthread_cond_broadcast(&scheduler.wake);
+static tsnative_task *worker_steal_head(tsnative_worker *worker) {
+  pthread_mutex_lock(&worker->deque_mutex);
+  tsnative_task *task = worker->head;
+  if (task) {
+    worker->head = task->next;
+    if (worker->head) worker->head->prev = NULL;
+    else worker->tail = NULL;
+    task->next = task->prev = NULL;
   }
-  pthread_mutex_unlock(&scheduler.mutex);
+  pthread_mutex_unlock(&worker->deque_mutex);
+  return task;
+}
+
+static void injection_push_locked(tsnative_task *task) {
+  task->next = NULL;
+  task->prev = scheduler.tail;
+  if (scheduler.tail) scheduler.tail->next = task;
+  else scheduler.head = task;
+  scheduler.tail = task;
+}
+
+static tsnative_task *injection_pop_locked(void) {
+  tsnative_task *task = scheduler.head;
+  if (!task) return NULL;
+  scheduler.head = task->next;
+  if (scheduler.head) scheduler.head->prev = NULL;
+  else scheduler.tail = NULL;
+  task->next = task->prev = NULL;
+  return task;
+}
+
+static tsnative_task *steal_task(tsnative_worker *self) {
+  size_t count = scheduler.worker_count;
+  if (count < 2) return NULL;
+  for (size_t offset = 1; offset < count; offset++) {
+    size_t index = (self->index + offset) % count;
+    atomic_fetch_add_explicit(&scheduler.steal_attempts, 1, memory_order_relaxed);
+    tsnative_task *task = worker_steal_head(&scheduler.workers[index]);
+    if (task) {
+      atomic_fetch_add_explicit(&scheduler.successful_steals, 1, memory_order_relaxed);
+      return task;
+    }
+  }
   return NULL;
 }
+
+static tsnative_task *take_work(tsnative_worker *worker) {
+  tsnative_task *task = worker_pop_tail(worker);
+  if (!task) {
+    pthread_mutex_lock(&scheduler.mutex);
+    task = injection_pop_locked();
+    pthread_mutex_unlock(&scheduler.mutex);
+  }
+  if (!task) task = steal_task(worker);
+  if (task) atomic_fetch_sub_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
+  return task;
+}
+
+static void execute_task(tsnative_task *task) {
+  atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNING, memory_order_release);
+  task->entry(task->state);
+
+  pthread_mutex_lock(&scheduler.mutex);
+  atomic_store_explicit(&task->status, TSNATIVE_TASK_DONE, memory_order_release);
+  atomic_fetch_sub_explicit(&scheduler.active_tasks, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&scheduler.completed_tasks, 1, memory_order_relaxed);
+  pthread_cond_broadcast(&scheduler.task_done);
+  pthread_mutex_unlock(&scheduler.mutex);
+}
+
+static void *worker_main(void *arg) {
+  tsnative_worker *worker = arg;
+  current_worker = worker;
+  for (;;) {
+    tsnative_task *task = take_work(worker);
+    if (!task) {
+      pthread_mutex_lock(&scheduler.mutex);
+      if (scheduler.stopping && atomic_load_explicit(&scheduler.runnable_tasks, memory_order_relaxed) == 0) {
+        pthread_mutex_unlock(&scheduler.mutex);
+        break;
+      }
+      while (!scheduler.stopping && scheduler.head == NULL &&
+             atomic_load_explicit(&scheduler.runnable_tasks, memory_order_relaxed) == 0) {
+        atomic_fetch_add_explicit(&scheduler.worker_parks, 1, memory_order_relaxed);
+        pthread_cond_wait(&scheduler.wake, &scheduler.mutex);
+        atomic_fetch_add_explicit(&scheduler.worker_wakeups, 1, memory_order_relaxed);
+      }
+      pthread_mutex_unlock(&scheduler.mutex);
+      continue;
+    }
+    execute_task(task);
+  }
+  current_worker = NULL;
+  return NULL;
+}
+
+static void reset_metrics(void) {
+  atomic_store(&scheduler.active_tasks, 0);
+  atomic_store(&scheduler.peak_active_tasks, 0);
+  atomic_store(&scheduler.runnable_tasks, 0);
+  atomic_store(&scheduler.spawned_tasks, 0);
+  atomic_store(&scheduler.completed_tasks, 0);
+  atomic_store(&scheduler.steal_attempts, 0);
+  atomic_store(&scheduler.successful_steals, 0);
+  atomic_store(&scheduler.worker_parks, 0);
+  atomic_store(&scheduler.worker_wakeups, 0);
+}
+
 int tsnative_scheduler_init(void) {
   pthread_mutex_lock(&scheduler.mutex);
   if (scheduler.started) {
@@ -99,33 +215,39 @@ int tsnative_scheduler_init(void) {
   }
   scheduler.worker_count = configured_workers();
   scheduler.max_tasks = configured_max_tasks();
-  scheduler.threads = calloc(scheduler.worker_count, sizeof(*scheduler.threads));
-  if (!scheduler.threads) {
+  scheduler.workers = calloc(scheduler.worker_count, sizeof(*scheduler.workers));
+  if (!scheduler.workers) {
     pthread_mutex_unlock(&scheduler.mutex);
     return -1;
+  }
+  for (size_t i = 0; i < scheduler.worker_count; i++) {
+    scheduler.workers[i].index = i;
+    pthread_mutex_init(&scheduler.workers[i].deque_mutex, NULL);
   }
   scheduler.started = 1;
   scheduler.stopping = 0;
   scheduler.head = scheduler.tail = NULL;
-  scheduler.active_tasks = scheduler.peak_active_tasks = 0;
-  scheduler.runnable_tasks = 0;
-  scheduler.next_task_id = scheduler.spawned_tasks = scheduler.completed_tasks = 0;
+  scheduler.next_task_id = 0;
+  reset_metrics();
+
   size_t created = 0;
   for (; created < scheduler.worker_count; created++) {
-    if (pthread_create(&scheduler.threads[created], NULL, worker_main, NULL) != 0) break;
+    if (pthread_create(&scheduler.workers[created].thread, NULL, worker_main, &scheduler.workers[created]) != 0) break;
   }
   if (created == scheduler.worker_count) {
     pthread_mutex_unlock(&scheduler.mutex);
     return 0;
   }
+
   scheduler.stopping = 1;
   pthread_cond_broadcast(&scheduler.wake);
   pthread_mutex_unlock(&scheduler.mutex);
-  for (size_t i = 0; i < created; i++) pthread_join(scheduler.threads[i], NULL);
+  for (size_t i = 0; i < created; i++) pthread_join(scheduler.workers[i].thread, NULL);
 
   pthread_mutex_lock(&scheduler.mutex);
-  free(scheduler.threads);
-  scheduler.threads = NULL;
+  for (size_t i = 0; i < scheduler.worker_count; i++) pthread_mutex_destroy(&scheduler.workers[i].deque_mutex);
+  free(scheduler.workers);
+  scheduler.workers = NULL;
   scheduler.worker_count = 0;
   scheduler.started = 0;
   scheduler.stopping = 0;
@@ -136,22 +258,22 @@ int tsnative_scheduler_init(void) {
 int tsnative_scheduler_submit(tsnative_task *task) {
   if (!task) return -1;
   pthread_mutex_lock(&scheduler.mutex);
-  if (!scheduler.started || scheduler.stopping || scheduler.active_tasks >= scheduler.max_tasks) {
+  size_t active = atomic_load_explicit(&scheduler.active_tasks, memory_order_relaxed);
+  if (!scheduler.started || scheduler.stopping || active >= scheduler.max_tasks) {
     pthread_mutex_unlock(&scheduler.mutex);
     return -1;
   }
+
   task->id = ++scheduler.next_task_id;
-  task->status = TSNATIVE_TASK_RUNNABLE;
-  task->next = NULL;
-  if (scheduler.tail) scheduler.tail->next = task;
-  else scheduler.head = task;
-  scheduler.tail = task;
-  scheduler.active_tasks++;
-  scheduler.runnable_tasks++;
-  scheduler.spawned_tasks++;
-  if (scheduler.active_tasks > scheduler.peak_active_tasks) {
-    scheduler.peak_active_tasks = scheduler.active_tasks;
-  }
+  atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNABLE, memory_order_release);
+  active = atomic_fetch_add_explicit(&scheduler.active_tasks, 1, memory_order_relaxed) + 1;
+  atomic_fetch_add_explicit(&scheduler.runnable_tasks, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&scheduler.spawned_tasks, 1, memory_order_relaxed);
+  size_t peak = atomic_load_explicit(&scheduler.peak_active_tasks, memory_order_relaxed);
+  if (active > peak) atomic_store_explicit(&scheduler.peak_active_tasks, active, memory_order_relaxed);
+
+  if (current_worker) worker_push_tail(current_worker, task);
+  else injection_push_locked(task);
   pthread_cond_signal(&scheduler.wake);
   pthread_mutex_unlock(&scheduler.mutex);
   return 0;
@@ -159,20 +281,26 @@ int tsnative_scheduler_submit(tsnative_task *task) {
 
 int tsnative_scheduler_wait(tsnative_task *task) {
   if (!task) return -1;
-  pthread_mutex_lock(&scheduler.mutex);
-  while (!terminal(task->status)) {
-    pthread_cond_wait(&scheduler.wake, &scheduler.mutex);
+  while (!terminal(atomic_load_explicit(&task->status, memory_order_acquire))) {
+    if (current_worker) {
+      tsnative_task *help = take_work(current_worker);
+      if (help) {
+        execute_task(help);
+        continue;
+      }
+    }
+    pthread_mutex_lock(&scheduler.mutex);
+    if (!terminal(atomic_load_explicit(&task->status, memory_order_acquire))) {
+      pthread_cond_wait(&scheduler.task_done, &scheduler.mutex);
+    }
+    pthread_mutex_unlock(&scheduler.mutex);
   }
-  int result = task->status == TSNATIVE_TASK_DONE ? 0 : -1;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return result;
+  return atomic_load_explicit(&task->status, memory_order_acquire) == TSNATIVE_TASK_DONE ? 0 : -1;
 }
+
 tsnative_task_status tsnative_scheduler_task_status(tsnative_task *task) {
   if (!task) return TSNATIVE_TASK_FAILED;
-  pthread_mutex_lock(&scheduler.mutex);
-  tsnative_task_status status = task->status;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return status;
+  return (tsnative_task_status)atomic_load_explicit(&task->status, memory_order_acquire);
 }
 
 void tsnative_scheduler_shutdown(void) {
@@ -183,20 +311,20 @@ void tsnative_scheduler_shutdown(void) {
   }
   scheduler.stopping = 1;
   pthread_cond_broadcast(&scheduler.wake);
-  pthread_t *threads = scheduler.threads;
+  tsnative_worker *workers = scheduler.workers;
   size_t count = scheduler.worker_count;
   pthread_mutex_unlock(&scheduler.mutex);
 
-  for (size_t i = 0; i < count; i++) pthread_join(threads[i], NULL);
+  for (size_t i = 0; i < count; i++) pthread_join(workers[i].thread, NULL);
 
   pthread_mutex_lock(&scheduler.mutex);
-  free(scheduler.threads);
-  scheduler.threads = NULL;
+  for (size_t i = 0; i < count; i++) pthread_mutex_destroy(&workers[i].deque_mutex);
+  free(workers);
+  scheduler.workers = NULL;
   scheduler.worker_count = 0;
   scheduler.started = 0;
   scheduler.stopping = 0;
   scheduler.head = scheduler.tail = NULL;
-  scheduler.runnable_tasks = 0;
   pthread_mutex_unlock(&scheduler.mutex);
 }
 
@@ -214,29 +342,11 @@ int tsnative_scheduler_is_running(void) {
   return running;
 }
 
-size_t tsnative_scheduler_active_tasks(void) {
-  pthread_mutex_lock(&scheduler.mutex);
-  size_t value = scheduler.active_tasks;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return value;
-}
-size_t tsnative_scheduler_peak_active_tasks(void) {
-  pthread_mutex_lock(&scheduler.mutex);
-  size_t value = scheduler.peak_active_tasks;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return value;
-}
-
-uint64_t tsnative_scheduler_spawned_tasks(void) {
-  pthread_mutex_lock(&scheduler.mutex);
-  uint64_t value = scheduler.spawned_tasks;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return value;
-}
-
-uint64_t tsnative_scheduler_completed_tasks(void) {
-  pthread_mutex_lock(&scheduler.mutex);
-  uint64_t value = scheduler.completed_tasks;
-  pthread_mutex_unlock(&scheduler.mutex);
-  return value;
-}
+size_t tsnative_scheduler_active_tasks(void) { return atomic_load(&scheduler.active_tasks); }
+size_t tsnative_scheduler_peak_active_tasks(void) { return atomic_load(&scheduler.peak_active_tasks); }
+uint64_t tsnative_scheduler_spawned_tasks(void) { return atomic_load(&scheduler.spawned_tasks); }
+uint64_t tsnative_scheduler_completed_tasks(void) { return atomic_load(&scheduler.completed_tasks); }
+uint64_t tsnative_scheduler_steal_attempts(void) { return atomic_load(&scheduler.steal_attempts); }
+uint64_t tsnative_scheduler_successful_steals(void) { return atomic_load(&scheduler.successful_steals); }
+uint64_t tsnative_scheduler_worker_parks(void) { return atomic_load(&scheduler.worker_parks); }
+uint64_t tsnative_scheduler_worker_wakeups(void) { return atomic_load(&scheduler.worker_wakeups); }

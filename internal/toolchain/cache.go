@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ObjectCache struct {
@@ -48,6 +49,11 @@ func (c *ObjectCache) compile(ctx context.Context, kind, input, opt string, comp
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(identity))
 	_, _ = h.Write([]byte{0})
+	if kind == "c" {
+		if err := hashLocalCDependencies(h, input, data, map[string]struct{}{}); err != nil {
+			return "", false, err
+		}
+	}
 	_, _ = h.Write(data)
 	key := hex.EncodeToString(h.Sum(nil))
 	output := filepath.Join(c.Dir, key+".o")
@@ -71,6 +77,55 @@ func (c *ObjectCache) compile(ctx context.Context, kind, input, opt string, comp
 		}
 	}
 	return output, false, nil
+}
+
+func hashLocalCDependencies(h interface{ Write([]byte) (int, error) }, path string, data []byte, seen map[string]struct{}) error {
+	for _, line := range strings.Split(string(data), "\n") {
+		include, ok := localQuotedInclude(line)
+		if !ok {
+			continue
+		}
+		dependency := filepath.Clean(filepath.Join(filepath.Dir(path), include))
+		if _, exists := seen[dependency]; exists {
+			continue
+		}
+		dependencyData, err := os.ReadFile(dependency)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read C dependency %s: %w", dependency, err)
+		}
+		seen[dependency] = struct{}{}
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(dependency))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(dependencyData)
+		if err := hashLocalCDependencies(h, dependency, dependencyData, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func localQuotedInclude(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	if !strings.HasPrefix(line, "include") {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "include"))
+	if len(rest) < 3 || rest[0] != '"' {
+		return "", false
+	}
+	end := strings.IndexByte(rest[1:], '"')
+	if end < 0 {
+		return "", false
+	}
+	return rest[1 : end+1], true
 }
 
 func clangIdentity(path string) (string, error) {

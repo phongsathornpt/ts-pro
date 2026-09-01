@@ -100,3 +100,93 @@ int main(void) {
 		t.Fatalf("unexpected output: %q", output)
 	}
 }
+
+func TestNativeTaskWorkStealing(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "steal_test.c")
+	program := `#include <assert.h>
+#include <stdatomic.h>
+#include <stdint.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *);
+tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *);
+void tsnative_task_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+uint64_t tsnative_scheduler_successful_steals(void);
+size_t tsnative_scheduler_worker_count(void);
+uint64_t tsnative_scheduler_spawned_tasks(void);
+uint64_t tsnative_scheduler_completed_tasks(void);
+static atomic_int done;
+static void leaf(void *state) {
+  (void)state;
+  atomic_fetch_add(&done, 1);
+}
+static void root_job(void *state) {
+  (void)state;
+  tsnative_task *children[256];
+  for (int i = 0; i < 256; i++) {
+    children[i] = tsnative_task_spawn(leaf, 0);
+    assert(children[i]);
+  }
+  for (int i = 0; i < 256; i++) {
+    assert(tsnative_task_join(children[i]) == 0);
+    tsnative_task_release(children[i]);
+  }
+}
+int main(void) {
+  tsnative_task *root = tsnative_task_spawn(root_job, 0);
+  assert(root);
+  assert(tsnative_task_join(root) == 0);
+  tsnative_task_release(root);
+  assert(atomic_load(&done) == 256);
+  if (tsnative_scheduler_worker_count() > 1) {
+    assert(tsnative_scheduler_successful_steals() > 0);
+  }
+  assert(tsnative_scheduler_spawned_tasks() == 257);
+  assert(tsnative_scheduler_completed_tasks() == 257);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	binary := filepath.Join(dir, "steal_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	for _, workers := range []string{"4", "1"} {
+		cmd := exec.CommandContext(ctx, binary)
+		cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS="+workers, "TSNATIVE_MAX_TASKS=1024")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("run work-stealing test with %s workers: %v: %s", workers, err, output)
+		}
+		if strings.TrimSpace(string(output)) != "" {
+			t.Fatalf("unexpected output with %s workers: %q", workers, output)
+		}
+	}
+}

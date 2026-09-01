@@ -40,3 +40,40 @@ func TestObjectCacheReusesCompiledCObject(t *testing.T) {
 		t.Fatalf("cached object invalid: info=%v err=%v", info, err)
 	}
 }
+
+func TestObjectCacheInvalidatesWhenLocalHeaderChanges(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	cache, err := NewObjectCache(root, clang)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := filepath.Join(root, "value.h")
+	source := filepath.Join(root, "value.c")
+	if err := os.WriteFile(header, []byte("#define VALUE 41\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("#include \"value.h\"\nint value(void) { return VALUE; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, hit, err := cache.CompileC(context.Background(), source, "-O2")
+	if err != nil || hit {
+		t.Fatalf("first compile path=%q hit=%v err=%v", first, hit, err)
+	}
+	if err := os.WriteFile(header, []byte("#define VALUE 42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, hit, err := cache.CompileC(context.Background(), source, "-O2")
+	if err != nil || hit {
+		t.Fatalf("header-change compile path=%q hit=%v err=%v", second, hit, err)
+	}
+	if first == second {
+		t.Fatalf("header change reused stale object %q", first)
+	}
+}
