@@ -16,9 +16,10 @@ import (
 const initialGCThreshold = 64 * 1024
 
 type nativeHeapBlock struct {
-	ptr    uintptr
-	size   uintptr
-	marked bool
+	ptr       uintptr
+	size      uintptr
+	marked    bool
+	finalizer func()
 }
 
 type nativeRootFrame struct {
@@ -49,6 +50,21 @@ var nativeHeap = struct {
 func nativeAbort(message string) {
 	_, _ = os.Stderr.WriteString("tsnative: " + message + "\n")
 	C.abort()
+}
+
+func registerNativeHeapFinalizer(raw unsafe.Pointer, finalizer func()) {
+	if raw == nil || finalizer == nil {
+		return
+	}
+	nativeHeap.Lock()
+	block := nativeHeap.blocks[uintptr(raw)]
+	if block == nil {
+		nativeHeap.Unlock()
+		nativeAbort("native heap finalizer target is not allocated")
+		return
+	}
+	block.finalizer = finalizer
+	nativeHeap.Unlock()
 }
 
 func allocToken() uintptr {
@@ -194,6 +210,9 @@ func collectLocked() {
 		if block.marked {
 			continue
 		}
+		if block.finalizer != nil {
+			block.finalizer()
+		}
 		C.free(unsafe.Pointer(block.ptr))
 		delete(nativeHeap.blocks, key)
 		nativeHeap.bytes -= block.size
@@ -229,6 +248,9 @@ func tsnative_gc_safepoint() {
 func tsnative_heap_shutdown() {
 	nativeHeap.Lock()
 	for key, block := range nativeHeap.blocks {
+		if block.finalizer != nil {
+			block.finalizer()
+		}
 		C.free(unsafe.Pointer(block.ptr))
 		delete(nativeHeap.blocks, key)
 	}

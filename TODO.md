@@ -153,9 +153,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Migrate object allocation/runtime helpers to the Go c-archive while preserving the existing heap-owned pointer ABI.
     - [x] Migrate JSValue boxing/dynamic helpers to the Go c-archive while preserving the tagged 16-byte ABI, dynamic `+`, and console output behavior.
   - [ ] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
-  - [~] Migrate channels, timers, and the blocking-call pool.
+  - [x] Migrate channels, timers, and the blocking-call pool.
     - [x] Migrate timers/sleep to Go `time` primitives with scheduler hook binding, tracked pending waits, cooperative fallback, and deterministic shutdown.
-    - [ ] Migrate typed channels.
+    - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.
     - [x] Migrate the bounded blocking-call pool to Go worker goroutines with opaque C job handles, scheduler park/wake hooks, bounded active jobs, metrics, and deterministic shutdown.
   - [ ] Remove legacy C headers/tests and the native C compilation path once no handwritten runtime `.c` sources remain.
 - [ ] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and eventually generational collection.

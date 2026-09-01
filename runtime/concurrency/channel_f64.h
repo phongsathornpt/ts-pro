@@ -2,6 +2,13 @@
 #define TSNATIVE_CHANNEL_F64_H
 
 #include <stddef.h>
+#include <stdint.h>
+
+#if defined(__GNUC__) || defined(__clang__)
+void tsnative_channel_bind_scheduler(uintptr_t current, uintptr_t prepare, uintptr_t cancel, uintptr_t wake, uintptr_t help) __attribute__((weak));
+#else
+void tsnative_channel_bind_scheduler(uintptr_t current, uintptr_t prepare, uintptr_t cancel, uintptr_t wake, uintptr_t help);
+#endif
 
 typedef struct tsnative_channel_f64 tsnative_channel_f64;
 

@@ -59,7 +59,6 @@ int main(void) {
 	}
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
-	channelObj := filepath.Join(dir, "channel.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "channel_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
@@ -68,10 +67,7 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, channelObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	output, err := exec.CommandContext(ctx, binary).CombinedOutput()
@@ -128,7 +124,6 @@ int main(void) {
 	}
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
-	channelObj := filepath.Join(dir, "channel.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "channel_try_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
@@ -137,10 +132,7 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, channelObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {
@@ -231,7 +223,6 @@ int main(void) {
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
-	channelObj := filepath.Join(dir, "channel.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "channel_task_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
@@ -243,10 +234,7 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, channelObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -306,7 +294,6 @@ int main(void) {
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
-	channelObj := filepath.Join(dir, "channel.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "channel_coop_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
@@ -318,10 +305,7 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, channelObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
