@@ -9,15 +9,17 @@ import (
 )
 
 type functionLowerer struct {
-	module     *moduleLowerer
-	source     frontend.Function
-	result     hir.Function
-	locals     map[frontend.SymbolID]hir.ValueID
-	nextValue  uint32
-	nextBlock  uint32
-	current    int
-	terminated bool
-	handlers   []exceptionHandler
+	module           *moduleLowerer
+	source           frontend.Function
+	result           hir.Function
+	locals           map[frontend.SymbolID]hir.ValueID
+	nextValue        uint32
+	nextBlock        uint32
+	current          int
+	terminated       bool
+	handlers         []exceptionHandler
+	returnFinalizers [][]frontend.Statement
+	throwFinalizers  [][]frontend.Statement
 }
 
 type localState struct {
@@ -126,6 +128,12 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if err != nil {
 			return err
 		}
+		if err := f.lowerCompletionFinalizers(f.throwFinalizers); err != nil {
+			return err
+		}
+		if f.terminated {
+			return nil
+		}
 		if len(f.handlers) != 0 {
 			index := len(f.handlers) - 1
 			pred := f.block().ID
@@ -137,11 +145,23 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		return f.lowerTryCatch(stmt)
 	case frontend.StmtReturn:
 		if stmt.Return == nil {
+			if err := f.lowerCompletionFinalizers(f.returnFinalizers); err != nil {
+				return err
+			}
+			if f.terminated {
+				return nil
+			}
 			return f.terminate(hir.ReturnTerm{})
 		}
 		value, err := f.lowerExprAs(stmt.Return, f.source.ReturnType)
 		if err != nil {
 			return err
+		}
+		if err := f.lowerCompletionFinalizers(f.returnFinalizers); err != nil {
+			return err
+		}
+		if f.terminated {
+			return nil
 		}
 		return f.terminate(hir.ReturnTerm{Value: &value})
 	case frontend.StmtIf:
@@ -214,10 +234,26 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 	}
 }
 
+func (f *functionLowerer) lowerCompletionFinalizers(finalizers [][]frontend.Statement) error {
+	for i := len(finalizers) - 1; i >= 0; i-- {
+		if err := f.lowerStatements(finalizers[i]); err != nil {
+			return err
+		}
+		if f.terminated {
+			return nil
+		}
+	}
+	return nil
+}
+
 func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 	before := cloneLocals(f.locals)
 	catchID := f.newBlockID()
 	continueID := f.newBlockID()
+	hasFinally := len(stmt.Finally) != 0
+	if hasFinally {
+		f.returnFinalizers = append(f.returnFinalizers, stmt.Finally)
+	}
 	f.handlers = append(f.handlers, exceptionHandler{block: catchID, symbol: stmt.CatchSymbol, typeID: stmt.CatchType})
 	if err := f.lowerStatements(stmt.Then); err != nil {
 		return err
@@ -238,8 +274,14 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 		f.startBlock(catchID)
 		exception := f.emit(handler.typeID, hir.PhiOp{Incoming: handler.incoming})
 		f.locals[handler.symbol] = exception
+		if hasFinally {
+			f.throwFinalizers = append(f.throwFinalizers, stmt.Finally)
+		}
 		if err := f.lowerStatements(stmt.Catch); err != nil {
 			return err
+		}
+		if hasFinally {
+			f.throwFinalizers = f.throwFinalizers[:len(f.throwFinalizers)-1]
 		}
 		if !f.terminated {
 			pred := f.block().ID
@@ -251,6 +293,9 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 			states = append(states, localState{pred: pred, locals: state})
 		}
 	}
+	if hasFinally {
+		f.returnFinalizers = f.returnFinalizers[:len(f.returnFinalizers)-1]
+	}
 	if len(states) == 0 {
 		f.locals = cloneLocals(before)
 		f.terminated = true
@@ -260,7 +305,7 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 	if err := f.mergeLocals(states); err != nil {
 		return err
 	}
-	if len(stmt.Finally) != 0 {
+	if hasFinally {
 		if err := f.lowerStatements(stmt.Finally); err != nil {
 			return err
 		}

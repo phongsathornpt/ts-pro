@@ -127,7 +127,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Caught `await` uses stackless task-status suspension, branches failed child results into GC-rooted JSValue catch Phi state, and releases child handles without poisoning the parent task.
       - [~] Add `finally`, broader nested rejection recovery tests, and selected Promise combinators.
         - [x] Native async `finally` runs after normal/caught completion, including recovered awaited rejection on a single worker.
-        - [ ] Preserve pending return/rethrow completion through `finally`, then add broader nested recovery tests and selected Promise combinators.
+        - [x] Preserve pending return/rethrow completion through `finally`, evaluating the completion value before finalizer side effects and propagating catch rethrows to outer handlers.
+        - [ ] Add completion override from `return`/`throw` inside `finally`, broader nested recovery tests, and selected Promise combinators.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
