@@ -29,6 +29,7 @@ const (
 	KindProtectedKeyword             uint32 = 123
 	KindPublicKeyword                uint32 = 124
 	KindStaticKeyword                uint32 = 125
+	KindAsyncKeyword                 uint32 = 133
 	KindReadonlyKeyword              uint32 = 148
 	KindNumberKeyword                uint32 = 150
 	KindParameter                    uint32 = 170
@@ -41,6 +42,7 @@ const (
 	KindElementAccessExpression      uint32 = 213
 	KindCallExpression               uint32 = 214
 	KindParenthesizedExpression      uint32 = 218
+	KindAwaitExpression              uint32 = 224
 	KindFunctionExpression           uint32 = 219
 	KindArrowFunction                uint32 = 220
 	KindNewExpression                uint32 = 215
@@ -77,12 +79,12 @@ var kindNames = map[uint32]string{
 	KindPlusToken: "PlusToken", KindMinusToken: "MinusToken", KindAsteriskToken: "AsteriskToken", KindSlashToken: "SlashToken",
 	KindPlusPlusToken: "PlusPlusToken", KindMinusMinusToken: "MinusMinusToken", KindEqualsToken: "EqualsToken",
 	KindExportKeyword: "ExportKeyword", KindExtendsKeyword: "ExtendsKeyword", KindFalseKeyword: "FalseKeyword", KindSuperKeyword: "SuperKeyword", KindThisKeyword: "ThisKeyword", KindTrueKeyword: "TrueKeyword",
-	KindPrivateKeyword: "PrivateKeyword", KindProtectedKeyword: "ProtectedKeyword", KindPublicKeyword: "PublicKeyword", KindStaticKeyword: "StaticKeyword", KindReadonlyKeyword: "ReadonlyKeyword",
+	KindAsyncKeyword: "AsyncKeyword", KindPrivateKeyword: "PrivateKeyword", KindProtectedKeyword: "ProtectedKeyword", KindPublicKeyword: "PublicKeyword", KindStaticKeyword: "StaticKeyword", KindReadonlyKeyword: "ReadonlyKeyword",
 	KindIdentifier: "Identifier", KindNumberKeyword: "NumberKeyword",
 	KindParameter: "Parameter", KindPropertyDeclaration: "PropertyDeclaration", KindMethodDeclaration: "MethodDeclaration", KindConstructor: "Constructor",
 	KindArrayLiteralExpression: "ArrayLiteralExpression", KindObjectLiteralExpression: "ObjectLiteralExpression", KindPropertyAccessExpression: "PropertyAccessExpression",
 	KindElementAccessExpression: "ElementAccessExpression", KindCallExpression: "CallExpression",
-	KindParenthesizedExpression: "ParenthesizedExpression", KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
+	KindParenthesizedExpression: "ParenthesizedExpression", KindAwaitExpression: "AwaitExpression", KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
 	KindExpressionWithTypeArguments: "ExpressionWithTypeArguments", KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
 	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement",

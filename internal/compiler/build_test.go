@@ -471,3 +471,32 @@ func TestBuildNativeMultiSuspendTaskSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeAsyncAwaitSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "async-await")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_async.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 2 || result.Metrics.Sleeps != 1 {
+		t.Fatalf("async metrics = %d/%d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins, result.Metrics.Sleeps)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run async: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42" {
+		t.Fatalf("output = %q", got)
+	}
+}

@@ -94,7 +94,7 @@ func (l *moduleLowerer) lowerTypes() error {
 				}
 				semantic.Members = append(semantic.Members, mapped)
 			}
-		case frontend.TypeTask:
+		case frontend.TypeTask, frontend.TypePromise:
 			mapped, ok := l.types[typ.ReturnType]
 			if !ok {
 				return fmt.Errorf("task type %q references unavailable result t%d", typ.Name, typ.ReturnType)
@@ -179,6 +179,8 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypeFunction, nil
 	case frontend.TypeTask:
 		return hir.TypeTask, nil
+	case frontend.TypePromise:
+		return hir.TypePromise, nil
 	case frontend.TypeChannel:
 		return hir.TypeChannel, nil
 	case frontend.TypeParameter:

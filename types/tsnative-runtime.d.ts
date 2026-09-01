@@ -11,6 +11,7 @@ interface TsnativeTask<T = void> {
 
 declare function spawn<T>(fn: () => T): TsnativeTask<T>;
 declare function join<T>(task: TsnativeTask<T>): T;
+declare function join<T>(task: Promise<T>): T;
 declare function yieldNow(): void;
 
 interface TsnativeChannel<T> {

@@ -101,7 +101,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Lazy monotonic timer service, task park/wake sleep ABI, cooperative fallback, worker=1 runtime regression, compiler `sleep(number)` lowering, and stackless one-suspend task wrapper support.
   - [x] Bounded lazy blocking-call pool with configurable worker/job limits, task-aware completion wakeups, cooperative fallback, deterministic shutdown, and queue-bound regressions.
   - [ ] Migrate future blocking native-library adapters onto the blocking-call pool as those libraries are added.
-- [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
+- [~] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
+  - [x] Native `Promise<T>` uses TaskRef ABI for compiled async functions; async calls spawn typed tasks and TS7 `await` lowers to task join with worker=1 acceptance.
+  - [ ] Replace cooperative await joins with compiler-generated task-completion suspension/resume and spill live values across await points.
+  - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.

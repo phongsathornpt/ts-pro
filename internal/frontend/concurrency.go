@@ -38,7 +38,7 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Args = nil
 		return expr, nil
 	case "join":
-		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeTask {
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || (e.result.Types[expr.Args[0].Type].Kind != TypeTask && e.result.Types[expr.Args[0].Type].Kind != TypePromise) {
 			return nil, fmt.Errorf("join at %d requires exactly one TsnativeTask", node.Pos())
 		}
 		taskType := e.result.Types[expr.Args[0].Type]

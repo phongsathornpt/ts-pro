@@ -185,6 +185,7 @@ func (e *extractor) extractFunctionSignature(node tsast.Node) (FunctionID, error
 		Source:   0,
 		Span:     e.span(node),
 		Exported: hasModifier(node, tsast.KindExportKeyword),
+		Async:    hasModifier(node, tsast.KindAsyncKeyword),
 	}
 	if params, ok := node.NamedChild("parameters"); ok {
 		for _, paramNode := range params.ListElements() {
@@ -203,7 +204,14 @@ func (e *extractor) extractFunctionSignature(node tsast.Node) (FunctionID, error
 	if err != nil {
 		return 0, err
 	}
-	fn.ReturnType = returnType
+	if fn.Async {
+		if int(returnType) >= len(e.result.Types) || e.result.Types[returnType].Kind != TypePromise {
+			return 0, fmt.Errorf("async function %s requires Promise<T> return type", name)
+		}
+		fn.ReturnType = e.result.Types[returnType].ReturnType
+	} else {
+		fn.ReturnType = returnType
+	}
 	e.result.Functions = append(e.result.Functions, fn)
 	return functionID, nil
 }
@@ -762,6 +770,21 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			}
 		}
 		return nil, fmt.Errorf("shape %s has no field %q", shape.Name, name)
+	case tsast.KindAwaitExpression:
+		innerNode, ok := node.NamedChild("expression")
+		if !ok {
+			return nil, fmt.Errorf("await at %d has no expression", node.Pos())
+		}
+		inner, err := e.extractExpr(innerNode)
+		if err != nil {
+			return nil, err
+		}
+		if int(inner.Type) >= len(e.result.Types) || (e.result.Types[inner.Type].Kind != TypePromise && e.result.Types[inner.Type].Kind != TypeTask) {
+			return nil, fmt.Errorf("await at %d currently requires a native Promise/Task", node.Pos())
+		}
+		expr.Kind = ExprTaskJoin
+		expr.Args = []*Expr{inner}
+		return expr, nil
 	case tsast.KindParenthesizedExpression:
 		innerNode, ok := node.NamedChild("expression")
 		if !ok {
@@ -940,6 +963,19 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
+	if expr.CallTarget != nil {
+		target := e.result.Functions[*expr.CallTarget]
+		if target.Async {
+			if int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypePromise || !e.compatibleTaskResult(e.result.Types[expr.Type].ReturnType, target.ReturnType) {
+				return nil, fmt.Errorf("async call at %d has inconsistent Promise result type", node.Pos())
+			}
+			expr.Kind = ExprTaskSpawn
+			expr.Captures = append([]*Expr(nil), expr.Args...)
+			expr.Args = nil
+			expr.Callee = nil
+			return expr, nil
+		}
+	}
 	if generic != nil {
 		target, err := e.specializeGenericCall(*generic, expr.Args, expr.Type)
 		if err != nil {
@@ -1026,7 +1062,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 		return id, nil
 	}
 	typ := Type{Kind: kind, Name: text}
-	if kind == TypeTask {
+	if kind == TypeTask || kind == TypePromise {
 		args, argsErr := e.client.GetTypeArguments(e.ctx, e.snapshot, e.project, info.ID)
 		if argsErr == nil && len(args) == 1 {
 			resultID, resultErr := e.internAPIType(&args[0])
@@ -1038,6 +1074,8 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			resultText := "void"
 			if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 				resultText = strings.TrimSpace(text[len("TsnativeTask<") : len(text)-1])
+			} else if strings.HasPrefix(text, "Promise<") && strings.HasSuffix(text, ">") {
+				resultText = strings.TrimSpace(text[len("Promise<") : len(text)-1])
 			}
 			switch resultText {
 			case "void":
@@ -1049,7 +1087,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			case "T":
 				typ.ReturnType = e.ensureSemanticType(TypeParameter, "T")
 			default:
-				return 0, fmt.Errorf("native task result type %q could not be resolved from TypeScript type arguments", resultText)
+				return 0, fmt.Errorf("native task/promise result type %q could not be resolved from TypeScript type arguments", resultText)
 			}
 		}
 	}
@@ -1194,11 +1232,16 @@ func classifyType(text string) TypeKind {
 		return TypeString
 	case "TsnativeTask":
 		return TypeTask
+	case "Promise":
+		return TypePromise
 	case "TsnativeChannel":
 		return TypeChannel
 	}
 	if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 		return TypeTask
+	}
+	if strings.HasPrefix(text, "Promise<") && strings.HasSuffix(text, ">") {
+		return TypePromise
 	}
 	if strings.HasPrefix(text, "TsnativeChannel<") && strings.HasSuffix(text, ">") {
 		return TypeChannel
