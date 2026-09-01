@@ -194,10 +194,14 @@ static void execute_task(tsnative_task *task) {
   tsnative_task *completion_waiter = task->completion_waiter;
   void *completion_out = task->completion_out;
   int completion_consume = task->completion_consume;
+  int completion_status_only = task->completion_status_only;
   task->completion_waiter = NULL;
   task->completion_out = NULL;
   task->completion_consume = 0;
-  if (completion_waiter && failed) {
+  task->completion_status_only = 0;
+  if (completion_waiter && completion_status_only && completion_out) {
+    *(uint8_t *)completion_out = failed ? 0 : 1;
+  } else if (completion_waiter && failed) {
     completion_waiter->failure_ref = task->failure_ref;
     atomic_store_explicit(&completion_waiter->failure_requested, 1, memory_order_release);
   } else if (completion_waiter && completion_out && task->transfer_completion) {

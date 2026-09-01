@@ -265,6 +265,9 @@ type TaskSpawn struct {
 	Group    *ValueID
 }
 type TaskJoin struct{ Task ValueID }
+type TaskWait struct{ Task ValueID }
+type TaskFailure struct{ Task ValueID }
+type TaskRelease struct{ Task ValueID }
 type TaskYield struct{}
 type TaskCancel struct{ Task ValueID }
 type TaskCancelled struct{}
@@ -314,6 +317,9 @@ func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
 func (TaskJoin) isOperation()             {}
+func (TaskWait) isOperation()             {}
+func (TaskFailure) isOperation()          {}
+func (TaskRelease) isOperation()          {}
 func (TaskYield) isOperation()            {}
 func (TaskCancel) isOperation()           {}
 func (TaskCancelled) isOperation()        {}

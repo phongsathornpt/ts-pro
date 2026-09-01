@@ -239,12 +239,7 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 	if len(handler.incoming) != 0 {
 		f.locals = cloneLocals(before)
 		f.startBlock(catchID)
-		var exception hir.ValueID
-		if len(handler.incoming) == 1 {
-			exception = handler.incoming[0].Value
-		} else {
-			exception = f.emit(handler.typeID, hir.PhiOp{Incoming: handler.incoming})
-		}
+		exception := f.emit(handler.typeID, hir.PhiOp{Incoming: handler.incoming})
 		f.locals[handler.symbol] = exception
 		if err := f.lowerStatements(stmt.Catch); err != nil {
 			return err

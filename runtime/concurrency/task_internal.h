@@ -29,6 +29,7 @@ struct tsnative_task {
   struct tsnative_task *completion_waiter;
   void *completion_out;
   int completion_consume;
+  int completion_status_only;
   int completion_handoff;
   void (*transfer_completion)(struct tsnative_task *task, void *out);
   void (*destroy_completed)(struct tsnative_task *task);

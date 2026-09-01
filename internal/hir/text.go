@@ -119,6 +119,12 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("task.spawn f%d(%s)", op.Callee, strings.Join(captures, ", "))
 	case TaskJoinOp:
 		return fmt.Sprintf("task.join v%d", op.Task)
+	case TaskWaitOp:
+		return fmt.Sprintf("task.wait v%d", op.Task)
+	case TaskFailureOp:
+		return fmt.Sprintf("task.failure v%d", op.Task)
+	case TaskReleaseOp:
+		return fmt.Sprintf("task.release v%d", op.Task)
 	case TaskYieldOp:
 		return "task.yield"
 	case TaskGroupNewOp:

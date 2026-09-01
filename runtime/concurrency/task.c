@@ -229,6 +229,42 @@ int tsnative_task_get_failure(tsnative_task *task, void **out) {
   return status == TSNATIVE_TASK_DONE ? 0 : -1;
 }
 
+uint8_t tsnative_task_wait_status(tsnative_task *task) {
+  if (!task) return 0;
+  return tsnative_scheduler_wait(task) == 0 ? 1 : 0;
+}
+
+void *tsnative_task_failure_ref(tsnative_task *task) {
+  void *failure = NULL;
+  return tsnative_task_get_failure(task, &failure) == 1 ? failure : NULL;
+}
+
+int tsnative_task_await_status_task(tsnative_task *task, uint8_t *success) {
+  if (!task || !success) return -1;
+  tsnative_task *waiter = tsnative_scheduler_current_task();
+  if (!waiter || waiter == task) return -1;
+  pthread_mutex_lock(&task->completion_mutex);
+  int status = atomic_load_explicit(&task->status, memory_order_acquire);
+  if (status == TSNATIVE_TASK_DONE || status == TSNATIVE_TASK_FAILED || status == TSNATIVE_TASK_CANCELLED) {
+    *success = status == TSNATIVE_TASK_DONE ? 1 : 0;
+    pthread_mutex_unlock(&task->completion_mutex);
+    return 1;
+  }
+  if (task->completion_waiter) {
+    pthread_mutex_unlock(&task->completion_mutex);
+    return -1;
+  }
+  if (tsnative_scheduler_prepare_park() != 0) {
+    pthread_mutex_unlock(&task->completion_mutex);
+    return -1;
+  }
+  task->completion_waiter = waiter;
+  task->completion_out = success;
+  task->completion_status_only = 1;
+  pthread_mutex_unlock(&task->completion_mutex);
+  return 0;
+}
+
 int tsnative_task_await_task(tsnative_task *task) {
   if (!task) return -1;
   tsnative_task *waiter = tsnative_scheduler_current_task();

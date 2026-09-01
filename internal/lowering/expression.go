@@ -159,6 +159,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if len(expr.Args) != 1 {
 			return 0, fmt.Errorf("task join requires one handle")
 		}
+		if len(f.handlers) != 0 {
+			return f.lowerCaughtTaskJoin(expr)
+		}
 		task, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
@@ -426,4 +429,40 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		return 0, err
 	}
 	return f.emit(expr.Type, hir.ClosureCallOp{Closure: closure, Args: args}), nil
+}
+
+func (f *functionLowerer) lowerCaughtTaskJoin(expr *frontend.Expr) (hir.ValueID, error) {
+	task, err := f.lowerExpr(expr.Args[0])
+	if err != nil {
+		return 0, err
+	}
+	boolType, ok := findFrontendType(f.module.source, frontend.TypeBoolean)
+	if !ok {
+		return 0, fmt.Errorf("caught await requires boolean semantic type")
+	}
+	anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+	if !ok {
+		return 0, fmt.Errorf("caught await requires any semantic type")
+	}
+	voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+	if !ok {
+		return 0, fmt.Errorf("caught await requires void semantic type")
+	}
+	status := f.emit(boolType, hir.TaskWaitOp{Task: task})
+	successID := f.newBlockID()
+	failureID := f.newBlockID()
+	if err := f.terminate(hir.BranchTerm{Condition: status, Then: successID, Else: failureID}); err != nil {
+		return 0, err
+	}
+	f.startBlock(failureID)
+	failure := f.emit(anyType, hir.TaskFailureOp{Task: task})
+	f.emit(voidType, hir.TaskReleaseOp{Task: task})
+	index := len(f.handlers) - 1
+	pred := f.block().ID
+	f.handlers[index].incoming = append(f.handlers[index].incoming, hir.PhiIncoming{Block: pred, Value: failure})
+	if err := f.terminate(hir.JumpTerm{Target: f.handlers[index].block}); err != nil {
+		return 0, err
+	}
+	f.startBlock(successID)
+	return f.emit(expr.Type, hir.TaskJoinOp{Task: task}), nil
 }

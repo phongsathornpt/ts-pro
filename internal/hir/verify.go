@@ -277,6 +277,12 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				}
 			case TaskJoinOp:
 				checkValue(op.Task)
+			case TaskWaitOp:
+				checkValue(op.Task)
+			case TaskFailureOp:
+				checkValue(op.Task)
+			case TaskReleaseOp:
+				checkValue(op.Task)
 			case TaskYieldOp:
 			case TaskCancelOp:
 				checkValue(op.Task)

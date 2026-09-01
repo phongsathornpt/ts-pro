@@ -20,6 +20,7 @@ const (
 	taskSuspendSleep
 	taskSuspendYield
 	taskSuspendBudgetPoll
+	taskSuspendWaitStatus
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
 	taskSuspendAwaitRef
@@ -153,6 +154,10 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return nil, true
 	case mir.TaskCancel:
 		return []mir.ValueID{op.Task}, true
+	case mir.TaskFailure:
+		return []mir.ValueID{op.Task}, true
+	case mir.TaskRelease:
+		return []mir.ValueID{op.Task}, true
 	case mir.TaskCancelled:
 		return nil, true
 	default:
@@ -270,6 +275,14 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.TaskWait:
+				if !available[op.Task] || inst.Repr != mir.ReprBool {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprBool}
+				available[inst.Result] = true
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendWaitStatus, Task: op.Task, Result: inst.Result})
 			case mir.TaskJoin:
 				if !available[op.Task] {
 					return nil
@@ -823,6 +836,16 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			fmt.Fprintf(b, "  call void @tsnative_task_release(ptr %s)\n", task)
 			fmt.Fprintf(b, "  br label %s\n", next)
 			continue
+		case taskSuspendWaitStatus:
+			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("wait%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprTaskRef {
+				return fmt.Errorf("task continuation wait requires TaskRef")
+			}
+			slot := cont.SpillSlots[step.Result]
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_await_status_task(ptr %s, ptr %%spill%d.ptr)\n", i, task, slot.Index)
 		case taskSuspendJoinVoid:
 			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("join%d", i))
 			if err != nil {

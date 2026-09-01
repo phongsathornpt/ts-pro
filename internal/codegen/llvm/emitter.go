@@ -83,7 +83,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
-	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_task(ptr)\ndeclare void @tsnative_task_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_task(ptr, ptr)\n")
+	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_task(ptr)\ndeclare i8 @tsnative_task_wait_status(ptr)\ndeclare ptr @tsnative_task_failure_ref(ptr)\ndeclare i32 @tsnative_task_await_status_task(ptr, ptr)\ndeclare void @tsnative_task_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_task(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
@@ -372,6 +372,32 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		return nil
 	case mir.TaskSpawn:
 		return e.emitTaskSpawn(b, inst, op, values)
+	case mir.TaskWait:
+		task, err := operand(values, op.Task)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_task_wait_status(ptr %s)\n", name, task)
+		fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
+		values[inst.Result] = name
+		return nil
+	case mir.TaskFailure:
+		task, err := operand(values, op.Task)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_failure_ref(ptr %s)\n", name, task)
+		values[inst.Result] = name
+		return nil
+	case mir.TaskRelease:
+		task, err := operand(values, op.Task)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_task_release(ptr %s)\n", task)
+		return nil
 	case mir.TaskJoin:
 		task, err := operand(values, op.Task)
 		if err != nil {

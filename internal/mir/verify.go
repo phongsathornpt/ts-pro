@@ -347,6 +347,27 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Task); err != nil {
 					return err
 				}
+			case TaskWait:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("task wait v%d must produce Bool", inst.Result)
+				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
+			case TaskFailure:
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("task failure v%d must produce JSValue", inst.Result)
+				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
+			case TaskRelease:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task release v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
 			case TaskYield:
 				if inst.Repr != ReprVoid {
 					return fmt.Errorf("task yield v%d must be void", inst.Result)

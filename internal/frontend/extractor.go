@@ -456,6 +456,8 @@ func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
 		return Statement{}, err
 	}
 	anyType := e.ensureSemanticType(TypeAny, "any")
+	e.ensureSemanticType(TypeBoolean, "boolean")
+	e.ensureSemanticType(TypeVoid, "void")
 	catchSymbol := e.internSymbol(symbol, SymbolVariable, nameNode)
 	e.result.Symbols[catchSymbol].Type = anyType
 	tryBody, err := e.extractBlock(tryBlock)
