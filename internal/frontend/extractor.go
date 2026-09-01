@@ -429,9 +429,6 @@ func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
 	if e.currentFunction == nil || int(*e.currentFunction) >= len(e.result.Functions) || !e.result.Functions[*e.currentFunction].Async {
 		return Statement{}, fmt.Errorf("try/catch at %d is currently supported only in native async functions", node.Pos())
 	}
-	if _, ok := node.NamedChild("finallyBlock"); ok {
-		return Statement{}, fmt.Errorf("finally at %d is not supported yet", node.Pos())
-	}
 	tryBlock, ok := node.NamedChild("tryBlock")
 	if !ok {
 		return Statement{}, fmt.Errorf("try statement at %d has no try block", node.Pos())
@@ -472,7 +469,44 @@ func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
-	return Statement{Kind: StmtTry, Span: e.span(node), Then: tryBody, Catch: catchBody, CatchSymbol: catchSymbol, CatchType: anyType}, nil
+	var finallyBody []Statement
+	if finallyBlock, ok := node.NamedChild("finallyBlock"); ok {
+		finallyBody, err = e.extractBlock(finallyBlock)
+		if err != nil {
+			return Statement{}, err
+		}
+		if statementsContainReturn(tryBody) || statementsContainReturn(catchBody) {
+			return Statement{}, fmt.Errorf("finally at %d does not yet support return inside try/catch", node.Pos())
+		}
+		if statementsContainThrow(catchBody) {
+			return Statement{}, fmt.Errorf("finally at %d does not yet support rethrow from catch", node.Pos())
+		}
+	}
+	return Statement{Kind: StmtTry, Span: e.span(node), Then: tryBody, Catch: catchBody, Finally: finallyBody, CatchSymbol: catchSymbol, CatchType: anyType}, nil
+}
+
+func statementsContainReturn(statements []Statement) bool {
+	for _, stmt := range statements {
+		if stmt.Kind == StmtReturn {
+			return true
+		}
+		if statementsContainReturn(stmt.Then) || statementsContainReturn(stmt.Else) || statementsContainReturn(stmt.Catch) || statementsContainReturn(stmt.Finally) {
+			return true
+		}
+	}
+	return false
+}
+
+func statementsContainThrow(statements []Statement) bool {
+	for _, stmt := range statements {
+		if stmt.Kind == StmtThrow {
+			return true
+		}
+		if statementsContainThrow(stmt.Then) || statementsContainThrow(stmt.Else) || statementsContainThrow(stmt.Catch) || statementsContainThrow(stmt.Finally) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *extractor) extractWhile(node tsast.Node) (Statement, error) {

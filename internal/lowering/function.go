@@ -215,9 +215,6 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 }
 
 func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
-	if len(stmt.Finally) != 0 {
-		return fmt.Errorf("finally lowering is not supported yet")
-	}
 	before := cloneLocals(f.locals)
 	catchID := f.newBlockID()
 	continueID := f.newBlockID()
@@ -260,7 +257,15 @@ func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
 		return nil
 	}
 	f.startBlock(continueID)
-	return f.mergeLocals(states)
+	if err := f.mergeLocals(states); err != nil {
+		return err
+	}
+	if len(stmt.Finally) != 0 {
+		if err := f.lowerStatements(stmt.Finally); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
