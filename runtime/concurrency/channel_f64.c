@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <time.h>
 
 typedef struct tsnative_channel_f64_waiter {
   struct tsnative_channel_f64_waiter *next;
@@ -281,14 +282,12 @@ static void finish_waiter(tsnative_channel_f64 *channel, tsnative_channel_f64_wa
 }
 
 static void wait_cooperatively(tsnative_channel_f64 *channel, tsnative_channel_f64_waiter *waiter) {
+  (void)channel;
+  const struct timespec pause = {.tv_sec = 0, .tv_nsec = 100000};
   for (;;) {
     if (atomic_load_explicit(&waiter->completed, memory_order_acquire)) return;
     if (tsnative_scheduler_help_once()) continue;
-    pthread_mutex_lock(&channel->mutex);
-    if (!atomic_load_explicit(&waiter->completed, memory_order_acquire)) {
-      pthread_cond_wait(&channel->changed, &channel->mutex);
-    }
-    pthread_mutex_unlock(&channel->mutex);
+    nanosleep(&pause, NULL);
   }
 }
 

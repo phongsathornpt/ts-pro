@@ -44,17 +44,13 @@ int main(void) {
 	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	heapSource := filepath.Join(root, "runtime", "core", "heap.c")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	programObj := filepath.Join(dir, "gc.o")
-	heapObj := filepath.Join(dir, "heap.o")
 	bin := filepath.Join(dir, "gc-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, heapSource, heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{programObj, heapObj}, bin); err != nil {
+	if err := clang.Link(ctx, []string{programObj, goRuntime}, bin); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := exec.CommandContext(ctx, bin).CombinedOutput(); err != nil {
@@ -118,17 +114,13 @@ int main(void) {
 	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	heapSource := filepath.Join(root, "runtime", "core", "heap.c")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	programObj := filepath.Join(dir, "gc_threads.o")
-	heapObj := filepath.Join(dir, "heap.o")
 	bin := filepath.Join(dir, "gc-threads-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, heapSource, heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{programObj, heapObj}, bin); err != nil {
+	if err := clang.Link(ctx, []string{programObj, goRuntime}, bin); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := exec.CommandContext(ctx, bin).CombinedOutput(); err != nil {
@@ -169,15 +161,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	programObj := filepath.Join(dir, "handoff.o")
-	heapObj := filepath.Join(dir, "heap.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "gc-handoff-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{programObj, heapObj}, binary); err != nil {
+	if err := clang.Link(ctx, []string{programObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {

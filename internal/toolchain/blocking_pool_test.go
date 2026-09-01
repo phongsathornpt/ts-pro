@@ -113,7 +113,7 @@ int main(void) {
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
-	heapObj := filepath.Join(dir, "heap.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	blockingObj := filepath.Join(dir, "blocking_pool.o")
 	binary := filepath.Join(dir, "blocking_pool_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
@@ -125,13 +125,10 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "blocking_pool.c"), blockingObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj, blockingObj}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime, blockingObj}, binary); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(ctx, binary)

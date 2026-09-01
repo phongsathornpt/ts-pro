@@ -162,9 +162,10 @@ static void execute_task(tsnative_task *task) {
   atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNING, memory_order_release);
   atomic_store_explicit(&task->park_requested, 0, memory_order_release);
   atomic_store_explicit(&task->wake_requested, 0, memory_order_release);
+  tsnative_task *previous_task = current_task;
   current_task = task;
   task->entry(task->state, &task->result);
-  current_task = NULL;
+  current_task = previous_task;
 
   pthread_mutex_lock(&scheduler.mutex);
   if (atomic_load_explicit(&task->park_requested, memory_order_acquire)) {

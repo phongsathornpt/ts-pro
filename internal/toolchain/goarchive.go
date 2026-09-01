@@ -59,10 +59,13 @@ func (c *ObjectCache) BuildGoArchive(ctx context.Context, root, packagePath stri
 	if info, statErr := os.Stat(output); statErr == nil && info.Size() > 0 {
 		return output, true, nil
 	}
-	temp := filepath.Join(c.Dir, key+"-tmp.a")
+	tempFile, err := os.CreateTemp(c.Dir, key+"-*.a")
+	if err != nil {
+		return "", false, fmt.Errorf("create Go archive cache temp: %w", err)
+	}
+	temp := tempFile.Name()
+	_ = tempFile.Close()
 	header := strings.TrimSuffix(temp, ".a") + ".h"
-	_ = os.Remove(temp)
-	_ = os.Remove(header)
 	defer os.Remove(temp)
 	defer os.Remove(header)
 	cmd := exec.CommandContext(ctx, goPath, "build", "-trimpath", "-buildmode=c-archive", "-o", temp, packagePath)

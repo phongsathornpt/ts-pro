@@ -78,7 +78,6 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	dir := t.TempDir()
 	ll := filepath.Join(dir, "fib.ll")
 	obj := filepath.Join(dir, "fib.o")
-	heapObj := filepath.Join(dir, "heap.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	timerObj := filepath.Join(dir, "timer.o")
 	blockingObj := filepath.Join(dir, "blocking.o")
@@ -97,9 +96,6 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
 	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +105,7 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "blocking_pool.c"), blockingObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.Link(ctx, []string{obj, heapObj, schedulerObj, timerObj, blockingObj, goRuntime}, bin); err != nil {
+	if err := tc.Link(ctx, []string{obj, schedulerObj, timerObj, blockingObj, goRuntime}, bin); err != nil {
 		t.Fatal(err)
 	}
 	output, err := exec.CommandContext(ctx, bin).CombinedOutput()

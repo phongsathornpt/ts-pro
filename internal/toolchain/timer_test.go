@@ -70,7 +70,7 @@ int main(void) {
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
 	timerObj := filepath.Join(dir, "timer.o")
-	heapObj := filepath.Join(dir, "heap.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "timer_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
@@ -84,10 +84,7 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "timer.c"), timerObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, timerObj, heapObj}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, timerObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)

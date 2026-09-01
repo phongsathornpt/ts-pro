@@ -12,7 +12,7 @@ Goal: replace every handwritten native runtime `.c` implementation with Go while
 ## Migration order
 
 1. [x] Go c-archive build/cache path and numeric console ABI; remove `core/console.c`.
-2. [ ] Heap/native allocator and GC ABI.
+2. [x] Heap/native allocator and GC ABI; remove `core/heap.c`.
 3. [ ] Strings, arrays, objects, and JSValue.
 4. [ ] Scheduler and lightweight tasks using Go concurrency primitives where ABI-safe.
 5. [ ] Channels, timers, and blocking-call pool.
