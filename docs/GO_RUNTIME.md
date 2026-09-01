@@ -13,7 +13,11 @@ Goal: replace every handwritten native runtime `.c` implementation with Go while
 
 1. [x] Go c-archive build/cache path and numeric console ABI; remove `core/console.c`.
 2. [x] Heap/native allocator and GC ABI; remove `core/heap.c`.
-3. [ ] Strings, arrays, objects, and JSValue.
+3. [~] Strings, arrays, objects, and JSValue.
+   - [x] String allocation/concat/logging; remove `core/string.c`.
+   - [ ] F64 arrays.
+   - [ ] Objects.
+   - [ ] JSValue.
 4. [ ] Scheduler and lightweight tasks using Go concurrency primitives where ABI-safe.
 5. [ ] Channels, timers, and blocking-call pool.
 6. [ ] Remove legacy C headers/tests and the C compilation path once no runtime C sources remain.
