@@ -194,7 +194,7 @@ func markCandidateLocked(candidate uintptr) {
 	}
 }
 
-func collectLocked() {
+func collectLocked() []*nativeHeapBlock {
 	for _, block := range nativeHeap.blocks {
 		block.marked = false
 	}
@@ -206,17 +206,15 @@ func collectLocked() {
 			markCandidateLocked(candidate)
 		}
 	}
+	blocks := make([]*nativeHeapBlock, 0)
 	for key, block := range nativeHeap.blocks {
 		if block.marked {
 			continue
 		}
-		if block.finalizer != nil {
-			block.finalizer()
-		}
-		C.free(unsafe.Pointer(block.ptr))
 		delete(nativeHeap.blocks, key)
 		nativeHeap.bytes -= block.size
 		nativeHeap.allocations--
+		blocks = append(blocks, block)
 	}
 	nativeHeap.collections++
 	next := nativeHeap.bytes * 2
@@ -224,45 +222,62 @@ func collectLocked() {
 		next = initialGCThreshold
 	}
 	nativeHeap.threshold = next
+	return blocks
+}
+
+func finalizeNativeHeapBlocks(blocks []*nativeHeapBlock) {
+	for _, block := range blocks {
+		if block.finalizer != nil {
+			block.finalizer()
+		}
+		C.free(unsafe.Pointer(block.ptr))
+	}
 }
 
 //export tsnative_gc_collect
 func tsnative_gc_collect() {
+	var blocks []*nativeHeapBlock
 	nativeHeap.Lock()
 	if len(nativeHeap.threadStacks) <= 1 && nativeHeap.handoffs == 0 {
-		collectLocked()
+		blocks = collectLocked()
 	}
 	nativeHeap.Unlock()
+	finalizeNativeHeapBlocks(blocks)
 }
 
 //export tsnative_gc_safepoint
 func tsnative_gc_safepoint() {
+	var blocks []*nativeHeapBlock
 	nativeHeap.Lock()
 	if nativeHeap.bytes >= nativeHeap.threshold && len(nativeHeap.threadStacks) <= 1 && nativeHeap.handoffs == 0 {
-		collectLocked()
+		blocks = collectLocked()
 	}
 	nativeHeap.Unlock()
+	finalizeNativeHeapBlocks(blocks)
 }
 
 //export tsnative_heap_shutdown
 func tsnative_heap_shutdown() {
 	nativeHeap.Lock()
+	blocks := make([]*nativeHeapBlock, 0, len(nativeHeap.blocks))
 	for key, block := range nativeHeap.blocks {
-		if block.finalizer != nil {
-			block.finalizer()
-		}
-		C.free(unsafe.Pointer(block.ptr))
+		blocks = append(blocks, block)
 		delete(nativeHeap.blocks, key)
 	}
+	nativeHeap.bytes = 0
+	nativeHeap.allocations = 0
+	nativeHeap.threshold = initialGCThreshold
+	nativeHeap.handoffs = 0
+	nativeHeap.Unlock()
+
+	finalizeNativeHeapBlocks(blocks)
+
+	nativeHeap.Lock()
 	for token := range nativeHeap.roots {
 		C.free(unsafe.Pointer(token))
 		delete(nativeHeap.roots, token)
 	}
 	nativeHeap.threadStacks = map[int][]uintptr{}
-	nativeHeap.bytes = 0
-	nativeHeap.allocations = 0
-	nativeHeap.threshold = initialGCThreshold
-	nativeHeap.handoffs = 0
 	nativeHeap.Unlock()
 }
 

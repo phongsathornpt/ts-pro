@@ -720,3 +720,31 @@ func TestEmitStacklessDelayedTaskJoinUsesSpilledHandle(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitReferenceChannelTaskContinuation(t *testing.T) {
+	module := mir.Module{Name: "reference-channel", Functions: []mir.Function{
+		{ID: 0, Name: "sender", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}, {Value: 1, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 2, Repr: mir.ReprVoid, Op: mir.ChannelSendRef{Channel: 0, Value: 1}},
+		}, Terminator: mir.Return{}}}},
+		{ID: 1, Name: "receiver", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 1, Repr: mir.ReprStringRef, Op: mir.ChannelRecvRef{Channel: 0}},
+		}, Terminator: mir.Return{Value: valueIDPtr(1)}}}},
+		{ID: 2, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}, {Value: 1, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 2, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0, 1}}},
+			{Result: 3, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1, Captures: []mir.ValueID{0}}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"call i32 @tsnative_channel_ref_send_task(ptr %capture0, ptr %capture1)",
+		"call i32 @tsnative_channel_ref_recv_task(ptr %capture0, ptr %spill0.ptr)",
+		"store ptr %spill.0.ret1, ptr %result_slot",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
