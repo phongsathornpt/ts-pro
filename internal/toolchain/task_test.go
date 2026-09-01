@@ -277,3 +277,103 @@ int main(void) {
 		t.Fatalf("run task ref result test: %v: %s", err, output)
 	}
 }
+
+func TestNativeTaskParkWakeResume(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "park_test.c")
+	program := `#include <assert.h>
+#include <sched.h>
+#include <stdatomic.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *, void *);
+typedef enum { RUNNABLE=1, RUNNING, WAITING, DONE, CANCELLED, FAILED } task_status;
+tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *);
+void tsnative_task_release(tsnative_task *);
+task_status tsnative_task_get_status(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+int tsnative_scheduler_prepare_park(void);
+tsnative_task *tsnative_scheduler_current_task(void);
+int tsnative_scheduler_wake(tsnative_task *);
+static atomic_int phase;
+static atomic_int fast_phase;
+static void parked(void *state, void *result) {
+  (void)state; (void)result;
+  int value = atomic_load(&phase);
+  if (value == 0) {
+    atomic_store(&phase, 1);
+    assert(tsnative_scheduler_prepare_park() == 0);
+    return;
+  }
+  assert(value == 1);
+  atomic_store(&phase, 2);
+}
+static void fast_wake(void *state, void *result) {
+  (void)state; (void)result;
+  int value = atomic_load(&fast_phase);
+  if (value == 0) {
+    atomic_store(&fast_phase, 1);
+    assert(tsnative_scheduler_prepare_park() == 0);
+    assert(tsnative_scheduler_wake(tsnative_scheduler_current_task()) == 0);
+    return;
+  }
+  assert(value == 1);
+  atomic_store(&fast_phase, 2);
+}
+int main(void) {
+  tsnative_task *task = tsnative_task_spawn(parked, 0);
+  assert(task);
+  while (tsnative_task_get_status(task) != WAITING) sched_yield();
+  assert(atomic_load(&phase) == 1);
+  assert(tsnative_scheduler_wake(task) == 0);
+  assert(tsnative_task_join(task) == 0);
+  assert(atomic_load(&phase) == 2);
+  tsnative_task_release(task);
+  tsnative_task *fast = tsnative_task_spawn(fast_wake, 0);
+  assert(fast);
+  assert(tsnative_task_join(fast) == 0);
+  assert(atomic_load(&fast_phase) == 2);
+  tsnative_task_release(fast);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "park_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run task park/wake test: %v: %s", err, output)
+	}
+}

@@ -13,6 +13,8 @@ struct tsnative_task {
   void *result_gc_root_token;
   uint64_t id;
   _Atomic int status;
+  _Atomic int park_requested;
+  _Atomic int wake_requested;
   tsnative_task_result_kind result_kind;
   union {
     double f64;
