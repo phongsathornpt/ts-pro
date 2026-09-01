@@ -299,7 +299,7 @@ type runtimeCompileResult struct {
 }
 
 func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
-	sources := []string{"core/heap.c", "core/console.c", "core/array_f64.c", "core/string.c", "core/object.c", "core/jsvalue.c", "concurrency/scheduler.c", "concurrency/task.c", "concurrency/channel_f64.c", "concurrency/timer.c", "concurrency/blocking_pool.c"}
+	sources := []string{"core/heap.c", "core/array_f64.c", "core/string.c", "core/object.c", "core/jsvalue.c", "concurrency/scheduler.c", "concurrency/task.c", "concurrency/channel_f64.c", "concurrency/timer.c", "concurrency/blocking_pool.c"}
 	results := make(chan runtimeCompileResult, len(sources))
 	for i, source := range sources {
 		go func(index int, name string) {
@@ -307,7 +307,7 @@ func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, ro
 			results <- runtimeCompileResult{index: index, path: path, hit: hit, err: err}
 		}(i, source)
 	}
-	objects := make([]string, len(sources))
+	objects := make([]string, len(sources), len(sources)+1)
 	hits, misses := 0, 0
 	for range sources {
 		result := <-results
@@ -320,6 +320,16 @@ func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, ro
 		} else {
 			misses++
 		}
+	}
+	archive, hit, err := cache.BuildGoArchive(ctx, root, "./runtimego")
+	if err != nil {
+		return nil, hits, misses, err
+	}
+	objects = append(objects, archive)
+	if hit {
+		hits++
+	} else {
+		misses++
 	}
 	return objects, hits, misses, nil
 }
