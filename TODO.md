@@ -112,7 +112,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Multi-block Branch/Jump/Return continuation CFGs without Phi nodes, including stackless async `if` on a single worker.
       - [x] Phi-backed continuation merges use typed task-state slots with parallel edge copies, including loop-carried numeric `while` state on a single worker.
       - [x] Generic resumable native-op steps cover object/array allocation and mutation, field access, direct/virtual/closure calls, intrinsics, task yield, and nonblocking channel operations using typed spills and allocation safepoints.
-      - [ ] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
+      - [~] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
+        - [x] Spill delayed nested `TaskRef` handles across suspension; typed joins await the existing handle and void joins use completion parking followed by explicit release, including worker=1 regression coverage.
+        - [ ] Remove remaining cooperative channel/sleep fallback shapes and expand richer reference Phi/state stress coverage.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -176,7 +178,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Remove remaining cooperative/manual task patterns now that typed spills, Branch/Jump/Return CFGs, Phi-backed loops, and generic supported-MIR continuation steps are implemented.
+1. Remove remaining cooperative channel/sleep fallback shapes and expand reference Phi/state stress; delayed nested TaskRef spawn/join patterns are stackless now.
 2. Add reference/JSValue typed channel specializations and broader channel/select semantics.
 3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
 4. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.

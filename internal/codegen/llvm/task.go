@@ -191,7 +191,7 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 					fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.spill%d\n", state, slot.Index)
 				case mir.ReprBool:
 					fmt.Fprintf(b, "  store i1 false, ptr %s.spill%d\n", state, slot.Index)
-				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
 					fmt.Fprintf(b, "  store ptr null, ptr %s.spill%d\n", state, slot.Index)
 				default:
 					return fmt.Errorf("unsupported task continuation spill representation %d", slot.Repr)
@@ -216,7 +216,7 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 
 func isTaskReferenceResult(repr mir.Repr) bool {
 	switch repr {
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
 		return true
 	default:
 		return false

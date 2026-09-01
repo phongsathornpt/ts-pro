@@ -465,10 +465,10 @@ func TestEmitStacklessF64AwaitContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"%tsnative_task_env_f1 = type { i32, double }",
+		"%tsnative_task_env_f1 = type { i32, ptr, double }",
 		"call i32 @tsnative_task_await_f64_task(ptr",
-		"store i32 1, ptr %pc.ptr",
-		"store double %spill.0.ret1, ptr %result_slot",
+		"store i32 2, ptr %pc.ptr",
+		"store double %spill.1.ret2, ptr %result_slot",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
@@ -486,7 +486,7 @@ func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_task_env_f1 = type { i32, i1 }", "call i32 @tsnative_task_await_bool_task(ptr", "store i1 %spill.0.ret1, ptr %result_slot"} {
+	for _, want := range []string{"%tsnative_task_env_f1 = type { i32, ptr, i1 }", "call i32 @tsnative_task_await_bool_task(ptr", "store i1 %spill.1.ret2, ptr %result_slot"} {
 		if !strings.Contains(boolIR, want) {
 			t.Fatalf("bool LLVM IR missing %q:\n%s", want, boolIR)
 		}
@@ -501,7 +501,7 @@ func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_task_env_f1 = type { ptr, i32, ptr }", "call i32 @tsnative_task_await_ref_task(ptr", "store ptr %spill.0.ret1, ptr %result_slot"} {
+	for _, want := range []string{"%tsnative_task_env_f1 = type { ptr, i32, ptr, ptr }", "call i32 @tsnative_task_await_ref_task(ptr", "store ptr %spill.1.ret2, ptr %result_slot"} {
 		if !strings.Contains(refIR, want) {
 			t.Fatalf("ref LLVM IR missing %q:\n%s", want, refIR)
 		}
@@ -528,12 +528,12 @@ func TestEmitStacklessLinearSSAContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"%tsnative_task_env_f1 = type { i32, double, double, i1 }",
+		"%tsnative_task_env_f1 = type { i32, ptr, double, double, i1 }",
 		"fmul double",
-		"store double %v3, ptr %spill1.ptr",
+		"store double %v3, ptr %spill2.ptr",
 		"fcmp ogt double",
-		"store i1 %v7, ptr %spill2.ptr",
-		"store i1 %spill.2.ret4, ptr %result_slot",
+		"store i1 %v7, ptr %spill3.ptr",
+		"store i1 %spill.3.ret5, ptr %result_slot",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
@@ -684,6 +684,36 @@ func TestEmitStacklessNativeObjectArrayCallContinuation(t *testing.T) {
 		"call void @tsnative_array_f64_set_checked(ptr",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
 		"call void @tsnative_gc_safepoint()",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestEmitStacklessDelayedTaskJoinUsesSpilledHandle(t *testing.T) {
+	ret := mir.ValueID(5)
+	module := mir.Module{Name: "delayed-task-join", Functions: []mir.Function{
+		{ID: 0, Name: "child", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{}}}},
+		{ID: 1, Name: "parent", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+			{Result: 2, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 1}},
+			{Result: 3, Repr: mir.ReprVoid, Op: mir.TaskJoin{Task: 0}},
+			{Result: 5, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+		}, Terminator: mir.Return{Value: &ret}}}},
+		{ID: 2, Name: "launcher", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1}}}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f1 = type { i32, ptr }",
+		"store ptr %v0, ptr %spill0.ptr",
+		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
+		"call i32 @tsnative_task_await_task(ptr %spill.0.join2)",
+		"call void @tsnative_task_release(ptr %spill.0.release3)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

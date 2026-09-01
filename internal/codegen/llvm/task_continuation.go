@@ -17,6 +17,8 @@ const (
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
 	taskSuspendAwaitRef
+	taskSuspendJoinVoid
+	taskStepTaskRelease
 	taskStepFloatBinary
 	taskStepProvenIntBinary
 	taskStepFloatCompare
@@ -100,6 +102,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return []mir.ValueID{op.Channel, op.Value}, true
 	case mir.ChannelTryRecvOrF64:
 		return []mir.ValueID{op.Channel, op.Fallback}, true
+	case mir.TaskSpawn:
+		return append([]mir.ValueID(nil), op.Captures...), true
 	case mir.TaskYield:
 		return nil, true
 	default:
@@ -127,32 +131,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	hasSuspend := false
 	for _, block := range blocks {
 		cont.BlockPC[block.ID] = len(cont.Steps)
-		var pendingSpawn *mir.TaskSpawn
-		var pendingTask mir.ValueID
 		for _, inst := range block.Instructions {
-			if pendingSpawn != nil {
-				join, ok := inst.Op.(mir.TaskJoin)
-				if !ok || join.Task != pendingTask {
-					return nil
-				}
-				kind := taskSuspendKind(0)
-				switch inst.Repr {
-				case mir.ReprF64:
-					kind = taskSuspendAwaitF64
-				case mir.ReprBool:
-					kind = taskSuspendAwaitBool
-				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
-					kind = taskSuspendAwaitRef
-				default:
-					return nil
-				}
-				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
-				available[inst.Result] = true
-				hasSuspend = true
-				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
-				pendingSpawn = nil
-				continue
-			}
 			switch op := inst.Op.(type) {
 			case mir.ConstF64:
 				cont.Consts[inst.Result] = op.Value
@@ -229,9 +208,33 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 						return nil
 					}
 				}
-				copy := op
-				pendingSpawn = &copy
-				pendingTask = inst.Result
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.TaskJoin:
+				if !available[op.Task] {
+					return nil
+				}
+				hasSuspend = true
+				if inst.Repr == mir.ReprVoid {
+					cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendJoinVoid, Task: op.Task})
+					cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepTaskRelease, Task: op.Task})
+					continue
+				}
+				kind := taskSuspendKind(0)
+				switch inst.Repr {
+				case mir.ReprF64:
+					kind = taskSuspendAwaitF64
+				case mir.ReprBool:
+					kind = taskSuspendAwaitBool
+				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+					kind = taskSuspendAwaitRef
+				default:
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Task: op.Task, Result: inst.Result})
 			case mir.ChannelSendF64:
 				if !available[op.Channel] || !available[op.Value] {
 					return nil
@@ -282,9 +285,6 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			}
-		}
-		if pendingSpawn != nil {
-			return nil
 		}
 		switch term := block.Terminator.(type) {
 		case mir.Return:
@@ -636,20 +636,34 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			}
 			slot := cont.SpillSlots[step.Result]
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_f64_recv_task(ptr %s, ptr %%spill%d.ptr)\n", i, channel, slot.Index)
-		case taskSuspendAwaitF64, taskSuspendAwaitBool, taskSuspendAwaitRef:
-			values := map[mir.ValueID]string{}
-			for _, capture := range step.Captures {
-				value, _, err := continuationOperand(b, fn, descriptor, capture, fmt.Sprintf("a%d", i))
-				if err != nil {
-					return err
-				}
-				values[capture] = value
-			}
-			spawnInst := mir.Instruction{Result: step.Task, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: step.Callee, Captures: step.Captures}}
-			if err := e.emitTaskSpawn(b, spawnInst, spawnInst.Op.(mir.TaskSpawn), values); err != nil {
+		case taskStepTaskRelease:
+			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("release%d", i))
+			if err != nil {
 				return err
 			}
-			child := values[step.Task]
+			if repr != mir.ReprTaskRef {
+				return fmt.Errorf("task continuation release requires TaskRef")
+			}
+			fmt.Fprintf(b, "  call void @tsnative_task_release(ptr %s)\n", task)
+			fmt.Fprintf(b, "  br label %s\n", next)
+			continue
+		case taskSuspendJoinVoid:
+			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("join%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprTaskRef {
+				return fmt.Errorf("task continuation join requires TaskRef")
+			}
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_await_task(ptr %s)\n", i, task)
+		case taskSuspendAwaitF64, taskSuspendAwaitBool, taskSuspendAwaitRef:
+			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("await%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprTaskRef {
+				return fmt.Errorf("task continuation await requires TaskRef")
+			}
 			slot := cont.SpillSlots[step.Result]
 			awaitName := "tsnative_task_await_f64_task"
 			if step.Kind == taskSuspendAwaitBool {
@@ -657,7 +671,7 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			} else if step.Kind == taskSuspendAwaitRef {
 				awaitName = "tsnative_task_await_ref_task"
 			}
-			fmt.Fprintf(b, "  %%status%d = call i32 @%s(ptr %s, ptr %%spill%d.ptr)\n", i, awaitName, child, slot.Index)
+			fmt.Fprintf(b, "  %%status%d = call i32 @%s(ptr %s, ptr %%spill%d.ptr)\n", i, awaitName, task, slot.Index)
 		default:
 			return fmt.Errorf("unsupported task suspension kind %d", step.Kind)
 		}
