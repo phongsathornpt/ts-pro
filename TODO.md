@@ -86,11 +86,15 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
     - [x] Runtime `WAITING -> RUNNABLE` park/wake lifecycle with race-safe pending wake and worker=1 resume regression.
     - [x] Wire F64 channel sender/receiver waiter queues onto park/wake, with operation-complete-before-wake handoff and worker=1 buffered/unbuffered regressions.
-    - [ ] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
+    - [~] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
+      - [x] Stackless task wrappers for proven single-block closures with one F64 channel send/recv suspension point, using heap-owned `pc`/recv spill state and task-aware channel park/wake ABI.
+      - [ ] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
   - [~] Add compiler-known `channel<number>` operations and scheduler/channel metrics.
     - [x] Compiler-known `channel<number>`, `channelTrySend`, and `channelTryRecvOr` through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
     - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.
-    - [ ] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
+    - [~] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
+      - [x] Automatically select the stackless wrapper for proven single-block one-suspend channel tasks while retaining the cooperative fallback for unsupported shapes.
+      - [ ] Remove the cooperative fallback once general continuation lowering covers branches/loops/multiple suspend points.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.

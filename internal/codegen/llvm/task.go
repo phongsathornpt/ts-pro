@@ -11,6 +11,7 @@ import (
 type taskDescriptor struct {
 	Callee       mir.FunctionID
 	CaptureCount int
+	Continuation *taskContinuation
 }
 
 func (e *emitter) taskDescriptors() ([]taskDescriptor, error) {
@@ -29,7 +30,7 @@ func (e *emitter) taskDescriptors() ([]taskDescriptor, error) {
 				if len(spawn.Captures) > len(target.Params) {
 					return nil, fmt.Errorf("task f%d captures %d values but target has %d params", spawn.Callee, len(spawn.Captures), len(target.Params))
 				}
-				descriptor := taskDescriptor{Callee: spawn.Callee, CaptureCount: len(spawn.Captures)}
+				descriptor := taskDescriptor{Callee: spawn.Callee, CaptureCount: len(spawn.Captures), Continuation: analyzeTaskContinuation(target)}
 				if existing, ok := byCallee[spawn.Callee]; ok && existing.CaptureCount != descriptor.CaptureCount {
 					return nil, fmt.Errorf("task f%d has inconsistent capture counts", spawn.Callee)
 				}
@@ -54,13 +55,14 @@ func (e *emitter) emitTaskTypes(b *strings.Builder) error {
 		return err
 	}
 	for _, descriptor := range descriptors {
-		if descriptor.CaptureCount == 0 {
+		if descriptor.CaptureCount == 0 && descriptor.Continuation == nil {
 			continue
 		}
 		fn := e.functions[descriptor.Callee]
 		fmt.Fprintf(b, "%s = type { ", taskEnvTypeName(descriptor.Callee))
+		written := false
 		for i := 0; i < descriptor.CaptureCount; i++ {
-			if i != 0 {
+			if written {
 				b.WriteString(", ")
 			}
 			typ, err := llvmType(fn.Params[i].Repr)
@@ -68,6 +70,17 @@ func (e *emitter) emitTaskTypes(b *strings.Builder) error {
 				return err
 			}
 			b.WriteString(typ)
+			written = true
+		}
+		if descriptor.Continuation != nil {
+			if written {
+				b.WriteString(", ")
+			}
+			b.WriteString("i32")
+			written = true
+			if descriptor.Continuation.Kind == taskSuspendRecvF64 {
+				b.WriteString(", double")
+			}
 		}
 		b.WriteString(" }\n")
 	}
@@ -88,6 +101,12 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			return fmt.Errorf("task target f%d must be a zero-argument source closure with a supported native result", descriptor.Callee)
 		}
 		fmt.Fprintf(b, "define void @%s(ptr %%state, ptr %%result_slot) {\nentry:\n", taskWrapperName(descriptor.Callee))
+		if descriptor.Continuation != nil {
+			if err := e.emitContinuationTaskWrapper(b, descriptor, fn); err != nil {
+				return err
+			}
+			continue
+		}
 		for i := 0; i < descriptor.CaptureCount; i++ {
 			typ, err := llvmType(fn.Params[i].Repr)
 			if err != nil {
@@ -136,7 +155,8 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 	}
 	name := valueName(inst.Result)
 	state := "null"
-	if len(op.Captures) != 0 {
+	descriptor := taskDescriptor{Callee: op.Callee, CaptureCount: len(op.Captures), Continuation: analyzeTaskContinuation(fn)}
+	if len(op.Captures) != 0 || descriptor.Continuation != nil {
 		state = name + ".state"
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", state, taskEnvTypeName(op.Callee))
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", state, state)
@@ -152,6 +172,15 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 			}
 			fmt.Fprintf(b, "  %s.c%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, i, taskEnvTypeName(op.Callee), state, i)
 			fmt.Fprintf(b, "  store %s %s, ptr %s.c%d\n", typ, value, state, i)
+		}
+		if descriptor.Continuation != nil {
+			pcIndex := descriptor.CaptureCount
+			fmt.Fprintf(b, "  %s.pc = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, taskEnvTypeName(op.Callee), state, pcIndex)
+			fmt.Fprintf(b, "  store i32 0, ptr %s.pc\n", state)
+			if descriptor.Continuation.Kind == taskSuspendRecvF64 {
+				fmt.Fprintf(b, "  %s.recv = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, taskEnvTypeName(op.Callee), state, pcIndex+1)
+				fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.recv\n", state)
+			}
 		}
 	}
 	spawnName := "tsnative_task_spawn_or_abort"

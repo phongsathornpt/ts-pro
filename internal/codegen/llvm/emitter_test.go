@@ -349,3 +349,40 @@ func TestEmitNativeF64ChannelBlockingOps(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessChannelTaskContinuation(t *testing.T) {
+	module := mir.Module{Name: "stackless-channel", Functions: []mir.Function{
+		{ID: 0, Name: "sender", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+				{Result: 2, Repr: mir.ReprVoid, Op: mir.ChannelSendF64{Channel: 0, Value: 1}},
+			}, Terminator: mir.Return{}}}},
+		{ID: 1, Name: "receiver", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprF64, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ChannelRecvF64{Channel: 0}},
+			}, Terminator: mir.Return{Value: valueIDPtr(1)}}}},
+		{ID: 2, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "ch", Repr: mir.ReprChannelRef}}, ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}},
+				{Result: 2, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1, Captures: []mir.ValueID{0}}},
+			}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { ptr, i32 }",
+		"%tsnative_task_env_f1 = type { ptr, i32, double }",
+		"call i32 @tsnative_channel_f64_send_task(ptr %capture0, double 4.200000e+01)",
+		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv.ptr)",
+		"switch i32 %pc",
+		"store i32 1, ptr %pc.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func valueIDPtr(value mir.ValueID) *mir.ValueID { return &value }
