@@ -116,6 +116,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			kind = mir.BoxJSNumber
 		case hir.BoxString:
 			kind = mir.BoxJSString
+		case hir.BoxBoolean:
+			kind = mir.BoxJSBoolean
 		}
 		if kind == mir.BoxJSInvalid {
 			return mir.Instruction{}, fmt.Errorf("invalid JSValue box kind %d", op.Kind)

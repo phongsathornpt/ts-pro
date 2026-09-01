@@ -129,6 +129,7 @@ const (
 	BoxJSInvalid BoxJSKind = iota
 	BoxJSNumber
 	BoxJSString
+	BoxJSBoolean
 )
 
 type BoxJSValue struct {

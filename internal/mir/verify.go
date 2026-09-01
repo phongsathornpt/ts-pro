@@ -122,7 +122,7 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return err
 				}
 			case BoxJSValue:
-				if op.Kind != BoxJSNumber && op.Kind != BoxJSString {
+				if op.Kind != BoxJSNumber && op.Kind != BoxJSString && op.Kind != BoxJSBoolean {
 					return fmt.Errorf("JSValue box v%d has invalid kind %d", inst.Result, op.Kind)
 				}
 				if inst.Repr != ReprJSValue {

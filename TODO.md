@@ -166,7 +166,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Add tagged `JSValue` only for values that cannot keep a proven native representation.
   - [x] Heap-backed GC-managed JSValue boundary for `any` number/string values.
   - [x] Explicit number/string boxing at variable, return, and direct-call parameter boundaries.
-  - [ ] Boolean, null/undefined, object/function, and tagged-union JSValue variants.
+  - [~] Boolean, null/undefined, object/function, and tagged-union JSValue variants.
+    - [x] Boolean JSValue tag/boxing, logging, and primitive `+` coercion with numbers/strings.
+    - [ ] Null/undefined, object/function, and tagged-union JSValue variants.
 - [~] Add checked conversions and dynamic operator/property slow paths.
   - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
   - [ ] Dynamic comparisons, arithmetic beyond `+`, property get/set, calls, and checked unboxing/conversions.

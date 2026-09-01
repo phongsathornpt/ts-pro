@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	nativeJSTagNumber uint32 = 1
-	nativeJSTagString uint32 = 2
+	nativeJSTagNumber  uint32 = 1
+	nativeJSTagString  uint32 = 2
+	nativeJSTagBoolean uint32 = 3
 )
 
 type nativeJSValue struct {
@@ -40,6 +41,10 @@ func nativeJSRef(value *nativeJSValue) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(value.payload))
 }
 
+func nativeJSBool(value *nativeJSValue) bool {
+	return value.payload != 0
+}
+
 //export tsnative_jsvalue_box_f64
 func tsnative_jsvalue_box_f64(number C.double) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagNumber)
@@ -52,6 +57,23 @@ func tsnative_jsvalue_box_string(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagString)
 	value.payload = uint64(uintptr(raw))
 	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_box_bool
+func tsnative_jsvalue_box_bool(raw C.uint8_t) unsafe.Pointer {
+	value := newNativeJSValue(nativeJSTagBoolean)
+	if raw != 0 {
+		value.payload = 1
+	}
+	return unsafe.Pointer(value)
+}
+
+func nativeJSStringLiteral(text string) unsafe.Pointer {
+	if len(text) == 0 {
+		return tsnative_string_new(nil, 0)
+	}
+	bytes := []byte(text)
+	return tsnative_string_new(unsafe.Pointer(&bytes[0]), C.uint64_t(len(bytes)))
 }
 
 func nativeJSNumberToString(number float64) unsafe.Pointer {
@@ -71,9 +93,32 @@ func nativeJSToString(value *nativeJSValue) unsafe.Pointer {
 		return nativeJSRef(value)
 	case nativeJSTagNumber:
 		return nativeJSNumberToString(nativeJSNumber(value))
+	case nativeJSTagBoolean:
+		if nativeJSBool(value) {
+			return nativeJSStringLiteral("true")
+		}
+		return nativeJSStringLiteral("false")
 	default:
 		C.abort()
 		return nil
+	}
+}
+
+func nativeJSToNumber(value *nativeJSValue) float64 {
+	if value == nil {
+		C.abort()
+	}
+	switch value.tag {
+	case nativeJSTagNumber:
+		return nativeJSNumber(value)
+	case nativeJSTagBoolean:
+		if nativeJSBool(value) {
+			return 1
+		}
+		return 0
+	default:
+		C.abort()
+		return 0
 	}
 }
 
@@ -84,11 +129,11 @@ func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 	if left == nil || right == nil {
 		C.abort()
 	}
-	if left.tag == nativeJSTagNumber && right.tag == nativeJSTagNumber {
-		return tsnative_jsvalue_box_f64(C.double(nativeJSNumber(left) + nativeJSNumber(right)))
+	if left.tag == nativeJSTagString || right.tag == nativeJSTagString {
+		combined := tsnative_string_concat(nativeJSToString(left), nativeJSToString(right))
+		return tsnative_jsvalue_box_string(combined)
 	}
-	combined := tsnative_string_concat(nativeJSToString(left), nativeJSToString(right))
-	return tsnative_jsvalue_box_string(combined)
+	return tsnative_jsvalue_box_f64(C.double(nativeJSToNumber(left) + nativeJSToNumber(right)))
 }
 
 //export tsnative_console_log_jsvalue
@@ -102,6 +147,12 @@ func tsnative_console_log_jsvalue(raw unsafe.Pointer) {
 		fmt.Printf("%.17g\n", nativeJSNumber(value))
 	case nativeJSTagString:
 		tsnative_console_log_string(nativeJSRef(value))
+	case nativeJSTagBoolean:
+		if nativeJSBool(value) {
+			fmt.Println("true")
+		} else {
+			fmt.Println("false")
+		}
 	default:
 		C.abort()
 	}

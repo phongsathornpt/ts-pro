@@ -59,6 +59,7 @@ const (
 	BoxInvalid BoxKind = iota
 	BoxNumber
 	BoxString
+	BoxBoolean
 )
 
 type BoxOp struct {
