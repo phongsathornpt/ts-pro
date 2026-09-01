@@ -76,6 +76,15 @@ func verifyFunction(fn Function, functions map[FunctionID]struct{}, shapes map[S
 	return verifyUses(fn, functions, shapes, blocks, values)
 }
 
+func isChannelRefElementRepr(repr Repr) bool {
+	switch repr {
+	case ReprStringRef, ReprArrayRef, ReprObjectRef, ReprFunctionRef, ReprJSValue:
+		return true
+	default:
+		return false
+	}
+}
+
 func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[ShapeID]Shape, blocks map[BlockID]struct{}, values map[ValueID]struct{}) error {
 	checkValue := func(v ValueID) error {
 		if _, ok := values[v]; !ok {
@@ -377,6 +386,50 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 			case ChannelRecvF64:
 				if inst.Repr != ReprF64 {
 					return fmt.Errorf("channel recv v%d must produce F64", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+			case ChannelNewRef:
+				if inst.Repr != ReprChannelRef {
+					return fmt.Errorf("reference channel new v%d must produce ChannelRef", inst.Result)
+				}
+				if err := checkValue(op.Capacity); err != nil {
+					return err
+				}
+			case ChannelTrySendRef:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("reference channel try send v%d must produce Bool", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ChannelTryRecvOrRef:
+				if !isChannelRefElementRepr(inst.Repr) {
+					return fmt.Errorf("reference channel try recv v%d has unsupported result representation %d", inst.Result, inst.Repr)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Fallback); err != nil {
+					return err
+				}
+			case ChannelSendRef:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("reference channel send v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ChannelRecvRef:
+				if !isChannelRefElementRepr(inst.Repr) {
+					return fmt.Errorf("reference channel recv v%d has unsupported result representation %d", inst.Result, inst.Repr)
 				}
 				if err := checkValue(op.Channel); err != nil {
 					return err

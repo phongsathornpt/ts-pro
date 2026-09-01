@@ -55,6 +55,13 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare i32 @tsnative_channel_f64_send_task(ptr, double)\n")
 	b.WriteString("declare double @tsnative_channel_f64_recv_cooperative(ptr)\n")
 	b.WriteString("declare i32 @tsnative_channel_f64_recv_task(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_channel_ref_new_checked(double)\n")
+	b.WriteString("declare i32 @tsnative_channel_ref_try_send(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_channel_ref_try_recv_or(ptr, ptr)\n")
+	b.WriteString("declare void @tsnative_channel_ref_send_cooperative(ptr, ptr)\n")
+	b.WriteString("declare i32 @tsnative_channel_ref_send_task(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_channel_ref_recv_cooperative(ptr)\n")
+	b.WriteString("declare i32 @tsnative_channel_ref_recv_task(ptr, ptr)\n")
 	b.WriteString("declare void @tsnative_sleep_cooperative(double)\n")
 	b.WriteString("declare i32 @tsnative_sleep_task(double)\n")
 	b.WriteString("declare void @tsnative_timer_shutdown()\ndeclare void @tsnative_blocking_pool_shutdown()\n")
@@ -440,6 +447,62 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call double @tsnative_channel_f64_recv_cooperative(ptr %s)\n", name, channel)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelNewRef:
+		capacity, err := operand(values, op.Capacity)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_channel_ref_new_checked(double %s)\n", name, capacity)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTrySendRef:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = call i32 @tsnative_channel_ref_try_send(ptr %s, ptr %s)\n", name, channel, value)
+		fmt.Fprintf(b, "  %s = icmp eq i32 %s.raw, 1\n", name, name)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTryRecvOrRef:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		fallback, err := operand(values, op.Fallback)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_channel_ref_try_recv_or(ptr %s, ptr %s)\n", name, channel, fallback)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelSendRef:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_channel_ref_send_cooperative(ptr %s, ptr %s)\n", channel, value)
+		return nil
+	case mir.ChannelRecvRef:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_channel_ref_recv_cooperative(ptr %s)\n", name, channel)
 		values[inst.Result] = name
 		return nil
 	case mir.Sleep:

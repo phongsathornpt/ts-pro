@@ -162,11 +162,34 @@ type TaskSpawnOp struct {
 }
 type TaskJoinOp struct{ Task ValueID }
 type TaskYieldOp struct{}
-type ChannelNewOp struct{ Capacity ValueID }
-type ChannelTrySendOp struct{ Channel, Value ValueID }
-type ChannelTryRecvOrOp struct{ Channel, Fallback ValueID }
-type ChannelSendOp struct{ Channel, Value ValueID }
-type ChannelRecvOp struct{ Channel ValueID }
+type ChannelElementKind uint8
+
+const (
+	ChannelElementInvalid ChannelElementKind = iota
+	ChannelElementF64
+	ChannelElementRef
+)
+
+type ChannelNewOp struct {
+	Capacity ValueID
+	Element  ChannelElementKind
+}
+type ChannelTrySendOp struct {
+	Channel, Value ValueID
+	Element        ChannelElementKind
+}
+type ChannelTryRecvOrOp struct {
+	Channel, Fallback ValueID
+	Element           ChannelElementKind
+}
+type ChannelSendOp struct {
+	Channel, Value ValueID
+	Element        ChannelElementKind
+}
+type ChannelRecvOp struct {
+	Channel ValueID
+	Element ChannelElementKind
+}
 type SleepOp struct{ Duration ValueID }
 
 func (ConstOp) isOperation()            {}

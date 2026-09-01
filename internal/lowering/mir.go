@@ -228,15 +228,50 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 	case hir.TaskYieldOp:
 		result.Op = mir.TaskYield{}
 	case hir.ChannelNewOp:
-		result.Op = mir.ChannelNewF64{Capacity: mir.ValueID(op.Capacity)}
+		switch op.Element {
+		case hir.ChannelElementF64:
+			result.Op = mir.ChannelNewF64{Capacity: mir.ValueID(op.Capacity)}
+		case hir.ChannelElementRef:
+			result.Op = mir.ChannelNewRef{Capacity: mir.ValueID(op.Capacity)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("invalid channel element kind %d", op.Element)
+		}
 	case hir.ChannelTrySendOp:
-		result.Op = mir.ChannelTrySendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		switch op.Element {
+		case hir.ChannelElementF64:
+			result.Op = mir.ChannelTrySendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		case hir.ChannelElementRef:
+			result.Op = mir.ChannelTrySendRef{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("invalid channel element kind %d", op.Element)
+		}
 	case hir.ChannelTryRecvOrOp:
-		result.Op = mir.ChannelTryRecvOrF64{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
+		switch op.Element {
+		case hir.ChannelElementF64:
+			result.Op = mir.ChannelTryRecvOrF64{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
+		case hir.ChannelElementRef:
+			result.Op = mir.ChannelTryRecvOrRef{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("invalid channel element kind %d", op.Element)
+		}
 	case hir.ChannelSendOp:
-		result.Op = mir.ChannelSendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		switch op.Element {
+		case hir.ChannelElementF64:
+			result.Op = mir.ChannelSendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		case hir.ChannelElementRef:
+			result.Op = mir.ChannelSendRef{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("invalid channel element kind %d", op.Element)
+		}
 	case hir.ChannelRecvOp:
-		result.Op = mir.ChannelRecvF64{Channel: mir.ValueID(op.Channel)}
+		switch op.Element {
+		case hir.ChannelElementF64:
+			result.Op = mir.ChannelRecvF64{Channel: mir.ValueID(op.Channel)}
+		case hir.ChannelElementRef:
+			result.Op = mir.ChannelRecvRef{Channel: mir.ValueID(op.Channel)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("invalid channel element kind %d", op.Element)
+		}
 	case hir.SleepOp:
 		result.Op = mir.Sleep{Duration: mir.ValueID(op.Duration)}
 	case hir.PhiOp:

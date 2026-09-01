@@ -13,6 +13,8 @@ type taskSuspendKind uint8
 const (
 	taskSuspendSendF64 taskSuspendKind = iota + 1
 	taskSuspendRecvF64
+	taskSuspendSendRef
+	taskSuspendRecvRef
 	taskSuspendSleep
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
@@ -72,6 +74,15 @@ type taskContinuation struct {
 	Phis       map[mir.BlockID][]taskPhi
 }
 
+func isChannelReferenceRepr(repr mir.Repr) bool {
+	switch repr {
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+		return true
+	default:
+		return false
+	}
+}
+
 func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	switch op := op.(type) {
 	case mir.ArrayNewF64:
@@ -102,6 +113,12 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	case mir.ChannelTrySendF64:
 		return []mir.ValueID{op.Channel, op.Value}, true
 	case mir.ChannelTryRecvOrF64:
+		return []mir.ValueID{op.Channel, op.Fallback}, true
+	case mir.ChannelNewRef:
+		return []mir.ValueID{op.Capacity}, true
+	case mir.ChannelTrySendRef:
+		return []mir.ValueID{op.Channel, op.Value}, true
+	case mir.ChannelTryRecvOrRef:
 		return []mir.ValueID{op.Channel, op.Fallback}, true
 	case mir.ConstJSValue:
 		return nil, true
@@ -261,6 +278,20 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				available[inst.Result] = true
 				hasSuspend = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvF64, Channel: op.Channel, Result: inst.Result})
+			case mir.ChannelSendRef:
+				if !available[op.Channel] || !available[op.Value] {
+					return nil
+				}
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSendRef, Channel: op.Channel, Value: op.Value})
+			case mir.ChannelRecvRef:
+				if !available[op.Channel] || !isChannelReferenceRepr(inst.Repr) {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvRef, Channel: op.Channel, Result: inst.Result})
 			case mir.Sleep:
 				if !available[op.Duration] {
 					return nil
@@ -656,6 +687,32 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			}
 			slot := cont.SpillSlots[step.Result]
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_f64_recv_task(ptr %s, ptr %%spill%d.ptr)\n", i, channel, slot.Index)
+		case taskSuspendSendRef:
+			channel, repr, err := continuationOperand(b, fn, descriptor, step.Channel, fmt.Sprintf("cr%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprChannelRef {
+				return fmt.Errorf("task continuation reference channel must be ChannelRef")
+			}
+			value, valueRepr, err := continuationOperand(b, fn, descriptor, step.Value, fmt.Sprintf("rv%d", i))
+			if err != nil {
+				return err
+			}
+			if !isChannelReferenceRepr(valueRepr) {
+				return fmt.Errorf("task continuation reference send has unsupported repr %d", valueRepr)
+			}
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_ref_send_task(ptr %s, ptr %s)\n", i, channel, value)
+		case taskSuspendRecvRef:
+			channel, repr, err := continuationOperand(b, fn, descriptor, step.Channel, fmt.Sprintf("cr%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprChannelRef {
+				return fmt.Errorf("task continuation reference channel must be ChannelRef")
+			}
+			slot := cont.SpillSlots[step.Result]
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_ref_recv_task(ptr %s, ptr %%spill%d.ptr)\n", i, channel, slot.Index)
 		case taskStepTaskRelease:
 			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("release%d", i))
 			if err != nil {

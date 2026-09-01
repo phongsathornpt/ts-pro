@@ -7,6 +7,25 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/hir"
 )
 
+func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (frontend.TypeID, hir.ChannelElementKind, error) {
+	if int(channelType) >= len(f.module.source.Types) {
+		return 0, hir.ChannelElementInvalid, fmt.Errorf("channel type t%d is invalid", channelType)
+	}
+	typ := f.module.source.Types[channelType]
+	if typ.Kind != frontend.TypeChannel || int(typ.Element) >= len(f.module.source.Types) {
+		return 0, hir.ChannelElementInvalid, fmt.Errorf("semantic type %q is not a concrete channel", typ.Name)
+	}
+	kind := f.module.source.Types[typ.Element].Kind
+	switch kind {
+	case frontend.TypeNumber:
+		return typ.Element, hir.ChannelElementF64, nil
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
+		return typ.Element, hir.ChannelElementRef, nil
+	default:
+		return typ.Element, hir.ChannelElementInvalid, fmt.Errorf("channel element type %q has no native channel representation", f.module.source.Types[typ.Element].Name)
+	}
+}
+
 func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 	if expr == nil {
 		return 0, fmt.Errorf("nil semantic expression")
@@ -138,47 +157,67 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 	case frontend.ExprTaskYield:
 		return f.emit(expr.Type, hir.TaskYieldOp{}), nil
 	case frontend.ExprChannelNew:
+		_, elementKind, err := f.channelElementKind(expr.Type)
+		if err != nil {
+			return 0, err
+		}
 		capacity, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ChannelNewOp{Capacity: capacity}), nil
+		return f.emit(expr.Type, hir.ChannelNewOp{Capacity: capacity, Element: elementKind}), nil
 	case frontend.ExprChannelTrySend:
+		elementType, elementKind, err := f.channelElementKind(expr.Args[0].Type)
+		if err != nil {
+			return 0, err
+		}
 		channel, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
 		}
-		value, err := f.lowerExpr(expr.Args[1])
+		value, err := f.lowerExprAs(expr.Args[1], elementType)
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ChannelTrySendOp{Channel: channel, Value: value}), nil
+		return f.emit(expr.Type, hir.ChannelTrySendOp{Channel: channel, Value: value, Element: elementKind}), nil
 	case frontend.ExprChannelTryRecvOr:
+		elementType, elementKind, err := f.channelElementKind(expr.Args[0].Type)
+		if err != nil {
+			return 0, err
+		}
 		channel, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
 		}
-		fallback, err := f.lowerExpr(expr.Args[1])
+		fallback, err := f.lowerExprAs(expr.Args[1], elementType)
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ChannelTryRecvOrOp{Channel: channel, Fallback: fallback}), nil
+		return f.emit(expr.Type, hir.ChannelTryRecvOrOp{Channel: channel, Fallback: fallback, Element: elementKind}), nil
 	case frontend.ExprChannelSend:
+		elementType, elementKind, err := f.channelElementKind(expr.Args[0].Type)
+		if err != nil {
+			return 0, err
+		}
 		channel, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
 		}
-		value, err := f.lowerExpr(expr.Args[1])
+		value, err := f.lowerExprAs(expr.Args[1], elementType)
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ChannelSendOp{Channel: channel, Value: value}), nil
+		return f.emit(expr.Type, hir.ChannelSendOp{Channel: channel, Value: value, Element: elementKind}), nil
 	case frontend.ExprChannelRecv:
+		_, elementKind, err := f.channelElementKind(expr.Args[0].Type)
+		if err != nil {
+			return 0, err
+		}
 		channel, err := f.lowerExpr(expr.Args[0])
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ChannelRecvOp{Channel: channel}), nil
+		return f.emit(expr.Type, hir.ChannelRecvOp{Channel: channel, Element: elementKind}), nil
 	case frontend.ExprSleep:
 		duration, err := f.lowerExpr(expr.Args[0])
 		if err != nil {

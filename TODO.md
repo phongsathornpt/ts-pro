@@ -81,7 +81,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Extend rooted reference results to object/array/function values and GC-managed `JSValue` results using TypeScript checker `getTypeArguments` instead of generic type-string parsing.
   - [x] Add unboxed `Task<boolean>` result slots and native bool join ABI; boolean literals now lower natively as `i1`.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
-- [~] Add typed channels with task parking, starting with unboxed `channel<number>`.
+- [~] Add typed channels with task parking and native representation specialization.
   - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer, unbuffered rendezvous, and nonblocking `try_send`/`try_recv` transitions plus pthread regression coverage.
   - [x] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
     - [x] Runtime `WAITING -> RUNNABLE` park/wake lifecycle with race-safe pending wake and worker=1 resume regression.
@@ -91,8 +91,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
         - [x] Linear single-block continuations with multiple channel/sleep suspension points and F64 receive-value spills across later suspensions.
         - [x] Spill arbitrary native representations and support branch/loop continuation CFGs.
-  - [~] Add compiler-known `channel<number>` operations and scheduler/channel metrics.
-    - [x] Compiler-known `channel<number>`, `channelTrySend`, and `channelTryRecvOr` through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
+  - [x] Add compiler-known typed channel operations and scheduler/channel metrics for currently supported native element representations.
+    - [x] Compiler-known `channel<number>` operations through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
+    - [x] Add StringRef/ObjectRef/ArrayRef/FunctionRef/JSValue-backed channel specialization using GC-rooted Go runtime queues, including buffered try operations and stackless blocking worker=1 send/recv regressions.
     - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.
     - [x] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for task suspension, timers, channels, and async/await.
       - [x] Automatically select the stackless wrapper for proven single-block one-suspend channel tasks while retaining the cooperative fallback for unsupported shapes.

@@ -52,9 +52,8 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeChannel {
 			return nil, fmt.Errorf("channel at %d requires one capacity and a concrete native channel type", node.Pos())
 		}
-		channelType := e.result.Types[expr.Type]
-		if int(channelType.Element) >= len(e.result.Types) || e.result.Types[channelType.Element].Kind != TypeNumber {
-			return nil, fmt.Errorf("channel at %d currently supports only channel<number>", node.Pos())
+		if _, _, ok := e.channelElement(expr.Type); !ok {
+			return nil, fmt.Errorf("channel at %d uses an unsupported element type", node.Pos())
 		}
 		if int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeNumber {
 			return nil, fmt.Errorf("channel capacity at %d must be number", node.Pos())
@@ -63,29 +62,45 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Callee = nil
 		return expr, nil
 	case "channelTrySend":
-		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeBoolean {
-			return nil, fmt.Errorf("channelTrySend at %d requires (channel<number>, number) and returns boolean", node.Pos())
+		if len(expr.Args) != 2 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeBoolean {
+			return nil, fmt.Errorf("channelTrySend at %d requires (channel<T>, T) and returns boolean", node.Pos())
+		}
+		element, _, ok := e.channelElement(expr.Args[0].Type)
+		if !ok || !e.channelValueCompatible(element, expr.Args[1].Type) {
+			return nil, fmt.Errorf("channelTrySend at %d has an unsupported or incompatible channel element", node.Pos())
 		}
 		expr.Kind = ExprChannelTrySend
 		expr.Callee = nil
 		return expr, nil
 	case "channelTryRecvOr":
-		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeNumber {
-			return nil, fmt.Errorf("channelTryRecvOr at %d requires (channel<number>, number) and returns number", node.Pos())
+		if len(expr.Args) != 2 {
+			return nil, fmt.Errorf("channelTryRecvOr at %d requires (channel<T>, T)", node.Pos())
+		}
+		element, _, ok := e.channelElement(expr.Args[0].Type)
+		if !ok || !e.channelValueCompatible(element, expr.Args[1].Type) || !e.channelValueCompatible(element, expr.Type) {
+			return nil, fmt.Errorf("channelTryRecvOr at %d has an unsupported or incompatible channel element", node.Pos())
 		}
 		expr.Kind = ExprChannelTryRecvOr
 		expr.Callee = nil
 		return expr, nil
 	case "channelSend":
-		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeVoid {
-			return nil, fmt.Errorf("channelSend at %d requires (channel<number>, number) and returns void", node.Pos())
+		if len(expr.Args) != 2 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("channelSend at %d requires (channel<T>, T) and returns void", node.Pos())
+		}
+		element, _, ok := e.channelElement(expr.Args[0].Type)
+		if !ok || !e.channelValueCompatible(element, expr.Args[1].Type) {
+			return nil, fmt.Errorf("channelSend at %d has an unsupported or incompatible channel element", node.Pos())
 		}
 		expr.Kind = ExprChannelSend
 		expr.Callee = nil
 		return expr, nil
 	case "channelRecv":
-		if len(expr.Args) != 1 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Type].Kind != TypeNumber {
-			return nil, fmt.Errorf("channelRecv at %d requires channel<number> and returns number", node.Pos())
+		if len(expr.Args) != 1 {
+			return nil, fmt.Errorf("channelRecv at %d requires channel<T>", node.Pos())
+		}
+		element, _, ok := e.channelElement(expr.Args[0].Type)
+		if !ok || !e.channelValueCompatible(element, expr.Type) {
+			return nil, fmt.Errorf("channelRecv at %d has an unsupported or incompatible channel result", node.Pos())
 		}
 		expr.Kind = ExprChannelRecv
 		expr.Callee = nil
@@ -128,12 +143,35 @@ func (e *extractor) compatibleTaskResult(left, right TypeID) bool {
 	}
 }
 
-func (e *extractor) isNumberChannel(typeID TypeID) bool {
+func (e *extractor) channelElement(typeID TypeID) (TypeID, TypeKind, bool) {
 	if int(typeID) >= len(e.result.Types) {
-		return false
+		return 0, TypeInvalid, false
 	}
 	typ := e.result.Types[typeID]
-	return typ.Kind == TypeChannel && int(typ.Element) < len(e.result.Types) && e.result.Types[typ.Element].Kind == TypeNumber
+	if typ.Kind != TypeChannel || int(typ.Element) >= len(e.result.Types) {
+		return 0, TypeInvalid, false
+	}
+	kind := e.result.Types[typ.Element].Kind
+	switch kind {
+	case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
+		return typ.Element, kind, true
+	default:
+		return typ.Element, kind, false
+	}
+}
+
+func (e *extractor) channelValueCompatible(element, value TypeID) bool {
+	if element == value {
+		return true
+	}
+	if int(element) >= len(e.result.Types) || int(value) >= len(e.result.Types) {
+		return false
+	}
+	elementKind, valueKind := e.result.Types[element].Kind, e.result.Types[value].Kind
+	if elementKind == TypeAny || elementKind == TypeUnion {
+		return true
+	}
+	return elementKind == valueKind
 }
 
 func isConcurrencyIntrinsic(name string) bool {

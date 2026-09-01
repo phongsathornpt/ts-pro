@@ -449,3 +449,500 @@ func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
 	waitNativeChannelCooperatively(waiter)
 	return C.double(waiter.value)
 }
+
+type nativeRefRoot struct {
+	slot  unsafe.Pointer
+	token unsafe.Pointer
+}
+
+func newNativeRefRoot(value unsafe.Pointer) *nativeRefRoot {
+	slot := C.malloc(C.size_t(unsafe.Sizeof(uintptr(0))))
+	if slot == nil {
+		nativeAbort("reference channel root slot allocation failed")
+	}
+	*(*unsafe.Pointer)(slot) = value
+	token := tsnative_gc_root_register(slot)
+	if token == nil {
+		C.free(slot)
+		nativeAbort("reference channel root registration failed")
+	}
+	return &nativeRefRoot{slot: slot, token: token}
+}
+
+func (root *nativeRefRoot) get() unsafe.Pointer {
+	if root == nil || root.slot == nil {
+		return nil
+	}
+	return *(*unsafe.Pointer)(root.slot)
+}
+
+func (root *nativeRefRoot) release() {
+	if root == nil {
+		return
+	}
+	if root.token != nil {
+		tsnative_gc_root_unregister(root.token)
+		root.token = nil
+	}
+	if root.slot != nil {
+		C.free(root.slot)
+		root.slot = nil
+	}
+}
+
+type nativeRefChannelWaiter struct {
+	task        uintptr
+	value       *nativeRefRoot
+	out         uintptr
+	cooperative bool
+	done        chan struct{}
+	once        sync.Once
+}
+
+type nativeRefChannel struct {
+	mu        sync.Mutex
+	cond      *sync.Cond
+	capacity  int
+	buffer    []*nativeRefRoot
+	head      int
+	tail      int
+	count     int
+	slot      *nativeRefRoot
+	sendQueue []*nativeRefChannelWaiter
+	recvQueue []*nativeRefChannelWaiter
+}
+
+var nativeRefChannels = struct {
+	sync.Mutex
+	byHandle map[uintptr]*nativeRefChannel
+}{byHandle: map[uintptr]*nativeRefChannel{}}
+
+func lookupNativeRefChannel(raw unsafe.Pointer) *nativeRefChannel {
+	if raw == nil {
+		return nil
+	}
+	nativeRefChannels.Lock()
+	channel := nativeRefChannels.byHandle[uintptr(raw)]
+	nativeRefChannels.Unlock()
+	return channel
+}
+
+func releaseNativeRefChannel(channel *nativeRefChannel) {
+	if channel == nil {
+		return
+	}
+	channel.mu.Lock()
+	if channel.slot != nil {
+		channel.slot.release()
+		channel.slot = nil
+	}
+	for i := range channel.buffer {
+		if channel.buffer[i] != nil {
+			channel.buffer[i].release()
+			channel.buffer[i] = nil
+		}
+	}
+	for _, waiter := range channel.sendQueue {
+		if waiter != nil && waiter.value != nil {
+			waiter.value.release()
+			waiter.value = nil
+		}
+	}
+	channel.sendQueue = nil
+	channel.recvQueue = nil
+	channel.mu.Unlock()
+}
+
+func newNativeRefChannel(capacity int) unsafe.Pointer {
+	if capacity < 0 {
+		C.abort()
+	}
+	raw := tsnative_heap_alloc(1)
+	channel := &nativeRefChannel{capacity: capacity}
+	if capacity > 0 {
+		channel.buffer = make([]*nativeRefRoot, capacity)
+	}
+	channel.cond = sync.NewCond(&channel.mu)
+	nativeRefChannels.Lock()
+	nativeRefChannels.byHandle[uintptr(raw)] = channel
+	nativeRefChannels.Unlock()
+	registerNativeHeapFinalizer(raw, func() {
+		nativeRefChannels.Lock()
+		state := nativeRefChannels.byHandle[uintptr(raw)]
+		delete(nativeRefChannels.byHandle, uintptr(raw))
+		nativeRefChannels.Unlock()
+		releaseNativeRefChannel(state)
+	})
+	return raw
+}
+
+func popRefChannelWaiter(queue *[]*nativeRefChannelWaiter) *nativeRefChannelWaiter {
+	if len(*queue) == 0 {
+		return nil
+	}
+	waiter := (*queue)[0]
+	copy((*queue)[0:], (*queue)[1:])
+	*queue = (*queue)[:len(*queue)-1]
+	return waiter
+}
+
+func finishNativeRefWaiter(waiter *nativeRefChannelWaiter) {
+	if waiter == nil {
+		return
+	}
+	waiter.once.Do(func() {
+		if waiter.cooperative {
+			close(waiter.done)
+			return
+		}
+		hooks := channelSchedulerHooks()
+		_ = C.tsnative_channel_call_wake(C.uintptr_t(hooks.wake), unsafe.Pointer(waiter.task))
+	})
+}
+
+func deliverNativeRefRoot(waiter *nativeRefChannelWaiter, root *nativeRefRoot) {
+	if waiter == nil || root == nil {
+		return
+	}
+	if waiter.cooperative {
+		waiter.value = root
+		return
+	}
+	*(*unsafe.Pointer)(unsafe.Pointer(waiter.out)) = root.get()
+	root.release()
+}
+
+func enqueueNativeRefRoot(channel *nativeRefChannel, root *nativeRefRoot) {
+	channel.buffer[channel.tail] = root
+	channel.tail = (channel.tail + 1) % channel.capacity
+	channel.count++
+}
+
+func dequeueNativeRefRoot(channel *nativeRefChannel) *nativeRefRoot {
+	root := channel.buffer[channel.head]
+	channel.buffer[channel.head] = nil
+	channel.head = (channel.head + 1) % channel.capacity
+	channel.count--
+	return root
+}
+
+//export tsnative_channel_ref_new_checked
+func tsnative_channel_ref_new_checked(capacity C.double) unsafe.Pointer {
+	value := float64(capacity)
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
+		C.abort()
+	}
+	return newNativeRefChannel(int(value))
+}
+
+//export tsnative_channel_ref_try_send
+func tsnative_channel_ref_try_send(raw, value unsafe.Pointer) C.int {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		return -1
+	}
+	root := newNativeRefRoot(value)
+	channel.mu.Lock()
+	if receiver := popRefChannelWaiter(&channel.recvQueue); receiver != nil {
+		deliverNativeRefRoot(receiver, root)
+		channel.mu.Unlock()
+		finishNativeRefWaiter(receiver)
+		return 1
+	}
+	if channel.capacity == 0 {
+		if channel.slot != nil {
+			channel.mu.Unlock()
+			root.release()
+			return 0
+		}
+		channel.slot = root
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		return 1
+	}
+	if channel.count == channel.capacity {
+		channel.mu.Unlock()
+		root.release()
+		return 0
+	}
+	enqueueNativeRefRoot(channel, root)
+	channel.cond.Broadcast()
+	channel.mu.Unlock()
+	return 1
+}
+
+func nativeRefTryRecv(raw unsafe.Pointer) (unsafe.Pointer, bool) {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		return nil, false
+	}
+	channel.mu.Lock()
+	var root *nativeRefRoot
+	if channel.capacity == 0 {
+		root = channel.slot
+		channel.slot = nil
+	} else if channel.count != 0 {
+		root = dequeueNativeRefRoot(channel)
+	}
+	if root == nil {
+		channel.mu.Unlock()
+		return nil, false
+	}
+	channel.cond.Broadcast()
+	channel.mu.Unlock()
+	value := root.get()
+	root.release()
+	return value, true
+}
+
+//export tsnative_channel_ref_try_recv_or
+func tsnative_channel_ref_try_recv_or(raw, fallback unsafe.Pointer) unsafe.Pointer {
+	if value, ok := nativeRefTryRecv(raw); ok {
+		return value
+	}
+	return fallback
+}
+
+func nativeRefSend(raw, value unsafe.Pointer) {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		C.abort()
+	}
+	root := newNativeRefRoot(value)
+	channel.mu.Lock()
+	defer channel.mu.Unlock()
+	if channel.capacity == 0 {
+		for channel.slot != nil {
+			channel.cond.Wait()
+		}
+		channel.slot = root
+		channel.cond.Broadcast()
+		for channel.slot != nil {
+			channel.cond.Wait()
+		}
+		return
+	}
+	for channel.count == channel.capacity {
+		channel.cond.Wait()
+	}
+	enqueueNativeRefRoot(channel, root)
+	channel.cond.Broadcast()
+}
+
+func nativeRefRecv(raw unsafe.Pointer) unsafe.Pointer {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		C.abort()
+	}
+	channel.mu.Lock()
+	defer channel.mu.Unlock()
+	if channel.capacity == 0 {
+		for channel.slot == nil {
+			channel.cond.Wait()
+		}
+		root := channel.slot
+		channel.slot = nil
+		channel.cond.Broadcast()
+		value := root.get()
+		root.release()
+		return value
+	}
+	for channel.count == 0 {
+		channel.cond.Wait()
+	}
+	root := dequeueNativeRefRoot(channel)
+	channel.cond.Broadcast()
+	value := root.get()
+	root.release()
+	return value
+}
+
+//export tsnative_channel_ref_send_task
+func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) C.int {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		return -1
+	}
+	hooks := channelSchedulerHooks()
+	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
+	if task == nil {
+		return -1
+	}
+	root := newNativeRefRoot(value)
+	channel.mu.Lock()
+	if receiver := popRefChannelWaiter(&channel.recvQueue); receiver != nil {
+		deliverNativeRefRoot(receiver, root)
+		channel.mu.Unlock()
+		finishNativeRefWaiter(receiver)
+		return 1
+	}
+	if channel.capacity != 0 && channel.count < channel.capacity {
+		enqueueNativeRefRoot(channel, root)
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		return 1
+	}
+	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+		channel.mu.Unlock()
+		root.release()
+		return -1
+	}
+	channel.sendQueue = append(channel.sendQueue, &nativeRefChannelWaiter{task: uintptr(task), value: root})
+	channel.mu.Unlock()
+	return 0
+}
+
+//export tsnative_channel_ref_recv_task
+func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil || out == nil {
+		return -1
+	}
+	hooks := channelSchedulerHooks()
+	task := C.tsnative_channel_call_current(C.uintptr_t(hooks.current))
+	if task == nil {
+		return -1
+	}
+	channel.mu.Lock()
+	if channel.capacity != 0 && channel.count != 0 {
+		root := dequeueNativeRefRoot(channel)
+		*(*unsafe.Pointer)(out) = root.get()
+		root.release()
+		sender := popRefChannelWaiter(&channel.sendQueue)
+		if sender != nil {
+			enqueueNativeRefRoot(channel, sender.value)
+			sender.value = nil
+		}
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		finishNativeRefWaiter(sender)
+		return 1
+	}
+	if sender := popRefChannelWaiter(&channel.sendQueue); sender != nil {
+		*(*unsafe.Pointer)(out) = sender.value.get()
+		sender.value.release()
+		sender.value = nil
+		channel.mu.Unlock()
+		finishNativeRefWaiter(sender)
+		return 1
+	}
+	if channel.capacity == 0 && channel.slot != nil {
+		root := channel.slot
+		channel.slot = nil
+		*(*unsafe.Pointer)(out) = root.get()
+		root.release()
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		return 1
+	}
+	if C.tsnative_channel_call_int0(C.uintptr_t(hooks.prepare)) != 0 {
+		channel.mu.Unlock()
+		return -1
+	}
+	channel.recvQueue = append(channel.recvQueue, &nativeRefChannelWaiter{task: uintptr(task), out: uintptr(out)})
+	channel.mu.Unlock()
+	return 0
+}
+
+func waitNativeRefChannelCooperatively(waiter *nativeRefChannelWaiter) {
+	hooks := channelSchedulerHooks()
+	for {
+		select {
+		case <-waiter.done:
+			return
+		default:
+		}
+		if hooks.help != 0 && C.tsnative_channel_call_int0(C.uintptr_t(hooks.help)) != 0 {
+			runtime.Gosched()
+			continue
+		}
+		select {
+		case <-waiter.done:
+			return
+		case <-time.After(100 * time.Microsecond):
+		}
+	}
+}
+
+//export tsnative_channel_ref_send_cooperative
+func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		C.abort()
+	}
+	hooks := channelSchedulerHooks()
+	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+		nativeRefSend(raw, value)
+		return
+	}
+	root := newNativeRefRoot(value)
+	channel.mu.Lock()
+	if receiver := popRefChannelWaiter(&channel.recvQueue); receiver != nil {
+		deliverNativeRefRoot(receiver, root)
+		channel.mu.Unlock()
+		finishNativeRefWaiter(receiver)
+		return
+	}
+	if channel.capacity != 0 && channel.count < channel.capacity {
+		enqueueNativeRefRoot(channel, root)
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		return
+	}
+	waiter := &nativeRefChannelWaiter{task: uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))), value: root, cooperative: true, done: make(chan struct{})}
+	channel.sendQueue = append(channel.sendQueue, waiter)
+	channel.mu.Unlock()
+	waitNativeRefChannelCooperatively(waiter)
+}
+
+//export tsnative_channel_ref_recv_cooperative
+func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
+	channel := lookupNativeRefChannel(raw)
+	if channel == nil {
+		C.abort()
+	}
+	hooks := channelSchedulerHooks()
+	if C.tsnative_channel_call_current(C.uintptr_t(hooks.current)) == nil {
+		return nativeRefRecv(raw)
+	}
+	channel.mu.Lock()
+	if channel.capacity != 0 && channel.count != 0 {
+		root := dequeueNativeRefRoot(channel)
+		sender := popRefChannelWaiter(&channel.sendQueue)
+		if sender != nil {
+			enqueueNativeRefRoot(channel, sender.value)
+			sender.value = nil
+		}
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		finishNativeRefWaiter(sender)
+		value := root.get()
+		root.release()
+		return value
+	}
+	if sender := popRefChannelWaiter(&channel.sendQueue); sender != nil {
+		value := sender.value.get()
+		sender.value.release()
+		sender.value = nil
+		channel.mu.Unlock()
+		finishNativeRefWaiter(sender)
+		return value
+	}
+	if channel.capacity == 0 && channel.slot != nil {
+		root := channel.slot
+		channel.slot = nil
+		channel.cond.Broadcast()
+		channel.mu.Unlock()
+		value := root.get()
+		root.release()
+		return value
+	}
+	waiter := &nativeRefChannelWaiter{task: uintptr(C.tsnative_channel_call_current(C.uintptr_t(hooks.current))), cooperative: true, done: make(chan struct{})}
+	channel.recvQueue = append(channel.recvQueue, waiter)
+	channel.mu.Unlock()
+	waitNativeRefChannelCooperatively(waiter)
+	value := waiter.value.get()
+	waiter.value.release()
+	waiter.value = nil
+	return value
+}
