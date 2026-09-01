@@ -141,6 +141,17 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [x] Add shared heap ownership for strings, arrays, objects, and closure environments/values, with deterministic shutdown from native `main`.
 - [x] Add initial mark/sweep GC with explicit native shadow roots, compiler safepoints, conservative heap tracing, and sweep reclamation.
+- [~] Migrate the handwritten native C runtime to Go while preserving the existing LLVM C ABI and native layouts.
+  - [x] Add cached Go `c-archive` build/link support and migrate the numeric console ABI; remove `runtime/core/console.c`.
+  - [x] Migrate the native heap allocator and mark/sweep GC ABI to Go; remove `runtime/core/heap.c`.
+  - [~] Migrate strings, arrays, objects, and JSValue.
+    - [x] Migrate native string allocation/concat/logging to Go; remove `runtime/core/string.c`.
+    - [ ] Migrate specialized F64 arrays.
+    - [ ] Migrate object allocation/runtime helpers.
+    - [ ] Migrate JSValue boxing/dynamic helpers.
+  - [ ] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
+  - [ ] Migrate channels, timers, and the blocking-call pool.
+  - [ ] Remove legacy C headers/tests and the native C compilation path once no handwritten runtime `.c` sources remain.
 - [ ] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and eventually generational collection.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -165,7 +176,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 1. Remove remaining cooperative/manual task patterns now that typed spills, Branch/Jump/Return CFGs, Phi-backed loops, and generic supported-MIR continuation steps are implemented.
 2. Add reference/JSValue typed channel specializations and broader channel/select semantics.
 3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
-4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
-5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
-6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-7. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+4. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.
+5. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+6. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
+7. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+8. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
