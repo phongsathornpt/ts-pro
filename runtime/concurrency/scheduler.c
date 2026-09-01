@@ -2,6 +2,7 @@
 #include "scheduler_internal.h"
 #include "task_internal.h"
 #include "timer.h"
+#include "blocking_pool.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -264,6 +265,14 @@ int tsnative_scheduler_init(void) {
   reset_metrics();
   if (tsnative_timer_bind_scheduler) {
     tsnative_timer_bind_scheduler(
+        (uintptr_t)&tsnative_scheduler_current_task,
+        (uintptr_t)&tsnative_scheduler_prepare_park,
+        (uintptr_t)&tsnative_scheduler_cancel_park,
+        (uintptr_t)&tsnative_scheduler_wake,
+        (uintptr_t)&tsnative_scheduler_help_once);
+  }
+  if (tsnative_blocking_bind_scheduler) {
+    tsnative_blocking_bind_scheduler(
         (uintptr_t)&tsnative_scheduler_current_task,
         (uintptr_t)&tsnative_scheduler_prepare_park,
         (uintptr_t)&tsnative_scheduler_cancel_park,
