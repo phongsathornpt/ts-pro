@@ -282,6 +282,11 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if inst.Repr != ReprTaskRef {
 					return fmt.Errorf("task spawn v%d must produce TaskRef", inst.Result)
 				}
+				for _, capture := range op.Captures {
+					if err := checkValue(capture); err != nil {
+						return err
+					}
+				}
 			case TaskJoin:
 				if inst.Repr != ReprVoid {
 					return fmt.Errorf("task join v%d must be void", inst.Result)

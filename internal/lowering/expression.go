@@ -103,7 +103,15 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("task spawn has no native target")
 		}
-		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget))}), nil
+		captures := make([]hir.ValueID, 0, len(expr.Captures))
+		for _, capture := range expr.Captures {
+			value, err := f.lowerExpr(capture)
+			if err != nil {
+				return 0, err
+			}
+			captures = append(captures, value)
+		}
+		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Captures: captures}), nil
 	case frontend.ExprTaskJoin:
 		if len(expr.Args) != 1 {
 			return 0, fmt.Errorf("task join requires one handle")

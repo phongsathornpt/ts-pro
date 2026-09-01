@@ -137,7 +137,10 @@ type ClosureCallOp struct {
 	Closure ValueID
 	Args    []ValueID
 }
-type TaskSpawnOp struct{ Callee FunctionID }
+type TaskSpawnOp struct {
+	Callee   FunctionID
+	Captures []ValueID
+}
 type TaskJoinOp struct{ Task ValueID }
 type TaskYieldOp struct{}
 

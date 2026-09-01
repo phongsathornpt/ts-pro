@@ -109,7 +109,11 @@ func formatOperation(op Operation) string {
 		}
 		return fmt.Sprintf("closure.new f%d(%s)", op.Callee, strings.Join(captures, ", "))
 	case TaskSpawnOp:
-		return fmt.Sprintf("task.spawn f%d", op.Callee)
+		captures := make([]string, len(op.Captures))
+		for i, capture := range op.Captures {
+			captures[i] = fmt.Sprintf("v%d", capture)
+		}
+		return fmt.Sprintf("task.spawn f%d(%s)", op.Callee, strings.Join(captures, ", "))
 	case TaskJoinOp:
 		return fmt.Sprintf("task.join v%d", op.Task)
 	case TaskYieldOp:

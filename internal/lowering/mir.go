@@ -177,7 +177,11 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		}
 		result.Op = mir.ClosureCall{Closure: mir.ValueID(op.Closure), Args: args}
 	case hir.TaskSpawnOp:
-		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee)}
+		captures := make([]mir.ValueID, len(op.Captures))
+		for i, capture := range op.Captures {
+			captures[i] = mir.ValueID(capture)
+		}
+		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee), Captures: captures}
 	case hir.TaskJoinOp:
 		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task)}
 	case hir.TaskYieldOp:

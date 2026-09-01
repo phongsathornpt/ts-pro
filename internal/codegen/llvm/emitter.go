@@ -60,6 +60,9 @@ func Emit(module mir.Module) (string, error) {
 	if err := e.emitClosureTypes(&b); err != nil {
 		return "", err
 	}
+	if err := e.emitTaskTypes(&b); err != nil {
+		return "", err
+	}
 	shapes := append([]mir.Shape(nil), module.Shapes...)
 	sort.Slice(shapes, func(i, j int) bool { return shapes[i].ID < shapes[j].ID })
 	for _, shape := range shapes {
@@ -330,10 +333,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		values[inst.Result] = value
 		return nil
 	case mir.TaskSpawn:
-		name := valueName(inst.Result)
-		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_spawn_or_abort(ptr @%s, ptr null)\n", name, taskWrapperName(op.Callee))
-		values[inst.Result] = name
-		return nil
+		return e.emitTaskSpawn(b, inst, op, values)
 	case mir.TaskJoin:
 		task, err := operand(values, op.Task)
 		if err != nil {

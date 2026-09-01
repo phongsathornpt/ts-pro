@@ -264,6 +264,9 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("task spawn references unknown function f%d", op.Callee))
 				}
+				for _, capture := range op.Captures {
+					checkValue(capture)
+				}
 			case TaskJoinOp:
 				checkValue(op.Task)
 			case TaskYieldOp:

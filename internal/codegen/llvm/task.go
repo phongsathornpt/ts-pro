@@ -8,40 +8,133 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
-func (e *emitter) taskTargets() []mir.FunctionID {
-	set := map[mir.FunctionID]struct{}{}
+type taskDescriptor struct {
+	Callee       mir.FunctionID
+	CaptureCount int
+}
+
+func (e *emitter) taskDescriptors() ([]taskDescriptor, error) {
+	byCallee := map[mir.FunctionID]taskDescriptor{}
 	for _, fn := range e.module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				if spawn, ok := inst.Op.(mir.TaskSpawn); ok {
-					set[spawn.Callee] = struct{}{}
+				spawn, ok := inst.Op.(mir.TaskSpawn)
+				if !ok {
+					continue
 				}
+				target, ok := e.functions[spawn.Callee]
+				if !ok {
+					return nil, fmt.Errorf("task target f%d is missing", spawn.Callee)
+				}
+				if len(spawn.Captures) > len(target.Params) {
+					return nil, fmt.Errorf("task f%d captures %d values but target has %d params", spawn.Callee, len(spawn.Captures), len(target.Params))
+				}
+				descriptor := taskDescriptor{Callee: spawn.Callee, CaptureCount: len(spawn.Captures)}
+				if existing, ok := byCallee[spawn.Callee]; ok && existing.CaptureCount != descriptor.CaptureCount {
+					return nil, fmt.Errorf("task f%d has inconsistent capture counts", spawn.Callee)
+				}
+				byCallee[spawn.Callee] = descriptor
 			}
 		}
 	}
-	result := make([]mir.FunctionID, 0, len(set))
-	for id := range set {
-		result = append(result, id)
+	result := make([]taskDescriptor, 0, len(byCallee))
+	for _, descriptor := range byCallee {
+		result = append(result, descriptor)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
-	return result
+	sort.Slice(result, func(i, j int) bool { return result[i].Callee < result[j].Callee })
+	return result, nil
 }
-func taskWrapperName(id mir.FunctionID) string {
-	return fmt.Sprintf("tsnative_task_entry_f%d", id)
+
+func taskWrapperName(id mir.FunctionID) string { return fmt.Sprintf("tsnative_task_entry_f%d", id) }
+func taskEnvTypeName(id mir.FunctionID) string { return fmt.Sprintf("%%tsnative_task_env_f%d", id) }
+
+func (e *emitter) emitTaskTypes(b *strings.Builder) error {
+	descriptors, err := e.taskDescriptors()
+	if err != nil {
+		return err
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.CaptureCount == 0 {
+			continue
+		}
+		fn := e.functions[descriptor.Callee]
+		fmt.Fprintf(b, "%s = type { ", taskEnvTypeName(descriptor.Callee))
+		for i := 0; i < descriptor.CaptureCount; i++ {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			typ, err := llvmType(fn.Params[i].Repr)
+			if err != nil {
+				return err
+			}
+			b.WriteString(typ)
+		}
+		b.WriteString(" }\n")
+	}
+	if len(descriptors) != 0 {
+		b.WriteString("\n")
+	}
+	return nil
 }
 
 func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
-	for _, id := range e.taskTargets() {
-		fn, ok := e.functions[id]
-		if !ok {
-			return fmt.Errorf("task wrapper references unknown function f%d", id)
-		}
-		if fn.ReturnRepr != mir.ReprVoid || len(fn.Params) != 0 {
-			return fmt.Errorf("task target f%d must have native signature () -> void", id)
-		}
-		fmt.Fprintf(b, "define void @%s(ptr %%state) {\nentry:\n", taskWrapperName(id))
-		fmt.Fprintf(b, "  call void @%s()\n", functionName(id))
-		b.WriteString("  ret void\n}\n")
+	descriptors, err := e.taskDescriptors()
+	if err != nil {
+		return err
 	}
+	for _, descriptor := range descriptors {
+		fn := e.functions[descriptor.Callee]
+		if fn.ReturnRepr != mir.ReprVoid || len(fn.Params) != descriptor.CaptureCount {
+			return fmt.Errorf("task target f%d must be a zero-argument source closure returning void", descriptor.Callee)
+		}
+		fmt.Fprintf(b, "define void @%s(ptr %%state) {\nentry:\n", taskWrapperName(descriptor.Callee))
+		for i := 0; i < descriptor.CaptureCount; i++ {
+			typ, err := llvmType(fn.Params[i].Repr)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  %%capture%d.ptr = getelementptr %s, ptr %%state, i32 0, i32 %d\n", i, taskEnvTypeName(descriptor.Callee), i)
+			fmt.Fprintf(b, "  %%capture%d = load %s, ptr %%capture%d.ptr\n", i, typ, i)
+		}
+		fmt.Fprintf(b, "  call void @%s(", functionName(descriptor.Callee))
+		for i := 0; i < descriptor.CaptureCount; i++ {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			typ, _ := llvmType(fn.Params[i].Repr)
+			fmt.Fprintf(b, "%s %%capture%d", typ, i)
+		}
+		b.WriteString(")\n  ret void\n}\n\n")
+	}
+	return nil
+}
+
+func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir.TaskSpawn, values map[mir.ValueID]string) error {
+	fn, ok := e.functions[op.Callee]
+	if !ok || len(op.Captures) > len(fn.Params) {
+		return fmt.Errorf("invalid task spawn target f%d", op.Callee)
+	}
+	name := valueName(inst.Result)
+	state := "null"
+	if len(op.Captures) != 0 {
+		state = name + ".state"
+		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", state, taskEnvTypeName(op.Callee))
+		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", state, state)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", state, state)
+		for i, capture := range op.Captures {
+			value, err := operand(values, capture)
+			if err != nil {
+				return err
+			}
+			typ, err := llvmType(fn.Params[i].Repr)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  %s.c%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, i, taskEnvTypeName(op.Callee), state, i)
+			fmt.Fprintf(b, "  store %s %s, ptr %s.c%d\n", typ, value, state, i)
+		}
+	}
+	fmt.Fprintf(b, "  %s = call ptr @tsnative_task_spawn_or_abort(ptr @%s, ptr %s)\n", name, taskWrapperName(op.Callee), state)
+	values[inst.Result] = name
 	return nil
 }

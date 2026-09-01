@@ -205,7 +205,10 @@ type ClosureCall struct {
 	Closure ValueID
 	Args    []ValueID
 }
-type TaskSpawn struct{ Callee FunctionID }
+type TaskSpawn struct {
+	Callee   FunctionID
+	Captures []ValueID
+}
 type TaskJoin struct{ Task ValueID }
 type TaskYield struct{}
 

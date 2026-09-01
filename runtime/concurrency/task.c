@@ -2,6 +2,7 @@
 #include "scheduler.h"
 #include "scheduler_internal.h"
 #include "task_internal.h"
+#include "../core/heap.h"
 
 #include <sched.h>
 #include <stdlib.h>
@@ -13,8 +14,16 @@ tsnative_task *tsnative_task_spawn(tsnative_task_entry entry, void *state) {
   if (!task) return NULL;
   task->entry = entry;
   task->state = state;
+  if (state) {
+    task->gc_root_token = tsnative_gc_root_register(&task->state);
+    if (!task->gc_root_token) {
+      free(task);
+      return NULL;
+    }
+  }
   task->status = TSNATIVE_TASK_RUNNABLE;
   if (tsnative_scheduler_submit(task) != 0) {
+    if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     free(task);
     return NULL;
   }
@@ -34,6 +43,7 @@ int tsnative_task_join(tsnative_task *task) {
 void tsnative_task_release(tsnative_task *task) {
   if (!task) return;
   (void)tsnative_scheduler_wait(task);
+  if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
   free(task);
 }
 

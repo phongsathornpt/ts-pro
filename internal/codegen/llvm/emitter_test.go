@@ -187,3 +187,34 @@ func TestEmitNativeTaskIntrinsics(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitCapturedTaskState(t *testing.T) {
+	module := mir.Module{Name: "captured-task", Functions: []mir.Function{
+		{ID: 0, Name: "worker", Params: []mir.Param{{Value: 0, Name: "message", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{}}}},
+		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "captured"}},
+				{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}},
+				{Result: 2, Repr: mir.ReprVoid, Op: mir.TaskJoin{Task: 1}},
+			}, Terminator: mir.Return{}}},
+		},
+	}}
+	entry := mir.FunctionID(1)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { ptr }",
+		"call ptr @tsnative_object_alloc",
+		"store ptr %v0",
+		"call ptr @tsnative_task_spawn_or_abort(ptr @tsnative_task_entry_f0, ptr %v1.state)",
+		"load ptr, ptr %capture0.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

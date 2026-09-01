@@ -26,7 +26,7 @@ func TestNativeOutputMatchesTypeScriptReference(t *testing.T) {
 	fixtures := []string{
 		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts", "array_writes.ts", "dynamic_any.ts", "dynamic_any_call.ts",
 		"strings.ts", "objects.ts", "classes.ts", "class_fields.ts",
-		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts", "concurrency_tasks.ts",
+		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts", "concurrency_tasks.ts", "concurrency_captures.ts",
 	}
 	for _, fixture := range fixtures {
 		fixture := fixture
@@ -50,7 +50,7 @@ func compareReferenceOutput(t *testing.T, root, tsc, node, fixture string) {
 		t.Fatalf("reference TypeScript compile: %v: %s", err, output)
 	}
 	js := filepath.Join(refDir, strings.TrimSuffix(fixture, filepath.Ext(fixture))+".js")
-	if fixture == "concurrency_tasks.ts" {
+	if strings.HasPrefix(fixture, "concurrency_") {
 		body, err := os.ReadFile(js)
 		if err != nil {
 			t.Fatal(err)

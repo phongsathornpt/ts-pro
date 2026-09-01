@@ -77,6 +77,7 @@ int main(void) {
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
+	heapObj := filepath.Join(dir, "heap.o")
 	binary := filepath.Join(dir, "task_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
@@ -87,7 +88,10 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj}, binary); err != nil {
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -165,6 +169,7 @@ int main(void) {
 	testObj := filepath.Join(dir, "test.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
 	taskObj := filepath.Join(dir, "task.o")
+	heapObj := filepath.Join(dir, "heap.o")
 	binary := filepath.Join(dir, "steal_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
@@ -175,7 +180,10 @@ int main(void) {
 	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj}, binary); err != nil {
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, heapObj}, binary); err != nil {
 		t.Fatal(err)
 	}
 	for _, workers := range []string{"4", "1"} {

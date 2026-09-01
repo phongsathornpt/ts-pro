@@ -16,19 +16,17 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		if closure.Kind != ExprClosure || closure.CallTarget == nil {
 			return nil, fmt.Errorf("spawn at %d requires a statically known closure", node.Pos())
 		}
-		if len(closure.Captures) != 0 {
-			return nil, fmt.Errorf("spawn at %d does not support captured state until task GC roots are implemented", node.Pos())
-		}
 		if int(*closure.CallTarget) >= len(e.result.Functions) {
 			return nil, fmt.Errorf("spawn at %d references invalid function", node.Pos())
 		}
 		target := e.result.Functions[*closure.CallTarget]
-		if len(target.Params) != 0 || int(target.ReturnType) >= len(e.result.Types) || e.result.Types[target.ReturnType].Kind != TypeVoid {
-			return nil, fmt.Errorf("spawn at %d currently requires () => void", node.Pos())
+		if len(target.Params) != len(closure.Captures) || int(target.ReturnType) >= len(e.result.Types) || e.result.Types[target.ReturnType].Kind != TypeVoid {
+			return nil, fmt.Errorf("spawn at %d currently requires a zero-argument closure returning void", node.Pos())
 		}
 		targetCopy := *closure.CallTarget
 		expr.Kind = ExprTaskSpawn
 		expr.CallTarget = &targetCopy
+		expr.Captures = closure.Captures
 		expr.Callee = nil
 		expr.Args = nil
 		return expr, nil
