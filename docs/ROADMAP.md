@@ -58,6 +58,17 @@
 - Incremental object cache, parallel codegen, ThinLTO, PGO, and cross compilation.
 
 
+## Milestone 7 — Native concurrency management
+
+- Bounded M:N scheduler with worker count near CPU cores.
+- Lightweight stackless tasks with spawn/join/yield.
+- Per-worker queues and work stealing.
+- Typed channels, timers, cancellation, structured concurrency, and blocking-call isolation.
+- Async/await state machines that park tasks instead of OS threads.
+- Scheduler/GC integration, per-worker allocation, and later Green-Tea-style mark-page work.
+
+See `CONCURRENCY.md` for the step-by-step commit plan and acceptance gates.
+
 ## Current checkpoint
 
-The committed compiler already accepts recursion, scalar arithmetic/comparisons, mutable locals, `if`/`while`/`for`, SSA loop phi nodes, native `number[]`, and native strings. The active working-tree milestone is checker-derived closed object shapes. See `STATUS.md` and `TODO.md` for the exact boundary.
+The stable checkpoint is `6bad298`: native recursion, scalar/integer fast paths, mutable SSA control flow, strings/`number[]`, closures, classes/inheritance/dispatch, initial generics, shared heap/mark-sweep GC, object caching, and performance reporting. The active working tree is the first partial `JSValue` dynamic-boundary milestone. Native concurrency is planned next as an isolated subsystem after that work reaches a clean checkpoint. See `STATUS.md`, `TODO.md`, and `CONCURRENCY.md`.

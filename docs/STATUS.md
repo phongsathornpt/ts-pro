@@ -2,58 +2,67 @@
 
 ## Stable committed baseline
 
-The committed compiler currently supports an end-to-end TypeScript 7 native path through commit `5d3d5cb`.
+The stable native compiler checkpoint is commit `6bad298`.
 
 ```text
 TypeScript 7.0.2
-  -> diagnostics + semantic API
-  -> TypeScript binary AST decoded in Go
+  -> diagnostics + checker/API snapshot
+  -> official binary AST decoded in Go
   -> compiler semantic DTOs
-  -> typed HIR
-  -> representation proof
+  -> typed HIR + representation/range analysis
   -> MIR / SSA
   -> LLVM IR
-  -> clang + small native runtime
+  -> clang + native runtime
   -> native executable
 ```
 
-The normal generated-program runtime path does not embed Node.js, V8, SWC, Babel, or Oxc.
+The generated executable does not embed Node.js or V8.
 
-## Stable language/runtime coverage
+## Stable coverage
 
-- typed functions, recursion, return values, and direct calls;
-- numeric `+ - * /` and `< <= > >= == !=`;
-- mutable locals and assignment;
-- `if`, `while`, and `for`, including SSA phi nodes;
-- specialized contiguous `number[]`, `.length`, and indexed reads;
-- UTF-8 string literals, parameters/returns, and string concatenation;
-- native `console.log(number)` and `console.log(string)`;
-- optimization profiles `-O0`, `-O1`, `-O2`, `-O3`, and `-Oz`.
-
-## Acceptance programs
-
-Current committed examples prove these native paths:
-
-```text
-examples/fib.ts      -> 6765
-examples/scalars.ts  -> scalar arithmetic/comparison results
-examples/loops.ts    -> 45 / 45
-examples/arrays.ts   -> 15
-examples/strings.ts  -> Hello, TypeScript 7!
-```
-
-`number` remains IEEE-754 `F64` by default. `I32`/`I64` narrowing is intentionally deferred until range analysis can prove that narrowing preserves TypeScript/JavaScript number semantics.
+- functions, recursion, direct calls, closures, and escaping function values;
+- arithmetic/comparisons plus proven integer arithmetic fast paths;
+- mutable locals, top-level bindings, `if`, `while`, and `for` with SSA phi nodes;
+- strings and specialized `number[]`, including checked indexed writes;
+- closed objects, fixed field reads/writes, classes, constructors, property initializers;
+- single inheritance, `super()`, provenance devirtualization, and class-tag dispatch;
+- direct generic `T` specialization for scalar/string call sites;
+- shared heap ownership and initial root-aware mark/sweep GC;
+- differential TypeScript 7 -> JavaScript reference tests;
+- deterministic object cache, parallel runtime compilation, and performance reports;
+- resilient long-lived TypeScript LSP workspaces.
 
 ## In-progress working tree
 
-Closed object-shape support is currently under implementation and is not part of the stable committed baseline yet. The work already introduces checker-derived shape/property metadata and HIR groundwork for object allocation and fixed fields. MIR/LLVM allocation and field access still need to be completed and accepted before the feature is marked complete.
+The current uncommitted compiler work is the first `JSValue` dynamic-boundary milestone. It includes partial semantic/HIR/MIR plumbing for `any`, boxing, and dynamic addition. It is intentionally separate from the concurrency plan and must be completed or checkpointed before concurrency implementation changes begin.
 
-## Next major stages
+## Planned concurrency subsystem
 
-1. Closed objects and classes with deterministic layouts.
-2. Closures and captured environments.
-3. Function/generic specialization and monomorphization.
-4. Shared heap allocation and initial GC.
-5. Dynamic `JSValue` fallback paths.
-6. Differential correctness and performance reporting.
-7. Incremental object cache, parallel LLVM codegen, ThinLTO, and PGO.
+`docs/CONCURRENCY.md` defines the implementation order for:
+
+```text
+bounded worker scheduler
+-> lightweight tasks
+-> spawn/join/yield
+-> per-worker queues + work stealing
+-> typed channels
+-> timers + blocking pool
+-> async/await state machines
+-> structured concurrency/cancellation
+-> scheduler/GC integration
+```
+
+## Immediate sequencing rule
+
+Concurrency implementation starts only from a clean compiler checkpoint. The partial `JSValue` work must not be mixed into scheduler commits.
+
+Expected first concurrency commits:
+
+1. bounded runtime worker lifecycle;
+2. lightweight task lifecycle and FIFO injection queue;
+3. compiler spawn/join intrinsics;
+4. per-worker deques;
+5. work stealing and wakeups;
+6. scheduler metrics and stress acceptance.
+
+Every milestone must pass `go test ./...`, native acceptance where applicable, and `git diff --check` before commit.

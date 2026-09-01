@@ -68,6 +68,21 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
   - [ ] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
 - [ ] Exceptions, Promise, and async/await.
+
+## Native concurrency management
+
+- [ ] Add bounded native scheduler core with `TSNATIVE_WORKERS` and deterministic shutdown.
+- [ ] Add lightweight stackless task lifecycle and bounded task accounting.
+- [ ] Add compiler-known `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR.
+- [ ] Add per-worker deques, work stealing, targeted worker wakeups, and scheduler metrics.
+- [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
+- [ ] Add timers/sleep and a separate bounded blocking-call pool.
+- [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
+- [ ] Add structured concurrency, task groups, cancellation, and task-local context.
+- [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
+- [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
+- [ ] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
+- [ ] Stress-test 1/100/10k/100k tasks, CPU fan-out, channel contention, cancellation, GC churn, and blocking calls.
 - [~] Expand native array coverage beyond read-only `number[]`.
   - [x] Bounds-checked in-place indexed writes for specialized `number[]`.
   - [ ] String/object arrays and typed generic array specializations.
@@ -108,5 +123,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 3. Complete generic specialization beyond direct `T`: nested generics, constrained structural generics, recursion, and cross-module specialization caching.
 4. Use the completed conservative range analysis to enable guarded/specialized `I32`/`I64` lowering while preserving TypeScript `number` semantics.
 5. Introduce tagged `JSValue` only at representation-unsafe boundaries, then checked conversions and dynamic operator/property slow paths.
-6. Add exceptions and Promise/async/await semantics on top of the stabilized native/dynamic runtime boundary.
-7. Finish multi-module LLVM scheduling, then ThinLTO/PGO and cross-compilation work.
+6. Add the bounded native task scheduler, spawn/join/yield, work stealing, typed channels, timers, and blocking pool.
+7. Add exceptions and lower Promise/async/await onto the task scheduler/state-machine runtime.
+8. Integrate scheduler memory with precise GC/per-worker allocation, then Green-Tea-style local mark-page work.
+9. Finish multi-module LLVM scheduling, then ThinLTO/PGO and cross-compilation work.
