@@ -299,7 +299,7 @@ type runtimeCompileResult struct {
 }
 
 func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
-	sources := []string{"core/heap.c", "core/console.c", "core/array_f64.c", "core/string.c", "core/object.c", "core/jsvalue.c", "concurrency/scheduler.c", "concurrency/task.c", "concurrency/channel_f64.c", "concurrency/timer.c"}
+	sources := []string{"core/heap.c", "core/console.c", "core/array_f64.c", "core/string.c", "core/object.c", "core/jsvalue.c", "concurrency/scheduler.c", "concurrency/task.c", "concurrency/channel_f64.c", "concurrency/timer.c", "concurrency/blocking_pool.c"}
 	results := make(chan runtimeCompileResult, len(sources))
 	for i, source := range sources {
 		go func(index int, name string) {

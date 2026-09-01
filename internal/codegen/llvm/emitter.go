@@ -53,7 +53,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare i32 @tsnative_channel_f64_recv_task(ptr, ptr)\n")
 	b.WriteString("declare void @tsnative_sleep_cooperative(double)\n")
 	b.WriteString("declare i32 @tsnative_sleep_task(double)\n")
-	b.WriteString("declare void @tsnative_timer_shutdown()\n")
+	b.WriteString("declare void @tsnative_timer_shutdown()\ndeclare void @tsnative_blocking_pool_shutdown()\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
@@ -126,7 +126,7 @@ func Emit(module mir.Module) (string, error) {
 		return "", err
 	}
 	if module.Entry != nil {
-		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  call void @tsnative_timer_shutdown()\n  call void @tsnative_scheduler_shutdown()\n  call void @tsnative_heap_shutdown()\n  ret i32 0\n}\n", functionName(*module.Entry))
+		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  call void @tsnative_blocking_pool_shutdown()\n  call void @tsnative_timer_shutdown()\n  call void @tsnative_scheduler_shutdown()\n  call void @tsnative_heap_shutdown()\n  ret i32 0\n}\n", functionName(*module.Entry))
 	}
 	return b.String(), nil
 }

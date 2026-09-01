@@ -95,9 +95,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [~] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
       - [x] Automatically select the stackless wrapper for proven single-block one-suspend channel tasks while retaining the cooperative fallback for unsupported shapes.
       - [ ] Remove the cooperative fallback once general continuation lowering covers branches/loops/multiple suspend points.
-- [~] Add timers/sleep and a separate bounded blocking-call pool.
+- [x] Add timers/sleep and a separate bounded blocking-call pool.
   - [x] Lazy monotonic timer service, task park/wake sleep ABI, cooperative fallback, worker=1 runtime regression, compiler `sleep(number)` lowering, and stackless one-suspend task wrapper support.
-  - [ ] Add a separate bounded blocking-call pool and migrate blocking native-library adapters onto it.
+  - [x] Bounded lazy blocking-call pool with configurable worker/job limits, task-aware completion wakeups, cooperative fallback, deterministic shutdown, and queue-bound regressions.
+  - [ ] Migrate future blocking native-library adapters onto the blocking-call pool as those libraries are added.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -147,11 +148,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Add resumable task parking/wakeup and compiler-known `channel<number>` send/recv intrinsics on top of the completed F64 channel storage runtime.
-2. Add typed channels with task parking, starting with unboxed `channel<number>`, then reference/JSValue channel specializations.
-3. Add timers/sleep and a bounded blocking-call pool, then lower Promise/async/await onto resumable task state machines.
-4. Add cancellation/task groups, task-local context, exception propagation, and cooperative execution budgets/preemption polling.
-5. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
-6. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
-7. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-8. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+1. Generalize compiler-generated stackless continuations across multiple suspension points, arbitrary live SSA values, branches, and loops.
+2. Add reference/JSValue typed channel specializations, then lower Promise/async/await onto the generalized resumable task state machine.
+3. Add cancellation/task groups, task-local context, exception propagation, and cooperative execution budgets/preemption polling.
+4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
+6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+7. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
