@@ -186,7 +186,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Small allocations up to 2 KiB now use worker-owned size-class spans with zeroed slot reuse and bounded reusable-span caching.
     - Finalizer-bearing slots remain pinned until finalizer completion; heap shutdown reclaims cached spans deterministically.
     - Page-to-span metadata resolves interior pointers in O(1), and remote frees / reusable-span ownership transfers are explicitly counted.
-    - Per-worker local mark-page work and remote-free inboxes remain before global heap locking can be reduced further.
+    - Remote frees now enter the owning worker allocator inbox and are drained before its next allocation; only fully drained inactive spans become transferable.
+    - Per-worker local mark-page work remains before global heap locking can be reduced further.
 
 15. `runtime: add Green-Tea-style local mark-page work`
     - Page/span marking queues per worker after size-class spans and precise pointer metadata exist.

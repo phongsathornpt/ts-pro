@@ -150,6 +150,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
   - [x] Add worker-owned size-class spans with bump-pointer slots, zeroed slot reuse, bounded recycled-span caching, and finalizer-safe recycling.
   - [x] Add page-to-span metadata for interior-pointer resolution plus remote-free and reusable-span ownership-transfer accounting.
+  - [x] Add owner-drained remote-free inboxes so foreign collectors/workers do not directly recycle another worker’s span slots.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.

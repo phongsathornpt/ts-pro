@@ -316,6 +316,15 @@ func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
 
 	schedulerSetThread(1, 0)
 	tsnative_gc_collect()
+	nativeHeap.Lock()
+	if pageSpan.owner != 0 || nativeHeap.spanTransfers != transfersBefore {
+		nativeHeap.Unlock()
+		t.Fatal("span transferred before owner drained remote frees")
+	}
+	nativeHeap.Unlock()
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(2048)
+	schedulerSetThread(1, 0)
 	_ = tsnative_heap_alloc(2048)
 
 	nativeHeap.Lock()
@@ -374,8 +383,13 @@ func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
 		t.Fatal("cross-worker collection recorded no remote frees")
 	}
 	before := nativeAllocatorSpanTransfers()
+	schedulerSetThread(0, 0)
 	if tsnative_heap_alloc(32) == nil {
-		t.Fatal("worker 1 allocation failed")
+		t.Fatal("worker 0 remote-free drain allocation failed")
+	}
+	schedulerSetThread(1, 0)
+	if tsnative_heap_alloc(32) == nil {
+		t.Fatal("worker 1 transfer allocation failed")
 	}
 	if got := nativeAllocatorSpanTransfers(); got <= before {
 		t.Fatalf("span transfer count = %d, want > %d", got, before)

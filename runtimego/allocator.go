@@ -25,11 +25,18 @@ type nativeHeapSpan struct {
 	next       uint32
 	free       []uint32
 	live       uint32
+	remote     uint32
 	listed     bool
+}
+
+type nativeRemoteFree struct {
+	span *nativeHeapSpan
+	slot uint32
 }
 
 type nativeWorkerAllocator struct {
 	active [nativeSizeClassCount]*nativeHeapSpan
+	remote []nativeRemoteFree
 }
 
 func nativeSizeClassIndex(size uintptr) int {
@@ -150,6 +157,7 @@ func allocateNativeHeapStorageLocked(size uintptr) (unsafe.Pointer, []byte, *nat
 
 	owner := nativeAllocatorOwner()
 	allocator := nativeWorkerAllocatorLocked(owner)
+	drainNativeRemoteFreesLocked(owner, allocator)
 	span := allocator.active[classIndex]
 	if !nativeSpanHasSpace(span) {
 		span = takeReusableNativeSpanLocked(classIndex, owner)
@@ -185,6 +193,44 @@ func removeReusableNativeSpanLocked(span *nativeHeapSpan) {
 	span.listed = false
 }
 
+func recycleNativeSpanSlotLocked(span *nativeHeapSpan, slot uint32) []byte {
+	span.free = append(span.free, slot)
+	if span.remote == 0 && !nativeSpanIsActiveLocked(span) && !span.listed {
+		span.listed = true
+		nativeHeap.freeSpans[span.classIndex] = append(nativeHeap.freeSpans[span.classIndex], span)
+	}
+	cache := nativeHeap.freeSpans[span.classIndex]
+	if span.live == 0 && span.remote == 0 && span.listed && len(cache) > nativeFreeSpanCachePerClass {
+		removeReusableNativeSpanLocked(span)
+		delete(nativeHeap.spans, span)
+		unregisterNativeSpanPagesLocked(span)
+		data := span.data
+		span.data = nil
+		span.base = nil
+		return data
+	}
+	return nil
+}
+
+func drainNativeRemoteFreesLocked(owner int, allocator *nativeWorkerAllocator) {
+	if allocator == nil || len(allocator.remote) == 0 {
+		return
+	}
+	remote := allocator.remote
+	allocator.remote = nil
+	for _, item := range remote {
+		span := item.span
+		if span == nil || span.owner != owner || span.remote == 0 {
+			nativeAbort("invalid remote free ownership")
+			return
+		}
+		span.remote--
+		if data := recycleNativeSpanSlotLocked(span, item.slot); len(data) != 0 {
+			nativeUnmap(data)
+		}
+	}
+}
+
 // releaseNativeHeapBlockStorageLocked returns an mmap region that must be unmapped
 // after nativeHeap is unlocked. A nil result means the slot/span remains cached.
 func releaseNativeHeapBlockStorageLocked(block *nativeHeapBlock) []byte {
@@ -201,27 +247,15 @@ func releaseNativeHeapBlockStorageLocked(block *nativeHeapBlock) []byte {
 		return nil
 	}
 	span.live--
-	if owner := nativeAllocatorOwner(); span.owner >= 0 && owner != span.owner {
+	owner := nativeAllocatorOwner()
+	if span.owner >= 0 && owner != span.owner {
 		nativeHeap.remoteFrees++
+		span.remote++
+		allocator := nativeWorkerAllocatorLocked(span.owner)
+		allocator.remote = append(allocator.remote, nativeRemoteFree{span: span, slot: block.slot})
+		return nil
 	}
-	span.free = append(span.free, block.slot)
-
-	if !nativeSpanIsActiveLocked(span) && !span.listed {
-		span.listed = true
-		nativeHeap.freeSpans[span.classIndex] = append(nativeHeap.freeSpans[span.classIndex], span)
-	}
-
-	cache := nativeHeap.freeSpans[span.classIndex]
-	if span.live == 0 && span.listed && len(cache) > nativeFreeSpanCachePerClass {
-		removeReusableNativeSpanLocked(span)
-		delete(nativeHeap.spans, span)
-		unregisterNativeSpanPagesLocked(span)
-		data := span.data
-		span.data = nil
-		span.base = nil
-		return data
-	}
-	return nil
+	return recycleNativeSpanSlotLocked(span, block.slot)
 }
 
 func releaseNativeHeapBlockStorage(block *nativeHeapBlock) []byte {
