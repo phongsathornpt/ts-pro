@@ -28,6 +28,10 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 		kind = hir.BoxString
 	case frontend.TypeBoolean:
 		kind = hir.BoxBoolean
+	case frontend.TypeObject, frontend.TypeArray:
+		kind = hir.BoxObject
+	case frontend.TypeFunction:
+		kind = hir.BoxFunction
 	default:
 		return 0, fmt.Errorf("cannot box semantic type %q into any", f.module.source.Types[expr.Type].Name)
 	}

@@ -19,6 +19,8 @@ const (
 	nativeJSTagBoolean   uint32 = 3
 	nativeJSTagNull      uint32 = 4
 	nativeJSTagUndefined uint32 = 5
+	nativeJSTagObject    uint32 = 6
+	nativeJSTagFunction  uint32 = 7
 )
 
 type nativeJSValue struct {
@@ -67,6 +69,20 @@ func tsnative_jsvalue_box_bool(raw C.uint8_t) unsafe.Pointer {
 	if raw != 0 {
 		value.payload = 1
 	}
+	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_box_object
+func tsnative_jsvalue_box_object(raw unsafe.Pointer) unsafe.Pointer {
+	value := newNativeJSValue(nativeJSTagObject)
+	value.payload = uint64(uintptr(raw))
+	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_box_function
+func tsnative_jsvalue_box_function(raw unsafe.Pointer) unsafe.Pointer {
+	value := newNativeJSValue(nativeJSTagFunction)
+	value.payload = uint64(uintptr(raw))
 	return unsafe.Pointer(value)
 }
 

@@ -169,7 +169,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Boolean, null/undefined, object/function, and tagged-union JSValue variants.
     - [x] Boolean JSValue tag/boxing, logging, and primitive `+` coercion with numbers/strings.
     - [x] Null/undefined JSValue literals/tags with console output and primitive `+` coercion (`null -> 0`, `undefined -> NaN`, string conversion).
-    - [ ] Object/function and tagged-union JSValue variants.
+    - [x] Object/array/function reference JSValue tags and explicit native boxing, with conservative GC payload tracing and differential/compiler regression coverage.
+    - [ ] Tagged-union JSValue variants.
 - [~] Add checked conversions and dynamic operator/property slow paths.
   - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
   - [ ] Dynamic comparisons, arithmetic beyond `+`, property get/set, calls, and checked unboxing/conversions.

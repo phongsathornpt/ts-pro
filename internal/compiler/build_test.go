@@ -742,3 +742,30 @@ func TestBuildNativeAsyncReferencePhiStateSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeDynamicReferenceBoxing(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-any-refs")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_any_refs.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.BoxingSites != 3 {
+		t.Fatalf("boxing sites = %d; want 3", result.Metrics.BoxingSites)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic reference boxing: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "1\n1\n1" {
+		t.Fatalf("output = %q", got)
+	}
+}

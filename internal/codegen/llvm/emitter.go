@@ -39,7 +39,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_console_log_string(ptr)\n")
 	b.WriteString("declare void @tsnative_console_log_jsvalue(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
-	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_box_object(ptr)\ndeclare ptr @tsnative_jsvalue_box_function(ptr)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
@@ -515,6 +515,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		case mir.BoxJSBoolean:
 			fmt.Fprintf(b, "  %s.bool = zext i1 %s to i8\n", name, value)
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_bool(i8 %s.bool)\n", name, name)
+		case mir.BoxJSObject:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_object(ptr %s)\n", name, value)
+		case mir.BoxJSFunction:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_function(ptr %s)\n", name, value)
 		default:
 			return fmt.Errorf("unsupported JSValue box kind %d", op.Kind)
 		}

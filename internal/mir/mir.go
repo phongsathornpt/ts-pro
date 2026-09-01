@@ -139,6 +139,8 @@ const (
 	BoxJSNumber
 	BoxJSString
 	BoxJSBoolean
+	BoxJSObject
+	BoxJSFunction
 )
 
 type BoxJSValue struct {

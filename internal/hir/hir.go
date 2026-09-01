@@ -60,6 +60,8 @@ const (
 	BoxNumber
 	BoxString
 	BoxBoolean
+	BoxObject
+	BoxFunction
 )
 
 type BoxOp struct {
