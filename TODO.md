@@ -123,7 +123,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
-  - [ ] Add task-local context propagation.
+  - [x] Add GC-rooted task-local JSValue context with automatic parent-to-child inheritance across worker migration/suspension and worker=1 regression coverage.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.

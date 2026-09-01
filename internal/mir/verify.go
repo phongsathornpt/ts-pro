@@ -380,6 +380,17 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Group); err != nil {
 					return err
 				}
+			case TaskContextSet:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task context set v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case TaskContextGet:
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("task context get v%d must produce JSValue", inst.Result)
+				}
 			case ChannelNewF64:
 				if inst.Repr != ReprChannelRef {
 					return fmt.Errorf("channel new v%d must produce ChannelRef", inst.Result)

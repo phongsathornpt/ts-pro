@@ -144,6 +144,10 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return nil, true
 	case mir.TaskGroupCancel:
 		return []mir.ValueID{op.Group}, true
+	case mir.TaskContextSet:
+		return []mir.ValueID{op.Value}, true
+	case mir.TaskContextGet:
+		return nil, true
 	case mir.TaskYield:
 		return nil, true
 	case mir.TaskCancel:

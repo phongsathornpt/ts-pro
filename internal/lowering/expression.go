@@ -191,6 +191,18 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.TaskGroupCancelOp{Group: group}), nil
+	case frontend.ExprTaskContextSet:
+		anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+		if !ok {
+			return 0, fmt.Errorf("task context requires any semantic type")
+		}
+		value, err := f.lowerExprAs(expr.Args[0], anyType)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.TaskContextSetOp{Value: value}), nil
+	case frontend.ExprTaskContextGet:
+		return f.emit(expr.Type, hir.TaskContextGetOp{}), nil
 	case frontend.ExprChannelNew:
 		_, elementKind, err := f.channelElementKind(expr.Type)
 		if err != nil {

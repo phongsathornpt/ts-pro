@@ -127,6 +127,10 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("task.group_join v%d", op.Group)
 	case TaskGroupCancelOp:
 		return fmt.Sprintf("task.group_cancel v%d", op.Group)
+	case TaskContextSetOp:
+		return fmt.Sprintf("task.context_set v%d", op.Value)
+	case TaskContextGetOp:
+		return "task.context_get"
 	case ChannelNewOp:
 		return fmt.Sprintf("channel.new v%d", op.Capacity)
 	case ChannelTrySendOp:

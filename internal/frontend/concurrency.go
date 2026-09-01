@@ -110,6 +110,20 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprTaskGroupCancel
 		expr.Callee = nil
 		return expr, nil
+	case "setTaskContext":
+		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("setTaskContext at %d requires one value and returns void", node.Pos())
+		}
+		expr.Kind = ExprTaskContextSet
+		expr.Callee = nil
+		return expr, nil
+	case "taskContext":
+		if len(expr.Args) != 0 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeAny {
+			return nil, fmt.Errorf("taskContext at %d takes no arguments and returns any", node.Pos())
+		}
+		expr.Kind = ExprTaskContextGet
+		expr.Callee = nil
+		return expr, nil
 	case "channel":
 		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeChannel {
 			return nil, fmt.Errorf("channel at %d requires one capacity and a concrete native channel type", node.Pos())
@@ -238,7 +252,7 @@ func (e *extractor) channelValueCompatible(element, value TypeID) bool {
 
 func isConcurrencyIntrinsic(name string) bool {
 	switch name {
-	case "spawn", "join", "yieldNow", "cancelTask", "taskCancelled", "taskGroup", "groupSpawn", "groupJoin", "groupCancel", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
+	case "spawn", "join", "yieldNow", "cancelTask", "taskCancelled", "taskGroup", "groupSpawn", "groupJoin", "groupCancel", "setTaskContext", "taskContext", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
 		return true
 	default:
 		return false

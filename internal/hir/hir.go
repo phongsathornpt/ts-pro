@@ -168,6 +168,8 @@ type TaskCancelledOp struct{}
 type TaskGroupNewOp struct{}
 type TaskGroupJoinOp struct{ Group ValueID }
 type TaskGroupCancelOp struct{ Group ValueID }
+type TaskContextSetOp struct{ Value ValueID }
+type TaskContextGetOp struct{}
 type ChannelElementKind uint8
 
 const (
@@ -227,6 +229,8 @@ func (TaskCancelledOp) isOperation()    {}
 func (TaskGroupNewOp) isOperation()     {}
 func (TaskGroupJoinOp) isOperation()    {}
 func (TaskGroupCancelOp) isOperation()  {}
+func (TaskContextSetOp) isOperation()   {}
+func (TaskContextGetOp) isOperation()   {}
 func (ChannelNewOp) isOperation()       {}
 func (ChannelTrySendOp) isOperation()   {}
 func (ChannelTryRecvOrOp) isOperation() {}

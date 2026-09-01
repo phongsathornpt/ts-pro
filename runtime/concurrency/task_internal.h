@@ -14,6 +14,8 @@ struct tsnative_task {
   void *state;
   void *gc_root_token;
   void *result_gc_root_token;
+  void *context;
+  void *context_gc_root_token;
   uint64_t id;
   _Atomic int status;
   _Atomic int park_requested;

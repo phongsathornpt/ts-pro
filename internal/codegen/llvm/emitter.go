@@ -87,7 +87,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
-	b.WriteString("declare i32 @tsnative_task_cancel(ptr)\ndeclare i32 @tsnative_task_is_cancelled()\ndeclare i32 @tsnative_task_budget_poll_task()\ndeclare i32 @tsnative_task_yield_task()\ndeclare void @tsnative_task_yield()\n")
+	b.WriteString("declare i32 @tsnative_task_cancel(ptr)\ndeclare i32 @tsnative_task_is_cancelled()\ndeclare void @tsnative_task_set_context(ptr)\ndeclare ptr @tsnative_task_get_context()\ndeclare i32 @tsnative_task_budget_poll_task()\ndeclare i32 @tsnative_task_yield_task()\ndeclare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")
@@ -431,6 +431,18 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			return err
 		}
 		fmt.Fprintf(b, "  call i32 @tsnative_task_group_cancel(ptr %s)\n", group)
+		return nil
+	case mir.TaskContextSet:
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_task_set_context(ptr %s)\n", value)
+		return nil
+	case mir.TaskContextGet:
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_get_context()\n", name)
+		values[inst.Result] = name
 		return nil
 	case mir.ChannelNewF64:
 		capacity, err := operand(values, op.Capacity)

@@ -1079,3 +1079,32 @@ func TestBuildNativeTaskGroupCancellationSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeTaskContextInheritanceSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "task-context")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_context.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 2 {
+		t.Fatalf("task metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run task context: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "trace-42\ntrace-42" {
+		t.Fatalf("output = %q", got)
+	}
+}

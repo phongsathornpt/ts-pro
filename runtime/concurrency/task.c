@@ -68,14 +68,19 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
   task->entry = entry;
   task->state = state;
   task->result_kind = kind;
+  tsnative_task *parent = tsnative_scheduler_current_task();
+  if (parent) task->context = parent->context;
   atomic_store_explicit(&task->budget_remaining, 256u, memory_order_relaxed);
   task->destroy_completed = destroy_task_storage;
   if (kind == TSNATIVE_TASK_RESULT_F64) task->transfer_completion = transfer_f64;
   else if (kind == TSNATIVE_TASK_RESULT_BOOL) task->transfer_completion = transfer_bool;
   else if (kind == TSNATIVE_TASK_RESULT_REF) task->transfer_completion = transfer_ref;
+  task->context_gc_root_token = tsnative_gc_root_register(&task->context);
+  if (!task->context_gc_root_token) { pthread_mutex_destroy(&task->completion_mutex); free(task); return NULL; }
   if (kind == TSNATIVE_TASK_RESULT_REF) {
     task->result_gc_root_token = tsnative_gc_root_register(&task->result.ref);
     if (!task->result_gc_root_token) {
+      if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
       pthread_mutex_destroy(&task->completion_mutex);
       free(task);
       return NULL;
@@ -85,6 +90,7 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
     task->gc_root_token = tsnative_gc_root_register(&task->state);
     if (!task->gc_root_token) {
       if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+      if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
       pthread_mutex_destroy(&task->completion_mutex);
       free(task);
       return NULL;
@@ -93,6 +99,7 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
   if (task_group_attach(group, task) != 0) {
     if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+    if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
     pthread_mutex_destroy(&task->completion_mutex);
     free(task);
     return NULL;
@@ -102,6 +109,7 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
     task_group_detach_submit_failure(task);
     if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+    if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
     pthread_mutex_destroy(&task->completion_mutex);
     free(task);
     return NULL;
@@ -302,6 +310,18 @@ void *tsnative_task_join_ref_release(tsnative_task *task) {
 tsnative_task_status tsnative_task_get_status(tsnative_task *task) {
   if (!task) return TSNATIVE_TASK_FAILED;
   return tsnative_scheduler_task_status(task);
+}
+
+void tsnative_task_set_context(void *value) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) abort();
+  task->context = value;
+}
+
+void *tsnative_task_get_context(void) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) abort();
+  return task->context;
 }
 
 int tsnative_task_cancel(tsnative_task *task) {

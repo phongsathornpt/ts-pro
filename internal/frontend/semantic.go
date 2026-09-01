@@ -27,6 +27,8 @@ const (
 	ExprTaskGroupNew
 	ExprTaskGroupJoin
 	ExprTaskGroupCancel
+	ExprTaskContextSet
+	ExprTaskContextGet
 	ExprChannelNew
 	ExprChannelTrySend
 	ExprChannelTryRecvOr

@@ -204,7 +204,7 @@ func countRuntimeCalls(module mir.Module) int {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
 					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
-					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
+					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.TaskGroupNew, mir.TaskGroupJoin, mir.TaskGroupCancel, mir.TaskContextSet, mir.TaskContextGet, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 					count++
 				}
 			}

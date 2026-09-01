@@ -242,6 +242,10 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.TaskGroupJoin{Group: mir.ValueID(op.Group)}
 	case hir.TaskGroupCancelOp:
 		result.Op = mir.TaskGroupCancel{Group: mir.ValueID(op.Group)}
+	case hir.TaskContextSetOp:
+		result.Op = mir.TaskContextSet{Value: mir.ValueID(op.Value)}
+	case hir.TaskContextGetOp:
+		result.Op = mir.TaskContextGet{}
 	case hir.ChannelNewOp:
 		switch op.Element {
 		case hir.ChannelElementF64:

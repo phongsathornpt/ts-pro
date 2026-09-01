@@ -271,6 +271,8 @@ type TaskCancelled struct{}
 type TaskGroupNew struct{}
 type TaskGroupJoin struct{ Group ValueID }
 type TaskGroupCancel struct{ Group ValueID }
+type TaskContextSet struct{ Value ValueID }
+type TaskContextGet struct{}
 type ChannelNewF64 struct{ Capacity ValueID }
 type ChannelTrySendF64 struct{ Channel, Value ValueID }
 type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
@@ -318,6 +320,8 @@ func (TaskCancelled) isOperation()        {}
 func (TaskGroupNew) isOperation()         {}
 func (TaskGroupJoin) isOperation()        {}
 func (TaskGroupCancel) isOperation()      {}
+func (TaskContextSet) isOperation()       {}
+func (TaskContextGet) isOperation()       {}
 func (ChannelNewF64) isOperation()        {}
 func (ChannelTrySendF64) isOperation()    {}
 func (ChannelTryRecvOrF64) isOperation()  {}
