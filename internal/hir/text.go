@@ -78,6 +78,10 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("%s v%d", formatUnary(op.Operator), op.Operand)
 	case BinaryExpr:
 		return fmt.Sprintf("%s v%d, v%d", formatBinary(op.Operator), op.Left, op.Right)
+	case BoxOp:
+		return fmt.Sprintf("box.%d v%d", op.Kind, op.Value)
+	case DynamicBinaryOp:
+		return fmt.Sprintf("dynamic.%s v%d, v%d", formatBinary(op.Operator), op.Left, op.Right)
 	case CallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

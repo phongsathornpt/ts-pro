@@ -118,14 +118,6 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 }
 
 func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) {
-	left, err := f.lowerExpr(expr.Left)
-	if err != nil {
-		return 0, err
-	}
-	right, err := f.lowerExpr(expr.Right)
-	if err != nil {
-		return 0, err
-	}
 	op := hir.BinaryOperator(0)
 	switch expr.Operator {
 	case frontend.BinaryAdd:
@@ -150,6 +142,28 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 		op = hir.BinaryNotEqual
 	default:
 		return 0, fmt.Errorf("unsupported semantic binary operator %d", expr.Operator)
+	}
+	if int(expr.Type) < len(f.module.source.Types) && f.module.source.Types[expr.Type].Kind == frontend.TypeAny {
+		if op != hir.BinaryAdd {
+			return 0, fmt.Errorf("dynamic any binary operator %d is not supported yet", expr.Operator)
+		}
+		left, err := f.lowerExprAs(expr.Left, expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		right, err := f.lowerExprAs(expr.Right, expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DynamicBinaryOp{Operator: op, Left: left, Right: right}), nil
+	}
+	left, err := f.lowerExpr(expr.Left)
+	if err != nil {
+		return 0, err
+	}
+	right, err := f.lowerExpr(expr.Right)
+	if err != nil {
+		return 0, err
 	}
 	return f.emit(expr.Type, hir.BinaryExpr{Operator: op, Left: left, Right: right}), nil
 }
@@ -177,6 +191,8 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 			intrinsic = hir.IntrinsicConsoleLogF64
 		case frontend.IntrinsicConsoleLogString:
 			intrinsic = hir.IntrinsicConsoleLogString
+		case frontend.IntrinsicConsoleLogJSValue:
+			intrinsic = hir.IntrinsicConsoleLogJSValue
 		default:
 			return 0, fmt.Errorf("unsupported semantic intrinsic %d", expr.Intrinsic)
 		}
@@ -194,11 +210,23 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.emit(expr.Type, hir.DispatchCallOp{Args: args, Cases: cases}), nil
 	}
 	if expr.CallTarget != nil {
-		args, err := lowerArgs()
-		if err != nil {
-			return 0, err
+		targetID := *expr.CallTarget
+		if int(targetID) >= len(f.module.source.Functions) {
+			return 0, fmt.Errorf("call target f%d is outside semantic function table", targetID)
 		}
-		return f.emit(expr.Type, hir.CallOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Args: args}), nil
+		target := f.module.source.Functions[targetID]
+		if len(target.Params) != len(expr.Args) {
+			return 0, fmt.Errorf("call target %s expects %d args; got %d", target.Name, len(target.Params), len(expr.Args))
+		}
+		args := make([]hir.ValueID, 0, len(expr.Args))
+		for i, arg := range expr.Args {
+			value, err := f.lowerExprAs(arg, target.Params[i].Type)
+			if err != nil {
+				return 0, err
+			}
+			args = append(args, value)
+		}
+		return f.emit(expr.Type, hir.CallOp{Callee: hir.NewFunctionID(uint32(targetID)), Args: args}), nil
 	}
 	if expr.Callee == nil {
 		return 0, fmt.Errorf("indirect call has no closure value")

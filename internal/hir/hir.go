@@ -52,6 +52,25 @@ type BinaryExpr struct {
 	Left     ValueID
 	Right    ValueID
 }
+
+type BoxKind uint8
+
+const (
+	BoxInvalid BoxKind = iota
+	BoxNumber
+	BoxString
+)
+
+type BoxOp struct {
+	Kind  BoxKind
+	Value ValueID
+}
+
+type DynamicBinaryOp struct {
+	Operator BinaryOperator
+	Left     ValueID
+	Right    ValueID
+}
 type CallOp struct {
 	Callee FunctionID
 	Args   []ValueID
@@ -73,6 +92,7 @@ const (
 	IntrinsicInvalid IntrinsicKind = iota
 	IntrinsicConsoleLogF64
 	IntrinsicConsoleLogString
+	IntrinsicConsoleLogJSValue
 )
 
 type IntrinsicCallOp struct {
@@ -121,6 +141,8 @@ type ClosureCallOp struct {
 func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
 func (BinaryExpr) isOperation()      {}
+func (BoxOp) isOperation()           {}
+func (DynamicBinaryOp) isOperation() {}
 func (CallOp) isOperation()          {}
 func (DispatchCallOp) isOperation()  {}
 func (IntrinsicCallOp) isOperation() {}

@@ -938,6 +938,8 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Intrinsic = IntrinsicConsoleLogF64
 		case TypeString:
 			expr.Intrinsic = IntrinsicConsoleLogString
+		case TypeAny:
+			expr.Intrinsic = IntrinsicConsoleLogJSValue
 		default:
 			return nil, fmt.Errorf("console.log native MVP does not support argument type %q at %d", e.result.Types[expr.Args[0].Type].Name, node.Pos())
 		}

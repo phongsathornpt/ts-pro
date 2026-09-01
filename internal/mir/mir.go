@@ -120,6 +120,24 @@ type FloatCompare struct {
 	Right    ValueID
 }
 
+type BoxJSKind uint8
+
+const (
+	BoxJSInvalid BoxJSKind = iota
+	BoxJSNumber
+	BoxJSString
+)
+
+type BoxJSValue struct {
+	Kind  BoxJSKind
+	Value ValueID
+}
+
+type DynamicAddJSValue struct {
+	Left  ValueID
+	Right ValueID
+}
+
 type Call struct {
 	Callee FunctionID
 	Args   []ValueID
@@ -141,6 +159,7 @@ const (
 	IntrinsicInvalid Intrinsic = iota
 	IntrinsicConsoleLogF64
 	IntrinsicConsoleLogString
+	IntrinsicConsoleLogJSValue
 )
 
 type IntrinsicCall struct {
@@ -186,26 +205,28 @@ type ClosureCall struct {
 	Args    []ValueID
 }
 
-func (ConstF64) isOperation()        {}
-func (ConstString) isOperation()     {}
-func (StringConcat) isOperation()    {}
-func (FloatBinary) isOperation()     {}
-func (ProvenIntBinary) isOperation() {}
-func (FloatCompare) isOperation()    {}
-func (Call) isOperation()            {}
-func (DispatchCall) isOperation()    {}
-func (IntrinsicCall) isOperation()   {}
-func (Phi) isOperation()             {}
-func (ArrayNewF64) isOperation()     {}
-func (ArrayLengthF64) isOperation()  {}
-func (ArrayGetF64) isOperation()     {}
-func (ArraySetF64) isOperation()     {}
-func (ObjectNew) isOperation()       {}
-func (ObjectAlloc) isOperation()     {}
-func (FieldSet) isOperation()        {}
-func (FieldGet) isOperation()        {}
-func (ClosureNew) isOperation()      {}
-func (ClosureCall) isOperation()     {}
+func (ConstF64) isOperation()          {}
+func (ConstString) isOperation()       {}
+func (StringConcat) isOperation()      {}
+func (FloatBinary) isOperation()       {}
+func (ProvenIntBinary) isOperation()   {}
+func (FloatCompare) isOperation()      {}
+func (Call) isOperation()              {}
+func (DispatchCall) isOperation()      {}
+func (IntrinsicCall) isOperation()     {}
+func (Phi) isOperation()               {}
+func (ArrayNewF64) isOperation()       {}
+func (ArrayLengthF64) isOperation()    {}
+func (ArrayGetF64) isOperation()       {}
+func (ArraySetF64) isOperation()       {}
+func (ObjectNew) isOperation()         {}
+func (ObjectAlloc) isOperation()       {}
+func (FieldSet) isOperation()          {}
+func (FieldGet) isOperation()          {}
+func (ClosureNew) isOperation()        {}
+func (ClosureCall) isOperation()       {}
+func (BoxJSValue) isOperation()        {}
+func (DynamicAddJSValue) isOperation() {}
 
 type Terminator interface{ isTerminator() }
 

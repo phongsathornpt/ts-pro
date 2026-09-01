@@ -107,8 +107,13 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Dynamic boundary, correctness, and performance
 
-- [ ] Add tagged `JSValue` only for values that cannot keep a proven native representation.
-- [ ] Add checked conversions and dynamic operator/property slow paths.
+- [~] Add tagged `JSValue` only for values that cannot keep a proven native representation.
+  - [x] Heap-backed GC-managed JSValue boundary for `any` number/string values.
+  - [x] Explicit number/string boxing at variable, return, and direct-call parameter boundaries.
+  - [ ] Boolean, null/undefined, object/function, and tagged-union JSValue variants.
+- [~] Add checked conversions and dynamic operator/property slow paths.
+  - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
+  - [ ] Dynamic comparisons, arithmetic beyond `+`, property get/set, calls, and checked unboxing/conversions.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.

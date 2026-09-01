@@ -164,6 +164,17 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case BinaryExpr:
 				checkValue(op.Left)
 				checkValue(op.Right)
+			case BoxOp:
+				if op.Kind == BoxInvalid {
+					add(fmt.Sprintf("box v%d has invalid kind", instruction.Result))
+				}
+				checkValue(op.Value)
+			case DynamicBinaryOp:
+				if op.Operator == 0 {
+					add(fmt.Sprintf("dynamic binary v%d has invalid operator", instruction.Result))
+				}
+				checkValue(op.Left)
+				checkValue(op.Right)
 			case CallOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("calls unknown function f%d", op.Callee))

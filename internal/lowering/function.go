@@ -114,7 +114,7 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if stmt.Return == nil {
 			return f.terminate(hir.ReturnTerm{})
 		}
-		value, err := f.lowerExpr(stmt.Return)
+		value, err := f.lowerExprAs(stmt.Return, f.source.ReturnType)
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if stmt.Value == nil {
 			return fmt.Errorf("variable %q has no value", stmt.Name)
 		}
-		value, err := f.lowerExpr(stmt.Value)
+		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
 		if err != nil {
 			return err
 		}

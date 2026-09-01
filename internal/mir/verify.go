@@ -121,6 +121,26 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Right); err != nil {
 					return err
 				}
+			case BoxJSValue:
+				if op.Kind != BoxJSNumber && op.Kind != BoxJSString {
+					return fmt.Errorf("JSValue box v%d has invalid kind %d", inst.Result, op.Kind)
+				}
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("JSValue box v%d must produce JSValue representation", inst.Result)
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case DynamicAddJSValue:
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("dynamic add v%d must produce JSValue representation", inst.Result)
+				}
+				if err := checkValue(op.Left); err != nil {
+					return err
+				}
+				if err := checkValue(op.Right); err != nil {
+					return err
+				}
 			case Call:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("unknown callee f%d", op.Callee)

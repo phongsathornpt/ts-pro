@@ -46,7 +46,6 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 		metrics.Values++
 		if repr.Kind == hir.ReprJSValue || repr.Kind == hir.ReprTaggedUnion {
 			metrics.DynamicValues++
-			metrics.BoxingSites++
 		} else {
 			metrics.NativeValues++
 		}
@@ -77,6 +76,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 		}
 	}
 	metrics.I32FastOps, metrics.I64FastOps = countIntegerFastOps(mirModule)
+	metrics.BoxingSites = countBoxingSites(mirModule)
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
 	return metrics
@@ -101,6 +101,20 @@ func countIntegerFastOps(module mir.Module) (i32, i64 int) {
 	return i32, i64
 }
 
+func countBoxingSites(module mir.Module) int {
+	count := 0
+	for _, fn := range module.Functions {
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				if _, ok := inst.Op.(mir.BoxJSValue); ok {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
 func countDynamicDispatch(module mir.Module) int {
 	count := 0
 	for _, fn := range module.Functions {
@@ -122,7 +136,8 @@ func countRuntimeCalls(module mir.Module) int {
 			for _, inst := range block.Instructions {
 				switch inst.Op.(type) {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
-					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew, mir.IntrinsicCall:
+					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
+					mir.BoxJSValue, mir.DynamicAddJSValue, mir.IntrinsicCall:
 					count++
 				}
 			}

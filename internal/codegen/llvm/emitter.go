@@ -37,6 +37,10 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("target triple = \"x86_64-unknown-linux-gnu\"\n\n")
 	b.WriteString("declare void @tsnative_console_log_f64(double)\n")
 	b.WriteString("declare void @tsnative_console_log_string(ptr)\n")
+	b.WriteString("declare void @tsnative_console_log_jsvalue(ptr)\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
@@ -362,6 +366,35 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		b.WriteString("\n")
 		return nil
+	case mir.BoxJSValue:
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		switch op.Kind {
+		case mir.BoxJSNumber:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_f64(double %s)\n", name, value)
+		case mir.BoxJSString:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_string(ptr %s)\n", name, value)
+		default:
+			return fmt.Errorf("unsupported JSValue box kind %d", op.Kind)
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.DynamicAddJSValue:
+		left, err := operand(values, op.Left)
+		if err != nil {
+			return err
+		}
+		right, err := operand(values, op.Right)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_add(ptr %s, ptr %s)\n", name, left, right)
+		values[inst.Result] = name
+		return nil
 	case mir.ProvenIntBinary:
 		return e.emitProvenIntBinary(b, inst, op, values)
 	case mir.FloatBinary:
@@ -540,6 +573,8 @@ func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, ca
 		fmt.Fprintf(b, "  call void @tsnative_console_log_f64(double %s)\n", arg)
 	case mir.IntrinsicConsoleLogString:
 		fmt.Fprintf(b, "  call void @tsnative_console_log_string(ptr %s)\n", arg)
+	case mir.IntrinsicConsoleLogJSValue:
+		fmt.Fprintf(b, "  call void @tsnative_console_log_jsvalue(ptr %s)\n", arg)
 	default:
 		return fmt.Errorf("unsupported intrinsic %d", call.Intrinsic)
 	}
@@ -586,10 +621,12 @@ func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.T
 
 func llvmZero(repr mir.Repr) (string, error) {
 	switch repr {
-	case mir.ReprBool, mir.ReprI32, mir.ReprI64, mir.ReprTagged, mir.ReprJSValue:
+	case mir.ReprBool, mir.ReprI32, mir.ReprI64, mir.ReprTagged:
 		return "0", nil
 	case mir.ReprF64:
 		return "0.000000e+00", nil
+	case mir.ReprJSValue:
+		return "null", nil
 	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef:
 		return "null", nil
 	default:
@@ -609,9 +646,9 @@ func llvmType(repr mir.Repr) (string, error) {
 		return "i64", nil
 	case mir.ReprF64:
 		return "double", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
 		return "ptr", nil
-	case mir.ReprTagged, mir.ReprJSValue:
+	case mir.ReprTagged:
 		return "i64", nil
 	default:
 		return "", fmt.Errorf("unsupported MIR representation %d", repr)

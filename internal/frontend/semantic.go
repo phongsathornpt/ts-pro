@@ -24,6 +24,7 @@ const (
 	IntrinsicNone IntrinsicKind = iota
 	IntrinsicConsoleLogF64
 	IntrinsicConsoleLogString
+	IntrinsicConsoleLogJSValue
 )
 
 type BinaryOperator uint8

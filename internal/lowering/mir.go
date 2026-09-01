@@ -107,6 +107,23 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			return mir.Instruction{}, err
 		}
 		result.Op = lowered
+	case hir.BoxOp:
+		kind := mir.BoxJSInvalid
+		switch op.Kind {
+		case hir.BoxNumber:
+			kind = mir.BoxJSNumber
+		case hir.BoxString:
+			kind = mir.BoxJSString
+		}
+		if kind == mir.BoxJSInvalid {
+			return mir.Instruction{}, fmt.Errorf("invalid JSValue box kind %d", op.Kind)
+		}
+		result.Op = mir.BoxJSValue{Kind: kind, Value: mir.ValueID(op.Value)}
+	case hir.DynamicBinaryOp:
+		if op.Operator != hir.BinaryAdd {
+			return mir.Instruction{}, fmt.Errorf("unsupported dynamic binary operator %d", op.Operator)
+		}
+		result.Op = mir.DynamicAddJSValue{Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
 	case hir.CallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {
@@ -176,6 +193,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			intrinsic = mir.IntrinsicConsoleLogF64
 		case hir.IntrinsicConsoleLogString:
 			intrinsic = mir.IntrinsicConsoleLogString
+		case hir.IntrinsicConsoleLogJSValue:
+			intrinsic = mir.IntrinsicConsoleLogJSValue
 		}
 		if intrinsic == mir.IntrinsicInvalid {
 			return mir.Instruction{}, fmt.Errorf("unsupported HIR intrinsic %d", op.Intrinsic)
