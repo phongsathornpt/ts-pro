@@ -4,10 +4,11 @@ interface TsnativeConsole {
 
 declare const console: TsnativeConsole;
 
-interface TsnativeTask {
+interface TsnativeTask<T = void> {
   readonly __tsnativeTaskBrand: never;
+  readonly __tsnativeTaskResultBrand?: T;
 }
 
-declare function spawn(fn: () => void): TsnativeTask;
-declare function join(task: TsnativeTask): void;
+declare function spawn<T>(fn: () => T): TsnativeTask<T>;
+declare function join<T>(task: TsnativeTask<T>): T;
 declare function yieldNow(): void;

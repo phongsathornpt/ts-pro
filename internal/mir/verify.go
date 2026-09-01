@@ -288,8 +288,8 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					}
 				}
 			case TaskJoin:
-				if inst.Repr != ReprVoid {
-					return fmt.Errorf("task join v%d must be void", inst.Result)
+				if inst.Repr != ReprVoid && inst.Repr != ReprF64 {
+					return fmt.Errorf("task join v%d has unsupported result representation %d", inst.Result, inst.Repr)
 				}
 				if err := checkValue(op.Task); err != nil {
 					return err

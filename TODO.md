@@ -75,7 +75,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
 - [x] Add compiler-known non-capturing `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM, with `TaskRef` representation, task-entry wrappers, static task metrics, native acceptance, LLVM regression, differential observable-order coverage, and full-suite validation.
 - [x] Add GC-safe captured task state with compiler-generated task environments pinned as persistent runtime roots until task release.
-- [ ] Add typed task-result storage/join ABI before allowing returning spawned closures.
+- [~] Add typed task-result storage/join ABI for returning spawned closures.
+  - [x] Unboxed `Task<number>` result slots and `join()` returning native F64 with captured-task support and differential/native regression coverage.
+  - [ ] GC-rooted reference result transfer for `Task<string>`/object/function results, then `JSValue` result specialization for dynamic tasks.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
 - [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
@@ -128,12 +130,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Finish regression/metrics coverage and commit the native `spawn`/`join`/`yieldNow` compiler-intrinsic checkpoint.
-2. Replace the global FIFO scheduler hot path with per-worker deques, work stealing, targeted wakeups, and scheduler metrics.
-3. Add GC-safe captured task state plus typed task-result storage/join ABI, then enable captured and returning spawned closures.
-4. Add typed channels with task parking, then timers/sleep and a bounded blocking-call pool.
-5. Lower Promise/async/await onto resumable task state machines; add cancellation/task groups and exception propagation without blocking scheduler workers.
-6. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
-7. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
-8. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-9. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+1. Finish GC-safe reference task results (`Task<string>` first), then object/function/JSValue result specialization.
+2. Add typed channels with task parking, starting with unboxed `channel<number>`, then reference/JSValue channel specializations.
+3. Add timers/sleep and a bounded blocking-call pool, then lower Promise/async/await onto resumable task state machines.
+4. Add cancellation/task groups, task-local context, exception propagation, and cooperative execution budgets/preemption polling.
+5. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+6. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
+7. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+8. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.

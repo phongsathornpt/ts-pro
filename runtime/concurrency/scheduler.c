@@ -159,7 +159,7 @@ static tsnative_task *take_work(tsnative_worker *worker) {
 
 static void execute_task(tsnative_task *task) {
   atomic_store_explicit(&task->status, TSNATIVE_TASK_RUNNING, memory_order_release);
-  task->entry(task->state);
+  task->entry(task->state, &task->result);
 
   pthread_mutex_lock(&scheduler.mutex);
   atomic_store_explicit(&task->status, TSNATIVE_TASK_DONE, memory_order_release);

@@ -18,6 +18,7 @@ const (
 	TypeUnion
 	TypeFunction
 	TypeTask
+	TypeParameter
 )
 
 type SemanticType struct {

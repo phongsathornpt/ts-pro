@@ -27,7 +27,7 @@ func TestNativeTaskLifecycleAndBound(t *testing.T) {
 #include <stdatomic.h>
 #include <stddef.h>
 typedef struct tsnative_task tsnative_task;
-typedef void (*tsnative_task_entry)(void *);
+typedef void (*tsnative_task_entry)(void *, void *);
 tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
 int tsnative_task_join(tsnative_task *);
 void tsnative_task_release(tsnative_task *);
@@ -38,8 +38,9 @@ unsigned long long tsnative_scheduler_spawned_tasks(void);
 unsigned long long tsnative_scheduler_completed_tasks(void);
 static atomic_int gate;
 static atomic_int done;
-static void job(void *state) {
+static void job(void *state, void *result_slot) {
   (void)state;
+  (void)result_slot;
   while (!atomic_load(&gate)) {}
   atomic_fetch_add(&done, 1);
 }
@@ -122,7 +123,7 @@ func TestNativeTaskWorkStealing(t *testing.T) {
 #include <stdatomic.h>
 #include <stdint.h>
 typedef struct tsnative_task tsnative_task;
-typedef void (*tsnative_task_entry)(void *);
+typedef void (*tsnative_task_entry)(void *, void *);
 tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
 int tsnative_task_join(tsnative_task *);
 void tsnative_task_release(tsnative_task *);
@@ -132,12 +133,14 @@ size_t tsnative_scheduler_worker_count(void);
 uint64_t tsnative_scheduler_spawned_tasks(void);
 uint64_t tsnative_scheduler_completed_tasks(void);
 static atomic_int done;
-static void leaf(void *state) {
+static void leaf(void *state, void *result_slot) {
   (void)state;
+  (void)result_slot;
   atomic_fetch_add(&done, 1);
 }
-static void root_job(void *state) {
+static void root_job(void *state, void *result_slot) {
   (void)state;
+  (void)result_slot;
   tsnative_task *children[256];
   for (int i = 0; i < 256; i++) {
     children[i] = tsnative_task_spawn(leaf, 0);

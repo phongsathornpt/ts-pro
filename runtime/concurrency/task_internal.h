@@ -12,6 +12,11 @@ struct tsnative_task {
   void *gc_root_token;
   uint64_t id;
   _Atomic int status;
+  tsnative_task_result_kind result_kind;
+  union {
+    double f64;
+    void *ref;
+  } result;
 };
 
 #endif

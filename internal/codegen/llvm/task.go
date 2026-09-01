@@ -84,10 +84,10 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 	}
 	for _, descriptor := range descriptors {
 		fn := e.functions[descriptor.Callee]
-		if fn.ReturnRepr != mir.ReprVoid || len(fn.Params) != descriptor.CaptureCount {
-			return fmt.Errorf("task target f%d must be a zero-argument source closure returning void", descriptor.Callee)
+		if (fn.ReturnRepr != mir.ReprVoid && fn.ReturnRepr != mir.ReprF64) || len(fn.Params) != descriptor.CaptureCount {
+			return fmt.Errorf("task target f%d must be a zero-argument source closure with void or f64 result", descriptor.Callee)
 		}
-		fmt.Fprintf(b, "define void @%s(ptr %%state) {\nentry:\n", taskWrapperName(descriptor.Callee))
+		fmt.Fprintf(b, "define void @%s(ptr %%state, ptr %%result_slot) {\nentry:\n", taskWrapperName(descriptor.Callee))
 		for i := 0; i < descriptor.CaptureCount; i++ {
 			typ, err := llvmType(fn.Params[i].Repr)
 			if err != nil {
@@ -96,7 +96,15 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			fmt.Fprintf(b, "  %%capture%d.ptr = getelementptr %s, ptr %%state, i32 0, i32 %d\n", i, taskEnvTypeName(descriptor.Callee), i)
 			fmt.Fprintf(b, "  %%capture%d = load %s, ptr %%capture%d.ptr\n", i, typ, i)
 		}
-		fmt.Fprintf(b, "  call void @%s(", functionName(descriptor.Callee))
+		prefix := "  "
+		if fn.ReturnRepr == mir.ReprF64 {
+			prefix = "  %result = "
+		}
+		retType, err := llvmType(fn.ReturnRepr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "%scall %s @%s(", prefix, retType, functionName(descriptor.Callee))
 		for i := 0; i < descriptor.CaptureCount; i++ {
 			if i != 0 {
 				b.WriteString(", ")
@@ -104,7 +112,11 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			typ, _ := llvmType(fn.Params[i].Repr)
 			fmt.Fprintf(b, "%s %%capture%d", typ, i)
 		}
-		b.WriteString(")\n  ret void\n}\n\n")
+		b.WriteString(")\n")
+		if fn.ReturnRepr == mir.ReprF64 {
+			b.WriteString("  store double %result, ptr %result_slot\n")
+		}
+		b.WriteString("  ret void\n}\n\n")
 	}
 	return nil
 }
@@ -134,7 +146,13 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 			fmt.Fprintf(b, "  store %s %s, ptr %s.c%d\n", typ, value, state, i)
 		}
 	}
-	fmt.Fprintf(b, "  %s = call ptr @tsnative_task_spawn_or_abort(ptr @%s, ptr %s)\n", name, taskWrapperName(op.Callee), state)
+	spawnName := "tsnative_task_spawn_or_abort"
+	if fn.ReturnRepr == mir.ReprF64 {
+		spawnName = "tsnative_task_spawn_f64_or_abort"
+	} else if fn.ReturnRepr != mir.ReprVoid {
+		return fmt.Errorf("unsupported task result representation %d", fn.ReturnRepr)
+	}
+	fmt.Fprintf(b, "  %s = call ptr @%s(ptr @%s, ptr %s)\n", name, spawnName, taskWrapperName(op.Callee), state)
 	values[inst.Result] = name
 	return nil
 }

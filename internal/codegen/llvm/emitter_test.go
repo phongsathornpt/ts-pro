@@ -177,7 +177,7 @@ func TestEmitNativeTaskIntrinsics(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"define void @tsnative_task_entry_f0(ptr %state)",
+		"define void @tsnative_task_entry_f0(ptr %state, ptr %result_slot)",
 		"call ptr @tsnative_task_spawn_or_abort(ptr @tsnative_task_entry_f0, ptr null)",
 		"call void @tsnative_task_join_release(ptr %v0)",
 		"call void @tsnative_task_yield()",
@@ -212,6 +212,32 @@ func TestEmitCapturedTaskState(t *testing.T) {
 		"store ptr %v0",
 		"call ptr @tsnative_task_spawn_or_abort(ptr @tsnative_task_entry_f0, ptr %v1.state)",
 		"load ptr, ptr %capture0.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestEmitF64TaskResult(t *testing.T) {
+	result := mir.ValueID(0)
+	module := mir.Module{Name: "task-f64", Functions: []mir.Function{
+		{ID: 0, Name: "worker", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}}}, Terminator: mir.Return{Value: &result}}}},
+		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprF64, Op: mir.TaskJoin{Task: 0}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	entry := mir.FunctionID(1)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"call ptr @tsnative_task_spawn_f64_or_abort",
+		"store double %result, ptr %result_slot",
+		"call double @tsnative_task_join_f64_release",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

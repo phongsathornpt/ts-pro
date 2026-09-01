@@ -94,6 +94,12 @@ func (l *moduleLowerer) lowerTypes() error {
 				}
 				semantic.Members = append(semantic.Members, mapped)
 			}
+		case frontend.TypeTask:
+			mapped, ok := l.types[typ.ReturnType]
+			if !ok {
+				return fmt.Errorf("task type %q references unavailable result t%d", typ.Name, typ.ReturnType)
+			}
+			semantic.ReturnType = mapped
 		case frontend.TypeFunction:
 			for _, param := range typ.Params {
 				mapped, ok := l.types[param]
@@ -130,7 +136,7 @@ func (l *moduleLowerer) lowerShapes() error {
 func isScalarType(kind frontend.TypeKind) bool {
 	switch kind {
 	case frontend.TypeAny, frontend.TypeUnknown, frontend.TypeNever, frontend.TypeVoid,
-		frontend.TypeUndefined, frontend.TypeNull, frontend.TypeBoolean, frontend.TypeNumber, frontend.TypeString, frontend.TypeTask:
+		frontend.TypeUndefined, frontend.TypeNull, frontend.TypeBoolean, frontend.TypeNumber, frontend.TypeString:
 		return true
 	default:
 		return false
@@ -167,6 +173,8 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypeFunction, nil
 	case frontend.TypeTask:
 		return hir.TypeTask, nil
+	case frontend.TypeParameter:
+		return hir.TypeParameter, nil
 	default:
 		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
 	}

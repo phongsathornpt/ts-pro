@@ -1022,6 +1022,22 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 		return id, nil
 	}
 	typ := Type{Kind: kind, Name: text}
+	if kind == TypeTask {
+		resultText := "void"
+		if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
+			resultText = strings.TrimSpace(text[len("TsnativeTask<") : len(text)-1])
+		}
+		switch resultText {
+		case "void":
+			typ.ReturnType = e.ensureSemanticType(TypeVoid, "void")
+		case "number":
+			typ.ReturnType = e.ensureSemanticType(TypeNumber, "number")
+		case "T":
+			typ.ReturnType = e.ensureSemanticType(TypeParameter, "T")
+		default:
+			return 0, fmt.Errorf("native task result type %q is not supported yet", resultText)
+		}
+	}
 	if kind == TypeArray {
 		base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
 		if base != "number[]" {
@@ -1148,6 +1164,9 @@ func classifyType(text string) TypeKind {
 	case "string":
 		return TypeString
 	case "TsnativeTask":
+		return TypeTask
+	}
+	if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 		return TypeTask
 	}
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
