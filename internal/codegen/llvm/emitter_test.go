@@ -264,6 +264,8 @@ func TestEmitStringTaskResult(t *testing.T) {
 		"call ptr @tsnative_task_spawn_ref_or_abort",
 		"store ptr %result, ptr %result_slot",
 		"call ptr @tsnative_task_join_ref_release",
+		"call void @tsnative_gc_handoff_begin()",
+		"call void @tsnative_gc_handoff_end()",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

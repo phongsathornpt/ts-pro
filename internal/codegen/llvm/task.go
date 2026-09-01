@@ -97,8 +97,11 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			fmt.Fprintf(b, "  %%capture%d = load %s, ptr %%capture%d.ptr\n", i, typ, i)
 		}
 		prefix := "  "
-		if fn.ReturnRepr == mir.ReprF64 || fn.ReturnRepr == mir.ReprStringRef {
+		if fn.ReturnRepr == mir.ReprF64 || isTaskReferenceResult(fn.ReturnRepr) {
 			prefix = "  %result = "
+		}
+		if isTaskReferenceResult(fn.ReturnRepr) {
+			b.WriteString("  call void @tsnative_gc_handoff_begin()\n")
 		}
 		retType, err := llvmType(fn.ReturnRepr)
 		if err != nil {
@@ -115,8 +118,9 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 		b.WriteString(")\n")
 		if fn.ReturnRepr == mir.ReprF64 {
 			b.WriteString("  store double %result, ptr %result_slot\n")
-		} else if fn.ReturnRepr == mir.ReprStringRef {
+		} else if isTaskReferenceResult(fn.ReturnRepr) {
 			b.WriteString("  store ptr %result, ptr %result_slot\n")
+			b.WriteString("  call void @tsnative_gc_handoff_end()\n")
 		}
 		b.WriteString("  ret void\n}\n\n")
 	}
@@ -159,4 +163,13 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 	fmt.Fprintf(b, "  %s = call ptr @%s(ptr @%s, ptr %s)\n", name, spawnName, taskWrapperName(op.Callee), state)
 	values[inst.Result] = name
 	return nil
+}
+
+func isTaskReferenceResult(repr mir.Repr) bool {
+	switch repr {
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+		return true
+	default:
+		return false
+	}
 }

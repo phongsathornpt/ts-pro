@@ -60,6 +60,8 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
+	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")
+	b.WriteString("declare void @tsnative_gc_handoff_end()\n")
 	b.WriteString("declare void @tsnative_gc_safepoint()\n\n")
 	if err := e.emitClosureTypes(&b); err != nil {
 		return "", err

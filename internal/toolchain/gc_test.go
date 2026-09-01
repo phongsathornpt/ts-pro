@@ -135,3 +135,52 @@ int main(void) {
 		t.Fatalf("run concurrent GC runtime test: %v: %s", err, output)
 	}
 }
+
+func TestRuntimeGCHandoffDefersCollection(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "gc_handoff.c")
+	header := filepath.Join(root, "runtime", "core", "heap.h")
+	program := fmt.Sprintf(`#include %q
+#include <assert.h>
+int main(void) {
+  (void)tsnative_heap_alloc(32);
+  assert(tsnative_heap_live_allocations() == 1);
+  tsnative_gc_handoff_begin();
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 1);
+  tsnative_gc_handoff_end();
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
+  tsnative_heap_shutdown();
+  return 0;
+}
+`, header)
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	programObj := filepath.Join(dir, "handoff.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "gc-handoff-test")
+	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{programObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {
+		t.Fatalf("run GC handoff test: %v: %s", err, output)
+	}
+}

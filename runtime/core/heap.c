@@ -28,6 +28,7 @@ static size_t tsnative_heap_allocations;
 static size_t tsnative_collection_count;
 static size_t tsnative_gc_threshold = 64 * 1024;
 static size_t tsnative_active_root_threads;
+static size_t tsnative_gc_handoffs;
 static _Thread_local tsnative_gc_frame *tsnative_local_roots;
 static _Thread_local size_t tsnative_local_root_depth;
 
@@ -122,6 +123,23 @@ void tsnative_gc_root_unregister(void *raw) {
   free(frame);
 }
 
+void tsnative_gc_handoff_begin(void) {
+  pthread_mutex_lock(&tsnative_heap_mutex);
+  tsnative_gc_handoffs++;
+  pthread_mutex_unlock(&tsnative_heap_mutex);
+}
+
+void tsnative_gc_handoff_end(void) {
+  pthread_mutex_lock(&tsnative_heap_mutex);
+  if (tsnative_gc_handoffs == 0) {
+    pthread_mutex_unlock(&tsnative_heap_mutex);
+    fputs("tsnative: invalid GC handoff discipline\n", stderr);
+    abort();
+  }
+  tsnative_gc_handoffs--;
+  pthread_mutex_unlock(&tsnative_heap_mutex);
+}
+
 static tsnative_heap_block *tsnative_find_block_locked(void *candidate) {
   for (tsnative_heap_block *block = tsnative_heap_head; block; block = block->next) {
     if ((void *)(block + 1) == candidate) return block;
@@ -165,13 +183,13 @@ static void tsnative_gc_collect_locked(void) {
 
 void tsnative_gc_collect(void) {
   pthread_mutex_lock(&tsnative_heap_mutex);
-  if (tsnative_active_root_threads <= 1) tsnative_gc_collect_locked();
+  if (tsnative_active_root_threads <= 1 && tsnative_gc_handoffs == 0) tsnative_gc_collect_locked();
   pthread_mutex_unlock(&tsnative_heap_mutex);
 }
 
 void tsnative_gc_safepoint(void) {
   pthread_mutex_lock(&tsnative_heap_mutex);
-  if (tsnative_heap_bytes >= tsnative_gc_threshold && tsnative_active_root_threads <= 1) {
+  if (tsnative_heap_bytes >= tsnative_gc_threshold && tsnative_active_root_threads <= 1 && tsnative_gc_handoffs == 0) {
     tsnative_gc_collect_locked();
   }
   pthread_mutex_unlock(&tsnative_heap_mutex);
@@ -194,6 +212,7 @@ void tsnative_heap_shutdown(void) {
   tsnative_heap_bytes = 0;
   tsnative_heap_allocations = 0;
   tsnative_gc_threshold = 64 * 1024;
+  tsnative_gc_handoffs = 0;
   pthread_mutex_unlock(&tsnative_heap_mutex);
 }
 
