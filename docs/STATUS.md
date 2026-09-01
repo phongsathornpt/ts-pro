@@ -56,6 +56,6 @@ bounded worker scheduler
 
 ## Remaining sequencing rule
 
-Scheduler/GC lifecycle integration is now in place: task-owned reference state and queued reference-channel values remain explicitly rooted, heap-threshold collection requests are deferred safely across active foreign root stacks, and scheduler return/wait/park/budget paths retry GC at safepoints. The next concurrency/runtime work is allocator locality: per-worker allocation caches/nurseries first, then Green-Tea-style local mark-page queues after size-class/page metadata is available.
+Scheduler/GC lifecycle integration is now in place: task-owned reference state and queued reference-channel values remain explicitly rooted, heap-threshold collection requests are deferred safely across active foreign root stacks, and scheduler return/wait/park/budget paths retry GC at safepoints. Allocator locality is now underway: small native allocations use worker-owned size-class spans with bounded reusable-span caching, zeroed slot reuse, and finalizer-safe recycling. The next step is bump-pointer nursery metadata and remote ownership transfer accounting before Green-Tea-style local mark-page queues.
 
 Every milestone must pass `go test ./...`, native acceptance where applicable, and `git diff --check` before commit.

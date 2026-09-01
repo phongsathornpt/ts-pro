@@ -182,9 +182,10 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Heap-threshold GC requests defer while foreign native root stacks are active and retry at task-return, wait, park, and execution-budget safepoints.
     - Idle-worker GC assistance remains an optional later optimization; correctness no longer depends on it.
 
-14. `runtime: add per-worker allocator caches`
-    - Task/continuation/closure fast allocations become worker-local.
-    - Track remote frees or ownership transfer explicitly.
+14. `runtime: add per-worker allocator caches` 🟡
+    - Small allocations up to 2 KiB now use worker-owned size-class spans with zeroed slot reuse and bounded reusable-span caching.
+    - Finalizer-bearing slots remain pinned until finalizer completion; heap shutdown reclaims cached spans deterministically.
+    - Bump-pointer nursery metadata and explicit remote ownership transfer accounting remain.
 
 15. `runtime: add Green-Tea-style local mark-page work`
     - Page/span marking queues per worker after size-class spans and precise pointer metadata exist.
