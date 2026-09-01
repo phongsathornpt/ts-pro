@@ -80,6 +80,7 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	obj := filepath.Join(dir, "fib.o")
 	runtimeObj := filepath.Join(dir, "runtime.o")
 	heapObj := filepath.Join(dir, "heap.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
 	bin := filepath.Join(dir, "fib")
 	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
@@ -93,7 +94,10 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.Link(ctx, []string{obj, runtimeObj, heapObj}, bin); err != nil {
+	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tc.Link(ctx, []string{obj, runtimeObj, heapObj, schedulerObj}, bin); err != nil {
 		t.Fatal(err)
 	}
 	output, err := exec.CommandContext(ctx, bin).CombinedOutput()

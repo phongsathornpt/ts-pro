@@ -50,6 +50,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n")
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
+	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_safepoint()\n\n")
@@ -98,7 +99,7 @@ func Emit(module mir.Module) (string, error) {
 		return "", err
 	}
 	if module.Entry != nil {
-		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  call void @tsnative_heap_shutdown()\n  ret i32 0\n}\n", functionName(*module.Entry))
+		fmt.Fprintf(&b, "define i32 @main() {\nentry:\n  call void @%s()\n  call void @tsnative_scheduler_shutdown()\n  call void @tsnative_heap_shutdown()\n  ret i32 0\n}\n", functionName(*module.Entry))
 	}
 	return b.String(), nil
 }

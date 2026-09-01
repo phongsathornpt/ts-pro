@@ -71,7 +71,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Native concurrency management
 
-- [ ] Add bounded native scheduler core with `TSNATIVE_WORKERS` and deterministic shutdown.
+- [x] Add bounded lazy native scheduler core with `TSNATIVE_WORKERS`, parked idle workers, and deterministic restartable shutdown.
 - [ ] Add lightweight stackless task lifecycle and bounded task accounting.
 - [ ] Add compiler-known `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR.
 - [ ] Add per-worker deques, work stealing, targeted worker wakeups, and scheduler metrics.

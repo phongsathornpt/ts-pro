@@ -37,7 +37,7 @@ func (c *Clang) CompileC(ctx context.Context, input, output string, opt string) 
 
 func (c *Clang) Link(ctx context.Context, objects []string, output string) error {
 	args := append([]string{}, objects...)
-	args = append(args, "-o", output)
+	args = append(args, "-pthread", "-o", output)
 	return c.run(ctx, args...)
 }
 
