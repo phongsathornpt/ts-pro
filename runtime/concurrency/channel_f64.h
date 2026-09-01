@@ -6,6 +6,8 @@
 typedef struct tsnative_channel_f64 tsnative_channel_f64;
 
 tsnative_channel_f64 *tsnative_channel_f64_new(size_t capacity);
+int tsnative_channel_f64_try_send(tsnative_channel_f64 *channel, double value);
+int tsnative_channel_f64_try_recv(tsnative_channel_f64 *channel, double *out);
 void tsnative_channel_f64_send(tsnative_channel_f64 *channel, double value);
 double tsnative_channel_f64_recv(tsnative_channel_f64 *channel);
 

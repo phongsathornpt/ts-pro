@@ -36,6 +36,54 @@ tsnative_channel_f64 *tsnative_channel_f64_new(size_t capacity) {
   return channel;
 }
 
+int tsnative_channel_f64_try_send(tsnative_channel_f64 *channel, double value) {
+  if (!channel) return -1;
+  pthread_mutex_lock(&channel->mutex);
+  int result = 0;
+  if (channel->capacity == 0) {
+    if (channel->has_value) {
+      result = 0;
+    } else {
+      channel->slot = value;
+      channel->has_value = 1;
+      pthread_cond_broadcast(&channel->changed);
+      result = 1;
+    }
+  } else if (channel->count == channel->capacity) {
+    result = 0;
+  } else {
+    channel->buffer[channel->tail] = value;
+    channel->tail = (channel->tail + 1) % channel->capacity;
+    channel->count++;
+    pthread_cond_broadcast(&channel->changed);
+    result = 1;
+  }
+  pthread_mutex_unlock(&channel->mutex);
+  return result;
+}
+
+int tsnative_channel_f64_try_recv(tsnative_channel_f64 *channel, double *out) {
+  if (!channel || !out) return -1;
+  pthread_mutex_lock(&channel->mutex);
+  int result = 0;
+  if (channel->capacity == 0) {
+    if (channel->has_value) {
+      *out = channel->slot;
+      channel->has_value = 0;
+      pthread_cond_broadcast(&channel->changed);
+      result = 1;
+    }
+  } else if (channel->count != 0) {
+    *out = channel->buffer[channel->head];
+    channel->head = (channel->head + 1) % channel->capacity;
+    channel->count--;
+    pthread_cond_broadcast(&channel->changed);
+    result = 1;
+  }
+  pthread_mutex_unlock(&channel->mutex);
+  return result;
+}
+
 void tsnative_channel_f64_send(tsnative_channel_f64 *channel, double value) {
   if (!channel) abort();
   pthread_mutex_lock(&channel->mutex);

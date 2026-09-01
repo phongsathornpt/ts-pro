@@ -85,3 +85,71 @@ int main(void) {
 		t.Fatalf("unexpected output: %q", output)
 	}
 }
+
+func TestNativeF64ChannelTryPrimitives(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "channel_try_test.c")
+	program := `#include <assert.h>
+#include <stddef.h>
+typedef struct tsnative_channel_f64 tsnative_channel_f64;
+tsnative_channel_f64 *tsnative_channel_f64_new(size_t);
+int tsnative_channel_f64_try_send(tsnative_channel_f64 *, double);
+int tsnative_channel_f64_try_recv(tsnative_channel_f64 *, double *);
+void tsnative_heap_shutdown(void);
+int main(void) {
+  double out = -1;
+  tsnative_channel_f64 *buffered = tsnative_channel_f64_new(2);
+  assert(tsnative_channel_f64_try_recv(buffered, &out) == 0);
+  assert(tsnative_channel_f64_try_send(buffered, 10) == 1);
+  assert(tsnative_channel_f64_try_send(buffered, 20) == 1);
+  assert(tsnative_channel_f64_try_send(buffered, 30) == 0);
+  assert(tsnative_channel_f64_try_recv(buffered, &out) == 1 && out == 10);
+  assert(tsnative_channel_f64_try_recv(buffered, &out) == 1 && out == 20);
+  assert(tsnative_channel_f64_try_recv(buffered, &out) == 0);
+  tsnative_channel_f64 *unbuffered = tsnative_channel_f64_new(0);
+  assert(tsnative_channel_f64_try_recv(unbuffered, &out) == 0);
+  assert(tsnative_channel_f64_try_send(unbuffered, 42) == 1);
+  assert(tsnative_channel_f64_try_send(unbuffered, 43) == 0);
+  assert(tsnative_channel_f64_try_recv(unbuffered, &out) == 1 && out == 42);
+  assert(tsnative_channel_f64_try_recv(unbuffered, &out) == 0);
+  tsnative_heap_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	channelObj := filepath.Join(dir, "channel.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "channel_try_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, channelObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {
+		t.Fatalf("run channel try test: %v: %s", err, output)
+	}
+}
