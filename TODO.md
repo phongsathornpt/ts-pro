@@ -114,7 +114,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Generic resumable native-op steps cover object/array allocation and mutation, field access, direct/virtual/closure calls, intrinsics, task yield, and nonblocking channel operations using typed spills and allocation safepoints.
       - [~] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
         - [x] Spill delayed nested `TaskRef` handles across suspension; typed joins await the existing handle and void joins use completion parking followed by explicit release, including worker=1 regression coverage.
-        - [ ] Remove remaining cooperative channel/sleep fallback shapes and expand richer reference Phi/state stress coverage.
+        - [x] Stress StringRef/ObjectRef/JSValue state across branch/loop Phi merges and suspension on a single worker, including GC-managed dynamic values.
+        - [ ] Remove remaining cooperative channel/sleep fallback shapes.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -178,7 +179,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Remove remaining cooperative channel/sleep fallback shapes and expand reference Phi/state stress; delayed nested TaskRef spawn/join patterns are stackless now.
+1. Remove remaining cooperative channel/sleep fallback shapes; delayed TaskRef joins and StringRef/ObjectRef/JSValue Phi-state stress are covered now.
 2. Add reference/JSValue typed channel specializations and broader channel/select semantics.
 3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
 4. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.
