@@ -87,7 +87,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
-	b.WriteString("declare void @tsnative_task_yield()\n")
+	b.WriteString("declare i32 @tsnative_task_yield_task()\ndeclare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")

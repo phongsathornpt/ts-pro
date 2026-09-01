@@ -74,6 +74,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add bounded lazy native scheduler core with `TSNATIVE_WORKERS`, parked idle workers, and deterministic restartable shutdown.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
 - [x] Add compiler-known non-capturing `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM, with `TaskRef` representation, task-entry wrappers, static task metrics, native acceptance, LLVM regression, differential observable-order coverage, and full-suite validation.
+  - [x] Make spawned-task `yieldNow()` a true stackless logical-task yield using park + pending wake + requeue rather than only `sched_yield`, with deterministic worker=1 interleaving coverage.
 - [x] Add GC-safe captured task state with compiler-generated task environments pinned as persistent runtime roots until task release.
 - [x] Add typed task-result storage/join ABI for returning spawned closures across currently proven native representations.
   - [x] Unboxed `Task<number>` result slots and `join()` returning native F64 with captured-task support and differential/native regression coverage.
@@ -122,7 +123,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
-- [ ] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
+- [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
+  - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
+  - [ ] Inject bounded execution-budget polls at proven loop backedges/function safepoints and requeue when the budget expires.
 - [ ] Stress-test 1/100/10k/100k tasks, CPU fan-out, channel contention, cancellation, GC churn, and blocking calls.
 
 ## Remaining native language/runtime coverage

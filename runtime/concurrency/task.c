@@ -214,6 +214,17 @@ tsnative_task_status tsnative_task_get_status(tsnative_task *task) {
   return tsnative_scheduler_task_status(task);
 }
 
+int tsnative_task_yield_task(void) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) return -1;
+  if (tsnative_scheduler_prepare_park() != 0) return -1;
+  if (tsnative_scheduler_wake(task) != 0) {
+    tsnative_scheduler_cancel_park();
+    return -1;
+  }
+  return 0;
+}
+
 void tsnative_task_yield(void) {
   sched_yield();
 }

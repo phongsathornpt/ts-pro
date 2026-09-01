@@ -18,6 +18,7 @@ const (
 	taskSuspendSendRef
 	taskSuspendRecvRef
 	taskSuspendSleep
+	taskSuspendYield
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
 	taskSuspendAwaitRef
@@ -320,6 +321,9 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				hasSuspend = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSleep, Duration: op.Duration})
+			case mir.TaskYield:
+				hasSuspend = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendYield})
 			case mir.Phi:
 				if inst.Repr == mir.ReprVoid || inst.Repr == mir.ReprInvalid {
 					return nil
@@ -683,6 +687,8 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 				return fmt.Errorf("task continuation sleep duration must be F64")
 			}
 			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_sleep_task(double %s)\n", i, duration)
+		case taskSuspendYield:
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_yield_task()\n", i)
 		case taskSuspendSendF64:
 			channel, repr, err := continuationOperand(b, fn, descriptor, step.Channel, fmt.Sprintf("c%d", i))
 			if err != nil {
