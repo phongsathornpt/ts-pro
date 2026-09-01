@@ -174,7 +174,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Add checked conversions and dynamic operator/property slow paths.
   - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
   - [x] Primitive dynamic `-`, `*`, `/`, relational comparison, loose equality, and strict equality with TypeScript-correct result representations and JS-style primitive coercion; object/function reference equality is supported without ToPrimitive coercion.
-  - [ ] Dynamic property get/set, calls, object/function ToPrimitive coercion, and checked unboxing/conversions.
+  - [~] Dynamic property get/set, calls, object/function ToPrimitive coercion, and checked unboxing/conversions.
+    - [x] Checked JSValue unboxing to native number/string/boolean/number[] with distinct array tagging, MIR/LLVM/runtime ABI coverage, and differential native tests.
+    - [ ] Dynamic object/property get/set and calls, plus object/function ToPrimitive coercion.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.

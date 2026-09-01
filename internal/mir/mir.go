@@ -140,11 +140,27 @@ const (
 	BoxJSString
 	BoxJSBoolean
 	BoxJSObject
+	BoxJSArray
 	BoxJSFunction
 )
 
 type BoxJSValue struct {
 	Kind  BoxJSKind
+	Value ValueID
+}
+
+type UnboxJSKind uint8
+
+const (
+	UnboxJSInvalid UnboxJSKind = iota
+	UnboxJSNumber
+	UnboxJSString
+	UnboxJSBoolean
+	UnboxJSArray
+)
+
+type UnboxJSValue struct {
+	Kind  UnboxJSKind
 	Value ValueID
 }
 
@@ -287,6 +303,7 @@ func (ChannelSendF64) isOperation()       {}
 func (ChannelRecvF64) isOperation()       {}
 func (Sleep) isOperation()                {}
 func (BoxJSValue) isOperation()           {}
+func (UnboxJSValue) isOperation()         {}
 func (DynamicAddJSValue) isOperation()    {}
 func (DynamicBinaryJSValue) isOperation() {}
 

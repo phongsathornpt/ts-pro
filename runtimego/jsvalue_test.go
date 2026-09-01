@@ -99,3 +99,30 @@ func TestNativeJSValueDynamicPrimitiveOperators(t *testing.T) {
 		t.Fatal("same object payload should be strictly equal")
 	}
 }
+
+func TestNativeJSValueCheckedUnboxing(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	number := tsnative_jsvalue_box_f64(42)
+	if got := float64(tsnative_jsvalue_unbox_f64(number)); got != 42 {
+		t.Fatalf("number unbox = %v", got)
+	}
+	stringRef := nativeJSStringLiteral("checked")
+	stringValue := tsnative_jsvalue_box_string(stringRef)
+	if got := tsnative_jsvalue_unbox_string(stringValue); got != stringRef {
+		t.Fatal("string unbox did not preserve native reference")
+	}
+	truth := tsnative_jsvalue_box_bool(1)
+	if tsnative_jsvalue_unbox_bool(truth) == 0 {
+		t.Fatal("boolean unbox = false; want true")
+	}
+	array := tsnative_heap_alloc(24)
+	arrayValue := tsnative_jsvalue_box_array(array)
+	if (*nativeJSValue)(arrayValue).tag != nativeJSTagArray {
+		t.Fatal("array JSValue tag mismatch")
+	}
+	if got := tsnative_jsvalue_unbox_array(arrayValue); got != array {
+		t.Fatal("array unbox did not preserve native reference")
+	}
+}

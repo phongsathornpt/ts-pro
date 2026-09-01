@@ -124,6 +124,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			kind = mir.BoxJSBoolean
 		case hir.BoxObject:
 			kind = mir.BoxJSObject
+		case hir.BoxArray:
+			kind = mir.BoxJSArray
 		case hir.BoxFunction:
 			kind = mir.BoxJSFunction
 		}
@@ -131,6 +133,22 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			return mir.Instruction{}, fmt.Errorf("invalid JSValue box kind %d", op.Kind)
 		}
 		result.Op = mir.BoxJSValue{Kind: kind, Value: mir.ValueID(op.Value)}
+	case hir.UnboxOp:
+		kind := mir.UnboxJSInvalid
+		switch op.Kind {
+		case hir.UnboxNumber:
+			kind = mir.UnboxJSNumber
+		case hir.UnboxString:
+			kind = mir.UnboxJSString
+		case hir.UnboxBoolean:
+			kind = mir.UnboxJSBoolean
+		case hir.UnboxArray:
+			kind = mir.UnboxJSArray
+		}
+		if kind == mir.UnboxJSInvalid {
+			return mir.Instruction{}, fmt.Errorf("invalid JSValue unbox kind %d", op.Kind)
+		}
+		result.Op = mir.UnboxJSValue{Kind: kind, Value: mir.ValueID(op.Value)}
 	case hir.DynamicBinaryOp:
 		if op.Operator == hir.BinaryAdd {
 			result.Op = mir.DynamicAddJSValue{Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}

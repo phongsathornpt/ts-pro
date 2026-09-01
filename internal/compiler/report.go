@@ -203,7 +203,7 @@ func countRuntimeCalls(module mir.Module) int {
 				switch inst.Op.(type) {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
-					mir.BoxJSValue, mir.DynamicAddJSValue, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
+					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
 					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.Sleep:
 					count++
 				}

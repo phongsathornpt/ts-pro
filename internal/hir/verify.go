@@ -169,6 +169,11 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 					add(fmt.Sprintf("box v%d has invalid kind", instruction.Result))
 				}
 				checkValue(op.Value)
+			case UnboxOp:
+				if op.Kind == UnboxInvalid {
+					add(fmt.Sprintf("unbox v%d has invalid kind", instruction.Result))
+				}
+				checkValue(op.Value)
 			case DynamicBinaryOp:
 				if op.Operator == 0 {
 					add(fmt.Sprintf("dynamic binary v%d has invalid operator", instruction.Result))

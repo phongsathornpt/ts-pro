@@ -851,3 +851,30 @@ func TestBuildNativeAsyncDynamicOperatorSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeDynamicCheckedUnboxing(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-unbox")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_unbox.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.BoxingSites != 4 {
+		t.Fatalf("boxing sites = %d; want 4", result.Metrics.BoxingSites)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic checked unboxing: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42\nunboxed\n42\n42" {
+		t.Fatalf("output = %q", got)
+	}
+}

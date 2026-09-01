@@ -61,11 +61,27 @@ const (
 	BoxString
 	BoxBoolean
 	BoxObject
+	BoxArray
 	BoxFunction
 )
 
 type BoxOp struct {
 	Kind  BoxKind
+	Value ValueID
+}
+
+type UnboxKind uint8
+
+const (
+	UnboxInvalid UnboxKind = iota
+	UnboxNumber
+	UnboxString
+	UnboxBoolean
+	UnboxArray
+)
+
+type UnboxOp struct {
+	Kind  UnboxKind
 	Value ValueID
 }
 
@@ -157,6 +173,7 @@ func (ConstOp) isOperation()            {}
 func (UnaryExpr) isOperation()          {}
 func (BinaryExpr) isOperation()         {}
 func (BoxOp) isOperation()              {}
+func (UnboxOp) isOperation()            {}
 func (DynamicBinaryOp) isOperation()    {}
 func (CallOp) isOperation()             {}
 func (DispatchCallOp) isOperation()     {}

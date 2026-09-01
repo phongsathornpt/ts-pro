@@ -23,6 +23,7 @@ const (
 	nativeJSTagUndefined uint32 = 5
 	nativeJSTagObject    uint32 = 6
 	nativeJSTagFunction  uint32 = 7
+	nativeJSTagArray     uint32 = 8
 )
 
 type nativeJSValue struct {
@@ -86,6 +87,49 @@ func tsnative_jsvalue_box_function(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagFunction)
 	value.payload = uint64(uintptr(raw))
 	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_box_array
+func tsnative_jsvalue_box_array(raw unsafe.Pointer) unsafe.Pointer {
+	value := newNativeJSValue(nativeJSTagArray)
+	value.payload = uint64(uintptr(raw))
+	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_unbox_f64
+func tsnative_jsvalue_unbox_f64(raw unsafe.Pointer) C.double {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagNumber {
+		C.abort()
+	}
+	return C.double(nativeJSNumber(value))
+}
+
+//export tsnative_jsvalue_unbox_string
+func tsnative_jsvalue_unbox_string(raw unsafe.Pointer) unsafe.Pointer {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagString {
+		C.abort()
+	}
+	return nativeJSRef(value)
+}
+
+//export tsnative_jsvalue_unbox_bool
+func tsnative_jsvalue_unbox_bool(raw unsafe.Pointer) C.uint8_t {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagBoolean {
+		C.abort()
+	}
+	return nativeJSBoolResult(nativeJSBool(value))
+}
+
+//export tsnative_jsvalue_unbox_array
+func tsnative_jsvalue_unbox_array(raw unsafe.Pointer) unsafe.Pointer {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagArray {
+		C.abort()
+	}
+	return nativeJSRef(value)
 }
 
 //export tsnative_jsvalue_null
@@ -256,7 +300,7 @@ func nativeJSStrictEqual(left, right *nativeJSValue) bool {
 		return nativeJSBool(left) == nativeJSBool(right)
 	case nativeJSTagNull, nativeJSTagUndefined:
 		return true
-	case nativeJSTagObject, nativeJSTagFunction:
+	case nativeJSTagObject, nativeJSTagArray, nativeJSTagFunction:
 		return nativeJSRef(left) == nativeJSRef(right)
 	default:
 		return false
@@ -281,7 +325,7 @@ func nativeJSEqualNumber(number float64, other *nativeJSValue) bool {
 		return number == 0
 	case nativeJSTagNull, nativeJSTagUndefined:
 		return false
-	case nativeJSTagObject, nativeJSTagFunction:
+	case nativeJSTagObject, nativeJSTagArray, nativeJSTagFunction:
 		C.abort()
 	}
 	return false
@@ -320,7 +364,7 @@ func nativeJSLooseEqual(left, right *nativeJSValue) bool {
 	if left.tag == nativeJSTagString && right.tag == nativeJSTagString {
 		return nativeJSStrictEqual(left, right)
 	}
-	if left.tag == nativeJSTagObject || left.tag == nativeJSTagFunction || right.tag == nativeJSTagObject || right.tag == nativeJSTagFunction {
+	if left.tag == nativeJSTagObject || left.tag == nativeJSTagArray || left.tag == nativeJSTagFunction || right.tag == nativeJSTagObject || right.tag == nativeJSTagArray || right.tag == nativeJSTagFunction {
 		C.abort()
 	}
 	return false

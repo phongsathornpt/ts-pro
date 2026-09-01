@@ -39,7 +39,8 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_console_log_string(ptr)\n")
 	b.WriteString("declare void @tsnative_console_log_jsvalue(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
-	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_box_object(ptr)\ndeclare ptr @tsnative_jsvalue_box_function(ptr)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
+	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_box_object(ptr)\ndeclare ptr @tsnative_jsvalue_box_array(ptr)\ndeclare ptr @tsnative_jsvalue_box_function(ptr)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
+	b.WriteString("declare double @tsnative_jsvalue_unbox_f64(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_string(ptr)\ndeclare i8 @tsnative_jsvalue_unbox_bool(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_array(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_jsvalue_sub(ptr, ptr)\ndeclare double @tsnative_jsvalue_mul(ptr, ptr)\ndeclare double @tsnative_jsvalue_div(ptr, ptr)\n")
 	b.WriteString("declare i8 @tsnative_jsvalue_lt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_le(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_gt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_ge(ptr, ptr)\n")
@@ -520,10 +521,33 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_bool(i8 %s.bool)\n", name, name)
 		case mir.BoxJSObject:
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_object(ptr %s)\n", name, value)
+		case mir.BoxJSArray:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_array(ptr %s)\n", name, value)
 		case mir.BoxJSFunction:
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_function(ptr %s)\n", name, value)
 		default:
 			return fmt.Errorf("unsupported JSValue box kind %d", op.Kind)
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.UnboxJSValue:
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		switch op.Kind {
+		case mir.UnboxJSNumber:
+			fmt.Fprintf(b, "  %s = call double @tsnative_jsvalue_unbox_f64(ptr %s)\n", name, value)
+		case mir.UnboxJSString:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_string(ptr %s)\n", name, value)
+		case mir.UnboxJSBoolean:
+			fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_jsvalue_unbox_bool(ptr %s)\n", name, value)
+			fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
+		case mir.UnboxJSArray:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_array(ptr %s)\n", name, value)
+		default:
+			return fmt.Errorf("unsupported JSValue unbox kind %d", op.Kind)
 		}
 		values[inst.Result] = name
 		return nil

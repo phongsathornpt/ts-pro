@@ -126,11 +126,29 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return err
 				}
 			case BoxJSValue:
-				if op.Kind != BoxJSNumber && op.Kind != BoxJSString && op.Kind != BoxJSBoolean && op.Kind != BoxJSObject && op.Kind != BoxJSFunction {
+				if op.Kind != BoxJSNumber && op.Kind != BoxJSString && op.Kind != BoxJSBoolean && op.Kind != BoxJSObject && op.Kind != BoxJSArray && op.Kind != BoxJSFunction {
 					return fmt.Errorf("JSValue box v%d has invalid kind %d", inst.Result, op.Kind)
 				}
 				if inst.Repr != ReprJSValue {
 					return fmt.Errorf("JSValue box v%d must produce JSValue representation", inst.Result)
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case UnboxJSValue:
+				want := ReprInvalid
+				switch op.Kind {
+				case UnboxJSNumber:
+					want = ReprF64
+				case UnboxJSString:
+					want = ReprStringRef
+				case UnboxJSBoolean:
+					want = ReprBool
+				case UnboxJSArray:
+					want = ReprArrayRef
+				}
+				if want == ReprInvalid || inst.Repr != want {
+					return fmt.Errorf("JSValue unbox v%d has invalid kind/repr %d/%d", inst.Result, op.Kind, inst.Repr)
 				}
 				if err := checkValue(op.Value); err != nil {
 					return err
