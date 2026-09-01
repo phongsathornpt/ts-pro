@@ -14,6 +14,26 @@ type taskDescriptor struct {
 	Continuation *taskContinuation
 }
 
+func taskTargetHasSuspension(fn mir.Function) bool {
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			switch inst.Op.(type) {
+			case mir.TaskJoin, mir.ChannelSendF64, mir.ChannelRecvF64, mir.Sleep:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func taskContinuationFor(fn mir.Function) (*taskContinuation, error) {
+	continuation := analyzeTaskContinuation(fn)
+	if taskTargetHasSuspension(fn) && continuation == nil {
+		return nil, fmt.Errorf("task target %s contains a blocking operation that could not be lowered to a resumable continuation", fn.Name)
+	}
+	return continuation, nil
+}
+
 func (e *emitter) taskDescriptors() ([]taskDescriptor, error) {
 	byCallee := map[mir.FunctionID]taskDescriptor{}
 	for _, fn := range e.module.Functions {
@@ -30,7 +50,11 @@ func (e *emitter) taskDescriptors() ([]taskDescriptor, error) {
 				if len(spawn.Captures) > len(target.Params) {
 					return nil, fmt.Errorf("task f%d captures %d values but target has %d params", spawn.Callee, len(spawn.Captures), len(target.Params))
 				}
-				descriptor := taskDescriptor{Callee: spawn.Callee, CaptureCount: len(spawn.Captures), Continuation: analyzeTaskContinuation(target)}
+				continuation, err := taskContinuationFor(target)
+				if err != nil {
+					return nil, err
+				}
+				descriptor := taskDescriptor{Callee: spawn.Callee, CaptureCount: len(spawn.Captures), Continuation: continuation}
 				if existing, ok := byCallee[spawn.Callee]; ok && existing.CaptureCount != descriptor.CaptureCount {
 					return nil, fmt.Errorf("task f%d has inconsistent capture counts", spawn.Callee)
 				}
@@ -161,7 +185,11 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 	}
 	name := valueName(inst.Result)
 	state := "null"
-	descriptor := taskDescriptor{Callee: op.Callee, CaptureCount: len(op.Captures), Continuation: analyzeTaskContinuation(fn)}
+	continuation, err := taskContinuationFor(fn)
+	if err != nil {
+		return err
+	}
+	descriptor := taskDescriptor{Callee: op.Callee, CaptureCount: len(op.Captures), Continuation: continuation}
 	if len(op.Captures) != 0 || descriptor.Continuation != nil {
 		state = name + ".state"
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", state, taskEnvTypeName(op.Callee))

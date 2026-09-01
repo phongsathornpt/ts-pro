@@ -83,20 +83,20 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
 - [~] Add typed channels with task parking, starting with unboxed `channel<number>`.
   - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer, unbuffered rendezvous, and nonblocking `try_send`/`try_recv` transitions plus pthread regression coverage.
-  - [~] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
+  - [x] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
     - [x] Runtime `WAITING -> RUNNABLE` park/wake lifecycle with race-safe pending wake and worker=1 resume regression.
     - [x] Wire F64 channel sender/receiver waiter queues onto park/wake, with operation-complete-before-wake handoff and worker=1 buffered/unbuffered regressions.
-    - [~] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
+    - [x] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
       - [x] Stackless task wrappers for proven single-block closures with one F64 channel send/recv suspension point, using heap-owned `pc`/recv spill state and task-aware channel park/wake ABI.
-      - [~] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
+      - [x] Generalize continuation spilling across multiple suspend points, branches, loops, and arbitrary live SSA values.
         - [x] Linear single-block continuations with multiple channel/sleep suspension points and F64 receive-value spills across later suspensions.
-        - [ ] Spill arbitrary native representations and support branch/loop continuation CFGs.
+        - [x] Spill arbitrary native representations and support branch/loop continuation CFGs.
   - [~] Add compiler-known `channel<number>` operations and scheduler/channel metrics.
     - [x] Compiler-known `channel<number>`, `channelTrySend`, and `channelTryRecvOr` through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
     - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.
-    - [~] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
+    - [x] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for task suspension, timers, channels, and async/await.
       - [x] Automatically select the stackless wrapper for proven single-block one-suspend channel tasks while retaining the cooperative fallback for unsupported shapes.
-      - [ ] Remove the cooperative fallback once general continuation lowering covers branches/loops/multiple suspend points.
+      - [x] Reject any spawned task target containing a blocking operation unless it lowers to a resumable continuation; cooperative ABI remains only for direct/top-level non-task calls.
 - [x] Add timers/sleep and a separate bounded blocking-call pool.
   - [x] Lazy monotonic timer service, task park/wake sleep ABI, cooperative fallback, worker=1 runtime regression, compiler `sleep(number)` lowering, and stackless one-suspend task wrapper support.
   - [x] Bounded lazy blocking-call pool with configurable worker/job limits, task-aware completion wakeups, cooperative fallback, deterministic shutdown, and queue-bound regressions.
@@ -112,10 +112,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Multi-block Branch/Jump/Return continuation CFGs without Phi nodes, including stackless async `if` on a single worker.
       - [x] Phi-backed continuation merges use typed task-state slots with parallel edge copies, including loop-carried numeric `while` state on a single worker.
       - [x] Generic resumable native-op steps cover object/array allocation and mutation, field access, direct/virtual/closure calls, intrinsics, task yield, and nonblocking channel operations using typed spills and allocation safepoints.
-      - [~] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
+      - [x] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
         - [x] Spill delayed nested `TaskRef` handles across suspension; typed joins await the existing handle and void joins use completion parking followed by explicit release, including worker=1 regression coverage.
         - [x] Stress StringRef/ObjectRef/JSValue state across branch/loop Phi merges and suspension on a single worker, including GC-managed dynamic values.
-        - [ ] Remove remaining cooperative channel/sleep fallback shapes.
+        - [x] Remove remaining spawned-task cooperative channel/sleep fallback shapes with compile-time continuation enforcement.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -186,11 +186,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Remove remaining cooperative channel/sleep fallback shapes; delayed TaskRef joins and StringRef/ObjectRef/JSValue Phi-state stress are covered now.
-2. Add reference/JSValue typed channel specializations and broader channel/select semantics.
-3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
-4. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.
-5. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
-6. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
-7. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-8. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+1. Add reference/JSValue typed channel specializations and broader channel/select semantics; spawned blocking-task fallbacks are now eliminated.
+2. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
+3. Finish Go native-runtime migration for arrays/objects/JSValue, then scheduler/tasks/channels/timers/blocking pool, while preserving the current LLVM ABI.
+4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
+6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+7. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
