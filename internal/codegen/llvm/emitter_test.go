@@ -515,3 +515,36 @@ func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessLinearSSAContinuation(t *testing.T) {
+	module := mir.Module{Name: "stackless-ssa", Functions: []mir.Function{
+		{ID: 0, Name: "child", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 40}}}, Terminator: mir.Return{Value: valueIDPtr(0)}}}},
+		{ID: 1, Name: "parent", ReturnRepr: mir.ReprBool, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprF64, Op: mir.TaskJoin{Task: 0}},
+			{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 2}},
+			{Result: 3, Repr: mir.ReprF64, Op: mir.FloatBinary{Operator: mir.FloatMul, Left: 1, Right: 2}},
+			{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+			{Result: 5, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 4}},
+			{Result: 6, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 41}},
+			{Result: 7, Repr: mir.ReprBool, Op: mir.FloatCompare{Operator: mir.FloatGreaterThan, Left: 3, Right: 6}},
+		}, Terminator: mir.Return{Value: valueIDPtr(7)}}}},
+		{ID: 2, Name: "launcher", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1}}}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f1 = type { i32, double, double, i1 }",
+		"fmul double",
+		"store double %v3, ptr %spill1.ptr",
+		"fcmp ogt double",
+		"store i1 %v7, ptr %spill2.ptr",
+		"store i1 %spill.2.ret, ptr %result_slot",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

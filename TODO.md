@@ -106,7 +106,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Replace cooperative await joins with compiler-generated task-completion suspension/resume and spill live values across await points.
     - [x] F64 async-await completion parking with race-safe child completion waiters, child-result transfer into parent task state, worker=1 stackless resume, and LLVM/native regressions.
     - [x] Bool/reference/JSValue await-result transfer with typed continuation spill slots, GC-safe reference handoff, worker=1 native coverage, and task-spawn parameter coercion matching direct-call ABI rules.
-    - [ ] Spill arbitrary live SSA values across await points and support branch/loop continuation CFGs.
+    - [~] Spill arbitrary live SSA values across await points and support branch/loop continuation CFGs.
+      - [x] Linear F64 arithmetic, proven-integer arithmetic, and Bool comparison results spill into typed task-state slots and survive later await/channel/sleep suspension points.
+      - [ ] Extend spill/liveness support to remaining native representations and branch/loop continuation CFGs.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -156,7 +158,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Generalize compiler-generated stackless continuations across arbitrary live SSA values, branches, and loops; linear multi-suspend channel/sleep and F64 await parking are complete.
+1. Generalize compiler-generated stackless continuations across branch/loop CFGs and remaining native SSA representations; linear F64/Bool SSA spills plus typed await/channel/sleep suspension are complete.
 2. Spill arbitrary native SSA values across suspend/await points, add branch/loop continuation CFGs, and remove remaining cooperative fallbacks.
 3. Add reference/JSValue typed channel specializations, then Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
 4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.

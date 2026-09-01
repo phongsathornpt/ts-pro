@@ -16,6 +16,9 @@ const (
 	taskSuspendAwaitF64
 	taskSuspendAwaitBool
 	taskSuspendAwaitRef
+	taskStepFloatBinary
+	taskStepProvenIntBinary
+	taskStepFloatCompare
 )
 
 type taskSuspendStep struct {
@@ -27,6 +30,7 @@ type taskSuspendStep struct {
 	Callee   mir.FunctionID
 	Captures []mir.ValueID
 	Task     mir.ValueID
+	Inst     mir.Instruction
 }
 
 type taskSpillSlot struct {
@@ -37,6 +41,7 @@ type taskSpillSlot struct {
 type taskContinuation struct {
 	Steps      []taskSuspendStep
 	Consts     map[mir.ValueID]float64
+	BoolConsts map[mir.ValueID]bool
 	SpillSlots map[mir.ValueID]taskSpillSlot
 }
 
@@ -51,6 +56,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	}
 	cont := &taskContinuation{
 		Consts:     map[mir.ValueID]float64{},
+		BoolConsts: map[mir.ValueID]bool{},
 		SpillSlots: map[mir.ValueID]taskSpillSlot{},
 	}
 	available := map[mir.ValueID]bool{}
@@ -59,6 +65,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	}
 	var pendingSpawn *mir.TaskSpawn
 	var pendingTask mir.ValueID
+	hasSuspend := false
 	for _, inst := range block.Instructions {
 		if pendingSpawn != nil {
 			join, ok := inst.Op.(mir.TaskJoin)
@@ -78,6 +85,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			}
 			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
 			available[inst.Result] = true
+			hasSuspend = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
 			pendingSpawn = nil
 			continue
@@ -86,6 +94,30 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		case mir.ConstF64:
 			cont.Consts[inst.Result] = op.Value
 			available[inst.Result] = true
+		case mir.ConstBool:
+			cont.BoolConsts[inst.Result] = op.Value
+			available[inst.Result] = true
+		case mir.FloatBinary:
+			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatBinary, Result: inst.Result, Inst: inst})
+		case mir.ProvenIntBinary:
+			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprF64 {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepProvenIntBinary, Result: inst.Result, Inst: inst})
+		case mir.FloatCompare:
+			if !available[op.Left] || !available[op.Right] || inst.Repr != mir.ReprBool {
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprBool}
+			available[inst.Result] = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepFloatCompare, Result: inst.Result, Inst: inst})
 		case mir.TaskSpawn:
 			for _, capture := range op.Captures {
 				if !available[capture] {
@@ -99,6 +131,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			if !available[op.Channel] || !available[op.Value] {
 				return nil
 			}
+			hasSuspend = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSendF64, Channel: op.Channel, Value: op.Value})
 		case mir.ChannelRecvF64:
 			if !available[op.Channel] {
@@ -106,11 +139,13 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			}
 			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
 			available[inst.Result] = true
+			hasSuspend = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvF64, Channel: op.Channel, Result: inst.Result})
 		case mir.Sleep:
 			if !available[op.Duration] {
 				return nil
 			}
+			hasSuspend = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSleep, Duration: op.Duration})
 		default:
 			return nil
@@ -119,7 +154,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	if pendingSpawn != nil {
 		return nil
 	}
-	if len(cont.Steps) == 0 {
+	if !hasSuspend {
 		return nil
 	}
 	switch fn.ReturnRepr {
@@ -157,6 +192,12 @@ func continuationOperand(b *strings.Builder, fn mir.Function, descriptor taskDes
 	if constant, ok := cont.Consts[value]; ok {
 		return formatF64(constant), mir.ReprF64, nil
 	}
+	if constant, ok := cont.BoolConsts[value]; ok {
+		if constant {
+			return "true", mir.ReprBool, nil
+		}
+		return "false", mir.ReprBool, nil
+	}
 	for i, param := range fn.Params {
 		if param.Value == value {
 			return fmt.Sprintf("%%capture%d", i), param.Repr, nil
@@ -172,6 +213,52 @@ func continuationOperand(b *strings.Builder, fn mir.Function, descriptor taskDes
 		return name, slot.Repr, nil
 	}
 	return "", mir.ReprInvalid, fmt.Errorf("task continuation operand v%d is unavailable", value)
+}
+
+func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDescriptor, fn mir.Function, step taskSuspendStep, suffix string) error {
+	values := map[mir.ValueID]string{}
+	switch op := step.Inst.Op.(type) {
+	case mir.FloatBinary:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
+	case mir.ProvenIntBinary:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
+	case mir.FloatCompare:
+		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
+	default:
+		return fmt.Errorf("unsupported pure continuation op %T", step.Inst.Op)
+	}
+	if err := e.emitInstruction(b, fn, step.Inst, values); err != nil {
+		return err
+	}
+	result, ok := values[step.Inst.Result]
+	if !ok {
+		return fmt.Errorf("pure continuation op did not produce v%d", step.Inst.Result)
+	}
+	slot := descriptor.Continuation.SpillSlots[step.Inst.Result]
+	typ, err := llvmType(slot.Repr)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", typ, result, slot.Index)
+	return nil
 }
 
 func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor taskDescriptor, fn mir.Function) error {
@@ -201,6 +288,12 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 		next := fmt.Sprintf("%%step%d", i+1)
 		park := fmt.Sprintf("%%park%d", i)
 		switch step.Kind {
+		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare:
+			if err := e.emitPureContinuationStep(b, descriptor, fn, step, fmt.Sprintf("p%d", i)); err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  br label %s\n", next)
+			continue
 		case taskSuspendSleep:
 			duration, repr, err := continuationOperand(b, fn, descriptor, step.Duration, fmt.Sprintf("s%d", i))
 			if err != nil {
