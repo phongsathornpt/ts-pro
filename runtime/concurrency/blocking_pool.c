@@ -68,6 +68,8 @@ static tsnative_blocking_job *pop_job_locked(void) {
 }
 
 static void complete_job(tsnative_blocking_job *job) {
+  atomic_fetch_sub_explicit(&blocking.active_jobs, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&blocking.completed_jobs, 1, memory_order_relaxed);
   pthread_mutex_lock(&job->mutex);
   atomic_store_explicit(&job->done, 1, memory_order_release);
   tsnative_task *waiter = job->waiter;
@@ -75,8 +77,6 @@ static void complete_job(tsnative_blocking_job *job) {
   pthread_cond_broadcast(&job->changed);
   pthread_mutex_unlock(&job->mutex);
   if (waiter) (void)tsnative_scheduler_wake(waiter);
-  atomic_fetch_sub_explicit(&blocking.active_jobs, 1, memory_order_relaxed);
-  atomic_fetch_add_explicit(&blocking.completed_jobs, 1, memory_order_relaxed);
 }
 
 static void *blocking_worker(void *unused) {
