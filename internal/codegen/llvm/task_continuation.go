@@ -137,6 +137,10 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return append([]mir.ValueID(nil), op.Captures...), true
 	case mir.TaskYield:
 		return nil, true
+	case mir.TaskCancel:
+		return []mir.ValueID{op.Task}, true
+	case mir.TaskCancelled:
+		return nil, true
 	default:
 		return nil, false
 	}

@@ -275,6 +275,9 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case TaskJoinOp:
 				checkValue(op.Task)
 			case TaskYieldOp:
+			case TaskCancelOp:
+				checkValue(op.Task)
+			case TaskCancelledOp:
 			case ChannelNewOp:
 				checkValue(op.Capacity)
 			case ChannelTrySendOp:

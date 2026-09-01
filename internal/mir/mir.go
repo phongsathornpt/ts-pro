@@ -264,6 +264,8 @@ type TaskSpawn struct {
 }
 type TaskJoin struct{ Task ValueID }
 type TaskYield struct{}
+type TaskCancel struct{ Task ValueID }
+type TaskCancelled struct{}
 type ChannelNewF64 struct{ Capacity ValueID }
 type ChannelTrySendF64 struct{ Channel, Value ValueID }
 type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
@@ -306,6 +308,8 @@ func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
 func (TaskJoin) isOperation()             {}
 func (TaskYield) isOperation()            {}
+func (TaskCancel) isOperation()           {}
+func (TaskCancelled) isOperation()        {}
 func (ChannelNewF64) isOperation()        {}
 func (ChannelTrySendF64) isOperation()    {}
 func (ChannelTryRecvOrF64) isOperation()  {}

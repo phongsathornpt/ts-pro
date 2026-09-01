@@ -346,6 +346,17 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if inst.Repr != ReprVoid {
 					return fmt.Errorf("task yield v%d must be void", inst.Result)
 				}
+			case TaskCancel:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task cancel v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
+			case TaskCancelled:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("task cancelled v%d must produce Bool", inst.Result)
+				}
 			case ChannelNewF64:
 				if inst.Repr != ReprChannelRef {
 					return fmt.Errorf("channel new v%d must produce ChannelRef", inst.Result)

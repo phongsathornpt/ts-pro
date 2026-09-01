@@ -214,6 +214,18 @@ tsnative_task_status tsnative_task_get_status(tsnative_task *task) {
   return tsnative_scheduler_task_status(task);
 }
 
+int tsnative_task_cancel(tsnative_task *task) {
+  if (!task) return -1;
+  atomic_store_explicit(&task->cancel_requested, 1, memory_order_release);
+  return 0;
+}
+
+int tsnative_task_is_cancelled(void) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) return 0;
+  return atomic_load_explicit(&task->cancel_requested, memory_order_acquire) ? 1 : 0;
+}
+
 int tsnative_task_yield_task(void) {
   tsnative_task *task = tsnative_scheduler_current_task();
   if (!task) return -1;

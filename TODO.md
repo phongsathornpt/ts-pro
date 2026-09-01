@@ -120,7 +120,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Stress StringRef/ObjectRef/JSValue state across branch/loop Phi merges and suspension on a single worker, including GC-managed dynamic values.
         - [x] Remove remaining spawned-task cooperative channel/sleep fallback shapes with compile-time continuation enforcement.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
-- [ ] Add structured concurrency, task groups, cancellation, and task-local context.
+- [~] Add structured concurrency, task groups, cancellation, and task-local context.
+  - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
+  - [ ] Add task groups with child ownership/join/cancel propagation.
+  - [ ] Add task-local context propagation.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.

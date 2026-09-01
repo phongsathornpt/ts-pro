@@ -13,6 +13,8 @@ declare function spawn<T>(fn: () => T): TsnativeTask<T>;
 declare function join<T>(task: TsnativeTask<T>): T;
 declare function join<T>(task: Promise<T>): T;
 declare function yieldNow(): void;
+declare function cancelTask<T>(task: TsnativeTask<T> | Promise<T>): void;
+declare function taskCancelled(): boolean;
 
 interface TsnativeChannel<T> {
   readonly __tsnativeChannelBrand: never;

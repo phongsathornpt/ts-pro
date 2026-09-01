@@ -40,6 +40,8 @@ uint8_t tsnative_task_join_bool_release(tsnative_task *task);
 void *tsnative_task_join_ref_release(tsnative_task *task);
 void tsnative_task_join_release(tsnative_task *task);
 void tsnative_task_release(tsnative_task *task);
+int tsnative_task_cancel(tsnative_task *task);
+int tsnative_task_is_cancelled(void);
 int tsnative_task_yield_task(void);
 void tsnative_task_yield(void);
 tsnative_task_status tsnative_task_get_status(tsnative_task *task);

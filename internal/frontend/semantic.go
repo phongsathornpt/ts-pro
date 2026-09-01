@@ -22,6 +22,8 @@ const (
 	ExprTaskSpawn
 	ExprTaskJoin
 	ExprTaskYield
+	ExprTaskCancel
+	ExprTaskCancelled
 	ExprChannelNew
 	ExprChannelTrySend
 	ExprChannelTryRecvOr

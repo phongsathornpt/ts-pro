@@ -158,6 +158,17 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.emit(expr.Type, hir.TaskJoinOp{Task: task}), nil
 	case frontend.ExprTaskYield:
 		return f.emit(expr.Type, hir.TaskYieldOp{}), nil
+	case frontend.ExprTaskCancel:
+		if len(expr.Args) != 1 {
+			return 0, fmt.Errorf("task cancel requires one handle")
+		}
+		task, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.TaskCancelOp{Task: task}), nil
+	case frontend.ExprTaskCancelled:
+		return f.emit(expr.Type, hir.TaskCancelledOp{}), nil
 	case frontend.ExprChannelNew:
 		_, elementKind, err := f.channelElementKind(expr.Type)
 		if err != nil {

@@ -162,6 +162,8 @@ type TaskSpawnOp struct {
 }
 type TaskJoinOp struct{ Task ValueID }
 type TaskYieldOp struct{}
+type TaskCancelOp struct{ Task ValueID }
+type TaskCancelledOp struct{}
 type ChannelElementKind uint8
 
 const (
@@ -216,6 +218,8 @@ func (ClosureCallOp) isOperation()      {}
 func (TaskSpawnOp) isOperation()        {}
 func (TaskJoinOp) isOperation()         {}
 func (TaskYieldOp) isOperation()        {}
+func (TaskCancelOp) isOperation()       {}
+func (TaskCancelledOp) isOperation()    {}
 func (ChannelNewOp) isOperation()       {}
 func (ChannelTrySendOp) isOperation()   {}
 func (ChannelTryRecvOrOp) isOperation() {}

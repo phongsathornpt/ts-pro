@@ -48,6 +48,20 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprTaskJoin
 		expr.Callee = nil
 		return expr, nil
+	case "cancelTask":
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || (e.result.Types[expr.Args[0].Type].Kind != TypeTask && e.result.Types[expr.Args[0].Type].Kind != TypePromise) || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("cancelTask at %d requires one native task and returns void", node.Pos())
+		}
+		expr.Kind = ExprTaskCancel
+		expr.Callee = nil
+		return expr, nil
+	case "taskCancelled":
+		if len(expr.Args) != 0 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeBoolean {
+			return nil, fmt.Errorf("taskCancelled at %d takes no arguments and returns boolean", node.Pos())
+		}
+		expr.Kind = ExprTaskCancelled
+		expr.Callee = nil
+		return expr, nil
 	case "channel":
 		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeChannel {
 			return nil, fmt.Errorf("channel at %d requires one capacity and a concrete native channel type", node.Pos())
@@ -176,7 +190,7 @@ func (e *extractor) channelValueCompatible(element, value TypeID) bool {
 
 func isConcurrencyIntrinsic(name string) bool {
 	switch name {
-	case "spawn", "join", "yieldNow", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
+	case "spawn", "join", "yieldNow", "cancelTask", "taskCancelled", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
 		return true
 	default:
 		return false

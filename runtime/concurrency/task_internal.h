@@ -16,6 +16,7 @@ struct tsnative_task {
   _Atomic int status;
   _Atomic int park_requested;
   _Atomic int wake_requested;
+  _Atomic int cancel_requested;
   pthread_mutex_t completion_mutex;
   struct tsnative_task *completion_waiter;
   void *completion_out;
