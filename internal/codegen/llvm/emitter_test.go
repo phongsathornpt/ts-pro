@@ -383,7 +383,7 @@ func TestEmitStacklessChannelTaskContinuation(t *testing.T) {
 		"%tsnative_task_env_f0 = type { ptr, i32 }",
 		"%tsnative_task_env_f1 = type { ptr, i32, double }",
 		"call i32 @tsnative_channel_f64_send_task(ptr %capture0, double 4.200000e+01)",
-		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv0.ptr)",
+		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %spill0.ptr)",
 		"switch i32 %pc",
 		"store i32 1, ptr %pc.ptr",
 	} {
@@ -443,9 +443,9 @@ func TestEmitMultiSuspendTaskContinuation(t *testing.T) {
 	for _, want := range []string{
 		"%tsnative_task_env_f0 = type { ptr, i32, double }",
 		"i32 0, label %step0 i32 1, label %step1 i32 2, label %step2",
-		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %recv0.ptr)",
+		"call i32 @tsnative_channel_f64_recv_task(ptr %capture0, ptr %spill0.ptr)",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
-		"%spill.0.ret = load double, ptr %recv0.ptr",
+		"%spill.0.ret = load double, ptr %spill0.ptr",
 		"store i32 1, ptr %pc.ptr",
 		"store i32 2, ptr %pc.ptr",
 	} {
@@ -480,6 +480,38 @@ func TestEmitStacklessF64AwaitContinuation(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestEmitStacklessTypedAwaitContinuations(t *testing.T) {
+	boolModule := mir.Module{Name: "stackless-await-bool", Functions: []mir.Function{
+		{ID: 0, Name: "childBool", ReturnRepr: mir.ReprBool, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}}}, Terminator: mir.Return{Value: valueIDPtr(0)}}}},
+		{ID: 1, Name: "parentBool", ReturnRepr: mir.ReprBool, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}}, {Result: 1, Repr: mir.ReprBool, Op: mir.TaskJoin{Task: 0}}}, Terminator: mir.Return{Value: valueIDPtr(1)}}}},
+		{ID: 2, Name: "launchBool", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1}}}, Terminator: mir.Return{}}}},
+	}}
+	boolIR, err := llvmcodegen.Emit(boolModule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"%tsnative_task_env_f1 = type { i32, i1 }", "call i32 @tsnative_task_await_bool_task(ptr", "store i1 %spill.0.ret, ptr %result_slot"} {
+		if !strings.Contains(boolIR, want) {
+			t.Fatalf("bool LLVM IR missing %q:\n%s", want, boolIR)
+		}
+	}
+
+	refModule := mir.Module{Name: "stackless-await-ref", Functions: []mir.Function{
+		{ID: 0, Name: "childRef", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{Value: valueIDPtr(0)}}}},
+		{ID: 1, Name: "parentRef", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}}, {Result: 2, Repr: mir.ReprStringRef, Op: mir.TaskJoin{Task: 1}}}, Terminator: mir.Return{Value: valueIDPtr(2)}}}},
+		{ID: 2, Name: "launchRef", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1, Captures: []mir.ValueID{0}}}}, Terminator: mir.Return{}}}},
+	}}
+	refIR, err := llvmcodegen.Emit(refModule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"%tsnative_task_env_f1 = type { ptr, i32, ptr }", "call i32 @tsnative_task_await_ref_task(ptr", "store ptr %spill.0.ret, ptr %result_slot"} {
+		if !strings.Contains(refIR, want) {
+			t.Fatalf("ref LLVM IR missing %q:\n%s", want, refIR)
 		}
 	}
 }

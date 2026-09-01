@@ -105,7 +105,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Native `Promise<T>` uses TaskRef ABI for compiled async functions; async calls spawn typed tasks and TS7 `await` lowers to task join with worker=1 acceptance.
   - [~] Replace cooperative await joins with compiler-generated task-completion suspension/resume and spill live values across await points.
     - [x] F64 async-await completion parking with race-safe child completion waiters, child-result transfer into parent task state, worker=1 stackless resume, and LLVM/native regressions.
-    - [ ] Extend stackless await result transfer to Bool/reference/JSValue results and arbitrary live SSA across branch/loop continuations.
+    - [x] Bool/reference/JSValue await-result transfer with typed continuation spill slots, GC-safe reference handoff, worker=1 native coverage, and task-spawn parameter coercion matching direct-call ABI rules.
+    - [ ] Spill arbitrary live SSA values across await points and support branch/loop continuation CFGs.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -156,8 +157,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Current critical path
 
 1. Generalize compiler-generated stackless continuations across arbitrary live SSA values, branches, and loops; linear multi-suspend channel/sleep and F64 await parking are complete.
-2. Extend typed await/channel result handling to Bool/reference/JSValue representations and remove remaining cooperative fallbacks.
-3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
+2. Spill arbitrary native SSA values across suspend/await points, add branch/loop continuation CFGs, and remove remaining cooperative fallbacks.
+3. Add reference/JSValue typed channel specializations, then Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
 4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
 5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
 6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

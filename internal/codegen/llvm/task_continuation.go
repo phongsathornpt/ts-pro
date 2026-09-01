@@ -2,7 +2,6 @@ package llvm
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/projectthorn/tsv7-bin/internal/mir"
@@ -15,6 +14,8 @@ const (
 	taskSuspendRecvF64
 	taskSuspendSleep
 	taskSuspendAwaitF64
+	taskSuspendAwaitBool
+	taskSuspendAwaitRef
 )
 
 type taskSuspendStep struct {
@@ -28,10 +29,15 @@ type taskSuspendStep struct {
 	Task     mir.ValueID
 }
 
+type taskSpillSlot struct {
+	Index int
+	Repr  mir.Repr
+}
+
 type taskContinuation struct {
-	Steps     []taskSuspendStep
-	Consts    map[mir.ValueID]float64
-	RecvSlots map[mir.ValueID]int
+	Steps      []taskSuspendStep
+	Consts     map[mir.ValueID]float64
+	SpillSlots map[mir.ValueID]taskSpillSlot
 }
 
 func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
@@ -44,8 +50,8 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		return nil
 	}
 	cont := &taskContinuation{
-		Consts:    map[mir.ValueID]float64{},
-		RecvSlots: map[mir.ValueID]int{},
+		Consts:     map[mir.ValueID]float64{},
+		SpillSlots: map[mir.ValueID]taskSpillSlot{},
 	}
 	available := map[mir.ValueID]bool{}
 	for _, param := range fn.Params {
@@ -56,12 +62,23 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	for _, inst := range block.Instructions {
 		if pendingSpawn != nil {
 			join, ok := inst.Op.(mir.TaskJoin)
-			if !ok || join.Task != pendingTask || inst.Repr != mir.ReprF64 {
+			if !ok || join.Task != pendingTask {
 				return nil
 			}
-			cont.RecvSlots[inst.Result] = len(cont.RecvSlots)
+			kind := taskSuspendKind(0)
+			switch inst.Repr {
+			case mir.ReprF64:
+				kind = taskSuspendAwaitF64
+			case mir.ReprBool:
+				kind = taskSuspendAwaitBool
+			case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+				kind = taskSuspendAwaitRef
+			default:
+				return nil
+			}
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
 			available[inst.Result] = true
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendAwaitF64, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Callee: pendingSpawn.Callee, Captures: append([]mir.ValueID(nil), pendingSpawn.Captures...), Task: pendingTask, Result: inst.Result})
 			pendingSpawn = nil
 			continue
 		}
@@ -87,7 +104,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			if !available[op.Channel] {
 				return nil
 			}
-			cont.RecvSlots[inst.Result] = len(cont.RecvSlots)
+			cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprF64}
 			available[inst.Result] = true
 			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendRecvF64, Channel: op.Channel, Result: inst.Result})
 		case mir.Sleep:
@@ -110,7 +127,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		if ret.Value != nil {
 			return nil
 		}
-	case mir.ReprF64:
+	case mir.ReprF64, mir.ReprBool, mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
 		if ret.Value == nil || !available[*ret.Value] {
 			return nil
 		}
@@ -120,17 +137,17 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 	return cont
 }
 
-func (c *taskContinuation) recvSlotCount() int {
+func (c *taskContinuation) spillSlotCount() int {
 	if c == nil {
 		return 0
 	}
-	return len(c.RecvSlots)
+	return len(c.SpillSlots)
 }
 
-func (c *taskContinuation) sortedRecvValues() []mir.ValueID {
-	values := make([]mir.ValueID, len(c.RecvSlots))
-	for value, index := range c.RecvSlots {
-		values[index] = value
+func (c *taskContinuation) sortedSpillValues() []mir.ValueID {
+	values := make([]mir.ValueID, len(c.SpillSlots))
+	for value, slot := range c.SpillSlots {
+		values[slot.Index] = value
 	}
 	return values
 }
@@ -145,10 +162,14 @@ func continuationOperand(b *strings.Builder, fn mir.Function, descriptor taskDes
 			return fmt.Sprintf("%%capture%d", i), param.Repr, nil
 		}
 	}
-	if slot, ok := cont.RecvSlots[value]; ok {
-		name := fmt.Sprintf("%%spill.%d.%s", slot, suffix)
-		fmt.Fprintf(b, "  %s = load double, ptr %%recv%d.ptr\n", name, slot)
-		return name, mir.ReprF64, nil
+	if slot, ok := cont.SpillSlots[value]; ok {
+		name := fmt.Sprintf("%%spill.%d.%s", slot.Index, suffix)
+		typ, err := llvmType(slot.Repr)
+		if err != nil {
+			return "", mir.ReprInvalid, err
+		}
+		fmt.Fprintf(b, "  %s = load %s, ptr %%spill%d.ptr\n", name, typ, slot.Index)
+		return name, slot.Repr, nil
 	}
 	return "", mir.ReprInvalid, fmt.Errorf("task continuation operand v%d is unavailable", value)
 }
@@ -165,8 +186,9 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 	}
 	pcIndex := descriptor.CaptureCount
 	fmt.Fprintf(b, "  %%pc.ptr = getelementptr %s, ptr %%state, i32 0, i32 %d\n", taskEnvTypeName(descriptor.Callee), pcIndex)
-	for slot := 0; slot < cont.recvSlotCount(); slot++ {
-		fmt.Fprintf(b, "  %%recv%d.ptr = getelementptr %s, ptr %%state, i32 0, i32 %d\n", slot, taskEnvTypeName(descriptor.Callee), pcIndex+1+slot)
+	for _, value := range cont.sortedSpillValues() {
+		slot := cont.SpillSlots[value]
+		fmt.Fprintf(b, "  %%spill%d.ptr = getelementptr %s, ptr %%state, i32 0, i32 %d\n", slot.Index, taskEnvTypeName(descriptor.Callee), pcIndex+1+slot.Index)
 	}
 	b.WriteString("  %pc = load i32, ptr %pc.ptr\n")
 	fmt.Fprintf(b, "  switch i32 %%pc, label %%invalid [")
@@ -212,9 +234,9 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			if repr != mir.ReprChannelRef {
 				return fmt.Errorf("task continuation channel must be ChannelRef")
 			}
-			slot := cont.RecvSlots[step.Result]
-			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_f64_recv_task(ptr %s, ptr %%recv%d.ptr)\n", i, channel, slot)
-		case taskSuspendAwaitF64:
+			slot := cont.SpillSlots[step.Result]
+			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_channel_f64_recv_task(ptr %s, ptr %%spill%d.ptr)\n", i, channel, slot.Index)
+		case taskSuspendAwaitF64, taskSuspendAwaitBool, taskSuspendAwaitRef:
 			values := map[mir.ValueID]string{}
 			for _, capture := range step.Captures {
 				value, _, err := continuationOperand(b, fn, descriptor, capture, fmt.Sprintf("a%d", i))
@@ -228,8 +250,14 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 				return err
 			}
 			child := values[step.Task]
-			slot := cont.RecvSlots[step.Result]
-			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_await_f64_task(ptr %s, ptr %%recv%d.ptr)\n", i, child, slot)
+			slot := cont.SpillSlots[step.Result]
+			awaitName := "tsnative_task_await_f64_task"
+			if step.Kind == taskSuspendAwaitBool {
+				awaitName = "tsnative_task_await_bool_task"
+			} else if step.Kind == taskSuspendAwaitRef {
+				awaitName = "tsnative_task_await_ref_task"
+			}
+			fmt.Fprintf(b, "  %%status%d = call i32 @%s(ptr %s, ptr %%spill%d.ptr)\n", i, awaitName, child, slot.Index)
 		default:
 			return fmt.Errorf("unsupported task suspension kind %d", step.Kind)
 		}
@@ -238,25 +266,20 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 	}
 	fmt.Fprintf(b, "step%d:\n", len(cont.Steps))
 	ret := fn.Blocks[0].Terminator.(mir.Return)
-	if fn.ReturnRepr == mir.ReprF64 {
+	if fn.ReturnRepr != mir.ReprVoid {
 		value, repr, err := continuationOperand(b, fn, descriptor, *ret.Value, "ret")
 		if err != nil {
 			return err
 		}
-		if repr != mir.ReprF64 {
-			return fmt.Errorf("task continuation result must be F64")
+		if repr != fn.ReturnRepr {
+			return fmt.Errorf("task continuation result repr %d does not match function repr %d", repr, fn.ReturnRepr)
 		}
-		fmt.Fprintf(b, "  store double %s, ptr %%result_slot\n", value)
+		typ, err := llvmType(repr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  store %s %s, ptr %%result_slot\n", typ, value)
 	}
 	b.WriteString("  ret void\ninvalid:\n  unreachable\n}\n\n")
 	return nil
-}
-
-func sortedRecvSlotValues(slots map[mir.ValueID]int) []mir.ValueID {
-	values := make([]mir.ValueID, 0, len(slots))
-	for value := range slots {
-		values = append(values, value)
-	}
-	sort.Slice(values, func(i, j int) bool { return slots[values[i]] < slots[values[j]] })
-	return values
 }

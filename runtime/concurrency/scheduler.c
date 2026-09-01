@@ -190,8 +190,8 @@ static void execute_task(tsnative_task *task) {
   task->completion_waiter = NULL;
   task->completion_out = NULL;
   task->completion_consume = 0;
-  if (completion_waiter && completion_out && task->result_kind == TSNATIVE_TASK_RESULT_F64) {
-    *(double *)completion_out = task->result.f64;
+  if (completion_waiter && completion_out && task->transfer_completion) {
+    task->transfer_completion(task, completion_out);
   }
   pthread_cond_broadcast(&scheduler.task_done);
   pthread_mutex_unlock(&scheduler.mutex);

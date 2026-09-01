@@ -455,3 +455,81 @@ int main(void) {
 		t.Fatalf("run task await: %v: %s", err, output)
 	}
 }
+
+func TestNativeReferenceAwaitTransferStaysRooted(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "await_ref_test.c")
+	program := `#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include "task.h"
+#include "scheduler.h"
+#include "heap.h"
+typedef struct { int phase; void *value; tsnative_task *child; } parent_state;
+static void child(void *state, void *result) {
+  (void)state;
+  uint64_t *value = tsnative_heap_alloc(sizeof(uint64_t));
+  *value = 0x12345678ULL;
+  *(void **)result = value;
+}
+static void parent(void *raw, void *result) {
+  (void)result;
+  parent_state *state = raw;
+  if (state->phase == 0) {
+    state->child = tsnative_task_spawn_ref(child, 0);
+    assert(state->child);
+    state->phase = 1;
+    assert(tsnative_task_await_ref_task(state->child, &state->value) == 0);
+    return;
+  }
+  assert(state->phase == 1);
+  tsnative_gc_collect();
+  assert(state->value);
+  assert(*(uint64_t *)state->value == 0x12345678ULL);
+  state->phase = 2;
+}
+int main(void) {
+  parent_state *state = tsnative_heap_alloc(sizeof(*state));
+  tsnative_task *task = tsnative_task_spawn(parent, state);
+  assert(task);
+  assert(tsnative_task_join(task) == 0);
+  assert(state->phase == 2);
+  tsnative_task_release(task);
+  tsnative_scheduler_shutdown();
+  tsnative_heap_shutdown();
+  return 0;
+}`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obj := filepath.Join(dir, "test.o")
+	taskObj := filepath.Join(dir, "task.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	bin := filepath.Join(dir, "test")
+	for src, out := range map[string]string{source: obj, filepath.Join(root, "runtime", "concurrency", "task.c"): taskObj, filepath.Join(root, "runtime", "concurrency", "scheduler.c"): schedulerObj, filepath.Join(root, "runtime", "core", "heap.c"): heapObj} {
+		cmd := exec.CommandContext(ctx, clang.Path, "-std=c11", "-pthread", "-I"+filepath.Join(root, "runtime", "concurrency"), "-I"+filepath.Join(root, "runtime", "core"), "-c", src, "-o", out)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("compile %s: %v: %s", src, err, output)
+		}
+	}
+	cmd := exec.CommandContext(ctx, clang.Path, obj, taskObj, schedulerObj, heapObj, "-pthread", "-o", bin)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("link: %v: %s", err, output)
+	}
+	cmd = exec.CommandContext(ctx, bin)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v: %s", err, output)
+	}
+}

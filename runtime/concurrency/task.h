@@ -33,6 +33,8 @@ tsnative_task *tsnative_task_spawn_ref_or_abort(tsnative_task_entry entry, void 
 int tsnative_task_join(tsnative_task *task);
 int tsnative_task_await_task(tsnative_task *task);
 int tsnative_task_await_f64_task(tsnative_task *task, double *out);
+int tsnative_task_await_bool_task(tsnative_task *task, uint8_t *out);
+int tsnative_task_await_ref_task(tsnative_task *task, void **out);
 double tsnative_task_join_f64_release(tsnative_task *task);
 uint8_t tsnative_task_join_bool_release(tsnative_task *task);
 void *tsnative_task_join_ref_release(tsnative_task *task);

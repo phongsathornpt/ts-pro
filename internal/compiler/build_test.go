@@ -500,3 +500,41 @@ func TestBuildNativeAsyncAwaitSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeTypedAsyncAwaitSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ fixture, want string }{
+		{"concurrency_async_bool.ts", "42"},
+		{"concurrency_async_string.ts", "async-string-done"},
+		{"concurrency_async_any.ts", "async-any"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			output := filepath.Join(t.TempDir(), "async-typed")
+			result, err := Build(ctx, BuildOptions{Root: root, Input: filepath.Join("examples", tc.fixture), Output: output, Optimization: "-O2"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 2 {
+				t.Fatalf("task metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+			}
+			cmd := exec.CommandContext(ctx, output)
+			cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+			got, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("run %s: %v: %s", tc.fixture, err, got)
+			}
+			if strings.TrimSpace(string(got)) != tc.want {
+				t.Fatalf("output = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}

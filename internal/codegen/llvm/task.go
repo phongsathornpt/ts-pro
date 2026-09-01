@@ -78,8 +78,14 @@ func (e *emitter) emitTaskTypes(b *strings.Builder) error {
 			}
 			b.WriteString("i32")
 			written = true
-			for range descriptor.Continuation.recvSlotCount() {
-				b.WriteString(", double")
+			for _, value := range descriptor.Continuation.sortedSpillValues() {
+				slot := descriptor.Continuation.SpillSlots[value]
+				typ, err := llvmType(slot.Repr)
+				if err != nil {
+					return err
+				}
+				b.WriteString(", ")
+				b.WriteString(typ)
 			}
 		}
 		b.WriteString(" }\n")
@@ -177,9 +183,19 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 			pcIndex := descriptor.CaptureCount
 			fmt.Fprintf(b, "  %s.pc = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, taskEnvTypeName(op.Callee), state, pcIndex)
 			fmt.Fprintf(b, "  store i32 0, ptr %s.pc\n", state)
-			for slot := 0; slot < descriptor.Continuation.recvSlotCount(); slot++ {
-				fmt.Fprintf(b, "  %s.recv%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, slot, taskEnvTypeName(op.Callee), state, pcIndex+1+slot)
-				fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.recv%d\n", state, slot)
+			for _, value := range descriptor.Continuation.sortedSpillValues() {
+				slot := descriptor.Continuation.SpillSlots[value]
+				fmt.Fprintf(b, "  %s.spill%d = getelementptr %s, ptr %s, i32 0, i32 %d\n", state, slot.Index, taskEnvTypeName(op.Callee), state, pcIndex+1+slot.Index)
+				switch slot.Repr {
+				case mir.ReprF64:
+					fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.spill%d\n", state, slot.Index)
+				case mir.ReprBool:
+					fmt.Fprintf(b, "  store i1 false, ptr %s.spill%d\n", state, slot.Index)
+				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+					fmt.Fprintf(b, "  store ptr null, ptr %s.spill%d\n", state, slot.Index)
+				default:
+					return fmt.Errorf("unsupported task continuation spill representation %d", slot.Repr)
+				}
 			}
 		}
 	}

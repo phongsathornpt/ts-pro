@@ -9,6 +9,14 @@
 
 static void destroy_task_storage(tsnative_task *task);
 
+static void transfer_f64(tsnative_task *task, void *out) { *(double *)out = task->result.f64; }
+static void transfer_bool(tsnative_task *task, void *out) { *(uint8_t *)out = task->result.boolean; }
+static void transfer_ref(tsnative_task *task, void *out) {
+  tsnative_gc_handoff_begin();
+  *(void **)out = task->result.ref;
+  task->completion_handoff = 1;
+}
+
 static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, tsnative_task_result_kind kind) {
   if (!entry) return NULL;
   if (tsnative_scheduler_init() != 0) return NULL;
@@ -19,6 +27,9 @@ static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, ts
   task->state = state;
   task->result_kind = kind;
   task->destroy_completed = destroy_task_storage;
+  if (kind == TSNATIVE_TASK_RESULT_F64) task->transfer_completion = transfer_f64;
+  else if (kind == TSNATIVE_TASK_RESULT_BOOL) task->transfer_completion = transfer_bool;
+  else if (kind == TSNATIVE_TASK_RESULT_REF) task->transfer_completion = transfer_ref;
   if (kind == TSNATIVE_TASK_RESULT_REF) {
     task->result_gc_root_token = tsnative_gc_root_register(&task->result.ref);
     if (!task->result_gc_root_token) {
@@ -115,16 +126,16 @@ int tsnative_task_await_task(tsnative_task *task) {
   return 0;
 }
 
-int tsnative_task_await_f64_task(tsnative_task *task, double *out) {
-  if (!task || !out || task->result_kind != TSNATIVE_TASK_RESULT_F64) return -1;
+static int await_typed_task(tsnative_task *task, tsnative_task_result_kind kind, void *out) {
+  if (!task || !out || task->result_kind != kind || !task->transfer_completion) return -1;
   tsnative_task *waiter = tsnative_scheduler_current_task();
   if (!waiter || waiter == task) return -1;
   pthread_mutex_lock(&task->completion_mutex);
   int status = atomic_load_explicit(&task->status, memory_order_acquire);
   if (status == TSNATIVE_TASK_DONE) {
-    *out = task->result.f64;
+    task->transfer_completion(task, out);
     pthread_mutex_unlock(&task->completion_mutex);
-    tsnative_task_release(task);
+    destroy_task_storage(task);
     return 1;
   }
   if (status == TSNATIVE_TASK_CANCELLED || status == TSNATIVE_TASK_FAILED || task->completion_waiter) {
@@ -142,10 +153,26 @@ int tsnative_task_await_f64_task(tsnative_task *task, double *out) {
   return 0;
 }
 
+int tsnative_task_await_f64_task(tsnative_task *task, double *out) {
+  return await_typed_task(task, TSNATIVE_TASK_RESULT_F64, out);
+}
+
+int tsnative_task_await_bool_task(tsnative_task *task, uint8_t *out) {
+  return await_typed_task(task, TSNATIVE_TASK_RESULT_BOOL, out);
+}
+
+int tsnative_task_await_ref_task(tsnative_task *task, void **out) {
+  return await_typed_task(task, TSNATIVE_TASK_RESULT_REF, out);
+}
+
 static void destroy_task_storage(tsnative_task *task) {
   if (!task) return;
   if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
   if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+  if (task->completion_handoff) {
+    task->completion_handoff = 0;
+    tsnative_gc_handoff_end();
+  }
   pthread_mutex_destroy(&task->completion_mutex);
   free(task);
 }

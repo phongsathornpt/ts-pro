@@ -105,15 +105,23 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("task spawn has no native target")
 		}
+		targetID := *expr.CallTarget
+		if int(targetID) >= len(f.module.source.Functions) {
+			return 0, fmt.Errorf("task target f%d is outside semantic function table", targetID)
+		}
+		target := f.module.source.Functions[targetID]
+		if len(target.Params) != len(expr.Captures) {
+			return 0, fmt.Errorf("task target %s expects %d captures; got %d", target.Name, len(target.Params), len(expr.Captures))
+		}
 		captures := make([]hir.ValueID, 0, len(expr.Captures))
-		for _, capture := range expr.Captures {
-			value, err := f.lowerExpr(capture)
+		for i, capture := range expr.Captures {
+			value, err := f.lowerExprAs(capture, target.Params[i].Type)
 			if err != nil {
 				return 0, err
 			}
 			captures = append(captures, value)
 		}
-		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Captures: captures}), nil
+		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(targetID)), Captures: captures}), nil
 	case frontend.ExprTaskJoin:
 		if len(expr.Args) != 1 {
 			return 0, fmt.Errorf("task join requires one handle")
