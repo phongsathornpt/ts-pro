@@ -342,6 +342,13 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Channel); err != nil {
 					return err
 				}
+			case Sleep:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("sleep v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Duration); err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}

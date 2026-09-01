@@ -25,6 +25,7 @@ func formatBuildReport(result compiler.BuildResult) string {
 	fmt.Fprintf(&b, "  integer fast ops: %d i32 / %d i64\n", m.I32FastOps, m.I64FastOps)
 	fmt.Fprintf(&b, "  task ops: %d spawn / %d join / %d yield\n", m.TaskSpawns, m.TaskJoins, m.TaskYields)
 	fmt.Fprintf(&b, "  channel ops: %d create / %d send / %d recv / %d try-send / %d try-recv\n", m.ChannelCreates, m.ChannelSends, m.ChannelRecvs, m.ChannelTrySends, m.ChannelTryRecvs)
+	fmt.Fprintf(&b, "  timer ops: %d sleep\n", m.Sleeps)
 	fmt.Fprintf(&b, "  runtime calls: %d\n", m.RuntimeCalls)
 	fmt.Fprintf(&b, "  object cache: %.1f%% (%d hit / %d miss)\n", m.CacheHitRate(), m.CacheHits, m.CacheMisses)
 	fmt.Fprintf(&b, "  timings:\n")

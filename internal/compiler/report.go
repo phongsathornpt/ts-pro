@@ -40,6 +40,7 @@ type BuildMetrics struct {
 	ChannelTryRecvs int
 	ChannelSends    int
 	ChannelRecvs    int
+	Sleeps          int
 	RuntimeCalls    int
 	CacheHits       int
 	CacheMisses     int
@@ -88,6 +89,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
 	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskYields = countTaskOps(mirModule)
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
+	metrics.Sleeps = countSleepOps(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
 	return metrics
 }
@@ -179,6 +181,20 @@ func countChannelOps(module mir.Module) (creates, trySends, tryRecvs, sends, rec
 	return creates, trySends, tryRecvs, sends, recvs
 }
 
+func countSleepOps(module mir.Module) int {
+	count := 0
+	for _, fn := range module.Functions {
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				if _, ok := inst.Op.(mir.Sleep); ok {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
 func countRuntimeCalls(module mir.Module) int {
 	count := 0
 	for _, fn := range module.Functions {
@@ -188,7 +204,7 @@ func countRuntimeCalls(module mir.Module) int {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
 					mir.BoxJSValue, mir.DynamicAddJSValue, mir.IntrinsicCall,
-					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64:
+					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.Sleep:
 					count++
 				}
 			}

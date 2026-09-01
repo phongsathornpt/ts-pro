@@ -95,7 +95,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [~] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
       - [x] Automatically select the stackless wrapper for proven single-block one-suspend channel tasks while retaining the cooperative fallback for unsupported shapes.
       - [ ] Remove the cooperative fallback once general continuation lowering covers branches/loops/multiple suspend points.
-- [ ] Add timers/sleep and a separate bounded blocking-call pool.
+- [~] Add timers/sleep and a separate bounded blocking-call pool.
+  - [x] Lazy monotonic timer service, task park/wake sleep ABI, cooperative fallback, worker=1 runtime regression, compiler `sleep(number)` lowering, and stackless one-suspend task wrapper support.
+  - [ ] Add a separate bounded blocking-call pool and migrate blocking native-library adapters onto it.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.

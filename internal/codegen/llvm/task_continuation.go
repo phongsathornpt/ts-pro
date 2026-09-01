@@ -12,14 +12,16 @@ type taskSuspendKind uint8
 const (
 	taskSuspendSendF64 taskSuspendKind = iota + 1
 	taskSuspendRecvF64
+	taskSuspendSleep
 )
 
 type taskContinuation struct {
-	Kind    taskSuspendKind
-	Channel mir.ValueID
-	Value   mir.ValueID
-	Result  mir.ValueID
-	Consts  map[mir.ValueID]float64
+	Kind     taskSuspendKind
+	Channel  mir.ValueID
+	Value    mir.ValueID
+	Result   mir.ValueID
+	Duration mir.ValueID
+	Consts   map[mir.ValueID]float64
 }
 
 func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
@@ -52,15 +54,30 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			}
 			seenSuspend = true
 			cont.Kind, cont.Channel, cont.Result = taskSuspendRecvF64, op.Channel, inst.Result
+		case mir.Sleep:
+			if seenSuspend || fn.ReturnRepr != mir.ReprVoid || ret.Value != nil {
+				return nil
+			}
+			seenSuspend = true
+			cont.Kind, cont.Duration = taskSuspendSleep, op.Duration
 		default:
 			return nil
 		}
 	}
-	if !seenSuspend || !taskContinuationOperandSupported(fn, cont.Channel, cont.Consts) {
+	if !seenSuspend {
 		return nil
 	}
-	if cont.Kind == taskSuspendSendF64 && !taskContinuationOperandSupported(fn, cont.Value, cont.Consts) {
-		return nil
+	if cont.Kind == taskSuspendSleep {
+		if !taskContinuationOperandSupported(fn, cont.Duration, cont.Consts) {
+			return nil
+		}
+	} else {
+		if !taskContinuationOperandSupported(fn, cont.Channel, cont.Consts) {
+			return nil
+		}
+		if cont.Kind == taskSuspendSendF64 && !taskContinuationOperandSupported(fn, cont.Value, cont.Consts) {
+			return nil
+		}
 	}
 	return cont
 }
@@ -107,6 +124,20 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 	b.WriteString("  %pc = load i32, ptr %pc.ptr\n")
 	b.WriteString("  switch i32 %pc, label %invalid [ i32 0, label %start i32 1, label %resume ]\n")
 	b.WriteString("start:\n")
+	if cont.Kind == taskSuspendSleep {
+		duration, repr, err := continuationOperand(fn, cont.Duration, cont.Consts)
+		if err != nil {
+			return err
+		}
+		if repr != mir.ReprF64 {
+			return fmt.Errorf("task continuation sleep duration must be F64")
+		}
+		fmt.Fprintf(b, "  %%status = call i32 @tsnative_sleep_task(double %s)\n", duration)
+		b.WriteString("  %parked = icmp eq i32 %status, 0\n  br i1 %parked, label %park, label %complete\n")
+		b.WriteString("park:\n  store i32 1, ptr %pc.ptr\n  ret void\nresume:\n  br label %complete\ncomplete:\n  ret void\n")
+		b.WriteString("invalid:\n  unreachable\n}\n\n")
+		return nil
+	}
 	channel, repr, err := continuationOperand(fn, cont.Channel, cont.Consts)
 	if err != nil {
 		return err

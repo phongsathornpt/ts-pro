@@ -24,3 +24,5 @@ declare function channelTryRecvOr<T>(channel: TsnativeChannel<T>, fallback: T): 
 
 declare function channelSend<T>(channel: TsnativeChannel<T>, value: T): void;
 declare function channelRecv<T>(channel: TsnativeChannel<T>): T;
+
+declare function sleep(milliseconds: number): void;

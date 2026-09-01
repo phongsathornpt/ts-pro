@@ -90,6 +90,13 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprChannelRecv
 		expr.Callee = nil
 		return expr, nil
+	case "sleep":
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeNumber || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("sleep at %d requires one number duration and returns void", node.Pos())
+		}
+		expr.Kind = ExprSleep
+		expr.Callee = nil
+		return expr, nil
 	case "yieldNow":
 		if len(expr.Args) != 0 {
 			return nil, fmt.Errorf("yieldNow at %d takes no arguments", node.Pos())

@@ -283,6 +283,8 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				checkValue(op.Value)
 			case ChannelRecvOp:
 				checkValue(op.Channel)
+			case SleepOp:
+				checkValue(op.Duration)
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

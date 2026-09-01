@@ -167,6 +167,12 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.ChannelRecvOp{Channel: channel}), nil
+	case frontend.ExprSleep:
+		duration, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SleepOp{Duration: duration}), nil
 	case frontend.ExprClosure:
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("closure value has no native target")

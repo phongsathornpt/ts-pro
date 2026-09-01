@@ -25,6 +25,7 @@ const (
 	ExprChannelTryRecvOr
 	ExprChannelSend
 	ExprChannelRecv
+	ExprSleep
 )
 
 type IntrinsicKind uint8

@@ -413,3 +413,32 @@ func TestBuildNativeBlockingChannelTasksSingleWorker(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativeSleepTaskSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "sleep-task")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_sleep.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.Sleeps != 1 || result.Metrics.TaskSpawns != 1 || result.Metrics.TaskJoins != 1 {
+		t.Fatalf("sleep/task metrics = %d/%d/%d", result.Metrics.Sleeps, result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	nativeOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native sleep task: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "42" {
+		t.Fatalf("native sleep task output = %q", got)
+	}
+}

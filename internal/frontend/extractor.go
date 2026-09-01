@@ -937,7 +937,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
-	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" || calleeIdentifier == "channel" || calleeIdentifier == "channelTrySend" || calleeIdentifier == "channelTryRecvOr" || calleeIdentifier == "channelSend" || calleeIdentifier == "channelRecv" {
+	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" || calleeIdentifier == "channel" || calleeIdentifier == "channelTrySend" || calleeIdentifier == "channelTryRecvOr" || calleeIdentifier == "channelSend" || calleeIdentifier == "channelRecv" || calleeIdentifier == "sleep" {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
 	if generic != nil {

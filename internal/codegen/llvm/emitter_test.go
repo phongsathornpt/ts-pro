@@ -81,6 +81,7 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	runtimeObj := filepath.Join(dir, "runtime.o")
 	heapObj := filepath.Join(dir, "heap.o")
 	schedulerObj := filepath.Join(dir, "scheduler.o")
+	timerObj := filepath.Join(dir, "timer.o")
 	bin := filepath.Join(dir, "fib")
 	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
@@ -97,7 +98,10 @@ func TestEmitFibLLVMAndCompileObject(t *testing.T) {
 	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.Link(ctx, []string{obj, runtimeObj, heapObj, schedulerObj}, bin); err != nil {
+	if err := tc.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "timer.c"), timerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tc.Link(ctx, []string{obj, runtimeObj, heapObj, schedulerObj, timerObj}, bin); err != nil {
 		t.Fatal(err)
 	}
 	output, err := exec.CommandContext(ctx, bin).CombinedOutput()
@@ -386,3 +390,31 @@ func TestEmitStacklessChannelTaskContinuation(t *testing.T) {
 }
 
 func valueIDPtr(value mir.ValueID) *mir.ValueID { return &value }
+
+func TestEmitStacklessSleepTaskContinuation(t *testing.T) {
+	module := mir.Module{Name: "stackless-sleep", Functions: []mir.Function{
+		{ID: 0, Name: "sleeper", ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 20}},
+				{Result: 1, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 0}},
+			}, Terminator: mir.Return{}}}},
+		{ID: 1, Name: "launcher", ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { i32 }",
+		"call i32 @tsnative_sleep_task(double 2.000000e+01)",
+		"switch i32 %pc",
+		"store i32 1, ptr %pc.ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
