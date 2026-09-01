@@ -396,3 +396,63 @@ func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
 	}
 	schedulerSetThread(-1, 0)
 }
+
+func TestGCIterativeMarkHandlesDeepHeapGraph(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	const nodes = 20000
+	var head unsafe.Pointer
+	for i := 0; i < nodes; i++ {
+		node := tsnative_heap_alloc(16)
+		if node == nil {
+			t.Fatalf("node allocation %d failed", i)
+		}
+		*(*unsafe.Pointer)(node) = head
+		head = node
+	}
+	root := tsnative_gc_root_register(unsafe.Pointer(&head))
+	if root == nil {
+		t.Fatal("deep graph root registration failed")
+	}
+	tsnative_gc_collect()
+	if got := tsnative_heap_live_allocations(); got != nodes {
+		t.Fatalf("live allocations = %d, want %d", got, nodes)
+	}
+	work, _ := nativeGCMarkWork()
+	if work < nodes {
+		t.Fatalf("mark work = %d, want at least %d", work, nodes)
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestGCMarkQueueSwitchesAcrossSpanOwners(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	schedulerSetThread(0, 0)
+	parent := tsnative_heap_alloc(16)
+	schedulerSetThread(1, 0)
+	child := tsnative_heap_alloc(16)
+	if parent == nil || child == nil {
+		t.Fatal("cross-owner graph allocation failed")
+	}
+	*(*unsafe.Pointer)(parent) = child
+	rooted := parent
+	root := tsnative_gc_root_register(unsafe.Pointer(&rooted))
+	if root == nil {
+		t.Fatal("cross-owner root registration failed")
+	}
+	_, before := nativeGCMarkWork()
+	schedulerSetThread(0, 0)
+	tsnative_gc_collect()
+	_, after := nativeGCMarkWork()
+	if after <= before {
+		t.Fatalf("mark queue switches = %d, want > %d", after, before)
+	}
+	if !nativeHeapContains(parent) || !nativeHeapContains(child) {
+		t.Fatal("cross-owner graph was not preserved")
+	}
+	tsnative_gc_root_unregister(root)
+	schedulerSetThread(-1, 0)
+}

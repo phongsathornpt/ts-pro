@@ -37,22 +37,24 @@ type nativeRootFrame struct {
 
 var nativeHeap = struct {
 	sync.Mutex
-	blocks        map[uintptr]*nativeHeapBlock
-	roots         map[uintptr]*nativeRootFrame
-	threadStacks  map[int][]uintptr
-	tokenPages    [][]byte
-	tokenFree     []unsafe.Pointer
-	allocators    map[int]*nativeWorkerAllocator
-	spans         map[*nativeHeapSpan]struct{}
-	spanPages     map[uintptr]*nativeHeapSpan
-	freeSpans     [nativeSizeClassCount][]*nativeHeapSpan
-	remoteFrees   uint64
-	spanTransfers uint64
-	bytes         uintptr
-	allocations   uintptr
-	collections   uintptr
-	threshold     uintptr
-	handoffs      uintptr
+	blocks            map[uintptr]*nativeHeapBlock
+	roots             map[uintptr]*nativeRootFrame
+	threadStacks      map[int][]uintptr
+	tokenPages        [][]byte
+	tokenFree         []unsafe.Pointer
+	allocators        map[int]*nativeWorkerAllocator
+	spans             map[*nativeHeapSpan]struct{}
+	spanPages         map[uintptr]*nativeHeapSpan
+	freeSpans         [nativeSizeClassCount][]*nativeHeapSpan
+	remoteFrees       uint64
+	spanTransfers     uint64
+	markWork          uint64
+	markQueueSwitches uint64
+	bytes             uintptr
+	allocations       uintptr
+	collections       uintptr
+	threshold         uintptr
+	handoffs          uintptr
 }{
 	blocks:       map[uintptr]*nativeHeapBlock{},
 	roots:        map[uintptr]*nativeRootFrame{},
@@ -238,34 +240,6 @@ func tsnative_gc_handoff_end() {
 	nativeHeap.Unlock()
 }
 
-func markCandidateLocked(candidate uintptr) {
-	if candidate == 0 {
-		return
-	}
-	block := nativeHeap.blocks[candidate]
-	if block == nil {
-		if span := nativeHeapSpanForPointerLocked(candidate); span != nil {
-			base := uintptr(span.base)
-			end := base + uintptr(len(span.data))
-			if candidate >= base && candidate < end {
-				offset := candidate - base
-				slotBase := base + (offset/span.classSize)*span.classSize
-				block = nativeHeap.blocks[slotBase]
-			}
-		}
-	}
-	if block == nil || block.marked {
-		return
-	}
-	block.marked = true
-	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
-	count := block.size / wordSize
-	for i := uintptr(0); i < count; i++ {
-		word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
-		markCandidateLocked(word)
-	}
-}
-
 func gcCanCollectLocked(tid int) bool {
 	if nativeHeap.handoffs != 0 {
 		return false
@@ -296,14 +270,7 @@ func collectLocked() []*nativeHeapBlock {
 	for _, block := range nativeHeap.blocks {
 		block.marked = false
 	}
-	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
-	for _, frame := range nativeHeap.roots {
-		for i := uintptr(0); i < frame.count; i++ {
-			slotAddr := unsafe.Add(frame.slots, i*wordSize)
-			candidate := *(*uintptr)(slotAddr)
-			markCandidateLocked(candidate)
-		}
-	}
+	markNativeHeapRootsLocked()
 	blocks := make([]*nativeHeapBlock, 0)
 	for key, block := range nativeHeap.blocks {
 		if block.marked {
@@ -401,6 +368,8 @@ func tsnative_heap_shutdown() {
 	nativeHeap.allocators = map[int]*nativeWorkerAllocator{}
 	nativeHeap.remoteFrees = 0
 	nativeHeap.spanTransfers = 0
+	nativeHeap.markWork = 0
+	nativeHeap.markQueueSwitches = 0
 	spans := make([]*nativeHeapSpan, 0, len(nativeHeap.spans))
 	for span := range nativeHeap.spans {
 		spans = append(spans, span)
