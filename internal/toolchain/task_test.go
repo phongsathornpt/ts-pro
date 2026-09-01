@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,20 +77,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "task_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -167,20 +160,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "steal_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	for _, workers := range []string{"4", "1"} {
@@ -246,20 +231,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "task_ref_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -343,20 +320,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "park_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -418,20 +387,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "task_await_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -454,12 +415,13 @@ func TestNativeReferenceAwaitTransferStaysRooted(t *testing.T) {
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "await_ref_test.c")
-	program := `#include <assert.h>
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	header := goRuntimeHeaderForTest(t, goRuntime)
+	program := fmt.Sprintf(`#include %q
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "task.h"
-#include "scheduler.h"
-#include "heap.h"
+typedef void tsnative_task;
 typedef struct { int phase; void *value; tsnative_task *child; } parent_state;
 static void child(void *state, void *result) {
   (void)state;
@@ -494,26 +456,19 @@ int main(void) {
   tsnative_scheduler_shutdown();
   tsnative_heap_shutdown();
   return 0;
-}`
+}`, header)
 	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	obj := filepath.Join(dir, "test.o")
-	taskObj := filepath.Join(dir, "task.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	bin := filepath.Join(dir, "test")
-	for src, out := range map[string]string{source: obj, filepath.Join(root, "runtime", "concurrency", "task.c"): taskObj, filepath.Join(root, "runtime", "concurrency", "scheduler.c"): schedulerObj} {
-		cmd := exec.CommandContext(ctx, clang.Path, "-std=c11", "-pthread", "-I"+filepath.Join(root, "runtime", "concurrency"), "-I"+filepath.Join(root, "runtime", "core"), "-c", src, "-o", out)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("compile %s: %v: %s", src, err, output)
-		}
+	if err := clang.CompileC(ctx, source, obj, "-O2"); err != nil {
+		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(ctx, clang.Path, obj, taskObj, schedulerObj, goRuntime, "-pthread", "-o", bin)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("link: %v: %s", err, output)
+	if err := clang.Link(ctx, []string{obj, goRuntime}, bin); err != nil {
+		t.Fatal(err)
 	}
-	cmd = exec.CommandContext(ctx, bin)
+	cmd := exec.CommandContext(ctx, bin)
 	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("run: %v: %s", err, output)
@@ -568,20 +523,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "task_100k_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)
@@ -643,20 +590,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
-	taskObj := filepath.Join(dir, "task.o")
 	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "task_failure_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)

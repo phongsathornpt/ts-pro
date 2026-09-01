@@ -37,8 +37,11 @@ func (c *ObjectCache) BuildGoArchive(ctx context.Context, root, packagePath stri
 		if walkErr != nil {
 			return walkErr
 		}
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
-			files = append(files, path)
+		if !entry.IsDir() {
+			ext := filepath.Ext(entry.Name())
+			if ext == ".go" || ext == ".s" || ext == ".h" {
+				files = append(files, path)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -56,7 +59,10 @@ func (c *ObjectCache) BuildGoArchive(ctx context.Context, root, packagePath stri
 	}
 	key := hex.EncodeToString(h.Sum(nil))
 	output := filepath.Join(c.Dir, key+".a")
-	if info, statErr := os.Stat(output); statErr == nil && info.Size() > 0 {
+	outputHeader := strings.TrimSuffix(output, ".a") + ".h"
+	archiveInfo, archiveErr := os.Stat(output)
+	headerInfo, headerErr := os.Stat(outputHeader)
+	if archiveErr == nil && archiveInfo.Size() > 0 && headerErr == nil && headerInfo.Size() > 0 {
 		return output, true, nil
 	}
 	tempFile, err := os.CreateTemp(c.Dir, key+"-*.a")
@@ -77,6 +83,11 @@ func (c *ObjectCache) BuildGoArchive(ctx context.Context, root, packagePath stri
 	if err := os.Rename(temp, output); err != nil {
 		if info, statErr := os.Stat(output); statErr != nil || info.Size() == 0 {
 			return "", false, fmt.Errorf("publish Go runtime archive: %w", err)
+		}
+	}
+	if err := os.Rename(header, outputHeader); err != nil {
+		if info, statErr := os.Stat(outputHeader); statErr != nil || info.Size() == 0 {
+			return "", false, fmt.Errorf("publish Go runtime header: %w", err)
 		}
 	}
 	return output, false, nil

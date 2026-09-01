@@ -44,7 +44,7 @@ func tsnative_array_f64_new(length C.uint64_t) unsafe.Pointer {
 		nativeAbort("f64 array allocation overflow")
 	}
 	size := nativeF64ArrayHeaderSize + uintptr(n)*unsafe.Sizeof(float64(0))
-	raw := tsnative_heap_alloc(C.size_t(size))
+	raw := tsnative_heap_alloc(size)
 	*(*uint64)(raw) = n
 	return raw
 }

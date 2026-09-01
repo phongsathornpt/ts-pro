@@ -46,15 +46,12 @@ int main(void) {
 		t.Fatal(err)
 	}
 	testObj := filepath.Join(dir, "test.o")
-	schedulerObj := filepath.Join(dir, "scheduler.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	binary := filepath.Join(dir, "scheduler_test")
 	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clang.Link(ctx, []string{testObj, schedulerObj}, binary); err != nil {
+	if err := clang.Link(ctx, []string{testObj, goRuntime}, binary); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, binary)

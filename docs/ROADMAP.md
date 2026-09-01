@@ -4,8 +4,8 @@
 
 - [ ] Move compiler-owned semantic normalization, HIR/MIR, representation analysis, LLVM emission, and build orchestration out of Go into the TypeScript 7 compiler implementation.
 - [ ] Freeze compile-time Go work to migration/parity fixes only.
-- [~] Complete `runtimego/` migration so Go is the sole handwritten runtime/native-library language.
-- [ ] Remove handwritten runtime C after Go ABI parity.
+- [x] Complete `runtimego/` migration so Go is the sole handwritten runtime/native-library language.
+- [x] Remove handwritten runtime C after Go ABI parity; ABI consumers use the generated Go `c-archive` header.
 - [ ] Retire transitional `cmd/` and `internal/` Go compiler packages after TypeScript-native parity tests pass.
 
 ## Milestone 0 — Historical Go compiler rebase [superseded target]
@@ -51,10 +51,10 @@
 ## Milestone 5 — Native data model 🚧
 
 - [x] Native strings and specialized `number[]`.
-- [ ] Add conservative integer narrowing only after range proof.
-- [~] Closed object shapes with fixed offsets; class reuse follows.
-- [ ] Closures and function values.
-- [ ] Monomorphized generics and direct-call specialization.
+- [x] Add conservative integer narrowing only after range proof.
+- [x] Closed object shapes with fixed offsets, including class reuse/inheritance support.
+- [x] Closures and function values.
+- [~] Monomorphized generics and direct-call specialization; initial scalar/string call-site specialization is complete, advanced/cross-module cases remain.
 - [ ] Escape analysis and scalar replacement.
 
 ## Milestone 6 — Dynamic boundary and scale
@@ -79,4 +79,4 @@ See `CONCURRENCY.md` for the step-by-step commit plan and acceptance gates.
 
 ## Current checkpoint
 
-The stable checkpoint is `6bad298`: native recursion, scalar/integer fast paths, mutable SSA control flow, strings/`number[]`, closures, classes/inheritance/dispatch, initial generics, shared heap/mark-sweep GC, object caching, and performance reporting. The active working tree is the first partial `JSValue` dynamic-boundary milestone. Native concurrency is planned next as an isolated subsystem after that work reaches a clean checkpoint. See `STATUS.md`, `TODO.md`, and `CONCURRENCY.md`.
+The historical compiler checkpoint `6bad298` predates the current runtime/concurrency work. The current branch now has the Go-only handwritten native runtime, stackless tasks/async continuations, typed channels, timers/blocking pool, structured concurrency, cancellation, task-local context, and dynamic JSValue coverage described in `STATUS.md` and `TODO.md`. The remaining critical path is precise scheduler/GC integration, allocator locality, incomplete dynamic/Promise/language coverage, multi-module work, and migration of compile-time ownership into TypeScript 7.

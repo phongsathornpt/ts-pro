@@ -23,7 +23,8 @@ func TestRuntimeMarkSweepPreservesExplicitRoots(t *testing.T) {
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "gc.c")
-	header := filepath.Join(root, "runtime", "core", "heap.h")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	header := goRuntimeHeaderForTest(t, goRuntime)
 	program := fmt.Sprintf(`#include %q
 #include <assert.h>
 int main(void) {
@@ -44,7 +45,6 @@ int main(void) {
 	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
 	programObj := filepath.Join(dir, "gc.o")
 	bin := filepath.Join(dir, "gc-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
@@ -57,7 +57,6 @@ int main(void) {
 		t.Fatalf("run GC runtime test: %v: %s", err, output)
 	}
 }
-
 func TestRuntimeHeapSupportsConcurrentRootFrames(t *testing.T) {
 	clang, err := DiscoverClang()
 	if err != nil {
@@ -71,7 +70,8 @@ func TestRuntimeHeapSupportsConcurrentRootFrames(t *testing.T) {
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "gc_threads.c")
-	header := filepath.Join(root, "runtime", "core", "heap.h")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	header := goRuntimeHeaderForTest(t, goRuntime)
 	program := fmt.Sprintf(`#include %q
 #include <assert.h>
 #include <pthread.h>
@@ -114,7 +114,7 @@ int main(void) {
 	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+
 	programObj := filepath.Join(dir, "gc_threads.o")
 	bin := filepath.Join(dir, "gc-threads-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
@@ -127,7 +127,6 @@ int main(void) {
 		t.Fatalf("run concurrent GC runtime test: %v: %s", err, output)
 	}
 }
-
 func TestRuntimeGCHandoffDefersCollection(t *testing.T) {
 	clang, err := DiscoverClang()
 	if err != nil {
@@ -141,7 +140,8 @@ func TestRuntimeGCHandoffDefersCollection(t *testing.T) {
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "gc_handoff.c")
-	header := filepath.Join(root, "runtime", "core", "heap.h")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	header := goRuntimeHeaderForTest(t, goRuntime)
 	program := fmt.Sprintf(`#include %q
 #include <assert.h>
 int main(void) {
@@ -161,7 +161,7 @@ int main(void) {
 		t.Fatal(err)
 	}
 	programObj := filepath.Join(dir, "handoff.o")
-	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+
 	binary := filepath.Join(dir, "gc-handoff-test")
 	if err := clang.CompileC(ctx, source, programObj, "-O2"); err != nil {
 		t.Fatal(err)

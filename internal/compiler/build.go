@@ -291,45 +291,13 @@ func recordCacheResult(metrics *BuildMetrics, hit bool) {
 	}
 }
 
-type runtimeCompileResult struct {
-	index int
-	path  string
-	hit   bool
-	err   error
-}
-
 func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
-	sources := []string{"concurrency/scheduler.c", "concurrency/task.c"}
-	results := make(chan runtimeCompileResult, len(sources))
-	for i, source := range sources {
-		go func(index int, name string) {
-			path, hit, err := cache.CompileC(ctx, filepath.Join(root, "runtime", name), opt)
-			results <- runtimeCompileResult{index: index, path: path, hit: hit, err: err}
-		}(i, source)
-	}
-	objects := make([]string, len(sources), len(sources)+1)
-	hits, misses := 0, 0
-	for range sources {
-		result := <-results
-		if result.err != nil {
-			return nil, hits, misses, result.err
-		}
-		objects[result.index] = result.path
-		if result.hit {
-			hits++
-		} else {
-			misses++
-		}
-	}
 	archive, hit, err := cache.BuildGoArchive(ctx, root, "./runtimego")
 	if err != nil {
-		return nil, hits, misses, err
+		return nil, 0, 0, err
 	}
-	objects = append(objects, archive)
 	if hit {
-		hits++
-	} else {
-		misses++
+		return []string{archive}, 1, 0, nil
 	}
-	return objects, hits, misses, nil
+	return []string{archive}, 0, 1, nil
 }

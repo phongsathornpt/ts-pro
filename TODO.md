@@ -9,8 +9,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [ ] Stop adding new compiler/frontend/HIR/MIR/codegen features to the transitional Go compiler path.
   - [ ] Port semantic DTO/HIR/MIR/representation/lowering/LLVM/build orchestration from `cmd/` + `internal/` Go packages into the TypeScript 7 compiler implementation with parity tests.
   - [ ] Retire transitional compile-time Go packages after TypeScript 7 parity is complete.
-  - [ ] Keep Go under `runtimego/` (and native-library packages) for allocator/GC, scheduler/tasks, channels, timers, blocking pool, JSValue, strings/arrays/objects, and native libraries.
-  - [ ] Remove all handwritten runtime C after Go runtime parity; C-compatible headers/ABI shims may remain generated/toolchain-facing only.
+  - [x] Keep Go under `runtimego/` (and native-library packages) for allocator/GC, scheduler/tasks, channels, timers, blocking pool, JSValue, strings/arrays/objects, and native libraries.
+  - [x] Remove all handwritten runtime C after Go runtime parity; the cached Go `c-archive` now publishes its generated C-compatible ABI header for toolchain/tests.
 
 ## Project completion goal
 
@@ -77,7 +77,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Generic monomorphization and call-site specialization.
   - [x] Direct type-parameter scalar/string call-site specializations (`identity<T>(x: T): T`).
   - [ ] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
-- [ ] Exceptions, Promise, and async/await.
+- [~] Exceptions, Promise, and async/await.
 
 ## Native concurrency management
 
@@ -140,7 +140,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Preserve pending return/rethrow completion through `finally`, evaluating the completion value before finalizer side effects and propagating catch rethrows to outer handlers.
         - [x] Add completion override from `return`/`throw` inside `finally`, including nested propagation into outer async catch handlers.
         - [ ] Add broader nested recovery tests and selected Promise combinators.
-- [~] Add structured concurrency, task groups, cancellation, and task-local context.
+- [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
   - [x] Add GC-rooted task-local JSValue context with automatic parent-to-child inheritance across worker migration/suspension and worker=1 regression coverage.
@@ -164,7 +164,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## LLVM, runtime, and build
 
 - [~] Preserve deterministic LLVM IR output while migrating LLVM emission from the transitional Go compiler into the TypeScript 7 compiler.
-- [~] Compile LLVM IR and link the Go native runtime through the native toolchain; handwritten runtime C is transitional and must disappear.
+- [x] Compile LLVM IR and link the Go native runtime through the native toolchain; handwritten runtime C has been retired.
 - [x] Link native executables without Node/V8.
 - [x] Support `-O0/-O1/-O2/-O3/-Oz`.
 - [x] Compile and run `fib.ts`, loop, numeric-array, string, and closed-object acceptance programs.
@@ -172,7 +172,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add native length-aware UTF-8 string runtime support.
 - [x] Add shared heap ownership for strings, arrays, objects, and closure environments/values, with deterministic shutdown from native `main`.
 - [x] Add initial mark/sweep GC with explicit native shadow roots, compiler safepoints, conservative heap tracing, and sweep reclamation.
-- [~] Migrate the handwritten native C runtime to Go while preserving the existing LLVM C ABI and native layouts.
+- [x] Migrate the handwritten native C runtime to Go while preserving the existing LLVM C ABI and native layouts.
   - [x] Add cached Go `c-archive` build/link support and migrate the numeric console ABI; remove `runtime/core/console.c`.
   - [x] Migrate the native heap allocator and mark/sweep GC ABI to Go; remove `runtime/core/heap.c`.
   - [x] Migrate strings, arrays, objects, and JSValue.
@@ -180,18 +180,19 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Migrate specialized F64 arrays to the Go c-archive while preserving the `{len,data[]}` ABI, checked-index behavior, and shared heap/GC ownership.
     - [x] Migrate object allocation/runtime helpers to the Go c-archive while preserving the existing heap-owned pointer ABI.
     - [x] Migrate JSValue boxing/dynamic helpers to the Go c-archive while preserving the tagged 16-byte ABI, dynamic `+`, and console output behavior.
-  - [~] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
-    - [x] Isolate task execution/completion/status/park-wake transitions behind an internal opaque task contract so scheduler logic no longer manipulates task state fields directly; intrusive queue links remain in C pending Go queue migration.
-    - [x] Move production scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go goroutines while preserving the existing task/LLVM C ABI; workers lock OS threads to preserve native TLS current-task semantics, and strong Go ABI symbols override the weak C fallback used by standalone harnesses.
-    - [~] Migrate task handle ownership/completion groups/context into Go, then remove the weak C scheduler fallback and intrusive queue links from the task layout.
-      - [x] Move production task-group ownership, child tracking, join coordination, and cancellation iteration to Go maps/condition variables; strong Go group ABI symbols override the weak C fallback while attaching children before scheduler submission.
-      - [ ] Move remaining task completion ownership, context/failure/result roots, and handle destruction into Go, then remove C group/intrusive queue fields and the weak scheduler fallback.
+  - [x] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
+    - [x] Isolate task execution/completion/status/park-wake transitions behind an internal opaque Go task contract; runnable queues and task state no longer depend on C layouts.
+    - [x] Move production scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go goroutines while preserving the task/LLVM C ABI; generated cgo exports provide the external ABI.
+    - [x] Migrate task handle ownership/completion groups/context into Go and remove the weak C scheduler fallback/intrusive C task layout.
+      - [x] Move production task-group ownership, child tracking, join coordination, cancellation iteration, and opaque group handles to Go maps/condition variables.
+      - [x] Move task completion ownership, context/failure/result roots, and handle destruction into Go; no C group/intrusive queue fields or weak scheduler fallback remain.
   - [x] Migrate channels, timers, and the blocking-call pool.
     - [x] Migrate timers/sleep to Go `time` primitives with scheduler hook binding, tracked pending waits, cooperative fallback, and deterministic shutdown.
     - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.
     - [x] Migrate the bounded blocking-call pool to Go worker goroutines with opaque C job handles, scheduler park/wake hooks, bounded active jobs, metrics, and deterministic shutdown.
-  - [ ] Remove legacy C headers/tests and the native C compilation path once no handwritten runtime `.c` sources remain.
+  - [x] Remove legacy C headers/runtime tests and the native C compilation path; ABI tests compile against the generated Go `c-archive` header.
 - [ ] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and eventually generational collection.
+- [ ] Make `go vet ./...` clean across native ABI boundaries by auditing/centralizing intentional `uintptr` ↔ native-pointer conversions instead of suppressing the `unsafeptr` analyzer.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
 ## Dynamic boundary, correctness, and performance
@@ -219,9 +220,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
-2. Migrate scheduler/tasks to Go concurrency primitives where ABI-safe, then remove the remaining handwritten C runtime path.
-3. Integrate task/channel/timer state with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
+2. Add per-worker allocation caches/nurseries, then Green-Tea-style local mark-page work.
+3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
 6. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+7. Port compiler-owned semantic/HIR/MIR/LLVM/build orchestration to TypeScript 7 and retire transitional compile-time Go packages.

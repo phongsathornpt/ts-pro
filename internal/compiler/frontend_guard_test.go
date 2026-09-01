@@ -14,7 +14,7 @@ func TestActiveCompilerHasNoParallelTypeScriptFrontend(t *testing.T) {
 		t.Fatal(err)
 	}
 	forbidden := []string{"swc", "babel", "oxc"}
-	for _, dir := range []string{"cmd", "internal", "runtime"} {
+	for _, dir := range []string{"cmd", "internal", "runtimego"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err

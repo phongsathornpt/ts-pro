@@ -14,7 +14,7 @@ M:N scheduler
 OS worker threads (N ≈ CPU cores)
 ```
 
-The first implementation is stackless. Async functions eventually lower to resumable state machines instead of allocating a large native stack per task.
+The runtime is stackless. Async functions and blocking task operations lower to resumable state machines instead of allocating a large native stack per task.
 
 ## Implementation-language boundary
 
@@ -61,17 +61,18 @@ These imports are compiler-known native libraries, not dynamic Node module looku
 ## Runtime layout
 
 ```text
-runtime/concurrency/
-  scheduler.c/.h
-  task.c/.h
-  deque.c/.h
-  channel.c/.h
-  timer.c/.h
-  blocking_pool.c/.h
-  sync.c/.h
-  atomic.c/.h
-  os_linux.c/.h
+runtimego/
+  scheduler.go     # bounded workers, queues, stealing, park/wake, metrics
+  task.go          # task handles, completion, roots, results, cancellation
+  taskgroup.go     # structured child ownership and group cancellation
+  taskcontext.go   # task-local context ABI backed by task-owned roots
+  channel.go       # typed F64/bool/reference channels
+  timer.go         # task-aware timers/sleep
+  blocking.go      # bounded blocking-call isolation
+  heap.go          # native allocation and mark/sweep roots
 ```
+
+The runtime is linked as a cached Go `c-archive`. Its generated header is cached beside the archive and is the ABI source used by native toolchain tests. There are no handwritten runtime `.c` implementation files or legacy scheduler/task headers in the active build path.
 
 A worker owns hot local state:
 
@@ -119,7 +120,7 @@ A `channel<number>` therefore remains an F64 channel and does not become `JSValu
 
 ## Implementation and commit sequence
 
-Each step must compile, test, and commit independently.
+Steps 1-12 and 16 are implemented. Steps 13-15 remain active work. Each additional step must compile, test, and commit independently.
 
 1. `runtime: add bounded native scheduler core`
    - Worker lifecycle, CPU-count default, `TSNATIVE_WORKERS`, shutdown.

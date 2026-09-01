@@ -1,25 +1,12 @@
 package main
 
 /*
-#cgo CFLAGS: -I../runtime/concurrency
 #include <stdint.h>
-#define TSNATIVE_CGO_TASKGROUP_EXPORTS 1
-#include "../runtime/concurrency/task_internal.h"
-
-static _Thread_local long long tsnative_go_worker_tls = -1;
-static _Thread_local tsnative_task *tsnative_go_task_tls = NULL;
-
-static void tsnative_go_set_worker(long long index) { tsnative_go_worker_tls = index; }
-static long long tsnative_go_get_worker(void) { return tsnative_go_worker_tls; }
-static void tsnative_go_set_current_task(tsnative_task *task) { tsnative_go_task_tls = task; }
-static tsnative_task *tsnative_go_get_current_task(void) { return tsnative_go_task_tls; }
-
 extern void *tsnative_scheduler_current_task(void);
 extern int tsnative_scheduler_prepare_park(void);
 extern void tsnative_scheduler_cancel_park(void);
 extern int tsnative_scheduler_wake(void *task);
 extern int tsnative_scheduler_help_once(void);
-
 static uintptr_t tsnative_go_addr_current(void) { return (uintptr_t)&tsnative_scheduler_current_task; }
 static uintptr_t tsnative_go_addr_prepare(void) { return (uintptr_t)&tsnative_scheduler_prepare_park; }
 static uintptr_t tsnative_go_addr_cancel(void) { return (uintptr_t)&tsnative_scheduler_cancel_park; }
@@ -34,6 +21,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
 )
 
@@ -112,6 +100,12 @@ var goScheduler = func() *nativeSchedulerState {
 	return s
 }()
 
+var schedulerThreads = struct {
+	sync.RWMutex
+	workers map[int]int
+	tasks   map[int]uintptr
+}{workers: map[int]int{}, tasks: map[int]uintptr{}}
+
 func schedulerLimit(name string, fallback, hardMax int) int {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -160,12 +154,52 @@ func updateSchedulerPeak(active int64) {
 	}
 }
 
+func schedulerSetThread(worker int, task uintptr) {
+	tid := syscall.Gettid()
+	schedulerThreads.Lock()
+	if worker >= 0 {
+		schedulerThreads.workers[tid] = worker
+	} else {
+		delete(schedulerThreads.workers, tid)
+	}
+	if task != 0 {
+		schedulerThreads.tasks[tid] = task
+	} else {
+		delete(schedulerThreads.tasks, tid)
+	}
+	schedulerThreads.Unlock()
+}
+
+func schedulerSetCurrentTask(task uintptr) uintptr {
+	tid := syscall.Gettid()
+	schedulerThreads.Lock()
+	previous := schedulerThreads.tasks[tid]
+	if task == 0 {
+		delete(schedulerThreads.tasks, tid)
+	} else {
+		schedulerThreads.tasks[tid] = task
+	}
+	schedulerThreads.Unlock()
+	return previous
+}
+
 func schedulerWorkerIndex() int {
-	return int(C.tsnative_go_get_worker())
+	tid := syscall.Gettid()
+	schedulerThreads.RLock()
+	worker, ok := schedulerThreads.workers[tid]
+	schedulerThreads.RUnlock()
+	if !ok {
+		return -1
+	}
+	return worker
 }
 
 func schedulerCurrentTaskPtr() uintptr {
-	return uintptr(unsafe.Pointer(C.tsnative_go_get_current_task()))
+	tid := syscall.Gettid()
+	schedulerThreads.RLock()
+	task := schedulerThreads.tasks[tid]
+	schedulerThreads.RUnlock()
+	return task
 }
 
 func schedulerInjectionPopLocked() uintptr {
@@ -211,14 +245,15 @@ func schedulerTakeWork(worker *nativeSchedulerWorker) uintptr {
 	return task
 }
 
-func schedulerWakeTask(task uintptr) int {
-	if task == 0 {
+func schedulerWakeTask(handle uintptr) int {
+	task := lookupNativeTask(handle)
+	if task == nil {
 		return -1
 	}
 	goScheduler.mu.Lock()
-	wake := int(C.tsnative_task_wake_internal((*C.tsnative_task)(unsafe.Pointer(task))))
+	wake := nativeTaskWake(task)
 	if wake == 1 {
-		goScheduler.inject = append(goScheduler.inject, task)
+		goScheduler.inject = append(goScheduler.inject, handle)
 		goScheduler.runnable.Add(1)
 		goScheduler.wake.Signal()
 	}
@@ -229,42 +264,44 @@ func schedulerWakeTask(task uintptr) int {
 	return 0
 }
 
-func schedulerExecuteTask(task uintptr) {
-	ptr := (*C.tsnative_task)(unsafe.Pointer(task))
-	previous := C.tsnative_go_get_current_task()
-	C.tsnative_go_set_current_task(ptr)
-	execution := C.tsnative_task_execute_once_internal(ptr)
-	C.tsnative_go_set_current_task(previous)
+func schedulerExecuteTask(handle uintptr) {
+	task := lookupNativeTask(handle)
+	if task == nil {
+		return
+	}
+	previous := schedulerSetCurrentTask(handle)
+	execution := executeNativeTaskOnce(task)
+	schedulerSetCurrentTask(previous)
 
-	kind := int(execution.kind)
 	goScheduler.mu.Lock()
-	if kind == int(C.TSNATIVE_TASK_EXEC_REQUEUE) {
-		goScheduler.inject = append(goScheduler.inject, task)
+	switch execution.kind {
+	case nativeTaskExecRequeue:
+		goScheduler.inject = append(goScheduler.inject, handle)
 		goScheduler.runnable.Add(1)
 		goScheduler.wake.Signal()
-	} else if kind == int(C.TSNATIVE_TASK_EXEC_TERMINAL) {
+	case nativeTaskExecTerminal:
 		goScheduler.active.Add(-1)
 		goScheduler.completed.Add(1)
 	}
 	goScheduler.done.Broadcast()
 	goScheduler.mu.Unlock()
 
-	if kind == int(C.TSNATIVE_TASK_EXEC_TERMINAL) {
-		taskGroupDetach(task)
-		C.tsnative_task_notify_completed_internal(ptr)
-		if execution.completion_waiter != nil {
-			_ = schedulerWakeTask(uintptr(unsafe.Pointer(execution.completion_waiter)))
+	if execution.kind == nativeTaskExecTerminal {
+		taskGroupDetach(handle)
+		if execution.completionWaiter != 0 {
+			_ = schedulerWakeTask(execution.completionWaiter)
 		}
-		C.tsnative_task_destroy_completed_internal(ptr, execution.completion_consume)
+		if execution.completionConsume {
+			destroyNativeTaskStorage(task)
+		}
 	}
 }
 
 func schedulerWorkerLoop(worker *nativeSchedulerWorker) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	C.tsnative_go_set_worker(C.longlong(worker.index))
-	defer C.tsnative_go_set_worker(-1)
-	defer C.tsnative_go_set_current_task(nil)
+	schedulerSetThread(worker.index, 0)
+	defer schedulerSetThread(-1, 0)
 
 	for {
 		if task := schedulerTakeWork(worker); task != 0 {
@@ -297,7 +334,7 @@ func bindGoSchedulerHooks() {
 }
 
 //export tsnative_scheduler_init
-func tsnative_scheduler_init() C.int {
+func tsnative_scheduler_init() int32 {
 	goScheduler.mu.Lock()
 	if goScheduler.started {
 		goScheduler.mu.Unlock()
@@ -329,11 +366,15 @@ func tsnative_scheduler_init() C.int {
 }
 
 //export tsnative_scheduler_submit
-func tsnative_scheduler_submit(raw unsafe.Pointer) C.int {
+func tsnative_scheduler_submit(raw unsafe.Pointer) int32 {
 	if raw == nil {
 		return -1
 	}
-	task := uintptr(raw)
+	handle := uintptr(raw)
+	task := lookupNativeTask(handle)
+	if task == nil {
+		return -1
+	}
 	goScheduler.mu.Lock()
 	active := goScheduler.active.Load()
 	if !goScheduler.started || goScheduler.stopping || active >= goScheduler.maxTasks {
@@ -341,16 +382,17 @@ func tsnative_scheduler_submit(raw unsafe.Pointer) C.int {
 		return -1
 	}
 	goScheduler.nextID++
-	C.tsnative_task_mark_submitted_internal((*C.tsnative_task)(raw), C.uint64_t(goScheduler.nextID))
+	task.id = goScheduler.nextID
+	task.status.Store(nativeTaskRunnable)
 	active = goScheduler.active.Add(1)
 	goScheduler.runnable.Add(1)
 	goScheduler.spawned.Add(1)
 	updateSchedulerPeak(active)
 	workerIndex := schedulerWorkerIndex()
 	if workerIndex >= 0 && workerIndex < len(goScheduler.workers) {
-		goScheduler.workers[workerIndex].pushTail(task)
+		goScheduler.workers[workerIndex].pushTail(handle)
 	} else {
-		goScheduler.inject = append(goScheduler.inject, task)
+		goScheduler.inject = append(goScheduler.inject, handle)
 	}
 	goScheduler.wake.Signal()
 	goScheduler.mu.Unlock()
@@ -358,40 +400,39 @@ func tsnative_scheduler_submit(raw unsafe.Pointer) C.int {
 }
 
 //export tsnative_scheduler_wait
-func tsnative_scheduler_wait(raw unsafe.Pointer) C.int {
-	if raw == nil {
+func tsnative_scheduler_wait(raw unsafe.Pointer) int32 {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil {
 		return -1
 	}
-	task := (*C.tsnative_task)(raw)
-	for C.tsnative_task_is_terminal_internal(task) == 0 {
+	for !nativeTaskIsTerminal(task) {
 		workerIndex := schedulerWorkerIndex()
-		if workerIndex >= 0 && workerIndex < len(goScheduler.workers) {
-			if tsnative_scheduler_help_once() != 0 {
-				continue
-			}
+		if workerIndex >= 0 && workerIndex < len(goScheduler.workers) && tsnative_scheduler_help_once() != 0 {
+			continue
 		}
 		goScheduler.mu.Lock()
-		if C.tsnative_task_is_terminal_internal(task) == 0 {
+		if !nativeTaskIsTerminal(task) {
 			goScheduler.done.Wait()
 		}
 		goScheduler.mu.Unlock()
 	}
-	if C.tsnative_task_status_internal(task) == C.TSNATIVE_TASK_DONE {
+	if task.status.Load() == nativeTaskDone {
 		return 0
 	}
 	return -1
 }
 
 //export tsnative_scheduler_task_status
-func tsnative_scheduler_task_status(raw unsafe.Pointer) C.int {
-	if raw == nil {
-		return C.int(C.TSNATIVE_TASK_FAILED)
+func tsnative_scheduler_task_status(raw unsafe.Pointer) int32 {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil {
+		return nativeTaskFailed
 	}
-	return C.int(C.tsnative_task_status_internal((*C.tsnative_task)(raw)))
+	return task.status.Load()
 }
 
 //export tsnative_scheduler_help_once
-func tsnative_scheduler_help_once() C.int {
+func tsnative_scheduler_help_once() int32 {
 	workerIndex := schedulerWorkerIndex()
 	if workerIndex < 0 || workerIndex >= len(goScheduler.workers) {
 		return 0
@@ -425,7 +466,7 @@ func tsnative_scheduler_shutdown() {
 }
 
 //export tsnative_scheduler_worker_count
-func tsnative_scheduler_worker_count() C.size_t {
+func tsnative_scheduler_worker_count() uintptr {
 	goScheduler.mu.Lock()
 	count := len(goScheduler.workers)
 	started := goScheduler.started
@@ -433,11 +474,11 @@ func tsnative_scheduler_worker_count() C.size_t {
 	if !started {
 		count = configuredSchedulerWorkers()
 	}
-	return C.size_t(count)
+	return uintptr(count)
 }
 
 //export tsnative_scheduler_is_running
-func tsnative_scheduler_is_running() C.int {
+func tsnative_scheduler_is_running() int32 {
 	goScheduler.mu.Lock()
 	running := goScheduler.started && !goScheduler.stopping
 	goScheduler.mu.Unlock()
@@ -448,28 +489,28 @@ func tsnative_scheduler_is_running() C.int {
 }
 
 //export tsnative_scheduler_active_tasks
-func tsnative_scheduler_active_tasks() C.size_t { return C.size_t(goScheduler.active.Load()) }
+func tsnative_scheduler_active_tasks() uintptr { return uintptr(goScheduler.active.Load()) }
 
 //export tsnative_scheduler_peak_active_tasks
-func tsnative_scheduler_peak_active_tasks() C.size_t { return C.size_t(goScheduler.peak.Load()) }
+func tsnative_scheduler_peak_active_tasks() uintptr { return uintptr(goScheduler.peak.Load()) }
 
 //export tsnative_scheduler_spawned_tasks
-func tsnative_scheduler_spawned_tasks() C.uint64_t { return C.uint64_t(goScheduler.spawned.Load()) }
+func tsnative_scheduler_spawned_tasks() uint64 { return goScheduler.spawned.Load() }
 
 //export tsnative_scheduler_completed_tasks
-func tsnative_scheduler_completed_tasks() C.uint64_t { return C.uint64_t(goScheduler.completed.Load()) }
+func tsnative_scheduler_completed_tasks() uint64 { return goScheduler.completed.Load() }
 
 //export tsnative_scheduler_steal_attempts
-func tsnative_scheduler_steal_attempts() C.uint64_t { return C.uint64_t(goScheduler.stealTry.Load()) }
+func tsnative_scheduler_steal_attempts() uint64 { return goScheduler.stealTry.Load() }
 
 //export tsnative_scheduler_successful_steals
-func tsnative_scheduler_successful_steals() C.uint64_t { return C.uint64_t(goScheduler.stealOK.Load()) }
+func tsnative_scheduler_successful_steals() uint64 { return goScheduler.stealOK.Load() }
 
 //export tsnative_scheduler_worker_parks
-func tsnative_scheduler_worker_parks() C.uint64_t { return C.uint64_t(goScheduler.parks.Load()) }
+func tsnative_scheduler_worker_parks() uint64 { return goScheduler.parks.Load() }
 
 //export tsnative_scheduler_worker_wakeups
-func tsnative_scheduler_worker_wakeups() C.uint64_t { return C.uint64_t(goScheduler.wakeups.Load()) }
+func tsnative_scheduler_worker_wakeups() uint64 { return goScheduler.wakeups.Load() }
 
 //export tsnative_scheduler_current_task
 func tsnative_scheduler_current_task() unsafe.Pointer {
@@ -477,23 +518,17 @@ func tsnative_scheduler_current_task() unsafe.Pointer {
 }
 
 //export tsnative_scheduler_prepare_park
-func tsnative_scheduler_prepare_park() C.int {
-	current := schedulerCurrentTaskPtr()
-	if current == 0 {
-		return -1
-	}
-	return C.tsnative_task_prepare_park_internal((*C.tsnative_task)(unsafe.Pointer(current)))
+func tsnative_scheduler_prepare_park() int32 {
+	task := lookupNativeTask(schedulerCurrentTaskPtr())
+	return nativeTaskPreparePark(task)
 }
 
 //export tsnative_scheduler_cancel_park
 func tsnative_scheduler_cancel_park() {
-	current := schedulerCurrentTaskPtr()
-	if current != 0 {
-		C.tsnative_task_cancel_park_internal((*C.tsnative_task)(unsafe.Pointer(current)))
-	}
+	nativeTaskCancelPark(lookupNativeTask(schedulerCurrentTaskPtr()))
 }
 
 //export tsnative_scheduler_wake
-func tsnative_scheduler_wake(raw unsafe.Pointer) C.int {
-	return C.int(schedulerWakeTask(uintptr(raw)))
+func tsnative_scheduler_wake(raw unsafe.Pointer) int32 {
+	return int32(schedulerWakeTask(uintptr(raw)))
 }
