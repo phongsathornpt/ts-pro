@@ -656,3 +656,45 @@ func TestEmitStacklessLoopPhiContinuation(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessNativeObjectArrayCallContinuation(t *testing.T) {
+	retHelper := mir.ValueID(1)
+	retWorker := mir.ValueID(10)
+	module := mir.Module{
+		Name:   "stackless-native-ops",
+		Shapes: []mir.Shape{{ID: 0, Name: "Point", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{
+			{ID: 0, Name: "double", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprF64}}, ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 2}},
+				{Result: 1, Repr: mir.ReprF64, Op: mir.FloatBinary{Operator: mir.FloatMul, Left: 0, Right: 2}},
+			}, Terminator: mir.Return{Value: &retHelper}}}},
+			{ID: 1, Name: "worker", Params: []mir.Param{{Value: 0, Name: "base", Repr: mir.ReprF64}}, ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+				{Result: 2, Repr: mir.ReprArrayRef, Op: mir.ArrayNewF64{Elements: []mir.ValueID{0, 1}}},
+				{Result: 3, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0}}},
+				{Result: 4, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 3, Shape: 0, Field: 0}},
+				{Result: 5, Repr: mir.ReprF64, Op: mir.Call{Callee: 0, Args: []mir.ValueID{4}}},
+				{Result: 6, Repr: mir.ReprF64, Op: mir.ArraySetF64{Array: 2, Index: 1, Value: 5}},
+				{Result: 7, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 1}},
+				{Result: 10, Repr: mir.ReprF64, Op: mir.ArrayGetF64{Array: 2, Index: 1}},
+			}, Terminator: mir.Return{Value: &retWorker}}}},
+			{ID: 2, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "base", Repr: mir.ReprF64}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 1, Captures: []mir.ValueID{0}}}}, Terminator: mir.Return{}}}},
+		},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"call ptr @tsnative_array_f64_new(i64 2)",
+		"call ptr @tsnative_object_alloc(i64",
+		"call double @tsnative_f0(double",
+		"call void @tsnative_array_f64_set_checked(ptr",
+		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
+		"call void @tsnative_gc_safepoint()",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

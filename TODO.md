@@ -111,7 +111,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Linear StringRef/JSValue creation, string concatenation, boxing/dynamic-add, and F64 array-read results spill into typed task state with allocation safepoints before suspension.
       - [x] Multi-block Branch/Jump/Return continuation CFGs without Phi nodes, including stackless async `if` on a single worker.
       - [x] Phi-backed continuation merges use typed task-state slots with parallel edge copies, including loop-carried numeric `while` state on a single worker.
-      - [ ] Extend spill/liveness support to object/array allocation, field/call/closure results, richer reference Phi cases, and remaining native operations.
+      - [x] Generic resumable native-op steps cover object/array allocation and mutation, field access, direct/virtual/closure calls, intrinsics, task yield, and nonblocking channel operations using typed spills and allocation safepoints.
+      - [ ] Remove the remaining cooperative/manual task patterns and expand richer reference Phi/state stress coverage.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
@@ -161,9 +162,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Generalize compiler-generated stackless continuations across branch/loop CFGs and remaining native SSA representations; linear F64/Bool SSA spills plus typed await/channel/sleep suspension are complete.
-2. Spill arbitrary native SSA values across suspend/await points, add branch/loop continuation CFGs, and remove remaining cooperative fallbacks.
-3. Add reference/JSValue typed channel specializations, then Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
+1. Remove remaining cooperative/manual task patterns now that typed spills, Branch/Jump/Return CFGs, Phi-backed loops, and generic supported-MIR continuation steps are implemented.
+2. Add reference/JSValue typed channel specializations and broader channel/select semantics.
+3. Add Promise rejection/exception propagation, cancellation/task groups, task-local context, and cooperative execution budgets/preemption polling.
 4. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
 5. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
 6. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

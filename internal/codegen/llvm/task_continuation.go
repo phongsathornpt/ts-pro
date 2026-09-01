@@ -26,6 +26,7 @@ const (
 	taskStepDynamicAddJSValue
 	taskStepArrayLengthF64
 	taskStepArrayGetF64
+	taskStepNativeOp
 	taskStepBranch
 	taskStepJump
 	taskStepReturn
@@ -66,6 +67,44 @@ type taskContinuation struct {
 	SpillSlots map[mir.ValueID]taskSpillSlot
 	BlockPC    map[mir.BlockID]int
 	Phis       map[mir.BlockID][]taskPhi
+}
+
+func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
+	switch op := op.(type) {
+	case mir.ArrayNewF64:
+		return append([]mir.ValueID(nil), op.Elements...), true
+	case mir.ArraySetF64:
+		return []mir.ValueID{op.Array, op.Index, op.Value}, true
+	case mir.ObjectNew:
+		return append([]mir.ValueID(nil), op.Fields...), true
+	case mir.ObjectAlloc:
+		return nil, true
+	case mir.FieldSet:
+		return []mir.ValueID{op.Object, op.Value}, true
+	case mir.FieldGet:
+		return []mir.ValueID{op.Object}, true
+	case mir.ClosureNew:
+		return append([]mir.ValueID(nil), op.Captures...), true
+	case mir.ClosureCall:
+		result := []mir.ValueID{op.Closure}
+		return append(result, op.Args...), true
+	case mir.Call:
+		return append([]mir.ValueID(nil), op.Args...), true
+	case mir.DispatchCall:
+		return append([]mir.ValueID(nil), op.Args...), true
+	case mir.IntrinsicCall:
+		return append([]mir.ValueID(nil), op.Args...), true
+	case mir.ChannelNewF64:
+		return []mir.ValueID{op.Capacity}, true
+	case mir.ChannelTrySendF64:
+		return []mir.ValueID{op.Channel, op.Value}, true
+	case mir.ChannelTryRecvOrF64:
+		return []mir.ValueID{op.Channel, op.Fallback}, true
+	case mir.TaskYield:
+		return nil, true
+	default:
+		return nil, false
+	}
 }
 
 func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
@@ -228,7 +267,20 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				cont.Phis[block.ID] = append(cont.Phis[block.ID], phi)
 			default:
-				return nil
+				operands, ok := continuationNativeOperands(inst.Op)
+				if !ok {
+					return nil
+				}
+				for _, value := range operands {
+					if !available[value] {
+						return nil
+					}
+				}
+				if inst.Repr != mir.ReprVoid {
+					cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+					available[inst.Result] = true
+				}
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			}
 		}
 		if pendingSpawn != nil {
@@ -373,7 +425,17 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 			values[valueID] = value
 		}
 	default:
-		return fmt.Errorf("unsupported pure continuation op %T", step.Inst.Op)
+		operands, ok := continuationNativeOperands(step.Inst.Op)
+		if !ok {
+			return fmt.Errorf("unsupported pure continuation op %T", step.Inst.Op)
+		}
+		for _, valueID := range operands {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
 	}
 	if emitsGCAllocation(step.Inst.Op) {
 		b.WriteString("  call void @tsnative_gc_safepoint()\n")
@@ -381,14 +443,20 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 	if err := e.emitInstruction(b, fn, step.Inst, values); err != nil {
 		return err
 	}
-	if _, ok := values[step.Inst.Result]; !ok && step.Inst.Repr != mir.ReprVoid {
+	if step.Inst.Repr == mir.ReprVoid {
+		return nil
+	}
+	if _, ok := values[step.Inst.Result]; !ok {
 		values[step.Inst.Result] = valueName(step.Inst.Result)
 	}
 	result, ok := values[step.Inst.Result]
 	if !ok {
 		return fmt.Errorf("pure continuation op did not produce v%d", step.Inst.Result)
 	}
-	slot := descriptor.Continuation.SpillSlots[step.Inst.Result]
+	slot, ok := descriptor.Continuation.SpillSlots[step.Inst.Result]
+	if !ok {
+		return fmt.Errorf("pure continuation op v%d has no spill slot", step.Inst.Result)
+	}
 	typ, err := llvmType(slot.Repr)
 	if err != nil {
 		return err
@@ -527,7 +595,7 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			continue
 		case taskStepFloatBinary, taskStepProvenIntBinary, taskStepFloatCompare,
 			taskStepConstString, taskStepStringConcat, taskStepBoxJSValue, taskStepDynamicAddJSValue,
-			taskStepArrayLengthF64, taskStepArrayGetF64:
+			taskStepArrayLengthF64, taskStepArrayGetF64, taskStepNativeOp:
 			if err := e.emitPureContinuationStep(b, descriptor, fn, step, fmt.Sprintf("p%d", i)); err != nil {
 				return err
 			}
