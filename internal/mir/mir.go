@@ -71,6 +71,7 @@ type Instruction struct {
 
 type Operation interface{ isOperation() }
 
+type ConstBool struct{ Value bool }
 type ConstF64 struct{ Value float64 }
 type ConstString struct{ Value string }
 type StringConcat struct{ Left, Right ValueID }
@@ -212,6 +213,7 @@ type TaskSpawn struct {
 type TaskJoin struct{ Task ValueID }
 type TaskYield struct{}
 
+func (ConstBool) isOperation()         {}
 func (ConstF64) isOperation()          {}
 func (ConstString) isOperation()       {}
 func (StringConcat) isOperation()      {}

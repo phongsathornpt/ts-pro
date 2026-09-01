@@ -86,6 +86,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 	switch op := source.Op.(type) {
 	case hir.ConstOp:
 		switch {
+		case op.Literal.Kind == hir.LiteralBoolean && repr == mir.ReprBool:
+			result.Op = mir.ConstBool{Value: op.Literal.Bool}
 		case op.Literal.Kind == hir.LiteralNumber && repr == mir.ReprF64:
 			result.Op = mir.ConstF64{Value: op.Literal.Number}
 		case op.Literal.Kind == hir.LiteralString && repr == mir.ReprStringRef:

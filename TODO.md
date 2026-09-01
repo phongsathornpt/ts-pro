@@ -75,10 +75,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
 - [x] Add compiler-known non-capturing `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM, with `TaskRef` representation, task-entry wrappers, static task metrics, native acceptance, LLVM regression, differential observable-order coverage, and full-suite validation.
 - [x] Add GC-safe captured task state with compiler-generated task environments pinned as persistent runtime roots until task release.
-- [~] Add typed task-result storage/join ABI for returning spawned closures.
+- [x] Add typed task-result storage/join ABI for returning spawned closures across currently proven native representations.
   - [x] Unboxed `Task<number>` result slots and `join()` returning native F64 with captured-task support and differential/native regression coverage.
   - [x] GC-rooted `Task<string>` result transfer with persistent task-result roots until `join()` transfers ownership to the caller shadow root.
-  - [ ] Extend rooted reference results to object/function values, then add `JSValue` result specialization for dynamic tasks.
+  - [x] Extend rooted reference results to object/array/function values and GC-managed `JSValue` results using TypeScript checker `getTypeArguments` instead of generic type-string parsing.
+  - [x] Add unboxed `Task<boolean>` result slots and native bool join ABI; boolean literals now lower natively as `i1`.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
 - [~] Add typed channels with task parking, starting with unboxed `channel<number>`.
   - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer and unbuffered rendezvous semantics plus pthread regression coverage.
@@ -134,7 +135,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Extend typed task results from completed F64/string support to object/function references and dynamic `JSValue` results.
+1. Add resumable task parking/wakeup and compiler-known `channel<number>` send/recv intrinsics on top of the completed F64 channel storage runtime.
 2. Add typed channels with task parking, starting with unboxed `channel<number>`, then reference/JSValue channel specializations.
 3. Add timers/sleep and a bounded blocking-call pool, then lower Promise/async/await onto resumable task state machines.
 4. Add cancellation/task groups, task-local context, exception propagation, and cooperative execution budgets/preemption polling.

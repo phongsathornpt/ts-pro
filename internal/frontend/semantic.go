@@ -5,6 +5,7 @@ type ExprKind uint8
 const (
 	ExprInvalid ExprKind = iota
 	ExprIdentifier
+	ExprBoolean
 	ExprNumber
 	ExprString
 	ExprBinary
@@ -62,6 +63,7 @@ type Expr struct {
 	Type          TypeID
 	Symbol        SymbolID
 	Name          string
+	Boolean       bool
 	Number        float64
 	String        string
 	Operator      BinaryOperator

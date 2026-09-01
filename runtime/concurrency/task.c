@@ -60,6 +60,16 @@ tsnative_task *tsnative_task_spawn_f64_or_abort(tsnative_task_entry entry, void 
   return task;
 }
 
+tsnative_task *tsnative_task_spawn_bool(tsnative_task_entry entry, void *state) {
+  return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_BOOL);
+}
+
+tsnative_task *tsnative_task_spawn_bool_or_abort(tsnative_task_entry entry, void *state) {
+  tsnative_task *task = tsnative_task_spawn_bool(entry, state);
+  if (!task) abort();
+  return task;
+}
+
 tsnative_task *tsnative_task_spawn_ref(tsnative_task_entry entry, void *state) {
   return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_REF);
 }
@@ -91,6 +101,13 @@ void tsnative_task_join_release(tsnative_task *task) {
 double tsnative_task_join_f64_release(tsnative_task *task) {
   if (!task || task->result_kind != TSNATIVE_TASK_RESULT_F64 || tsnative_task_join(task) != 0) abort();
   double result = task->result.f64;
+  tsnative_task_release(task);
+  return result;
+}
+
+uint8_t tsnative_task_join_bool_release(tsnative_task *task) {
+  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_BOOL || tsnative_task_join(task) != 0) abort();
+  uint8_t result = task->result.boolean;
   tsnative_task_release(task);
   return result;
 }

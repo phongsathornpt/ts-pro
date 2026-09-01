@@ -571,6 +571,10 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 	}
 	expr := &Expr{Type: typeID, Span: e.span(node)}
 	switch node.Kind() {
+	case tsast.KindTrueKeyword, tsast.KindFalseKeyword:
+		expr.Kind = ExprBoolean
+		expr.Boolean = node.Kind() == tsast.KindTrueKeyword
+		return expr, nil
 	case tsast.KindIdentifier:
 		expr.Kind = ExprIdentifier
 		expr.Name, _ = node.Text()
@@ -1023,21 +1027,30 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 	}
 	typ := Type{Kind: kind, Name: text}
 	if kind == TypeTask {
-		resultText := "void"
-		if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
-			resultText = strings.TrimSpace(text[len("TsnativeTask<") : len(text)-1])
-		}
-		switch resultText {
-		case "void":
-			typ.ReturnType = e.ensureSemanticType(TypeVoid, "void")
-		case "number":
-			typ.ReturnType = e.ensureSemanticType(TypeNumber, "number")
-		case "string":
-			typ.ReturnType = e.ensureSemanticType(TypeString, "string")
-		case "T":
-			typ.ReturnType = e.ensureSemanticType(TypeParameter, "T")
-		default:
-			return 0, fmt.Errorf("native task result type %q is not supported yet", resultText)
+		args, argsErr := e.client.GetTypeArguments(e.ctx, e.snapshot, e.project, info.ID)
+		if argsErr == nil && len(args) == 1 {
+			resultID, resultErr := e.internAPIType(&args[0])
+			if resultErr != nil {
+				return 0, resultErr
+			}
+			typ.ReturnType = resultID
+		} else {
+			resultText := "void"
+			if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
+				resultText = strings.TrimSpace(text[len("TsnativeTask<") : len(text)-1])
+			}
+			switch resultText {
+			case "void":
+				typ.ReturnType = e.ensureSemanticType(TypeVoid, "void")
+			case "number":
+				typ.ReturnType = e.ensureSemanticType(TypeNumber, "number")
+			case "string":
+				typ.ReturnType = e.ensureSemanticType(TypeString, "string")
+			case "T":
+				typ.ReturnType = e.ensureSemanticType(TypeParameter, "T")
+			default:
+				return 0, fmt.Errorf("native task result type %q could not be resolved from TypeScript type arguments", resultText)
+			}
 		}
 	}
 	if kind == TypeArray {
@@ -1177,12 +1190,12 @@ func classifyType(text string) TypeKind {
 	if len(text) >= 2 && ((strings.HasPrefix(text, "\"") && strings.HasSuffix(text, "\"")) || (strings.HasPrefix(text, "'") && strings.HasSuffix(text, "'"))) {
 		return TypeString
 	}
+	if strings.Contains(text, "=>") {
+		return TypeFunction
+	}
 	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
 	if strings.HasSuffix(arrayText, "[]") {
 		return TypeArray
-	}
-	if strings.Contains(text, "=>") {
-		return TypeFunction
 	}
 	if strings.Contains(text, " | ") {
 		return TypeUnion

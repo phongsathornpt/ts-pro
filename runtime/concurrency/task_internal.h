@@ -16,6 +16,7 @@ struct tsnative_task {
   tsnative_task_result_kind result_kind;
   union {
     double f64;
+    uint8_t boolean;
     void *ref;
   } result;
 };

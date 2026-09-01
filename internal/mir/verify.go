@@ -86,7 +86,7 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			switch op := inst.Op.(type) {
-			case ConstF64, ConstString:
+			case ConstBool, ConstF64, ConstString:
 			case StringConcat:
 				if err := checkValue(op.Left); err != nil {
 					return err
@@ -288,7 +288,7 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					}
 				}
 			case TaskJoin:
-				if inst.Repr != ReprVoid && inst.Repr != ReprF64 && inst.Repr != ReprStringRef {
+				if inst.Repr != ReprVoid && inst.Repr != ReprBool && inst.Repr != ReprF64 && inst.Repr != ReprStringRef && inst.Repr != ReprArrayRef && inst.Repr != ReprObjectRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
 					return fmt.Errorf("task join v%d has unsupported result representation %d", inst.Result, inst.Repr)
 				}
 				if err := checkValue(op.Task); err != nil {

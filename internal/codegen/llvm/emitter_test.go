@@ -272,3 +272,25 @@ func TestEmitStringTaskResult(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitBoolTaskResult(t *testing.T) {
+	result := mir.ValueID(0)
+	module := mir.Module{Name: "task-bool", Functions: []mir.Function{
+		{ID: 0, Name: "worker", ReturnRepr: mir.ReprBool, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}}}, Terminator: mir.Return{Value: &result}}}},
+		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0}},
+			{Result: 1, Repr: mir.ReprBool, Op: mir.TaskJoin{Task: 0}},
+		}, Terminator: mir.Return{}}}},
+	}}
+	entry := mir.FunctionID(1)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"@tsnative_task_spawn_bool_or_abort", "store i1 %result, ptr %result_slot", "@tsnative_task_join_bool_release", "trunc i8"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

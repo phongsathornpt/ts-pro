@@ -314,3 +314,43 @@ func TestBuildNativeStringTaskResultExecutable(t *testing.T) {
 		t.Fatalf("native task string result output = %q", got)
 	}
 }
+
+func TestBuildNativeExtendedTaskResultMatrix(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ fixture, want string }{
+		{"concurrency_object_results.ts", "42"},
+		{"concurrency_array_results.ts", "42"},
+		{"concurrency_any_results.ts", "42"},
+		{"concurrency_function_results.ts", "42"},
+		{"concurrency_bool_results.ts", "42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			output := filepath.Join(t.TempDir(), "task-result")
+			result, err := Build(ctx, BuildOptions{Root: root, Input: filepath.Join("examples", tc.fixture), Output: output, Optimization: "-O2"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Metrics.TaskSpawns != 1 || result.Metrics.TaskJoins != 1 {
+				t.Fatalf("task metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+			}
+			cmd := exec.CommandContext(ctx, output)
+			cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=2")
+			nativeOutput, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("run %s: %v: %s", tc.fixture, err, nativeOutput)
+			}
+			if got := strings.TrimSpace(string(nativeOutput)); got != tc.want {
+				t.Fatalf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

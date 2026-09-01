@@ -53,9 +53,11 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\n")
 	b.WriteString("declare void @tsnative_task_join_release(ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
+	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
 	b.WriteString("declare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
@@ -185,6 +187,8 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 
 func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.Instruction, values map[mir.ValueID]string) error {
 	switch op := inst.Op.(type) {
+	case mir.ConstBool:
+		return nil
 	case mir.ConstF64:
 		return nil
 	case mir.ConstString:
@@ -348,11 +352,16 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		switch inst.Repr {
 		case mir.ReprVoid:
 			fmt.Fprintf(b, "  call void @tsnative_task_join_release(ptr %s)\n", task)
+		case mir.ReprBool:
+			name := valueName(inst.Result)
+			fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_task_join_bool_release(ptr %s)\n", name, task)
+			fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
+			values[inst.Result] = name
 		case mir.ReprF64:
 			name := valueName(inst.Result)
 			fmt.Fprintf(b, "  %s = call double @tsnative_task_join_f64_release(ptr %s)\n", name, task)
 			values[inst.Result] = name
-		case mir.ReprStringRef:
+		case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
 			name := valueName(inst.Result)
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_task_join_ref_release(ptr %s)\n", name, task)
 			values[inst.Result] = name
@@ -746,7 +755,13 @@ func buildValueOperands(fn mir.Function) map[mir.ValueID]string {
 	}
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
-			if constant, ok := inst.Op.(mir.ConstF64); ok {
+			if constant, ok := inst.Op.(mir.ConstBool); ok {
+				if constant.Value {
+					values[inst.Result] = "true"
+				} else {
+					values[inst.Result] = "false"
+				}
+			} else if constant, ok := inst.Op.(mir.ConstF64); ok {
 				values[inst.Result] = formatF64(constant.Value)
 			} else if inst.Repr != mir.ReprVoid {
 				values[inst.Result] = valueName(inst.Result)

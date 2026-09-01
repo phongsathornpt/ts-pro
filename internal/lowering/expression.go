@@ -18,6 +18,8 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, fmt.Errorf("identifier %q is not a local value", expr.Name)
 		}
 		return value, nil
+	case frontend.ExprBoolean:
+		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralBoolean, Bool: expr.Boolean}}), nil
 	case frontend.ExprNumber:
 		return f.emit(expr.Type, hir.ConstOp{Literal: hir.Literal{Kind: hir.LiteralNumber, Number: expr.Number}}), nil
 	case frontend.ExprString:

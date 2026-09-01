@@ -84,8 +84,8 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 	}
 	for _, descriptor := range descriptors {
 		fn := e.functions[descriptor.Callee]
-		if (fn.ReturnRepr != mir.ReprVoid && fn.ReturnRepr != mir.ReprF64 && fn.ReturnRepr != mir.ReprStringRef) || len(fn.Params) != descriptor.CaptureCount {
-			return fmt.Errorf("task target f%d must be a zero-argument source closure with void, f64, or string result", descriptor.Callee)
+		if (fn.ReturnRepr != mir.ReprVoid && fn.ReturnRepr != mir.ReprBool && fn.ReturnRepr != mir.ReprF64 && !isTaskReferenceResult(fn.ReturnRepr)) || len(fn.Params) != descriptor.CaptureCount {
+			return fmt.Errorf("task target f%d must be a zero-argument source closure with a supported native result", descriptor.Callee)
 		}
 		fmt.Fprintf(b, "define void @%s(ptr %%state, ptr %%result_slot) {\nentry:\n", taskWrapperName(descriptor.Callee))
 		for i := 0; i < descriptor.CaptureCount; i++ {
@@ -97,7 +97,7 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			fmt.Fprintf(b, "  %%capture%d = load %s, ptr %%capture%d.ptr\n", i, typ, i)
 		}
 		prefix := "  "
-		if fn.ReturnRepr == mir.ReprF64 || isTaskReferenceResult(fn.ReturnRepr) {
+		if fn.ReturnRepr == mir.ReprBool || fn.ReturnRepr == mir.ReprF64 || isTaskReferenceResult(fn.ReturnRepr) {
 			prefix = "  %result = "
 		}
 		if isTaskReferenceResult(fn.ReturnRepr) {
@@ -116,7 +116,9 @@ func (e *emitter) emitTaskWrappers(b *strings.Builder) error {
 			fmt.Fprintf(b, "%s %%capture%d", typ, i)
 		}
 		b.WriteString(")\n")
-		if fn.ReturnRepr == mir.ReprF64 {
+		if fn.ReturnRepr == mir.ReprBool {
+			b.WriteString("  store i1 %result, ptr %result_slot\n")
+		} else if fn.ReturnRepr == mir.ReprF64 {
 			b.WriteString("  store double %result, ptr %result_slot\n")
 		} else if isTaskReferenceResult(fn.ReturnRepr) {
 			b.WriteString("  store ptr %result, ptr %result_slot\n")
@@ -153,9 +155,11 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 		}
 	}
 	spawnName := "tsnative_task_spawn_or_abort"
-	if fn.ReturnRepr == mir.ReprF64 {
+	if fn.ReturnRepr == mir.ReprBool {
+		spawnName = "tsnative_task_spawn_bool_or_abort"
+	} else if fn.ReturnRepr == mir.ReprF64 {
 		spawnName = "tsnative_task_spawn_f64_or_abort"
-	} else if fn.ReturnRepr == mir.ReprStringRef {
+	} else if isTaskReferenceResult(fn.ReturnRepr) {
 		spawnName = "tsnative_task_spawn_ref_or_abort"
 	} else if fn.ReturnRepr != mir.ReprVoid {
 		return fmt.Errorf("unsupported task result representation %d", fn.ReturnRepr)
