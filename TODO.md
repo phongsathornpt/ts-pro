@@ -129,7 +129,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.
-- [ ] Stress-test 1/100/10k/100k tasks, CPU fan-out, channel contention, cancellation, GC churn, and blocking calls.
+- [x] Stress-test 1/100/10k/100k tasks, CPU fan-out/work stealing, channel contention/parking, cancellation, GC-root handoff/churn, and bounded blocking calls.
 
 ## Remaining native language/runtime coverage
 

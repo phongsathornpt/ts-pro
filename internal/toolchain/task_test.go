@@ -519,3 +519,74 @@ int main(void) {
 		t.Fatalf("run: %v: %s", err, output)
 	}
 }
+
+func TestNativeTaskHundredThousandStress(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "task_100k_test.c")
+	program := `#include <assert.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *, void *);
+tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *);
+void tsnative_task_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+uint64_t tsnative_scheduler_spawned_tasks(void);
+uint64_t tsnative_scheduler_completed_tasks(void);
+static atomic_uint done;
+static void job(void *state, void *result_slot) {
+  (void)state; (void)result_slot;
+  atomic_fetch_add_explicit(&done, 1u, memory_order_relaxed);
+}
+int main(void) {
+  enum { N = 100000 };
+  tsnative_task **tasks = calloc(N, sizeof(*tasks));
+  assert(tasks);
+  for (int i = 0; i < N; i++) { tasks[i] = tsnative_task_spawn(job, 0); assert(tasks[i]); }
+  for (int i = 0; i < N; i++) { assert(tsnative_task_join(tasks[i]) == 0); tsnative_task_release(tasks[i]); }
+  assert(atomic_load_explicit(&done, memory_order_relaxed) == N);
+  assert(tsnative_scheduler_spawned_tasks() == N);
+  assert(tsnative_scheduler_completed_tasks() == N);
+  free(tasks);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	binary := filepath.Join(dir, "task_100k_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, goRuntime}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=8", "TSNATIVE_MAX_TASKS=120000")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run 100k task stress: %v: %s", err, output)
+	}
+}
