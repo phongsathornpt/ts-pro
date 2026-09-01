@@ -1,13 +1,14 @@
 # tsv7-bin
 
-`tsv7-bin` is an experimental TypeScript 7 to native-binary compiler written in Go.
+`tsv7-bin` is an experimental TypeScript 7 to native-binary compiler. TypeScript 7 owns the compiler implementation; Go is reserved for the native runtime and native libraries.
 
 Goal: compile strongly typed TypeScript 7 programs into native binaries without embedding Node.js, V8, or another JavaScript engine in the normal runtime path.
 
 ## Core architecture
 
-- Go is the implementation language for the compiler, tooling, runtime tooling, and build driver.
-- TypeScript 7 is the language and type-system authority.
+- TypeScript 7 is the compiler implementation, language, parser, binder, checker, and semantic authority.
+- Go is used only for the native runtime and native libraries behind stable native ABI boundaries.
+- Compile-time HIR/MIR/representation analysis/LLVM generation/build orchestration must not depend on Go in the target architecture.
 - TypeScript-LS is the semantic frontend and IDE service.
 - `TypeScript-LS` means the official TypeScript 7 native LSP (`tsc --lsp --stdio`).
 - SWC is not used for parsing, semantic analysis, or compiler lowering.
@@ -17,7 +18,7 @@ Goal: compile strongly typed TypeScript 7 programs into native binaries without 
 
 ## Current native MVP
 
-The end-to-end native path now covers typed scalars, mutable SSA control flow, specialized `number[]`, and native strings. From the project root:
+The current transitional end-to-end path still uses the existing Go compiler driver while the TypeScript 7 compiler implementation is brought to parity. It covers typed scalars, mutable SSA control flow, specialized `number[]`, and native strings. From the project root:
 
 ```bash
 go build -o build/tsnative ./cmd/tsnative
@@ -31,7 +32,7 @@ Expected output:
 6765
 ```
 
-The generated program is a native executable linked against the small tsnative C runtime and the platform C library; Node.js and V8 are not part of the runtime path.
+The generated program is a native executable linked against the tsnative Go runtime/native libraries through a stable C-compatible ABI; Node.js and V8 are not part of the runtime path. Handwritten C runtime code is transitional and must be removed.
 
 Committed native coverage includes direct/recursive functions, numeric arithmetic and comparisons, mutable locals, `if`/`while`/`for` with SSA phi nodes, contiguous `number[]`, UTF-8 strings and concatenation, and native number/string console output. Closed object shapes are the active in-progress milestone.
 
@@ -42,7 +43,7 @@ Build optimization flags currently accepted are `-O0`, `-O1`, `-O2`, `-O3`, and 
 - One TypeScript semantic source for editor and compiler.
 - Preserve TypeScript 7 diagnostics and project resolution.
 - Reuse a long-lived TypeScript-LS process for incremental development.
-- Keep TypeScript/LSP details behind a Go frontend adapter.
+- Keep compile-time logic inside the TypeScript 7 compiler implementation; do not introduce a second Go compiler frontend.
 - Prefer direct calls, closed shapes, typed arrays, and monomorphization.
 - Keep dynamic runtime operations off typed hot paths.
 

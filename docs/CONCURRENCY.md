@@ -16,6 +16,10 @@ OS worker threads (N ≈ CPU cores)
 
 The first implementation is stackless. Async functions eventually lower to resumable state machines instead of allocating a large native stack per task.
 
+## Implementation-language boundary
+
+Concurrency APIs are compiler-known TypeScript features, but their runtime implementation belongs in Go. Scheduler, tasks, channels, timers, blocking-call management, cancellation, and GC coordination must live in `runtimego/`. Do not move compiler HIR/MIR/LLVM ownership into Go merely because the runtime uses goroutines.
+
 ## Design rules
 
 - One task must not imply one pthread.

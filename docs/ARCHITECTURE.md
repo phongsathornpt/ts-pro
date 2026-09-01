@@ -11,7 +11,7 @@ IDE: `tsc --lsp --stdio`
 compile: `tsc --api --async`
        |
        v
-Go TypeScript client / semantic bridge
+TypeScript 7 compiler integration
        |
        v
 compiler-owned semantic DTOs
@@ -30,7 +30,7 @@ MIR / SSA
 LLVM IR -> object files -> native linker -> executable
 ```
 
-The compiler is Go-first. TypeScript 7 owns language semantics; our Go code owns normalization, native lowering, optimization, code generation, and runtime behavior.
+The target compiler is TypeScript-7-first and TypeScript-only at compile time. TypeScript 7 owns parsing, semantics, normalization, HIR/MIR construction, native lowering, optimization, LLVM generation, and build orchestration. Go begins only at the native runtime/native-library ABI boundary.
 
 ## Frontend ownership
 
@@ -69,14 +69,14 @@ TypeScript 7 API (`tsc --api --async`)
     +-- symbols and checker types
     |
     v
-Go AST decoder + semantic DTOs -> HIR
+TypeScript 7 AST/checker integration -> semantic DTOs -> HIR
 ```
 
 Standard LSP is not treated as a compiler IR API. If a later TypeScript release makes a shared LSP-hosted API session reliable, `internal/tsls` may switch transports without changing HIR/MIR contracts.
 
 ## Backend ownership
 
-The Go native compiler owns HIR/MIR, representation proof, native layouts, monomorphization, devirtualization, escape analysis, LLVM generation, linker orchestration, runtime ABI, allocator, GC, and native APIs.
+The TypeScript 7 compiler owns HIR/MIR, representation proof, native layouts, monomorphization, devirtualization, escape analysis, LLVM generation, and linker orchestration. The Go runtime owns runtime ABI implementations, allocator/GC, scheduler, concurrency primitives, and native libraries. Compile-time Go code is transitional debt and must be retired after TypeScript parity.
 
 The central rule remains: a TypeScript type is evidence, not by itself a proof of runtime representation.
 

@@ -24,7 +24,7 @@ TypeScript-LS gives the project one authority for:
 
 The same `tsconfig.json` must drive both IDE behavior and native compilation.
 
-## Go client architecture
+## Transitional client architecture
 
 ```text
 internal/tsls/
@@ -36,7 +36,7 @@ internal/tsls/
   api_object.go      object/property checker queries
 ```
 
-The Go process should keep one LS alive per workspace instead of spawning TypeScript for every file. Requests use IDs, cancellation, deadlines, and bounded concurrency.
+The current Go tooling keeps one LS alive per workspace instead of spawning TypeScript for every file. This is transitional; final compiler/workspace ownership belongs in the TypeScript 7 implementation. Requests still use IDs, cancellation, deadlines, and bounded concurrency during migration.
 
 ## Semantic extraction rule
 

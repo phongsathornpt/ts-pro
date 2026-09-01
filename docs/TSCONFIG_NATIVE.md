@@ -48,9 +48,9 @@ The compiler will eventually support native-specific policy outside `compilerOpt
 
 ## TypeScript-LS contract
 
-The official TypeScript 7 language server and native compiler must resolve the same project and the same `tsconfig.json`. The Go frontend must not maintain a second parser-specific config or SWC config.
+The official TypeScript 7 language server and native compiler must resolve the same project and the same `tsconfig.json`. The native compiler must not maintain a second parser-specific config or SWC config; TypeScript 7 owns compiler configuration and semantics.
 
-Native-only settings such as representation policy, LLVM optimization, LTO, and dynamic fallback remain outside `compilerOptions`; TypeScript-LS owns TypeScript semantics while the Go compiler owns native policy.
+Native-only settings such as representation policy, LLVM optimization, LTO, and dynamic fallback remain outside `compilerOptions`; TypeScript 7 owns both TypeScript semantics and compile-time native policy; the Go runtime only implements runtime/native-library ABI contracts.
 
 ## Current native fast-path notes
 

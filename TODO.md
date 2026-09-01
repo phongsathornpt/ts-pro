@@ -2,6 +2,16 @@
 
 Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
+## Architecture invariant
+
+- [~] Enforce the target language split: **TypeScript 7 implements the compiler; Go implements the native runtime/native libraries only**.
+  - [x] Document Go runtime ownership and stable C-compatible ABI boundaries.
+  - [ ] Stop adding new compiler/frontend/HIR/MIR/codegen features to the transitional Go compiler path.
+  - [ ] Port semantic DTO/HIR/MIR/representation/lowering/LLVM/build orchestration from `cmd/` + `internal/` Go packages into the TypeScript 7 compiler implementation with parity tests.
+  - [ ] Retire transitional compile-time Go packages after TypeScript 7 parity is complete.
+  - [ ] Keep Go under `runtimego/` (and native-library packages) for allocator/GC, scheduler/tasks, channels, timers, blocking pool, JSValue, strings/arrays/objects, and native libraries.
+  - [ ] Remove all handwritten runtime C after Go runtime parity; C-compatible headers/ABI shims may remain generated/toolchain-facing only.
+
 ## Project completion goal
 
 - [~] Reach 100% of the compiler roadmap tracked in this file, with every completed capability covered by native acceptance/regression tests and differential tests where TypeScript/JavaScript observable behavior applies.
@@ -9,22 +19,22 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Foundation and frontend
 
-- [x] Migrate the active compiler from the superseded Rust prototype to Go.
+- [S] Historical migration from Rust to the current Go compiler path; superseded as target architecture by the TypeScript-7 compiler / Go-runtime-only split.
 - [x] Remove the superseded Rust workspace from the repository.
 - [x] Pin `typescript@7.0.2` and strict native `tsconfig`.
-- [x] Implement `cmd/tsnative`, Go tests, vet, build, and doctor commands.
+- [~] Keep the existing Go `cmd/tsnative`/compiler tooling only as transitional parity infrastructure until the TypeScript 7 compiler path replaces it.
 - [x] Implement TypeScript 7 LSP JSON-RPC transport and lifecycle.
 - [x] Implement TypeScript 7 `tsc --api --async` semantic transport.
-- [x] Decode the TypeScript 7 binary AST protocol in Go.
+- [~] Preserve the existing Go binary-AST decoder only as transitional parity infrastructure; the target TypeScript 7 compiler consumes its own AST/checker data directly.
 - [x] Query exact AST-node symbols/types through the TypeScript checker.
 - [x] Gate native builds on TypeScript diagnostics before lowering.
 - [x] Regression-test that SWC/Babel/Oxc are absent from the active compiler path.
-- [x] Keep one long-lived TypeScript-LS process per IDE workspace through the Go workspace manager.
-- [x] Add TypeScript-LS crash detection and generation-based restart policy.
+- [~] Preserve the existing Go TypeScript-LS workspace manager only as transitional tooling; move compiler/workspace ownership into the TypeScript 7 implementation.
+- [x] Preserve TypeScript-LS crash detection and generation-based restart behavior during compiler migration.
 
 ## HIR, representation, and MIR
 
-- [x] Define compiler-owned semantic DTOs and typed Go HIR.
+- [~] Preserve the current Go semantic DTO/HIR implementation as a reference while porting compiler-owned DTO/HIR into the TypeScript 7 compiler.
 - [x] Separate TypeScript semantic types from native runtime `Repr`.
 - [x] Add HIR verifier and deterministic textual dump.
 - [x] Add scalar representation proof for `Bool`, `F64`, strings, arrays, and references.
@@ -153,8 +163,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## LLVM, runtime, and build
 
-- [x] Emit deterministic textual LLVM IR from Go.
-- [x] Compile LLVM IR and runtime C sources through the clang toolchain wrapper.
+- [~] Preserve deterministic LLVM IR output while migrating LLVM emission from the transitional Go compiler into the TypeScript 7 compiler.
+- [~] Compile LLVM IR and link the Go native runtime through the native toolchain; handwritten runtime C is transitional and must disappear.
 - [x] Link native executables without Node/V8.
 - [x] Support `-O0/-O1/-O2/-O3/-Oz`.
 - [x] Compile and run `fib.ts`, loop, numeric-array, string, and closed-object acceptance programs.
@@ -172,7 +182,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Migrate JSValue boxing/dynamic helpers to the Go c-archive while preserving the tagged 16-byte ABI, dynamic `+`, and console output behavior.
   - [~] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
     - [x] Isolate task execution/completion/status/park-wake transitions behind an internal opaque task contract so scheduler logic no longer manipulates task state fields directly; intrusive queue links remain in C pending Go queue migration.
-    - [ ] Move scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go while preserving the existing task/LLVM C ABI, then migrate task handle ownership.
+    - [x] Move production scheduler worker queues, work stealing, wait/wake coordination, and metrics to Go goroutines while preserving the existing task/LLVM C ABI; workers lock OS threads to preserve native TLS current-task semantics, and strong Go ABI symbols override the weak C fallback used by standalone harnesses.
+    - [ ] Migrate task handle ownership/completion groups/context into Go, then remove the weak C scheduler fallback and intrusive queue links from the task layout.
   - [x] Migrate channels, timers, and the blocking-call pool.
     - [x] Migrate timers/sleep to Go `time` primitives with scheduler hook binding, tracked pending waits, cooperative fallback, and deterministic shutdown.
     - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.

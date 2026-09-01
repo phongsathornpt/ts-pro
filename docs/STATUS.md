@@ -1,5 +1,9 @@
 # Implementation Status
 
+## Target architecture correction
+
+The target architecture is **TypeScript 7 for the compiler and Go only for the native runtime/native libraries**. The existing Go compiler under `cmd/` and `internal/` is transitional parity/reference code and must be retired as compile-time stages move into TypeScript 7. Handwritten runtime C is also transitional and is being replaced by `runtimego/`.
+
 ## Stable committed baseline
 
 The stable native compiler checkpoint is commit `6bad298`.
@@ -7,12 +11,12 @@ The stable native compiler checkpoint is commit `6bad298`.
 ```text
 TypeScript 7.0.2
   -> diagnostics + checker/API snapshot
-  -> official binary AST decoded in Go
+  -> TypeScript 7 AST/checker integration (current Go decoder is transitional)
   -> compiler semantic DTOs
   -> typed HIR + representation/range analysis
   -> MIR / SSA
   -> LLVM IR
-  -> clang + native runtime
+  -> native linker + Go runtime ABI
   -> native executable
 ```
 

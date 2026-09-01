@@ -8,7 +8,7 @@ Performance is split into frontend/compile-time and generated-code runtime goals
 2. Reuse TypeScript 7 incremental project state instead of reparsing through another frontend.
 3. Batch semantic extraction and avoid one LSP round-trip per AST node.
 4. Cache normalized semantic snapshots by source/project version.
-5. Use Go worker pools only after semantic snapshots are stable.
+5. Use bounded compile-time concurrency inside the TypeScript 7 compiler only after semantic snapshots are stable; Go concurrency is reserved for the native runtime.
 6. Cache HIR/MIR/object files with deterministic content keys.
 7. Parallelize LLVM modules and use ThinLTO for release builds.
 

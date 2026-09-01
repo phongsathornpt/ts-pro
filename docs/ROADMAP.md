@@ -1,11 +1,19 @@
 # Roadmap
 
-## Milestone 0 — Rebase architecture on Go ✅
+## Architecture correction — TypeScript 7 compiler / Go runtime only
 
-- [x] Replace the superseded Rust prototype with the Go implementation and remove Rust from the active repository.
-- [x] Add a Go module and `cmd/tsnative` CLI.
+- [ ] Move compiler-owned semantic normalization, HIR/MIR, representation analysis, LLVM emission, and build orchestration out of Go into the TypeScript 7 compiler implementation.
+- [ ] Freeze compile-time Go work to migration/parity fixes only.
+- [~] Complete `runtimego/` migration so Go is the sole handwritten runtime/native-library language.
+- [ ] Remove handwritten runtime C after Go ABI parity.
+- [ ] Retire transitional `cmd/` and `internal/` Go compiler packages after TypeScript-native parity tests pass.
+
+## Milestone 0 — Historical Go compiler rebase [superseded target]
+
+- [S] Replace the Rust prototype with the current Go implementation as an intermediate step; the final architecture moves compile-time ownership to TypeScript 7 and keeps Go only for runtime/native libraries.
+- [x] Add a Go module and `cmd/tsnative` CLI as transitional compiler infrastructure; retire it after TypeScript 7 parity.
 - [x] Pin TypeScript 7 as the language-service/compiler dependency.
-- [x] Validate `tsc --lsp --stdio` from the Go driver.
+- [x] Validate `tsc --lsp --stdio` from the transitional Go driver.
 - [x] Keep strict native `tsconfig` as the project contract.
 
 ## Milestone 1 — TypeScript-LS client
@@ -36,7 +44,7 @@
 
 - [x] Add representation proof for Bool, F64, strings, arrays, references, and static functions.
 - [x] Lower HIR into MIR/SSA, including loop phi nodes.
-- [x] Emit textual LLVM IR from Go.
+- [x] Emit textual LLVM IR from the current Go compiler; port this emitter to the TypeScript 7 compiler before retiring Go compile-time code.
 - [x] Use clang for object generation/link orchestration and the first native executable.
 - [x] Compile the `fib.ts` acceptance program without Node/V8 at runtime.
 

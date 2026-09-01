@@ -1,6 +1,6 @@
 # Go native runtime migration
 
-Goal: replace every handwritten native runtime `.c` implementation with Go while preserving the LLVM C ABI and native memory layouts during migration.
+Goal: make Go the **only handwritten native runtime/native-library implementation language**, replacing every handwritten runtime `.c` implementation while preserving the LLVM C ABI and native memory layouts during migration. Go must not expand upward into compiler/frontend/HIR/MIR/codegen ownership.
 
 ## Rules
 

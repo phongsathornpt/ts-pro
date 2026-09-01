@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #define TSNATIVE_MAX_WORKERS 256u
+#define TSNATIVE_WEAK __attribute__((weak))
 #define TSNATIVE_DEFAULT_MAX_TASKS 1000000u
 #define TSNATIVE_HARD_MAX_TASKS 10000000u
 
@@ -220,7 +221,7 @@ static void reset_metrics(void) {
   atomic_store(&scheduler.worker_wakeups, 0);
 }
 
-int tsnative_scheduler_init(void) {
+TSNATIVE_WEAK int tsnative_scheduler_init(void) {
   pthread_mutex_lock(&scheduler.mutex);
   if (scheduler.started) {
     pthread_mutex_unlock(&scheduler.mutex);
@@ -292,7 +293,7 @@ int tsnative_scheduler_init(void) {
   return -1;
 }
 
-int tsnative_scheduler_submit(tsnative_task *task) {
+TSNATIVE_WEAK int tsnative_scheduler_submit(tsnative_task *task) {
   if (!task) return -1;
   pthread_mutex_lock(&scheduler.mutex);
   size_t active = atomic_load_explicit(&scheduler.active_tasks, memory_order_relaxed);
@@ -315,7 +316,7 @@ int tsnative_scheduler_submit(tsnative_task *task) {
   return 0;
 }
 
-int tsnative_scheduler_wait(tsnative_task *task) {
+TSNATIVE_WEAK int tsnative_scheduler_wait(tsnative_task *task) {
   if (!task) return -1;
   while (!tsnative_task_is_terminal_internal(task)) {
     if (current_worker) {
@@ -334,12 +335,12 @@ int tsnative_scheduler_wait(tsnative_task *task) {
   return tsnative_task_status_internal(task) == TSNATIVE_TASK_DONE ? 0 : -1;
 }
 
-tsnative_task_status tsnative_scheduler_task_status(tsnative_task *task) {
+TSNATIVE_WEAK tsnative_task_status tsnative_scheduler_task_status(tsnative_task *task) {
   if (!task) return TSNATIVE_TASK_FAILED;
   return tsnative_task_status_internal(task);
 }
 
-int tsnative_scheduler_help_once(void) {
+TSNATIVE_WEAK int tsnative_scheduler_help_once(void) {
   if (!current_worker) return 0;
   tsnative_task *task = take_work(current_worker);
   if (!task) return 0;
@@ -347,7 +348,7 @@ int tsnative_scheduler_help_once(void) {
   return 1;
 }
 
-void tsnative_scheduler_shutdown(void) {
+TSNATIVE_WEAK void tsnative_scheduler_shutdown(void) {
   pthread_mutex_lock(&scheduler.mutex);
   if (!scheduler.started) {
     pthread_mutex_unlock(&scheduler.mutex);
@@ -372,42 +373,42 @@ void tsnative_scheduler_shutdown(void) {
   pthread_mutex_unlock(&scheduler.mutex);
 }
 
-size_t tsnative_scheduler_worker_count(void) {
+TSNATIVE_WEAK size_t tsnative_scheduler_worker_count(void) {
   pthread_mutex_lock(&scheduler.mutex);
   size_t count = scheduler.started ? scheduler.worker_count : configured_workers();
   pthread_mutex_unlock(&scheduler.mutex);
   return count;
 }
 
-int tsnative_scheduler_is_running(void) {
+TSNATIVE_WEAK int tsnative_scheduler_is_running(void) {
   pthread_mutex_lock(&scheduler.mutex);
   int running = scheduler.started && !scheduler.stopping;
   pthread_mutex_unlock(&scheduler.mutex);
   return running;
 }
 
-size_t tsnative_scheduler_active_tasks(void) { return atomic_load(&scheduler.active_tasks); }
-size_t tsnative_scheduler_peak_active_tasks(void) { return atomic_load(&scheduler.peak_active_tasks); }
-uint64_t tsnative_scheduler_spawned_tasks(void) { return atomic_load(&scheduler.spawned_tasks); }
-uint64_t tsnative_scheduler_completed_tasks(void) { return atomic_load(&scheduler.completed_tasks); }
-uint64_t tsnative_scheduler_steal_attempts(void) { return atomic_load(&scheduler.steal_attempts); }
-uint64_t tsnative_scheduler_successful_steals(void) { return atomic_load(&scheduler.successful_steals); }
-uint64_t tsnative_scheduler_worker_parks(void) { return atomic_load(&scheduler.worker_parks); }
-uint64_t tsnative_scheduler_worker_wakeups(void) { return atomic_load(&scheduler.worker_wakeups); }
+TSNATIVE_WEAK size_t tsnative_scheduler_active_tasks(void) { return atomic_load(&scheduler.active_tasks); }
+TSNATIVE_WEAK size_t tsnative_scheduler_peak_active_tasks(void) { return atomic_load(&scheduler.peak_active_tasks); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_spawned_tasks(void) { return atomic_load(&scheduler.spawned_tasks); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_completed_tasks(void) { return atomic_load(&scheduler.completed_tasks); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_steal_attempts(void) { return atomic_load(&scheduler.steal_attempts); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_successful_steals(void) { return atomic_load(&scheduler.successful_steals); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_worker_parks(void) { return atomic_load(&scheduler.worker_parks); }
+TSNATIVE_WEAK uint64_t tsnative_scheduler_worker_wakeups(void) { return atomic_load(&scheduler.worker_wakeups); }
 
-tsnative_task *tsnative_scheduler_current_task(void) { return current_task; }
+TSNATIVE_WEAK tsnative_task *tsnative_scheduler_current_task(void) { return current_task; }
 
-int tsnative_scheduler_prepare_park(void) {
+TSNATIVE_WEAK int tsnative_scheduler_prepare_park(void) {
   if (!current_task) return -1;
   return tsnative_task_prepare_park_internal(current_task);
 }
 
-void tsnative_scheduler_cancel_park(void) {
+TSNATIVE_WEAK void tsnative_scheduler_cancel_park(void) {
   if (!current_task) return;
   tsnative_task_cancel_park_internal(current_task);
 }
 
-int tsnative_scheduler_wake(tsnative_task *task) {
+TSNATIVE_WEAK int tsnative_scheduler_wake(tsnative_task *task) {
   if (!task) return -1;
   pthread_mutex_lock(&scheduler.mutex);
   int wake = tsnative_task_wake_internal(task);
