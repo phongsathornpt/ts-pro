@@ -73,7 +73,12 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Add bounded lazy native scheduler core with `TSNATIVE_WORKERS`, parked idle workers, and deterministic restartable shutdown.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
-- [ ] Add compiler-known `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR.
+- [~] Add compiler-known `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM.
+  - [x] Add `TsnativeTask`/`TypeTask`/`ReprTaskRef` contracts without routing task handles through `JSValue`.
+  - [x] Lower non-capturing `spawn((): void => ...)`, `join(task)`, and `yieldNow()` through frontend, HIR, MIR, and native task-entry wrappers.
+  - [x] Native acceptance currently preserves join ordering (`42` from the worker before `7` from the caller).
+  - [ ] Add differential/regression fixture coverage, scheduler/task metrics, run the full suite, and commit the compiler-intrinsic checkpoint.
+  - [ ] Add GC-safe captured task state and typed task-result ABI before allowing captured/returning spawned closures.
 - [ ] Add per-worker deques, work stealing, targeted worker wakeups, and scheduler metrics.
 - [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
@@ -83,6 +88,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.
 - [ ] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
 - [ ] Stress-test 1/100/10k/100k tasks, CPU fan-out, channel contention, cancellation, GC churn, and blocking calls.
+
+## Remaining native language/runtime coverage
+
 - [~] Expand native array coverage beyond read-only `number[]`.
   - [x] Bounds-checked in-place indexed writes for specialized `number[]`.
   - [ ] String/object arrays and typed generic array specializations.
@@ -123,12 +131,12 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Finish and commit closed-world single inheritance: exact TS7 heritage decoding, base-prefix layouts, `super(...)`, inherited fields/methods, and differential acceptance.
-2. Add override dispatch for base-typed references, preferring closed-world devirtualization before introducing vtables/type tags.
-3. Complete generic specialization beyond direct `T`: nested generics, constrained structural generics, recursion, and cross-module specialization caching.
-4. Use the completed conservative range analysis to enable guarded/specialized `I32`/`I64` lowering while preserving TypeScript `number` semantics.
-5. Introduce tagged `JSValue` only at representation-unsafe boundaries, then checked conversions and dynamic operator/property slow paths.
-6. Add the bounded native task scheduler, spawn/join/yield, work stealing, typed channels, timers, and blocking pool.
-7. Add exceptions and lower Promise/async/await onto the task scheduler/state-machine runtime.
-8. Integrate scheduler memory with precise GC/per-worker allocation, then Green-Tea-style local mark-page work.
-9. Finish multi-module LLVM scheduling, then ThinLTO/PGO and cross-compilation work.
+1. Finish regression/metrics coverage and commit the native `spawn`/`join`/`yieldNow` compiler-intrinsic checkpoint.
+2. Replace the global FIFO scheduler hot path with per-worker deques, work stealing, targeted wakeups, and scheduler metrics.
+3. Add GC-safe captured task state plus typed task-result storage/join ABI, then enable captured and returning spawned closures.
+4. Add typed channels with task parking, then timers/sleep and a bounded blocking-call pool.
+5. Lower Promise/async/await onto resumable task state machines; add cancellation/task groups and exception propagation without blocking scheduler workers.
+6. Integrate task/channel/timer roots with precise GC metadata, per-worker allocation caches/nurseries, and Green-Tea-style local mark-page work.
+7. Complete the dynamic boundary: remaining JSValue variants, checked conversions, dynamic arithmetic/comparisons, property access, and calls.
+8. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+9. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
