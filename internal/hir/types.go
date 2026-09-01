@@ -20,6 +20,7 @@ const (
 	TypeTask
 	TypePromise
 	TypeChannel
+	TypeTaskGroup
 	TypeParameter
 )
 
@@ -59,6 +60,7 @@ const (
 	ReprFunctionRef
 	ReprTaskRef
 	ReprChannelRef
+	ReprTaskGroupRef
 	ReprTaggedUnion
 	ReprJSValue
 )

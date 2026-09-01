@@ -200,6 +200,7 @@ static void execute_task(tsnative_task *task) {
   pthread_cond_broadcast(&scheduler.task_done);
   pthread_mutex_unlock(&scheduler.mutex);
   pthread_mutex_unlock(&task->completion_mutex);
+  if (task->notify_completed) task->notify_completed(task);
   if (completion_waiter) (void)tsnative_scheduler_wake(completion_waiter);
   if (completion_consume && task->destroy_completed) task->destroy_completed(task);
 }

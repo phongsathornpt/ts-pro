@@ -138,6 +138,14 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if len(target.Params) != len(expr.Captures) {
 			return 0, fmt.Errorf("task target %s expects %d captures; got %d", target.Name, len(target.Params), len(expr.Captures))
 		}
+		var group *hir.ValueID
+		if expr.Object != nil {
+			groupValue, err := f.lowerExpr(expr.Object)
+			if err != nil {
+				return 0, err
+			}
+			group = &groupValue
+		}
 		captures := make([]hir.ValueID, 0, len(expr.Captures))
 		for i, capture := range expr.Captures {
 			value, err := f.lowerExprAs(capture, target.Params[i].Type)
@@ -146,7 +154,7 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			}
 			captures = append(captures, value)
 		}
-		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(targetID)), Captures: captures}), nil
+		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(targetID)), Captures: captures, Group: group}), nil
 	case frontend.ExprTaskJoin:
 		if len(expr.Args) != 1 {
 			return 0, fmt.Errorf("task join requires one handle")
@@ -169,6 +177,20 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.emit(expr.Type, hir.TaskCancelOp{Task: task}), nil
 	case frontend.ExprTaskCancelled:
 		return f.emit(expr.Type, hir.TaskCancelledOp{}), nil
+	case frontend.ExprTaskGroupNew:
+		return f.emit(expr.Type, hir.TaskGroupNewOp{}), nil
+	case frontend.ExprTaskGroupJoin:
+		group, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.TaskGroupJoinOp{Group: group}), nil
+	case frontend.ExprTaskGroupCancel:
+		group, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.TaskGroupCancelOp{Group: group}), nil
 	case frontend.ExprChannelNew:
 		_, elementKind, err := f.channelElementKind(expr.Type)
 		if err != nil {

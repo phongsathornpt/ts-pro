@@ -135,7 +135,15 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	case mir.UnboxJSValue:
 		return []mir.ValueID{op.Value}, true
 	case mir.TaskSpawn:
-		return append([]mir.ValueID(nil), op.Captures...), true
+		values := append([]mir.ValueID(nil), op.Captures...)
+		if op.Group != nil {
+			values = append(values, *op.Group)
+		}
+		return values, true
+	case mir.TaskGroupNew:
+		return nil, true
+	case mir.TaskGroupCancel:
+		return []mir.ValueID{op.Group}, true
 	case mir.TaskYield:
 		return nil, true
 	case mir.TaskCancel:
@@ -246,6 +254,9 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayGetF64, Result: inst.Result, Inst: inst})
 			case mir.TaskSpawn:
+				if op.Group != nil && !available[*op.Group] {
+					return nil
+				}
 				for _, capture := range op.Captures {
 					if !available[capture] {
 						return nil

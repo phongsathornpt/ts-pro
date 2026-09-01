@@ -8,6 +8,8 @@
 struct tsnative_task {
   struct tsnative_task *next;
   struct tsnative_task *prev;
+  struct tsnative_task *group_next;
+  tsnative_task_group *group;
   tsnative_task_entry entry;
   void *state;
   void *gc_root_token;
@@ -25,6 +27,7 @@ struct tsnative_task {
   int completion_handoff;
   void (*transfer_completion)(struct tsnative_task *task, void *out);
   void (*destroy_completed)(struct tsnative_task *task);
+  void (*notify_completed)(struct tsnative_task *task);
   tsnative_task_result_kind result_kind;
   union {
     double f64;

@@ -1267,6 +1267,8 @@ func classifyType(text string) TypeKind {
 		return TypePromise
 	case "TsnativeChannel":
 		return TypeChannel
+	case "TsnativeTaskGroup":
+		return TypeTaskGroup
 	}
 	if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 		return TypeTask

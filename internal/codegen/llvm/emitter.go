@@ -82,7 +82,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
-	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
 	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_task(ptr)\ndeclare void @tsnative_task_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_task(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
@@ -412,6 +412,25 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  %s.raw = call i32 @tsnative_task_is_cancelled()\n", name)
 		fmt.Fprintf(b, "  %s = icmp ne i32 %s.raw, 0\n", name, name)
 		values[inst.Result] = name
+		return nil
+	case mir.TaskGroupNew:
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_group_new()\n", name)
+		values[inst.Result] = name
+		return nil
+	case mir.TaskGroupJoin:
+		group, err := operand(values, op.Group)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call i32 @tsnative_task_group_join_release(ptr %s)\n", group)
+		return nil
+	case mir.TaskGroupCancel:
+		group, err := operand(values, op.Group)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call i32 @tsnative_task_group_cancel(ptr %s)\n", group)
 		return nil
 	case mir.ChannelNewF64:
 		capacity, err := operand(values, op.Capacity)
@@ -989,7 +1008,7 @@ func llvmType(repr mir.Repr) (string, error) {
 		return "i64", nil
 	case mir.ReprF64:
 		return "double", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprJSValue:
 		return "ptr", nil
 	case mir.ReprTagged:
 		return "i64", nil

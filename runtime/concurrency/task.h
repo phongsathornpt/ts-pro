@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 typedef struct tsnative_task tsnative_task;
+typedef struct tsnative_task_group tsnative_task_group;
 typedef void (*tsnative_task_entry)(void *state, void *result_slot);
 
 typedef enum {
@@ -30,6 +31,13 @@ tsnative_task *tsnative_task_spawn_bool(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_bool_or_abort(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_ref(tsnative_task_entry entry, void *state);
 tsnative_task *tsnative_task_spawn_ref_or_abort(tsnative_task_entry entry, void *state);
+tsnative_task_group *tsnative_task_group_new(void);
+tsnative_task *tsnative_task_group_spawn_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
+tsnative_task *tsnative_task_group_spawn_f64_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
+tsnative_task *tsnative_task_group_spawn_bool_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
+tsnative_task *tsnative_task_group_spawn_ref_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state);
+int tsnative_task_group_cancel(tsnative_task_group *group);
+int tsnative_task_group_join_release(tsnative_task_group *group);
 int tsnative_task_join(tsnative_task *task);
 int tsnative_task_await_task(tsnative_task *task);
 int tsnative_task_await_f64_task(tsnative_task *task, double *out);

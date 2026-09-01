@@ -159,11 +159,15 @@ type ClosureCallOp struct {
 type TaskSpawnOp struct {
 	Callee   FunctionID
 	Captures []ValueID
+	Group    *ValueID
 }
 type TaskJoinOp struct{ Task ValueID }
 type TaskYieldOp struct{}
 type TaskCancelOp struct{ Task ValueID }
 type TaskCancelledOp struct{}
+type TaskGroupNewOp struct{}
+type TaskGroupJoinOp struct{ Group ValueID }
+type TaskGroupCancelOp struct{ Group ValueID }
 type ChannelElementKind uint8
 
 const (
@@ -220,6 +224,9 @@ func (TaskJoinOp) isOperation()         {}
 func (TaskYieldOp) isOperation()        {}
 func (TaskCancelOp) isOperation()       {}
 func (TaskCancelledOp) isOperation()    {}
+func (TaskGroupNewOp) isOperation()     {}
+func (TaskGroupJoinOp) isOperation()    {}
+func (TaskGroupCancelOp) isOperation()  {}
 func (ChannelNewOp) isOperation()       {}
 func (ChannelTrySendOp) isOperation()   {}
 func (ChannelTryRecvOrOp) isOperation() {}

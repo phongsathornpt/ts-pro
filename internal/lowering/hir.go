@@ -183,6 +183,8 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypePromise, nil
 	case frontend.TypeChannel:
 		return hir.TypeChannel, nil
+	case frontend.TypeTaskGroup:
+		return hir.TypeTaskGroup, nil
 	case frontend.TypeParameter:
 		return hir.TypeParameter, nil
 	default:

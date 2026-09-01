@@ -272,12 +272,20 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, capture := range op.Captures {
 					checkValue(capture)
 				}
+				if op.Group != nil {
+					checkValue(*op.Group)
+				}
 			case TaskJoinOp:
 				checkValue(op.Task)
 			case TaskYieldOp:
 			case TaskCancelOp:
 				checkValue(op.Task)
 			case TaskCancelledOp:
+			case TaskGroupNewOp:
+			case TaskGroupJoinOp:
+				checkValue(op.Group)
+			case TaskGroupCancelOp:
+				checkValue(op.Group)
 			case ChannelNewOp:
 				checkValue(op.Capacity)
 			case ChannelTrySendOp:

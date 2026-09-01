@@ -16,6 +16,14 @@ declare function yieldNow(): void;
 declare function cancelTask<T>(task: TsnativeTask<T> | Promise<T>): void;
 declare function taskCancelled(): boolean;
 
+interface TsnativeTaskGroup {
+  readonly __tsnativeTaskGroupBrand: never;
+}
+declare function taskGroup(): TsnativeTaskGroup;
+declare function groupSpawn<T>(group: TsnativeTaskGroup, fn: () => T): TsnativeTask<T>;
+declare function groupJoin(group: TsnativeTaskGroup): void;
+declare function groupCancel(group: TsnativeTaskGroup): void;
+
 interface TsnativeChannel<T> {
   readonly __tsnativeChannelBrand: never;
   readonly __tsnativeChannelElementBrand?: T;

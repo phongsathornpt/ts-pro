@@ -335,6 +335,11 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+				if op.Group != nil {
+					if err := checkValue(*op.Group); err != nil {
+						return err
+					}
+				}
 			case TaskJoin:
 				if inst.Repr != ReprVoid && inst.Repr != ReprBool && inst.Repr != ReprF64 && inst.Repr != ReprStringRef && inst.Repr != ReprArrayRef && inst.Repr != ReprObjectRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
 					return fmt.Errorf("task join v%d has unsupported result representation %d", inst.Result, inst.Repr)
@@ -356,6 +361,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 			case TaskCancelled:
 				if inst.Repr != ReprBool {
 					return fmt.Errorf("task cancelled v%d must produce Bool", inst.Result)
+				}
+			case TaskGroupNew:
+				if inst.Repr != ReprTaskGroupRef {
+					return fmt.Errorf("task group new v%d must produce TaskGroupRef", inst.Result)
+				}
+			case TaskGroupJoin:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task group join v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Group); err != nil {
+					return err
+				}
+			case TaskGroupCancel:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task group cancel v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Group); err != nil {
+					return err
 				}
 			case ChannelNewF64:
 				if inst.Repr != ReprChannelRef {

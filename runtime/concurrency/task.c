@@ -8,6 +8,48 @@
 #include <stdlib.h>
 
 static void destroy_task_storage(tsnative_task *task);
+struct tsnative_task_group {
+  pthread_mutex_t mutex;
+  pthread_cond_t done;
+  tsnative_task *head;
+  size_t active;
+  int closed;
+};
+
+static void task_group_completed(tsnative_task *task) {
+  tsnative_task_group *group = task ? task->group : NULL;
+  if (!group) return;
+  pthread_mutex_lock(&group->mutex);
+  tsnative_task **cursor = &group->head;
+  while (*cursor && *cursor != task) cursor = &(*cursor)->group_next;
+  if (*cursor == task) {
+    *cursor = task->group_next;
+    task->group_next = NULL;
+    task->group = NULL;
+    if (group->active) group->active--;
+    pthread_cond_broadcast(&group->done);
+  }
+  pthread_mutex_unlock(&group->mutex);
+}
+
+static int task_group_attach(tsnative_task_group *group, tsnative_task *task) {
+  if (!group) return 0;
+  pthread_mutex_lock(&group->mutex);
+  if (group->closed) { pthread_mutex_unlock(&group->mutex); return -1; }
+  task->group = group;
+  task->group_next = group->head;
+  task->notify_completed = task_group_completed;
+  group->head = task;
+  group->active++;
+  pthread_mutex_unlock(&group->mutex);
+  return 0;
+}
+
+static void task_group_detach_submit_failure(tsnative_task *task) {
+  if (!task || !task->group) return;
+  task_group_completed(task);
+}
+
 
 static void transfer_f64(tsnative_task *task, void *out) { *(double *)out = task->result.f64; }
 static void transfer_bool(tsnative_task *task, void *out) { *(uint8_t *)out = task->result.boolean; }
@@ -17,7 +59,7 @@ static void transfer_ref(tsnative_task *task, void *out) {
   task->completion_handoff = 1;
 }
 
-static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, tsnative_task_result_kind kind) {
+static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative_task_entry entry, void *state, tsnative_task_result_kind kind) {
   if (!entry) return NULL;
   if (tsnative_scheduler_init() != 0) return NULL;
   tsnative_task *task = calloc(1, sizeof(*task));
@@ -48,8 +90,16 @@ static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, ts
       return NULL;
     }
   }
+  if (task_group_attach(group, task) != 0) {
+    if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
+    if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+    pthread_mutex_destroy(&task->completion_mutex);
+    free(task);
+    return NULL;
+  }
   task->status = TSNATIVE_TASK_RUNNABLE;
   if (tsnative_scheduler_submit(task) != 0) {
+    task_group_detach_submit_failure(task);
     if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
     pthread_mutex_destroy(&task->completion_mutex);
@@ -60,7 +110,7 @@ static tsnative_task *spawn_with_kind(tsnative_task_entry entry, void *state, ts
 }
 
 tsnative_task *tsnative_task_spawn(tsnative_task_entry entry, void *state) {
-  return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_VOID);
+  return spawn_with_kind_group(NULL, entry, state, TSNATIVE_TASK_RESULT_VOID);
 }
 
 tsnative_task *tsnative_task_spawn_or_abort(tsnative_task_entry entry, void *state) {
@@ -70,7 +120,7 @@ tsnative_task *tsnative_task_spawn_or_abort(tsnative_task_entry entry, void *sta
 }
 
 tsnative_task *tsnative_task_spawn_f64(tsnative_task_entry entry, void *state) {
-  return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_F64);
+  return spawn_with_kind_group(NULL, entry, state, TSNATIVE_TASK_RESULT_F64);
 }
 
 tsnative_task *tsnative_task_spawn_f64_or_abort(tsnative_task_entry entry, void *state) {
@@ -80,7 +130,7 @@ tsnative_task *tsnative_task_spawn_f64_or_abort(tsnative_task_entry entry, void 
 }
 
 tsnative_task *tsnative_task_spawn_bool(tsnative_task_entry entry, void *state) {
-  return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_BOOL);
+  return spawn_with_kind_group(NULL, entry, state, TSNATIVE_TASK_RESULT_BOOL);
 }
 
 tsnative_task *tsnative_task_spawn_bool_or_abort(tsnative_task_entry entry, void *state) {
@@ -90,13 +140,52 @@ tsnative_task *tsnative_task_spawn_bool_or_abort(tsnative_task_entry entry, void
 }
 
 tsnative_task *tsnative_task_spawn_ref(tsnative_task_entry entry, void *state) {
-  return spawn_with_kind(entry, state, TSNATIVE_TASK_RESULT_REF);
+  return spawn_with_kind_group(NULL, entry, state, TSNATIVE_TASK_RESULT_REF);
 }
 
 tsnative_task *tsnative_task_spawn_ref_or_abort(tsnative_task_entry entry, void *state) {
   tsnative_task *task = tsnative_task_spawn_ref(entry, state);
   if (!task) abort();
   return task;
+}
+
+tsnative_task_group *tsnative_task_group_new(void) {
+  tsnative_task_group *group = calloc(1, sizeof(*group));
+  if (!group) return NULL;
+  if (pthread_mutex_init(&group->mutex, NULL) != 0) { free(group); return NULL; }
+  if (pthread_cond_init(&group->done, NULL) != 0) { pthread_mutex_destroy(&group->mutex); free(group); return NULL; }
+  return group;
+}
+
+static tsnative_task *group_spawn_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state, tsnative_task_result_kind kind) {
+  tsnative_task *task = spawn_with_kind_group(group, entry, state, kind);
+  if (!task) abort();
+  return task;
+}
+
+tsnative_task *tsnative_task_group_spawn_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state) { return group_spawn_or_abort(group, entry, state, TSNATIVE_TASK_RESULT_VOID); }
+tsnative_task *tsnative_task_group_spawn_f64_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state) { return group_spawn_or_abort(group, entry, state, TSNATIVE_TASK_RESULT_F64); }
+tsnative_task *tsnative_task_group_spawn_bool_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state) { return group_spawn_or_abort(group, entry, state, TSNATIVE_TASK_RESULT_BOOL); }
+tsnative_task *tsnative_task_group_spawn_ref_or_abort(tsnative_task_group *group, tsnative_task_entry entry, void *state) { return group_spawn_or_abort(group, entry, state, TSNATIVE_TASK_RESULT_REF); }
+
+int tsnative_task_group_cancel(tsnative_task_group *group) {
+  if (!group) return -1;
+  pthread_mutex_lock(&group->mutex);
+  for (tsnative_task *task = group->head; task; task = task->group_next) atomic_store_explicit(&task->cancel_requested, 1, memory_order_release);
+  pthread_mutex_unlock(&group->mutex);
+  return 0;
+}
+
+int tsnative_task_group_join_release(tsnative_task_group *group) {
+  if (!group) return -1;
+  pthread_mutex_lock(&group->mutex);
+  group->closed = 1;
+  while (group->active != 0) pthread_cond_wait(&group->done, &group->mutex);
+  pthread_mutex_unlock(&group->mutex);
+  pthread_cond_destroy(&group->done);
+  pthread_mutex_destroy(&group->mutex);
+  free(group);
+  return 0;
 }
 
 int tsnative_task_join(tsnative_task *task) {

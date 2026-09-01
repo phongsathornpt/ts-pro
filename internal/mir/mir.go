@@ -20,6 +20,7 @@ const (
 	ReprFunctionRef
 	ReprTaskRef
 	ReprChannelRef
+	ReprTaskGroupRef
 	ReprTagged
 	ReprJSValue
 )
@@ -261,11 +262,15 @@ type ClosureCall struct {
 type TaskSpawn struct {
 	Callee   FunctionID
 	Captures []ValueID
+	Group    *ValueID
 }
 type TaskJoin struct{ Task ValueID }
 type TaskYield struct{}
 type TaskCancel struct{ Task ValueID }
 type TaskCancelled struct{}
+type TaskGroupNew struct{}
+type TaskGroupJoin struct{ Group ValueID }
+type TaskGroupCancel struct{ Group ValueID }
 type ChannelNewF64 struct{ Capacity ValueID }
 type ChannelTrySendF64 struct{ Channel, Value ValueID }
 type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
@@ -310,6 +315,9 @@ func (TaskJoin) isOperation()             {}
 func (TaskYield) isOperation()            {}
 func (TaskCancel) isOperation()           {}
 func (TaskCancelled) isOperation()        {}
+func (TaskGroupNew) isOperation()         {}
+func (TaskGroupJoin) isOperation()        {}
+func (TaskGroupCancel) isOperation()      {}
 func (ChannelNewF64) isOperation()        {}
 func (ChannelTrySendF64) isOperation()    {}
 func (ChannelTryRecvOrF64) isOperation()  {}

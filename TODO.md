@@ -122,7 +122,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
-  - [ ] Add task groups with child ownership/join/cancel propagation.
+  - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
   - [ ] Add task-local context propagation.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
 - [ ] Add per-worker allocation caches/nurseries and later Green-Tea-style per-worker mark-page queues.

@@ -67,6 +67,8 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 		return hir.Repr{Kind: hir.ReprTaskRef}, diagnostics
 	case hir.TypeChannel:
 		return hir.Repr{Kind: hir.ReprChannelRef}, diagnostics
+	case hir.TypeTaskGroup:
+		return hir.Repr{Kind: hir.ReprTaskGroupRef}, diagnostics
 	case hir.TypeUnion:
 		for _, memberID := range typ.Members {
 			if int(memberID) >= len(module.Types) || !jsValueUnionMember(module.Types[memberID].Kind) {

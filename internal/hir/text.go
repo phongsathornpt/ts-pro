@@ -113,11 +113,20 @@ func formatOperation(op Operation) string {
 		for i, capture := range op.Captures {
 			captures[i] = fmt.Sprintf("v%d", capture)
 		}
+		if op.Group != nil {
+			return fmt.Sprintf("task.group_spawn v%d, f%d(%s)", *op.Group, op.Callee, strings.Join(captures, ", "))
+		}
 		return fmt.Sprintf("task.spawn f%d(%s)", op.Callee, strings.Join(captures, ", "))
 	case TaskJoinOp:
 		return fmt.Sprintf("task.join v%d", op.Task)
 	case TaskYieldOp:
 		return "task.yield"
+	case TaskGroupNewOp:
+		return "task.group_new"
+	case TaskGroupJoinOp:
+		return fmt.Sprintf("task.group_join v%d", op.Group)
+	case TaskGroupCancelOp:
+		return fmt.Sprintf("task.group_cancel v%d", op.Group)
 	case ChannelNewOp:
 		return fmt.Sprintf("channel.new v%d", op.Capacity)
 	case ChannelTrySendOp:

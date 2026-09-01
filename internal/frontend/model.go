@@ -67,6 +67,7 @@ const (
 	TypeTask
 	TypePromise
 	TypeChannel
+	TypeTaskGroup
 	TypeParameter
 )
 

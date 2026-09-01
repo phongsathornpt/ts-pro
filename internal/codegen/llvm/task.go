@@ -219,7 +219,7 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 					fmt.Fprintf(b, "  store double 0.000000e+00, ptr %s.spill%d\n", state, slot.Index)
 				case mir.ReprBool:
 					fmt.Fprintf(b, "  store i1 false, ptr %s.spill%d\n", state, slot.Index)
-				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
+				case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprTaskGroupRef, mir.ReprJSValue:
 					fmt.Fprintf(b, "  store ptr null, ptr %s.spill%d\n", state, slot.Index)
 				default:
 					return fmt.Errorf("unsupported task continuation spill representation %d", slot.Repr)
@@ -228,23 +228,46 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 		}
 	}
 	spawnName := "tsnative_task_spawn_or_abort"
+	if op.Group != nil {
+		spawnName = "tsnative_task_group_spawn_or_abort"
+	}
 	if fn.ReturnRepr == mir.ReprBool {
-		spawnName = "tsnative_task_spawn_bool_or_abort"
+		if op.Group != nil {
+			spawnName = "tsnative_task_group_spawn_bool_or_abort"
+		} else {
+			spawnName = "tsnative_task_spawn_bool_or_abort"
+		}
 	} else if fn.ReturnRepr == mir.ReprF64 {
-		spawnName = "tsnative_task_spawn_f64_or_abort"
+		if op.Group != nil {
+			spawnName = "tsnative_task_group_spawn_f64_or_abort"
+		} else {
+			spawnName = "tsnative_task_spawn_f64_or_abort"
+		}
 	} else if isTaskReferenceResult(fn.ReturnRepr) {
-		spawnName = "tsnative_task_spawn_ref_or_abort"
+		if op.Group != nil {
+			spawnName = "tsnative_task_group_spawn_ref_or_abort"
+		} else {
+			spawnName = "tsnative_task_spawn_ref_or_abort"
+		}
 	} else if fn.ReturnRepr != mir.ReprVoid {
 		return fmt.Errorf("unsupported task result representation %d", fn.ReturnRepr)
 	}
-	fmt.Fprintf(b, "  %s = call ptr @%s(ptr @%s, ptr %s)\n", name, spawnName, taskWrapperName(op.Callee), state)
+	if op.Group != nil {
+		group, err := operand(values, *op.Group)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s, ptr @%s, ptr %s)\n", name, spawnName, group, taskWrapperName(op.Callee), state)
+	} else {
+		fmt.Fprintf(b, "  %s = call ptr @%s(ptr @%s, ptr %s)\n", name, spawnName, taskWrapperName(op.Callee), state)
+	}
 	values[inst.Result] = name
 	return nil
 }
 
 func isTaskReferenceResult(repr mir.Repr) bool {
 	switch repr {
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprTaskGroupRef, mir.ReprJSValue:
 		return true
 	default:
 		return false

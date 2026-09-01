@@ -222,7 +222,12 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		for i, capture := range op.Captures {
 			captures[i] = mir.ValueID(capture)
 		}
-		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee), Captures: captures}
+		var group *mir.ValueID
+		if op.Group != nil {
+			g := mir.ValueID(*op.Group)
+			group = &g
+		}
+		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee), Captures: captures, Group: group}
 	case hir.TaskJoinOp:
 		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task)}
 	case hir.TaskYieldOp:
@@ -231,6 +236,12 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.TaskCancel{Task: mir.ValueID(op.Task)}
 	case hir.TaskCancelledOp:
 		result.Op = mir.TaskCancelled{}
+	case hir.TaskGroupNewOp:
+		result.Op = mir.TaskGroupNew{}
+	case hir.TaskGroupJoinOp:
+		result.Op = mir.TaskGroupJoin{Group: mir.ValueID(op.Group)}
+	case hir.TaskGroupCancelOp:
+		result.Op = mir.TaskGroupCancel{Group: mir.ValueID(op.Group)}
 	case hir.ChannelNewOp:
 		switch op.Element {
 		case hir.ChannelElementF64:
@@ -398,6 +409,8 @@ func lowerRepr(source hir.Repr) (mir.Repr, error) {
 		return mir.ReprTaskRef, nil
 	case hir.ReprChannelRef:
 		return mir.ReprChannelRef, nil
+	case hir.ReprTaskGroupRef:
+		return mir.ReprTaskGroupRef, nil
 	case hir.ReprTaggedUnion:
 		return mir.ReprTagged, nil
 	case hir.ReprJSValue:

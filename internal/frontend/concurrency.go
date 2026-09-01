@@ -62,6 +62,54 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprTaskCancelled
 		expr.Callee = nil
 		return expr, nil
+	case "taskGroup":
+		if len(expr.Args) != 0 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeTaskGroup {
+			return nil, fmt.Errorf("taskGroup at %d takes no arguments and returns TsnativeTaskGroup", node.Pos())
+		}
+		expr.Kind = ExprTaskGroupNew
+		expr.Callee = nil
+		return expr, nil
+	case "groupSpawn":
+		if len(expr.Args) != 2 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeTaskGroup {
+			return nil, fmt.Errorf("groupSpawn at %d requires (TsnativeTaskGroup, closure)", node.Pos())
+		}
+		closure := expr.Args[1]
+		if closure.Kind != ExprClosure || closure.CallTarget == nil || int(*closure.CallTarget) >= len(e.result.Functions) {
+			return nil, fmt.Errorf("groupSpawn at %d requires a statically known closure", node.Pos())
+		}
+		target := e.result.Functions[*closure.CallTarget]
+		if len(target.Params) != len(closure.Captures) || int(target.ReturnType) >= len(e.result.Types) {
+			return nil, fmt.Errorf("groupSpawn at %d requires a supported zero-argument closure", node.Pos())
+		}
+		returnKind := e.result.Types[target.ReturnType].Kind
+		if returnKind != TypeVoid && returnKind != TypeNumber && returnKind != TypeString && returnKind != TypeBoolean && returnKind != TypeObject && returnKind != TypeArray && returnKind != TypeFunction && returnKind != TypeAny {
+			return nil, fmt.Errorf("groupSpawn at %d does not support task result type %q", node.Pos(), e.result.Types[target.ReturnType].Name)
+		}
+		if int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeTask || !e.compatibleTaskResult(e.result.Types[expr.Type].ReturnType, target.ReturnType) {
+			return nil, fmt.Errorf("groupSpawn at %d has inconsistent task result type", node.Pos())
+		}
+		targetCopy := *closure.CallTarget
+		expr.Kind = ExprTaskSpawn
+		expr.CallTarget = &targetCopy
+		expr.Captures = closure.Captures
+		expr.Object = expr.Args[0]
+		expr.Callee = nil
+		expr.Args = nil
+		return expr, nil
+	case "groupJoin":
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeTaskGroup || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("groupJoin at %d requires one TsnativeTaskGroup and returns void", node.Pos())
+		}
+		expr.Kind = ExprTaskGroupJoin
+		expr.Callee = nil
+		return expr, nil
+	case "groupCancel":
+		if len(expr.Args) != 1 || int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeTaskGroup || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("groupCancel at %d requires one TsnativeTaskGroup and returns void", node.Pos())
+		}
+		expr.Kind = ExprTaskGroupCancel
+		expr.Callee = nil
+		return expr, nil
 	case "channel":
 		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeChannel {
 			return nil, fmt.Errorf("channel at %d requires one capacity and a concrete native channel type", node.Pos())
@@ -190,7 +238,7 @@ func (e *extractor) channelValueCompatible(element, value TypeID) bool {
 
 func isConcurrencyIntrinsic(name string) bool {
 	switch name {
-	case "spawn", "join", "yieldNow", "cancelTask", "taskCancelled", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
+	case "spawn", "join", "yieldNow", "cancelTask", "taskCancelled", "taskGroup", "groupSpawn", "groupJoin", "groupCancel", "channel", "channelTrySend", "channelTryRecvOr", "channelSend", "channelRecv", "sleep":
 		return true
 	default:
 		return false
