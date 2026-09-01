@@ -144,11 +144,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Migrate the handwritten native C runtime to Go while preserving the existing LLVM C ABI and native layouts.
   - [x] Add cached Go `c-archive` build/link support and migrate the numeric console ABI; remove `runtime/core/console.c`.
   - [x] Migrate the native heap allocator and mark/sweep GC ABI to Go; remove `runtime/core/heap.c`.
-  - [~] Migrate strings, arrays, objects, and JSValue.
+  - [x] Migrate strings, arrays, objects, and JSValue.
     - [x] Migrate native string allocation/concat/logging to Go; remove `runtime/core/string.c`.
     - [x] Migrate specialized F64 arrays to the Go c-archive while preserving the `{len,data[]}` ABI, checked-index behavior, and shared heap/GC ownership.
     - [x] Migrate object allocation/runtime helpers to the Go c-archive while preserving the existing heap-owned pointer ABI.
-    - [ ] Migrate JSValue boxing/dynamic helpers.
+    - [x] Migrate JSValue boxing/dynamic helpers to the Go c-archive while preserving the tagged 16-byte ABI, dynamic `+`, and console output behavior.
   - [ ] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
   - [ ] Migrate channels, timers, and the blocking-call pool.
   - [ ] Remove legacy C headers/tests and the native C compilation path once no handwritten runtime `.c` sources remain.
