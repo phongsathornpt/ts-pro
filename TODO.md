@@ -80,7 +80,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] GC-rooted `Task<string>` result transfer with persistent task-result roots until `join()` transfers ownership to the caller shadow root.
   - [ ] Extend rooted reference results to object/function values, then add `JSValue` result specialization for dynamic tasks.
 - [x] Add per-worker intrusive deques, work stealing, targeted worker wakeups, worker-helping joins, and scheduler steal/park/wakeup metrics.
-- [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
+- [~] Add typed channels with task parking, starting with unboxed `channel<number>`.
+  - [x] Add heap-owned F64 channel storage primitives with buffered ring-buffer and unbuffered rendezvous semantics plus pthread regression coverage.
+  - [ ] Add resumable task parking/wakeup so blocking send/recv never consumes an OS worker, including workers=1 correctness.
+  - [ ] Add compiler-known `channel<number>`/send/recv intrinsics and scheduler/channel metrics.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.

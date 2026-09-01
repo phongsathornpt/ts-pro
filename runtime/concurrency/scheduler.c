@@ -303,6 +303,14 @@ tsnative_task_status tsnative_scheduler_task_status(tsnative_task *task) {
   return (tsnative_task_status)atomic_load_explicit(&task->status, memory_order_acquire);
 }
 
+int tsnative_scheduler_help_once(void) {
+  if (!current_worker) return 0;
+  tsnative_task *task = take_work(current_worker);
+  if (!task) return 0;
+  execute_task(task);
+  return 1;
+}
+
 void tsnative_scheduler_shutdown(void) {
   pthread_mutex_lock(&scheduler.mutex);
   if (!scheduler.started) {
