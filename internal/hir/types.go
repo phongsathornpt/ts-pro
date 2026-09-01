@@ -17,6 +17,7 @@ const (
 	TypeArray
 	TypeUnion
 	TypeFunction
+	TypeTask
 )
 
 type SemanticType struct {
@@ -53,6 +54,7 @@ const (
 	ReprArrayRef
 	ReprObjectRef
 	ReprFunctionRef
+	ReprTaskRef
 	ReprTaggedUnion
 	ReprJSValue
 )

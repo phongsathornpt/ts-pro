@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,7 @@ func TestNativeOutputMatchesTypeScriptReference(t *testing.T) {
 	fixtures := []string{
 		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts", "array_writes.ts", "dynamic_any.ts", "dynamic_any_call.ts",
 		"strings.ts", "objects.ts", "classes.ts", "class_fields.ts",
-		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts",
+		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts", "concurrency_tasks.ts",
 	}
 	for _, fixture := range fixtures {
 		fixture := fixture
@@ -49,6 +50,16 @@ func compareReferenceOutput(t *testing.T, root, tsc, node, fixture string) {
 		t.Fatalf("reference TypeScript compile: %v: %s", err, output)
 	}
 	js := filepath.Join(refDir, strings.TrimSuffix(fixture, filepath.Ext(fixture))+".js")
+	if fixture == "concurrency_tasks.ts" {
+		body, err := os.ReadFile(js)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shim := []byte("const spawn = fn => { fn(); return {}; };\nconst join = _task => {};\nconst yieldNow = () => {};\n")
+		if err := os.WriteFile(js, append(shim, body...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	reference, err := exec.CommandContext(ctx, node, js).CombinedOutput()
 	if err != nil {
 		t.Fatalf("reference Node run: %v: %s", err, reference)

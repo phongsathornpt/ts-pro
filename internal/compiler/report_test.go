@@ -11,9 +11,16 @@ func TestCountRuntimeCallsIncludesClosureAllocation(t *testing.T) {
 		Blocks: []mir.Block{{Instructions: []mir.Instruction{
 			{Op: mir.ClosureNew{Callee: 1}},
 			{Op: mir.IntrinsicCall{Intrinsic: mir.IntrinsicConsoleLogF64}},
+			{Op: mir.TaskSpawn{Callee: 1}},
+			{Op: mir.TaskJoin{Task: 1}},
+			{Op: mir.TaskYield{}},
 		}}},
 	}}}
-	if got := countRuntimeCalls(module); got != 2 {
-		t.Fatalf("runtime calls = %d, want 2", got)
+	if got := countRuntimeCalls(module); got != 5 {
+		t.Fatalf("runtime calls = %d, want 5", got)
+	}
+	spawns, joins, yields := countTaskOps(module)
+	if spawns != 1 || joins != 1 || yields != 1 {
+		t.Fatalf("task ops = %d/%d/%d, want 1/1/1", spawns, joins, yields)
 	}
 }

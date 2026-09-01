@@ -225,3 +225,34 @@ func TestBuildExplicitClassFieldsNativeExecutable(t *testing.T) {
 		t.Fatalf("native explicit class fields output = %q", got)
 	}
 }
+
+func TestBuildNativeTaskIntrinsicsExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "tasks")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency_tasks.ts", Output: output, Optimization: "-O2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 1 || result.Metrics.TaskJoins != 1 || result.Metrics.TaskYields != 1 {
+		t.Fatalf("task metrics = %d/%d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins, result.Metrics.TaskYields)
+	}
+	command := exec.CommandContext(ctx, output)
+	command.Env = append(os.Environ(), "TSNATIVE_WORKERS=2")
+	nativeOutput, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native task binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "42\n7" {
+		t.Fatalf("native task output = %q", got)
+	}
+}

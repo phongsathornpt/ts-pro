@@ -260,6 +260,13 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
+			case TaskSpawnOp:
+				if _, exists := functionIDs[op.Callee]; !exists {
+					add(fmt.Sprintf("task spawn references unknown function f%d", op.Callee))
+				}
+			case TaskJoinOp:
+				checkValue(op.Task)
+			case TaskYieldOp:
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

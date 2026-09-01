@@ -73,12 +73,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 - [x] Add bounded lazy native scheduler core with `TSNATIVE_WORKERS`, parked idle workers, and deterministic restartable shutdown.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
-- [~] Add compiler-known `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM.
-  - [x] Add `TsnativeTask`/`TypeTask`/`ReprTaskRef` contracts without routing task handles through `JSValue`.
-  - [x] Lower non-capturing `spawn((): void => ...)`, `join(task)`, and `yieldNow()` through frontend, HIR, MIR, and native task-entry wrappers.
-  - [x] Native acceptance currently preserves join ordering (`42` from the worker before `7` from the caller).
-  - [ ] Add differential/regression fixture coverage, scheduler/task metrics, run the full suite, and commit the compiler-intrinsic checkpoint.
-  - [ ] Add GC-safe captured task state and typed task-result ABI before allowing captured/returning spawned closures.
+- [x] Add compiler-known non-capturing `spawn`, `join`, and `yieldNow` native intrinsics through semantic DTO → HIR → MIR → LLVM, with `TaskRef` representation, task-entry wrappers, static task metrics, native acceptance, LLVM regression, differential observable-order coverage, and full-suite validation.
+- [ ] Add GC-safe captured task state and typed task-result ABI before allowing captured/returning spawned closures.
 - [ ] Add per-worker deques, work stealing, targeted worker wakeups, and scheduler metrics.
 - [ ] Add typed channels with task parking, starting with unboxed `channel<number>`.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.

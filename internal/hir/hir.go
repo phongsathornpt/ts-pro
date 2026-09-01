@@ -137,6 +137,9 @@ type ClosureCallOp struct {
 	Closure ValueID
 	Args    []ValueID
 }
+type TaskSpawnOp struct{ Callee FunctionID }
+type TaskJoinOp struct{ Task ValueID }
+type TaskYieldOp struct{}
 
 func (ConstOp) isOperation()         {}
 func (UnaryExpr) isOperation()       {}
@@ -157,6 +160,9 @@ func (FieldSetOp) isOperation()      {}
 func (FieldGetOp) isOperation()      {}
 func (ClosureNewOp) isOperation()    {}
 func (ClosureCallOp) isOperation()   {}
+func (TaskSpawnOp) isOperation()     {}
+func (TaskJoinOp) isOperation()      {}
+func (TaskYieldOp) isOperation()     {}
 
 type LiteralKind uint8
 

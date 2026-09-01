@@ -176,6 +176,12 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.ClosureCall{Closure: mir.ValueID(op.Closure), Args: args}
+	case hir.TaskSpawnOp:
+		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee)}
+	case hir.TaskJoinOp:
+		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task)}
+	case hir.TaskYieldOp:
+		result.Op = mir.TaskYield{}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {
@@ -281,6 +287,8 @@ func lowerRepr(source hir.Repr) (mir.Repr, error) {
 		return mir.ReprObjectRef, nil
 	case hir.ReprFunctionRef:
 		return mir.ReprFunctionRef, nil
+	case hir.ReprTaskRef:
+		return mir.ReprTaskRef, nil
 	case hir.ReprTaggedUnion:
 		return mir.ReprTagged, nil
 	case hir.ReprJSValue:

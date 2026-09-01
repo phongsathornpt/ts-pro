@@ -18,6 +18,7 @@ const (
 	ReprArrayRef
 	ReprObjectRef
 	ReprFunctionRef
+	ReprTaskRef
 	ReprTagged
 	ReprJSValue
 )
@@ -204,6 +205,9 @@ type ClosureCall struct {
 	Closure ValueID
 	Args    []ValueID
 }
+type TaskSpawn struct{ Callee FunctionID }
+type TaskJoin struct{ Task ValueID }
+type TaskYield struct{}
 
 func (ConstF64) isOperation()          {}
 func (ConstString) isOperation()       {}
@@ -225,6 +229,9 @@ func (FieldSet) isOperation()          {}
 func (FieldGet) isOperation()          {}
 func (ClosureNew) isOperation()        {}
 func (ClosureCall) isOperation()       {}
+func (TaskSpawn) isOperation()         {}
+func (TaskJoin) isOperation()          {}
+func (TaskYield) isOperation()         {}
 func (BoxJSValue) isOperation()        {}
 func (DynamicAddJSValue) isOperation() {}
 

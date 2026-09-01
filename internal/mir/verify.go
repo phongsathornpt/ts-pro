@@ -275,6 +275,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case TaskSpawn:
+				if _, ok := functions[op.Callee]; !ok {
+					return fmt.Errorf("task spawn v%d references unknown callee f%d", inst.Result, op.Callee)
+				}
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("task spawn v%d must produce TaskRef", inst.Result)
+				}
+			case TaskJoin:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task join v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
+			case TaskYield:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("task yield v%d must be void", inst.Result)
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}

@@ -626,6 +626,16 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		expr.String = text
 		return expr, nil
+	case tsast.KindArrowFunction, tsast.KindFunctionExpression:
+		info, err := e.extractLocalClosure("inline", nil, node)
+		if err != nil {
+			return nil, err
+		}
+		target := info.Function
+		expr.Kind = ExprClosure
+		expr.CallTarget = &target
+		expr.Captures = e.closureCaptureArgs(info, e.span(node))
+		return expr, nil
 	case tsast.KindBinaryExpression:
 		return e.extractBinary(node, expr)
 	case tsast.KindCallExpression:
@@ -826,10 +836,12 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	}
 	expr.Kind = ExprCall
 	consoleCall := false
+	calleeIdentifier := ""
 	var generic *genericInfo
 	switch calleeNode.Kind() {
 	case tsast.KindIdentifier:
 		calleeName, _ := calleeNode.Text()
+		calleeIdentifier = calleeName
 		expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeName, Span: e.span(calleeNode)}
 		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
 		if err != nil {
@@ -920,6 +932,9 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			}
 			expr.Args = append(expr.Args, arg)
 		}
+	}
+	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" {
+		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
 	if generic != nil {
 		target, err := e.specializeGenericCall(*generic, expr.Args, expr.Type)
@@ -1132,6 +1147,8 @@ func classifyType(text string) TypeKind {
 		return TypeNumber
 	case "string":
 		return TypeString
+	case "TsnativeTask":
+		return TypeTask
 	}
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
 		return TypeNumber

@@ -130,7 +130,7 @@ func (l *moduleLowerer) lowerShapes() error {
 func isScalarType(kind frontend.TypeKind) bool {
 	switch kind {
 	case frontend.TypeAny, frontend.TypeUnknown, frontend.TypeNever, frontend.TypeVoid,
-		frontend.TypeUndefined, frontend.TypeNull, frontend.TypeBoolean, frontend.TypeNumber, frontend.TypeString:
+		frontend.TypeUndefined, frontend.TypeNull, frontend.TypeBoolean, frontend.TypeNumber, frontend.TypeString, frontend.TypeTask:
 		return true
 	default:
 		return false
@@ -165,6 +165,8 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypeUnion, nil
 	case frontend.TypeFunction:
 		return hir.TypeFunction, nil
+	case frontend.TypeTask:
+		return hir.TypeTask, nil
 	default:
 		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
 	}

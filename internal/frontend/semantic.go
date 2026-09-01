@@ -16,6 +16,9 @@ const (
 	ExprFieldGet
 	ExprClosure
 	ExprNewClass
+	ExprTaskSpawn
+	ExprTaskJoin
+	ExprTaskYield
 )
 
 type IntrinsicKind uint8

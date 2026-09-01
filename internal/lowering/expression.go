@@ -99,6 +99,22 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		shape := f.module.source.Types[expr.Object.Type].Shape
 		return f.emit(expr.Type, hir.FieldGetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: expr.FieldIndex}), nil
+	case frontend.ExprTaskSpawn:
+		if expr.CallTarget == nil {
+			return 0, fmt.Errorf("task spawn has no native target")
+		}
+		return f.emit(expr.Type, hir.TaskSpawnOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget))}), nil
+	case frontend.ExprTaskJoin:
+		if len(expr.Args) != 1 {
+			return 0, fmt.Errorf("task join requires one handle")
+		}
+		task, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.TaskJoinOp{Task: task}), nil
+	case frontend.ExprTaskYield:
+		return f.emit(expr.Type, hir.TaskYieldOp{}), nil
 	case frontend.ExprClosure:
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("closure value has no native target")

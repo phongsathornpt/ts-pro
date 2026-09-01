@@ -51,6 +51,9 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n")
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
+	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
+	b.WriteString("declare void @tsnative_task_join_release(ptr)\n")
+	b.WriteString("declare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_safepoint()\n\n")
@@ -96,6 +99,9 @@ func Emit(module mir.Module) (string, error) {
 		}
 	}
 	if err := e.emitClosureWrappers(&b); err != nil {
+		return "", err
+	}
+	if err := e.emitTaskWrappers(&b); err != nil {
 		return "", err
 	}
 	if module.Entry != nil {
@@ -322,6 +328,21 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
 		fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
 		values[inst.Result] = value
+		return nil
+	case mir.TaskSpawn:
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_spawn_or_abort(ptr @%s, ptr null)\n", name, taskWrapperName(op.Callee))
+		values[inst.Result] = name
+		return nil
+	case mir.TaskJoin:
+		task, err := operand(values, op.Task)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_task_join_release(ptr %s)\n", task)
+		return nil
+	case mir.TaskYield:
+		b.WriteString("  call void @tsnative_task_yield()\n")
 		return nil
 	case mir.ClosureNew:
 		return e.emitClosureNew(b, inst, op, values)
@@ -628,7 +649,7 @@ func llvmZero(repr mir.Repr) (string, error) {
 		return "0.000000e+00", nil
 	case mir.ReprJSValue:
 		return "null", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef:
 		return "null", nil
 	default:
 		return "", fmt.Errorf("no zero initializer for representation %d", repr)
@@ -647,7 +668,7 @@ func llvmType(repr mir.Repr) (string, error) {
 		return "i64", nil
 	case mir.ReprF64:
 		return "double", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
 		return "ptr", nil
 	case mir.ReprTagged:
 		return "i64", nil

@@ -64,6 +64,7 @@ const (
 	TypeArray
 	TypeUnion
 	TypeFunction
+	TypeTask
 	TypeParameter
 )
 
