@@ -38,6 +38,8 @@ type BuildMetrics struct {
 	ChannelCreates  int
 	ChannelTrySends int
 	ChannelTryRecvs int
+	ChannelSends    int
+	ChannelRecvs    int
 	RuntimeCalls    int
 	CacheHits       int
 	CacheMisses     int
@@ -85,7 +87,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 	metrics.BoxingSites = countBoxingSites(mirModule)
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
 	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskYields = countTaskOps(mirModule)
-	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs = countChannelOps(mirModule)
+	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
 	return metrics
 }
@@ -155,7 +157,7 @@ func countTaskOps(module mir.Module) (spawns, joins, yields int) {
 	return spawns, joins, yields
 }
 
-func countChannelOps(module mir.Module) (creates, sends, recvs int) {
+func countChannelOps(module mir.Module) (creates, trySends, tryRecvs, sends, recvs int) {
 	for _, fn := range module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
@@ -163,14 +165,18 @@ func countChannelOps(module mir.Module) (creates, sends, recvs int) {
 				case mir.ChannelNewF64:
 					creates++
 				case mir.ChannelTrySendF64:
-					sends++
+					trySends++
 				case mir.ChannelTryRecvOrF64:
+					tryRecvs++
+				case mir.ChannelSendF64:
+					sends++
+				case mir.ChannelRecvF64:
 					recvs++
 				}
 			}
 		}
 	}
-	return creates, sends, recvs
+	return creates, trySends, tryRecvs, sends, recvs
 }
 
 func countRuntimeCalls(module mir.Module) int {
@@ -182,7 +188,7 @@ func countRuntimeCalls(module mir.Module) int {
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew,
 					mir.BoxJSValue, mir.DynamicAddJSValue, mir.IntrinsicCall,
-					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64:
+					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64:
 					count++
 				}
 			}

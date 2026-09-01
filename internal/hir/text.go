@@ -124,6 +124,10 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("channel.try_send v%d, v%d", op.Channel, op.Value)
 	case ChannelTryRecvOrOp:
 		return fmt.Sprintf("channel.try_recv_or v%d, v%d", op.Channel, op.Fallback)
+	case ChannelSendOp:
+		return fmt.Sprintf("channel.send v%d, v%d", op.Channel, op.Value)
+	case ChannelRecvOp:
+		return fmt.Sprintf("channel.recv v%d", op.Channel)
 	case ClosureCallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

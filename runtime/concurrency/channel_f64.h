@@ -14,5 +14,7 @@ int tsnative_channel_f64_send_task(tsnative_channel_f64 *channel, double value);
 int tsnative_channel_f64_recv_task(tsnative_channel_f64 *channel, double *out);
 void tsnative_channel_f64_send(tsnative_channel_f64 *channel, double value);
 double tsnative_channel_f64_recv(tsnative_channel_f64 *channel);
+void tsnative_channel_f64_send_cooperative(tsnative_channel_f64 *channel, double value);
+double tsnative_channel_f64_recv_cooperative(tsnative_channel_f64 *channel);
 
 #endif

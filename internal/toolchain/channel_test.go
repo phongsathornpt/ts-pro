@@ -264,3 +264,81 @@ int main(void) {
 		t.Fatalf("run channel task parking test: %v: %s", err, output)
 	}
 }
+
+func TestNativeF64ChannelCooperativeBlockingSingleWorker(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "channel_coop_test.c")
+	program := `#include <assert.h>
+#include <stddef.h>
+typedef struct tsnative_channel_f64 tsnative_channel_f64;
+typedef struct tsnative_task tsnative_task;
+typedef void (*tsnative_task_entry)(void *, void *);
+tsnative_channel_f64 *tsnative_channel_f64_new(size_t);
+void tsnative_channel_f64_send_cooperative(tsnative_channel_f64 *, double);
+double tsnative_channel_f64_recv_cooperative(tsnative_channel_f64 *);
+tsnative_task *tsnative_task_spawn(tsnative_task_entry, void *);
+int tsnative_task_join(tsnative_task *); void tsnative_task_release(tsnative_task *);
+void tsnative_scheduler_shutdown(void);
+typedef struct { tsnative_channel_f64 *ch; double value; } state;
+static void send_job(void *raw, void *result) { (void)result; state *s = raw; tsnative_channel_f64_send_cooperative(s->ch, 42); }
+static void recv_job(void *raw, void *result) { (void)result; state *s = raw; s->value = tsnative_channel_f64_recv_cooperative(s->ch); }
+static void join_release(tsnative_task *task) { assert(tsnative_task_join(task) == 0); tsnative_task_release(task); }
+static void run_case(int sender_first) {
+  state sender = {.ch = tsnative_channel_f64_new(0)};
+  state receiver = {.ch = sender.ch};
+  tsnative_task *first = tsnative_task_spawn(sender_first ? send_job : recv_job, sender_first ? (void *)&sender : (void *)&receiver);
+  tsnative_task *second = tsnative_task_spawn(sender_first ? recv_job : send_job, sender_first ? (void *)&receiver : (void *)&sender);
+  assert(first && second);
+  join_release(first); join_release(second);
+  assert(receiver.value == 42);
+}
+int main(void) {
+  run_case(1);
+  run_case(0);
+  tsnative_scheduler_shutdown();
+  return 0;
+}
+`
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testObj := filepath.Join(dir, "test.o")
+	schedulerObj := filepath.Join(dir, "scheduler.o")
+	taskObj := filepath.Join(dir, "task.o")
+	channelObj := filepath.Join(dir, "channel.o")
+	heapObj := filepath.Join(dir, "heap.o")
+	binary := filepath.Join(dir, "channel_coop_test")
+	if err := clang.CompileC(ctx, source, testObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "scheduler.c"), schedulerObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "task.c"), taskObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "concurrency", "channel_f64.c"), channelObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.CompileC(ctx, filepath.Join(root, "runtime", "core", "heap.c"), heapObj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{testObj, schedulerObj, taskObj, channelObj, heapObj}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1", "TSNATIVE_MAX_TASKS=8")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run cooperative channel test: %v: %s", err, output)
+	}
+}

@@ -47,6 +47,8 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_channel_f64_new_checked(double)\n")
 	b.WriteString("declare i32 @tsnative_channel_f64_try_send(ptr, double)\n")
 	b.WriteString("declare double @tsnative_channel_f64_try_recv_or(ptr, double)\n")
+	b.WriteString("declare void @tsnative_channel_f64_send_cooperative(ptr, double)\n")
+	b.WriteString("declare double @tsnative_channel_f64_recv_cooperative(ptr)\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
@@ -409,6 +411,26 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call double @tsnative_channel_f64_try_recv_or(ptr %s, double %s)\n", name, channel, fallback)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelSendF64:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_channel_f64_send_cooperative(ptr %s, double %s)\n", channel, value)
+		return nil
+	case mir.ChannelRecvF64:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call double @tsnative_channel_f64_recv_cooperative(ptr %s)\n", name, channel)
 		values[inst.Result] = name
 		return nil
 	case mir.ClosureNew:

@@ -194,6 +194,10 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.ChannelTrySendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
 	case hir.ChannelTryRecvOrOp:
 		result.Op = mir.ChannelTryRecvOrF64{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
+	case hir.ChannelSendOp:
+		result.Op = mir.ChannelSendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+	case hir.ChannelRecvOp:
+		result.Op = mir.ChannelRecvF64{Channel: mir.ValueID(op.Channel)}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {

@@ -381,3 +381,35 @@ func TestBuildNativeChannelTryExecutable(t *testing.T) {
 		t.Fatalf("native channel try output = %q", got)
 	}
 }
+
+func TestBuildNativeBlockingChannelTasksSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "channel-tasks")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_channel_tasks.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.ChannelCreates != 1 || result.Metrics.ChannelSends != 1 || result.Metrics.ChannelRecvs != 1 {
+		t.Fatalf("channel metrics = create:%d send:%d recv:%d", result.Metrics.ChannelCreates, result.Metrics.ChannelSends, result.Metrics.ChannelRecvs)
+	}
+	if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 2 {
+		t.Fatalf("task metrics = %d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	nativeOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run blocking channel tasks: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "42" {
+		t.Fatalf("output = %q", got)
+	}
+}

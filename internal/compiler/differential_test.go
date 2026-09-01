@@ -26,7 +26,7 @@ func TestNativeOutputMatchesTypeScriptReference(t *testing.T) {
 	fixtures := []string{
 		"fib.ts", "scalars.ts", "loops.ts", "arrays.ts", "array_writes.ts", "dynamic_any.ts", "dynamic_any_call.ts",
 		"strings.ts", "objects.ts", "classes.ts", "class_fields.ts",
-		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts", "concurrency_tasks.ts", "concurrency_captures.ts", "concurrency_results.ts", "concurrency_string_results.ts", "concurrency_object_results.ts", "concurrency_array_results.ts", "concurrency_any_results.ts", "concurrency_function_results.ts", "concurrency_bool_results.ts", "concurrency_channel_try.ts",
+		"closures.ts", "closures_escape.ts", "generics.ts", "gc_churn.ts", "top_level.ts", "class_initializers.ts", "class_constructor_effects.ts", "class_mutation.ts", "inheritance.ts", "override_dispatch.ts", "virtual_dispatch.ts", "integer_fast.ts", "concurrency_tasks.ts", "concurrency_captures.ts", "concurrency_results.ts", "concurrency_string_results.ts", "concurrency_object_results.ts", "concurrency_array_results.ts", "concurrency_any_results.ts", "concurrency_function_results.ts", "concurrency_bool_results.ts", "concurrency_channel_try.ts", "concurrency_channel_blocking.ts",
 	}
 	for _, fixture := range fixtures {
 		fixture := fixture
@@ -55,7 +55,7 @@ func compareReferenceOutput(t *testing.T, root, tsc, node, fixture string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		shim := []byte("const spawn = fn => ({ result: fn() });\nconst join = task => task.result;\nconst yieldNow = () => {};\nconst channel = capacity => ({ capacity, items: [] });\nconst channelTrySend = (ch, value) => { if (ch.items.length >= ch.capacity) return false; ch.items.push(value); return true; };\nconst channelTryRecvOr = (ch, fallback) => ch.items.length ? ch.items.shift() : fallback;\n")
+		shim := []byte("const spawn = fn => ({ result: fn() });\nconst join = task => task.result;\nconst yieldNow = () => {};\nconst channel = capacity => ({ capacity, items: [] });\nconst channelTrySend = (ch, value) => { if (ch.items.length >= ch.capacity) return false; ch.items.push(value); return true; };\nconst channelTryRecvOr = (ch, fallback) => ch.items.length ? ch.items.shift() : fallback;\nconst channelSend = (ch, value) => { if (ch.items.length >= ch.capacity) throw new Error('channel full in reference shim'); ch.items.push(value); };\nconst channelRecv = ch => { if (!ch.items.length) throw new Error('channel empty in reference shim'); return ch.items.shift(); };\n")
 		if err := os.WriteFile(js, append(shim, body...), 0o644); err != nil {
 			t.Fatal(err)
 		}

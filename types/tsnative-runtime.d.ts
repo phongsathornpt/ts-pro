@@ -21,3 +21,6 @@ interface TsnativeChannel<T> {
 declare function channel<T>(capacity: number): TsnativeChannel<T>;
 declare function channelTrySend<T>(channel: TsnativeChannel<T>, value: T): boolean;
 declare function channelTryRecvOr<T>(channel: TsnativeChannel<T>, fallback: T): T;
+
+declare function channelSend<T>(channel: TsnativeChannel<T>, value: T): void;
+declare function channelRecv<T>(channel: TsnativeChannel<T>): T;

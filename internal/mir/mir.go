@@ -216,6 +216,8 @@ type TaskYield struct{}
 type ChannelNewF64 struct{ Capacity ValueID }
 type ChannelTrySendF64 struct{ Channel, Value ValueID }
 type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
+type ChannelSendF64 struct{ Channel, Value ValueID }
+type ChannelRecvF64 struct{ Channel ValueID }
 
 func (ConstBool) isOperation()           {}
 func (ConstF64) isOperation()            {}
@@ -244,6 +246,8 @@ func (TaskYield) isOperation()           {}
 func (ChannelNewF64) isOperation()       {}
 func (ChannelTrySendF64) isOperation()   {}
 func (ChannelTryRecvOrF64) isOperation() {}
+func (ChannelSendF64) isOperation()      {}
+func (ChannelRecvF64) isOperation()      {}
 func (BoxJSValue) isOperation()          {}
 func (DynamicAddJSValue) isOperation()   {}
 

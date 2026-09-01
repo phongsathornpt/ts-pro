@@ -76,6 +76,20 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprChannelTryRecvOr
 		expr.Callee = nil
 		return expr, nil
+	case "channelSend":
+		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeVoid {
+			return nil, fmt.Errorf("channelSend at %d requires (channel<number>, number) and returns void", node.Pos())
+		}
+		expr.Kind = ExprChannelSend
+		expr.Callee = nil
+		return expr, nil
+	case "channelRecv":
+		if len(expr.Args) != 1 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Type].Kind != TypeNumber {
+			return nil, fmt.Errorf("channelRecv at %d requires channel<number> and returns number", node.Pos())
+		}
+		expr.Kind = ExprChannelRecv
+		expr.Callee = nil
+		return expr, nil
 	case "yieldNow":
 		if len(expr.Args) != 0 {
 			return nil, fmt.Errorf("yieldNow at %d takes no arguments", node.Pos())

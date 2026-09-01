@@ -146,6 +146,8 @@ type TaskYieldOp struct{}
 type ChannelNewOp struct{ Capacity ValueID }
 type ChannelTrySendOp struct{ Channel, Value ValueID }
 type ChannelTryRecvOrOp struct{ Channel, Fallback ValueID }
+type ChannelSendOp struct{ Channel, Value ValueID }
+type ChannelRecvOp struct{ Channel ValueID }
 
 func (ConstOp) isOperation()            {}
 func (UnaryExpr) isOperation()          {}
@@ -172,6 +174,8 @@ func (TaskYieldOp) isOperation()        {}
 func (ChannelNewOp) isOperation()       {}
 func (ChannelTrySendOp) isOperation()   {}
 func (ChannelTryRecvOrOp) isOperation() {}
+func (ChannelSendOp) isOperation()      {}
+func (ChannelRecvOp) isOperation()      {}
 
 type LiteralKind uint8
 

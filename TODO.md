@@ -89,7 +89,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [ ] Add compiler-generated continuation state so source-level blocking channel operations can suspend and resume arbitrary task bodies.
   - [~] Add compiler-known `channel<number>` operations and scheduler/channel metrics.
     - [x] Compiler-known `channel<number>`, `channelTrySend`, and `channelTryRecvOr` through semantic DTO → HIR → MIR → LLVM, with ChannelRef GC roots, native metrics, differential coverage, and zero-boxing acceptance.
-    - [ ] Add source-level blocking `channelSend`/`channelRecv` lowering onto compiler-generated resumable continuation state.
+    - [x] Add source-level blocking `channelSend`/`channelRecv` lowering using cooperative work-helping waiters, including unbuffered worker=1 native acceptance.
+    - [ ] Replace nested-stack cooperative waits with compiler-generated stackless continuation state for arbitrary suspension, timers, I/O, and async/await.
 - [ ] Add timers/sleep and a separate bounded blocking-call pool.
 - [ ] Lower `async`/`await` to resumable task state machines rather than blocking OS workers.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.

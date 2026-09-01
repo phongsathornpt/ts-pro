@@ -3,6 +3,7 @@
 #include "../core/heap.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 
 typedef struct tsnative_channel_f64_waiter {
@@ -10,6 +11,8 @@ typedef struct tsnative_channel_f64_waiter {
   tsnative_task *task;
   double value;
   double *out;
+  int cooperative;
+  _Atomic int completed;
 } tsnative_channel_f64_waiter;
 
 struct tsnative_channel_f64 {
@@ -265,4 +268,82 @@ int tsnative_channel_f64_recv_task(tsnative_channel_f64 *channel, double *out) {
   waiter_push(&channel->recv_head, &channel->recv_tail, waiter);
   pthread_mutex_unlock(&channel->mutex);
   return 0;
+}
+
+static void finish_waiter(tsnative_channel_f64 *channel, tsnative_channel_f64_waiter *waiter) {
+  if (waiter->cooperative) {
+    atomic_store_explicit(&waiter->completed, 1, memory_order_release);
+    pthread_cond_broadcast(&channel->changed);
+    return;
+  }
+  (void)tsnative_scheduler_wake(waiter->task);
+  free(waiter);
+}
+
+static void wait_cooperatively(tsnative_channel_f64 *channel, tsnative_channel_f64_waiter *waiter) {
+  for (;;) {
+    if (atomic_load_explicit(&waiter->completed, memory_order_acquire)) return;
+    if (tsnative_scheduler_help_once()) continue;
+    pthread_mutex_lock(&channel->mutex);
+    if (!atomic_load_explicit(&waiter->completed, memory_order_acquire)) {
+      pthread_cond_wait(&channel->changed, &channel->mutex);
+    }
+    pthread_mutex_unlock(&channel->mutex);
+  }
+}
+
+void tsnative_channel_f64_send_cooperative(tsnative_channel_f64 *channel, double value) {
+  if (!channel) abort();
+  if (!tsnative_scheduler_current_task()) { tsnative_channel_f64_send(channel, value); return; }
+  pthread_mutex_lock(&channel->mutex);
+  tsnative_channel_f64_waiter *receiver = waiter_pop(&channel->recv_head, &channel->recv_tail);
+  if (receiver) {
+    *receiver->out = value;
+    finish_waiter(channel, receiver);
+    pthread_mutex_unlock(&channel->mutex);
+    return;
+  }
+  if (channel->capacity != 0 && channel->count < channel->capacity) {
+    channel->buffer[channel->tail] = value;
+    channel->tail = (channel->tail + 1) % channel->capacity;
+    channel->count++;
+    pthread_cond_broadcast(&channel->changed);
+    pthread_mutex_unlock(&channel->mutex);
+    return;
+  }
+  tsnative_channel_f64_waiter *waiter = calloc(1, sizeof(*waiter));
+  if (!waiter) abort();
+  waiter->task = tsnative_scheduler_current_task(); waiter->value = value; waiter->cooperative = 1;
+  waiter_push(&channel->send_head, &channel->send_tail, waiter);
+  pthread_mutex_unlock(&channel->mutex);
+  wait_cooperatively(channel, waiter);
+  free(waiter);
+}
+
+double tsnative_channel_f64_recv_cooperative(tsnative_channel_f64 *channel) {
+  if (!channel) abort();
+  if (!tsnative_scheduler_current_task()) return tsnative_channel_f64_recv(channel);
+  double value = 0;
+  pthread_mutex_lock(&channel->mutex);
+  if (channel->capacity != 0 && channel->count != 0) {
+    value = channel->buffer[channel->head]; channel->head = (channel->head + 1) % channel->capacity; channel->count--;
+    tsnative_channel_f64_waiter *sender = waiter_pop(&channel->send_head, &channel->send_tail);
+    if (sender) {
+      channel->buffer[channel->tail] = sender->value; channel->tail = (channel->tail + 1) % channel->capacity; channel->count++;
+      finish_waiter(channel, sender);
+    }
+    pthread_cond_broadcast(&channel->changed); pthread_mutex_unlock(&channel->mutex); return value;
+  }
+  tsnative_channel_f64_waiter *sender = waiter_pop(&channel->send_head, &channel->send_tail);
+  if (sender) {
+    value = sender->value; finish_waiter(channel, sender); pthread_mutex_unlock(&channel->mutex); return value;
+  }
+  tsnative_channel_f64_waiter *waiter = calloc(1, sizeof(*waiter));
+  if (!waiter) abort();
+  waiter->task = tsnative_scheduler_current_task(); waiter->out = &value; waiter->cooperative = 1;
+  waiter_push(&channel->recv_head, &channel->recv_tail, waiter);
+  pthread_mutex_unlock(&channel->mutex);
+  wait_cooperatively(channel, waiter);
+  free(waiter);
+  return value;
 }

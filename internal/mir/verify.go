@@ -325,6 +325,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Fallback); err != nil {
 					return err
 				}
+			case ChannelSendF64:
+				if inst.Repr != ReprVoid {
+					return fmt.Errorf("channel send v%d must be void", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ChannelRecvF64:
+				if inst.Repr != ReprF64 {
+					return fmt.Errorf("channel recv v%d must produce F64", inst.Result)
+				}
+				if err := checkValue(op.Channel); err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("unsupported operation %T", inst.Op)
 			}

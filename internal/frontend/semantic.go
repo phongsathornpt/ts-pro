@@ -23,6 +23,8 @@ const (
 	ExprChannelNew
 	ExprChannelTrySend
 	ExprChannelTryRecvOr
+	ExprChannelSend
+	ExprChannelRecv
 )
 
 type IntrinsicKind uint8
