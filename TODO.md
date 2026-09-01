@@ -122,7 +122,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
     - [x] Async `throw` lowers to a GC-rooted JSValue task failure, propagates through stackless await completion waiters, and terminates an uncaught top-level join with the rejection value.
     - [x] Add non-aborting failed-task inspection with GC-root lifetime tests, and release context/failure persistent roots when task handles are destroyed.
-    - [ ] Add native `try`/`catch`/`finally`, rejection recovery, and selected Promise combinators.
+    - [~] Add native `try`/`catch`/`finally`, rejection recovery, and selected Promise combinators.
+      - [x] Native async `try/catch` catches local `throw` through explicit CFG exception edges and JSValue catch bindings without runtime unwind/setjmp.
+      - [ ] Catch awaited child-task rejection, add `finally`, nested rejection recovery, and selected Promise combinators.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.

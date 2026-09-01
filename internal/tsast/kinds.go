@@ -60,6 +60,7 @@ const (
 	KindForStatement                 uint32 = 249
 	KindReturnStatement              uint32 = 254
 	KindThrowStatement               uint32 = 258
+	KindTryStatement                 uint32 = 259
 	KindVariableDeclaration          uint32 = 261
 	KindVariableDeclarationList      uint32 = 262
 	KindFunctionDeclaration          uint32 = 263
@@ -68,6 +69,7 @@ const (
 	KindTypeAliasDeclaration         uint32 = 266
 	KindPropertyAssignment           uint32 = 303
 	KindHeritageClause               uint32 = 299
+	KindCatchClause                  uint32 = 300
 	KindShorthandPropertyAssignment  uint32 = 304
 	KindSourceFile                   uint32 = 307
 	KindIdentifier                   uint32 = 79
@@ -89,10 +91,10 @@ var kindNames = map[uint32]string{
 	KindParenthesizedExpression: "ParenthesizedExpression", KindAwaitExpression: "AwaitExpression", KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
 	KindExpressionWithTypeArguments: "ExpressionWithTypeArguments", KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
-	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement", KindThrowStatement: "ThrowStatement",
+	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement", KindThrowStatement: "ThrowStatement", KindTryStatement: "TryStatement",
 	KindVariableDeclaration: "VariableDeclaration", KindVariableDeclarationList: "VariableDeclarationList", KindFunctionDeclaration: "FunctionDeclaration", KindClassDeclaration: "ClassDeclaration",
 	KindInterfaceDeclaration: "InterfaceDeclaration", KindTypeAliasDeclaration: "TypeAliasDeclaration",
-	KindHeritageClause: "HeritageClause", KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",
+	KindHeritageClause: "HeritageClause", KindCatchClause: "CatchClause", KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",
 	KindSourceFile: "SourceFile", KindNodeList: "NodeList",
 }
 

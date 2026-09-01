@@ -268,6 +268,8 @@ func (e *extractor) extractBlock(block tsast.Node) ([]Statement, error) {
 
 func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 	switch node.Kind() {
+	case tsast.KindTryStatement:
+		return e.extractTryStatement(node)
 	case tsast.KindThrowStatement:
 		if e.currentFunction == nil || int(*e.currentFunction) >= len(e.result.Functions) || !e.result.Functions[*e.currentFunction].Async {
 			return Statement{}, fmt.Errorf("throw at %d is currently supported only in native async functions", node.Pos())
@@ -421,6 +423,54 @@ func (e *extractor) extractVariableDeclaration(node tsast.Node) (Statement, erro
 	}
 	e.recordConcreteClass(symbolID, value)
 	return Statement{Kind: StmtVar, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, nil
+}
+
+func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
+	if e.currentFunction == nil || int(*e.currentFunction) >= len(e.result.Functions) || !e.result.Functions[*e.currentFunction].Async {
+		return Statement{}, fmt.Errorf("try/catch at %d is currently supported only in native async functions", node.Pos())
+	}
+	if _, ok := node.NamedChild("finallyBlock"); ok {
+		return Statement{}, fmt.Errorf("finally at %d is not supported yet", node.Pos())
+	}
+	tryBlock, ok := node.NamedChild("tryBlock")
+	if !ok {
+		return Statement{}, fmt.Errorf("try statement at %d has no try block", node.Pos())
+	}
+	catchClause, ok := node.NamedChild("catchClause")
+	if !ok {
+		return Statement{}, fmt.Errorf("try statement at %d requires a catch clause", node.Pos())
+	}
+	decl, ok := catchClause.NamedChild("variableDeclaration")
+	if !ok {
+		return Statement{}, fmt.Errorf("catch clause at %d requires a binding", catchClause.Pos())
+	}
+	nameNode, ok := decl.NamedChild("name")
+	if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		return Statement{}, fmt.Errorf("catch clause at %d requires an identifier binding", catchClause.Pos())
+	}
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	if err != nil || symbol == nil {
+		if err == nil {
+			err = fmt.Errorf("catch binding has no TypeScript symbol")
+		}
+		return Statement{}, err
+	}
+	anyType := e.ensureSemanticType(TypeAny, "any")
+	catchSymbol := e.internSymbol(symbol, SymbolVariable, nameNode)
+	e.result.Symbols[catchSymbol].Type = anyType
+	tryBody, err := e.extractBlock(tryBlock)
+	if err != nil {
+		return Statement{}, err
+	}
+	catchBlock, ok := catchClause.NamedChild("block")
+	if !ok {
+		return Statement{}, fmt.Errorf("catch clause at %d has no block", catchClause.Pos())
+	}
+	catchBody, err := e.extractBlock(catchBlock)
+	if err != nil {
+		return Statement{}, err
+	}
+	return Statement{Kind: StmtTry, Span: e.span(node), Then: tryBody, Catch: catchBody, CatchSymbol: catchSymbol, CatchType: anyType}, nil
 }
 
 func (e *extractor) extractWhile(node tsast.Node) (Statement, error) {

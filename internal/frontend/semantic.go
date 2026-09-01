@@ -112,6 +112,7 @@ const (
 	StmtIf
 	StmtReturn
 	StmtThrow
+	StmtTry
 	StmtExpr
 	StmtVar
 	StmtAssign
@@ -123,21 +124,25 @@ const (
 )
 
 type Statement struct {
-	Kind   StmtKind
-	Span   Span
-	Expr   *Expr
-	Then   []Statement
-	Else   []Statement
-	Return *Expr
+	Kind    StmtKind
+	Span    Span
+	Expr    *Expr
+	Then    []Statement
+	Else    []Statement
+	Catch   []Statement
+	Finally []Statement
+	Return  *Expr
 
-	Symbol     SymbolID
-	Name       string
-	Type       TypeID
-	Value      *Expr
-	Object     *Expr
-	Index      *Expr
-	Field      string
-	FieldIndex uint32
-	Init       []Statement
-	Update     []Statement
+	Symbol      SymbolID
+	CatchSymbol SymbolID
+	CatchType   TypeID
+	Name        string
+	Type        TypeID
+	Value       *Expr
+	Object      *Expr
+	Index       *Expr
+	Field       string
+	FieldIndex  uint32
+	Init        []Statement
+	Update      []Statement
 }

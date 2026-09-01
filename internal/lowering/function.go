@@ -17,6 +17,7 @@ type functionLowerer struct {
 	nextBlock  uint32
 	current    int
 	terminated bool
+	handlers   []exceptionHandler
 }
 
 type localState struct {
@@ -27,6 +28,13 @@ type localState struct {
 type loopPhi struct {
 	symbol    frontend.SymbolID
 	instIndex int
+}
+
+type exceptionHandler struct {
+	block    hir.BlockID
+	incoming []hir.PhiIncoming
+	symbol   frontend.SymbolID
+	typeID   frontend.TypeID
 }
 
 func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, error) {
@@ -118,7 +126,15 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if err != nil {
 			return err
 		}
+		if len(f.handlers) != 0 {
+			index := len(f.handlers) - 1
+			pred := f.block().ID
+			f.handlers[index].incoming = append(f.handlers[index].incoming, hir.PhiIncoming{Block: pred, Value: value})
+			return f.terminate(hir.JumpTerm{Target: f.handlers[index].block})
+		}
 		return f.terminate(hir.ThrowTerm{Value: value})
+	case frontend.StmtTry:
+		return f.lowerTryCatch(stmt)
 	case frontend.StmtReturn:
 		if stmt.Return == nil {
 			return f.terminate(hir.ReturnTerm{})
@@ -196,6 +212,60 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 	default:
 		return fmt.Errorf("unsupported semantic statement kind %d", stmt.Kind)
 	}
+}
+
+func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
+	if len(stmt.Finally) != 0 {
+		return fmt.Errorf("finally lowering is not supported yet")
+	}
+	before := cloneLocals(f.locals)
+	catchID := f.newBlockID()
+	continueID := f.newBlockID()
+	f.handlers = append(f.handlers, exceptionHandler{block: catchID, symbol: stmt.CatchSymbol, typeID: stmt.CatchType})
+	if err := f.lowerStatements(stmt.Then); err != nil {
+		return err
+	}
+	handler := f.handlers[len(f.handlers)-1]
+	f.handlers = f.handlers[:len(f.handlers)-1]
+	states := make([]localState, 0, 2)
+	if !f.terminated {
+		pred := f.block().ID
+		state := cloneLocals(f.locals)
+		if err := f.terminate(hir.JumpTerm{Target: continueID}); err != nil {
+			return err
+		}
+		states = append(states, localState{pred: pred, locals: state})
+	}
+	if len(handler.incoming) != 0 {
+		f.locals = cloneLocals(before)
+		f.startBlock(catchID)
+		var exception hir.ValueID
+		if len(handler.incoming) == 1 {
+			exception = handler.incoming[0].Value
+		} else {
+			exception = f.emit(handler.typeID, hir.PhiOp{Incoming: handler.incoming})
+		}
+		f.locals[handler.symbol] = exception
+		if err := f.lowerStatements(stmt.Catch); err != nil {
+			return err
+		}
+		if !f.terminated {
+			pred := f.block().ID
+			state := cloneLocals(f.locals)
+			delete(state, handler.symbol)
+			if err := f.terminate(hir.JumpTerm{Target: continueID}); err != nil {
+				return err
+			}
+			states = append(states, localState{pred: pred, locals: state})
+		}
+	}
+	if len(states) == 0 {
+		f.locals = cloneLocals(before)
+		f.terminated = true
+		return nil
+	}
+	f.startBlock(continueID)
+	return f.mergeLocals(states)
 }
 
 func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
