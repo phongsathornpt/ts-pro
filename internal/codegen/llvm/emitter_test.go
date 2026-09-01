@@ -617,3 +617,42 @@ func TestEmitStacklessBranchContinuation(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStacklessLoopPhiContinuation(t *testing.T) {
+	ret := mir.ValueID(3)
+	module := mir.Module{Name: "stackless-loop", Functions: []mir.Function{
+		{ID: 0, Name: "sum", Params: []mir.Param{{Value: 0, Name: "limit", Repr: mir.ReprF64}}, ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 0}}, {Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 0}}}, Terminator: mir.Jump{Target: 1}},
+			{ID: 1, Instructions: []mir.Instruction{
+				{Result: 3, Repr: mir.ReprF64, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 1}, {Block: 2, Value: 7}}}},
+				{Result: 4, Repr: mir.ReprF64, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 2}, {Block: 2, Value: 8}}}},
+				{Result: 5, Repr: mir.ReprBool, Op: mir.FloatCompare{Operator: mir.FloatLessThan, Left: 4, Right: 0}},
+			}, Terminator: mir.Branch{Condition: 5, Then: 2, Else: 3}},
+			{ID: 2, Instructions: []mir.Instruction{
+				{Result: 6, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+				{Result: 9, Repr: mir.ReprVoid, Op: mir.Sleep{Duration: 6}},
+				{Result: 7, Repr: mir.ReprF64, Op: mir.FloatBinary{Operator: mir.FloatAdd, Left: 3, Right: 4}},
+				{Result: 8, Repr: mir.ReprF64, Op: mir.FloatBinary{Operator: mir.FloatAdd, Left: 4, Right: 6}},
+			}, Terminator: mir.Jump{Target: 1}},
+			{ID: 3, Terminator: mir.Return{Value: &ret}},
+		}},
+		{ID: 1, Name: "launcher", Params: []mir.Param{{Value: 0, Name: "limit", Repr: mir.ReprF64}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprTaskRef, Op: mir.TaskSpawn{Callee: 0, Captures: []mir.ValueID{0}}}}, Terminator: mir.Return{}}}},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_task_env_f0 = type { double, i32, double, double, i1, double, double }",
+		"store double 0.000000e+00, ptr %spill0.ptr",
+		"store double 0.000000e+00, ptr %spill1.ptr",
+		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
+		"store double %spill.3.j6.phi0, ptr %spill0.ptr",
+		"store double %spill.4.j6.phi1, ptr %spill1.ptr",
+		"br label %step1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

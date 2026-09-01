@@ -45,11 +45,18 @@ type taskSuspendStep struct {
 	Then     mir.BlockID
 	Else     mir.BlockID
 	HasValue bool
+	Block    mir.BlockID
 }
 
 type taskSpillSlot struct {
 	Index int
 	Repr  mir.Repr
+}
+
+type taskPhi struct {
+	Result   mir.ValueID
+	Repr     mir.Repr
+	Incoming map[mir.BlockID]mir.ValueID
 }
 
 type taskContinuation struct {
@@ -58,6 +65,7 @@ type taskContinuation struct {
 	BoolConsts map[mir.ValueID]bool
 	SpillSlots map[mir.ValueID]taskSpillSlot
 	BlockPC    map[mir.BlockID]int
+	Phis       map[mir.BlockID][]taskPhi
 }
 
 func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
@@ -69,6 +77,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		BoolConsts: map[mir.ValueID]bool{},
 		SpillSlots: map[mir.ValueID]taskSpillSlot{},
 		BlockPC:    map[mir.BlockID]int{},
+		Phis:       map[mir.BlockID][]taskPhi{},
 	}
 	available := map[mir.ValueID]bool{}
 	for _, param := range fn.Params {
@@ -205,7 +214,19 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				hasSuspend = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendSleep, Duration: op.Duration})
 			case mir.Phi:
-				return nil
+				if inst.Repr == mir.ReprVoid || inst.Repr == mir.ReprInvalid {
+					return nil
+				}
+				if _, exists := cont.SpillSlots[inst.Result]; exists {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				phi := taskPhi{Result: inst.Result, Repr: inst.Repr, Incoming: map[mir.BlockID]mir.ValueID{}}
+				for _, incoming := range op.Incoming {
+					phi.Incoming[incoming.Block] = incoming.Value
+				}
+				cont.Phis[block.ID] = append(cont.Phis[block.ID], phi)
 			default:
 				return nil
 			}
@@ -215,7 +236,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 		}
 		switch term := block.Terminator.(type) {
 		case mir.Return:
-			step := taskSuspendStep{Kind: taskStepReturn}
+			step := taskSuspendStep{Kind: taskStepReturn, Block: block.ID}
 			if term.Value != nil {
 				if !available[*term.Value] {
 					return nil
@@ -227,12 +248,12 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 			}
 			cont.Steps = append(cont.Steps, step)
 		case mir.Jump:
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepJump, Target: term.Target})
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepJump, Target: term.Target, Block: block.ID})
 		case mir.Branch:
 			if !available[term.Condition] {
 				return nil
 			}
-			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBranch, Value: term.Condition, Then: term.Then, Else: term.Else})
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBranch, Value: term.Condition, Then: term.Then, Else: term.Else, Block: block.ID})
 		default:
 			return nil
 		}
@@ -376,6 +397,41 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 	return nil
 }
 
+func (e *emitter) emitContinuationPhiEdge(b *strings.Builder, descriptor taskDescriptor, fn mir.Function, from, target mir.BlockID, suffix string) error {
+	phis := descriptor.Continuation.Phis[target]
+	if len(phis) == 0 {
+		return nil
+	}
+	type pendingStore struct {
+		typ, value string
+		slot       int
+	}
+	stores := make([]pendingStore, 0, len(phis))
+	for i, phi := range phis {
+		incoming, ok := phi.Incoming[from]
+		if !ok {
+			return fmt.Errorf("task continuation phi v%d has no incoming edge b%d -> b%d", phi.Result, from, target)
+		}
+		value, repr, err := continuationOperand(b, fn, descriptor, incoming, fmt.Sprintf("%s.phi%d", suffix, i))
+		if err != nil {
+			return err
+		}
+		if repr != phi.Repr {
+			return fmt.Errorf("task continuation phi v%d repr mismatch", phi.Result)
+		}
+		typ, err := llvmType(repr)
+		if err != nil {
+			return err
+		}
+		slot := descriptor.Continuation.SpillSlots[phi.Result]
+		stores = append(stores, pendingStore{typ: typ, value: value, slot: slot.Index})
+	}
+	for _, store := range stores {
+		fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", store.typ, store.value, store.slot)
+	}
+	return nil
+}
+
 func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor taskDescriptor, fn mir.Function) error {
 	cont := descriptor.Continuation
 	for i := 0; i < descriptor.CaptureCount; i++ {
@@ -416,12 +472,37 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			if !thenOK || !elseOK {
 				return fmt.Errorf("task continuation branch targets are unavailable")
 			}
-			fmt.Fprintf(b, "  br i1 %s, label %%step%d, label %%step%d\n", condition, thenPC, elsePC)
+			thenPhis, elsePhis := len(cont.Phis[step.Then]) != 0, len(cont.Phis[step.Else]) != 0
+			thenLabel, elseLabel := fmt.Sprintf("%%step%d", thenPC), fmt.Sprintf("%%step%d", elsePC)
+			if thenPhis {
+				thenLabel = fmt.Sprintf("%%edge%d_then", i)
+			}
+			if elsePhis {
+				elseLabel = fmt.Sprintf("%%edge%d_else", i)
+			}
+			fmt.Fprintf(b, "  br i1 %s, label %s, label %s\n", condition, thenLabel, elseLabel)
+			if thenPhis {
+				fmt.Fprintf(b, "edge%d_then:\n", i)
+				if err := e.emitContinuationPhiEdge(b, descriptor, fn, step.Block, step.Then, fmt.Sprintf("e%d.then", i)); err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  br label %%step%d\n", thenPC)
+			}
+			if elsePhis {
+				fmt.Fprintf(b, "edge%d_else:\n", i)
+				if err := e.emitContinuationPhiEdge(b, descriptor, fn, step.Block, step.Else, fmt.Sprintf("e%d.else", i)); err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  br label %%step%d\n", elsePC)
+			}
 			continue
 		case taskStepJump:
 			targetPC, ok := cont.BlockPC[step.Target]
 			if !ok {
 				return fmt.Errorf("task continuation jump target b%d is unavailable", step.Target)
+			}
+			if err := e.emitContinuationPhiEdge(b, descriptor, fn, step.Block, step.Target, fmt.Sprintf("j%d", i)); err != nil {
+				return err
 			}
 			fmt.Fprintf(b, "  br label %%step%d\n", targetPC)
 			continue

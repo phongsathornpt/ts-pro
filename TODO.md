@@ -110,7 +110,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Linear F64 arithmetic, proven-integer arithmetic, and Bool comparison results spill into typed task-state slots and survive later await/channel/sleep suspension points.
       - [x] Linear StringRef/JSValue creation, string concatenation, boxing/dynamic-add, and F64 array-read results spill into typed task state with allocation safepoints before suspension.
       - [x] Multi-block Branch/Jump/Return continuation CFGs without Phi nodes, including stackless async `if` on a single worker.
-      - [ ] Extend spill/liveness support to object/array allocation, field/call/closure results, Phi-backed merges/loops, and remaining native operations.
+      - [x] Phi-backed continuation merges use typed task-state slots with parallel edge copies, including loop-carried numeric `while` state on a single worker.
+      - [ ] Extend spill/liveness support to object/array allocation, field/call/closure results, richer reference Phi cases, and remaining native operations.
   - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
 - [ ] Add structured concurrency, task groups, cancellation, and task-local context.
 - [ ] Integrate task/channel/timer state with precise GC roots and scheduler safepoints.
