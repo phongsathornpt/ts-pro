@@ -16,11 +16,14 @@ struct tsnative_task {
   void *result_gc_root_token;
   void *context;
   void *context_gc_root_token;
+  void *failure_ref;
+  void *failure_gc_root_token;
   uint64_t id;
   _Atomic int status;
   _Atomic int park_requested;
   _Atomic int wake_requested;
   _Atomic int cancel_requested;
+  _Atomic int failure_requested;
   _Atomic uint32_t budget_remaining;
   pthread_mutex_t completion_mutex;
   struct tsnative_task *completion_waiter;

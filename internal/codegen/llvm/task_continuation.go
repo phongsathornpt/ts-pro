@@ -39,6 +39,7 @@ const (
 	taskStepBranch
 	taskStepJump
 	taskStepReturn
+	taskStepThrow
 )
 
 type taskSuspendStep struct {
@@ -388,6 +389,12 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				return nil
 			}
 			cont.Steps = append(cont.Steps, step)
+		case mir.Throw:
+			if !available[term.Value] {
+				return nil
+			}
+			hasSuspend = true
+			cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepThrow, Value: term.Value, Block: block.ID})
 		case mir.Jump:
 			if term.Target <= block.ID {
 				hasSuspend = true
@@ -674,6 +681,17 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 				return err
 			}
 			fmt.Fprintf(b, "  br label %%step%d\n", targetPC)
+			continue
+		case taskStepThrow:
+			value, repr, err := continuationOperand(b, fn, descriptor, step.Value, fmt.Sprintf("throw%d", i))
+			if err != nil {
+				return err
+			}
+			if repr != mir.ReprJSValue {
+				return fmt.Errorf("task continuation throw requires JSValue")
+			}
+			fmt.Fprintf(b, "  call void @tsnative_task_fail_current(ptr %s)\n", value)
+			b.WriteString("  ret void\n")
 			continue
 		case taskStepReturn:
 			if step.HasValue {

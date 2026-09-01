@@ -544,6 +544,10 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return err
 				}
 			}
+		case Throw:
+			if err := checkValue(term.Value); err != nil {
+				return err
+			}
 		case Jump:
 			if _, ok := blocks[term.Target]; !ok {
 				return fmt.Errorf("unknown block b%d", term.Target)

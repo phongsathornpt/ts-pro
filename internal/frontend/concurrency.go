@@ -114,6 +114,7 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeVoid {
 			return nil, fmt.Errorf("setTaskContext at %d requires one value and returns void", node.Pos())
 		}
+		e.ensureSemanticType(TypeAny, "any")
 		expr.Kind = ExprTaskContextSet
 		expr.Callee = nil
 		return expr, nil

@@ -110,6 +110,15 @@ func (f *functionLowerer) lowerStatements(statements []frontend.Statement) error
 
 func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 	switch stmt.Kind {
+	case frontend.StmtThrow:
+		if stmt.Value == nil {
+			return fmt.Errorf("throw statement has no value")
+		}
+		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
+		if err != nil {
+			return err
+		}
+		return f.terminate(hir.ThrowTerm{Value: value})
 	case frontend.StmtReturn:
 		if stmt.Return == nil {
 			return f.terminate(hir.ReturnTerm{})

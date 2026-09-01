@@ -7,6 +7,8 @@
 #include <sched.h>
 #include <stdlib.h>
 
+extern void tsnative_console_log_jsvalue(void *value);
+
 static void destroy_task_storage(tsnative_task *task);
 struct tsnative_task_group {
   pthread_mutex_t mutex;
@@ -96,10 +98,20 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
       return NULL;
     }
   }
+  task->failure_gc_root_token = tsnative_gc_root_register(&task->failure_ref);
+  if (!task->failure_gc_root_token) {
+    if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
+    if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
+    if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
+    pthread_mutex_destroy(&task->completion_mutex);
+    free(task);
+    return NULL;
+  }
   if (task_group_attach(group, task) != 0) {
     if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
     if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
+    if (task->failure_gc_root_token) tsnative_gc_root_unregister(task->failure_gc_root_token);
     pthread_mutex_destroy(&task->completion_mutex);
     free(task);
     return NULL;
@@ -110,6 +122,7 @@ static tsnative_task *spawn_with_kind_group(tsnative_task_group *group, tsnative
     if (task->gc_root_token) tsnative_gc_root_unregister(task->gc_root_token);
     if (task->result_gc_root_token) tsnative_gc_root_unregister(task->result_gc_root_token);
     if (task->context_gc_root_token) tsnative_gc_root_unregister(task->context_gc_root_token);
+    if (task->failure_gc_root_token) tsnative_gc_root_unregister(task->failure_gc_root_token);
     pthread_mutex_destroy(&task->completion_mutex);
     free(task);
     return NULL;
@@ -281,27 +294,36 @@ void tsnative_task_release(tsnative_task *task) {
   destroy_task_storage(task);
 }
 
+static void abort_task_failure(tsnative_task *task) {
+  if (task && task->failure_ref) tsnative_console_log_jsvalue(task->failure_ref);
+  abort();
+}
+
 void tsnative_task_join_release(tsnative_task *task) {
-  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_VOID || tsnative_task_join(task) != 0) abort();
+  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_VOID) abort();
+  if (tsnative_task_join(task) != 0) abort_task_failure(task);
   tsnative_task_release(task);
 }
 
 double tsnative_task_join_f64_release(tsnative_task *task) {
-  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_F64 || tsnative_task_join(task) != 0) abort();
+  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_F64) abort();
+  if (tsnative_task_join(task) != 0) abort_task_failure(task);
   double result = task->result.f64;
   tsnative_task_release(task);
   return result;
 }
 
 uint8_t tsnative_task_join_bool_release(tsnative_task *task) {
-  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_BOOL || tsnative_task_join(task) != 0) abort();
+  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_BOOL) abort();
+  if (tsnative_task_join(task) != 0) abort_task_failure(task);
   uint8_t result = task->result.boolean;
   tsnative_task_release(task);
   return result;
 }
 
 void *tsnative_task_join_ref_release(tsnative_task *task) {
-  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_REF || tsnative_task_join(task) != 0) abort();
+  if (!task || task->result_kind != TSNATIVE_TASK_RESULT_REF) abort();
+  if (tsnative_task_join(task) != 0) abort_task_failure(task);
   void *result = task->result.ref;
   tsnative_task_release(task);
   return result;
@@ -322,6 +344,13 @@ void *tsnative_task_get_context(void) {
   tsnative_task *task = tsnative_scheduler_current_task();
   if (!task) abort();
   return task->context;
+}
+
+void tsnative_task_fail_current(void *error) {
+  tsnative_task *task = tsnative_scheduler_current_task();
+  if (!task) abort();
+  task->failure_ref = error;
+  atomic_store_explicit(&task->failure_requested, 1, memory_order_release);
 }
 
 int tsnative_task_cancel(tsnative_task *task) {

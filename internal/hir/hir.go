@@ -284,6 +284,7 @@ type Terminator interface {
 }
 
 type ReturnTerm struct{ Value *ValueID }
+type ThrowTerm struct{ Value ValueID }
 type JumpTerm struct{ Target BlockID }
 type BranchTerm struct {
 	Condition ValueID
@@ -292,5 +293,6 @@ type BranchTerm struct {
 }
 
 func (ReturnTerm) isTerminator() {}
+func (ThrowTerm) isTerminator()  {}
 func (JumpTerm) isTerminator()   {}
 func (BranchTerm) isTerminator() {}

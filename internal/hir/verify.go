@@ -313,6 +313,8 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			if term.Value != nil {
 				checkValue(*term.Value)
 			}
+		case ThrowTerm:
+			checkValue(term.Value)
 		case JumpTerm:
 			checkBlock(term.Target)
 		case BranchTerm:

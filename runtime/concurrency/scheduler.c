@@ -167,7 +167,9 @@ static void execute_task(tsnative_task *task) {
   atomic_store_explicit(&task->wake_requested, 0, memory_order_release);
   tsnative_task *previous_task = current_task;
   current_task = task;
-  task->entry(task->state, &task->result);
+  if (!atomic_load_explicit(&task->failure_requested, memory_order_acquire)) {
+    task->entry(task->state, &task->result);
+  }
   current_task = previous_task;
 
   pthread_mutex_lock(&scheduler.mutex);
@@ -185,7 +187,8 @@ static void execute_task(tsnative_task *task) {
     return;
   }
   pthread_mutex_lock(&task->completion_mutex);
-  atomic_store_explicit(&task->status, TSNATIVE_TASK_DONE, memory_order_release);
+  int failed = atomic_load_explicit(&task->failure_requested, memory_order_acquire);
+  atomic_store_explicit(&task->status, failed ? TSNATIVE_TASK_FAILED : TSNATIVE_TASK_DONE, memory_order_release);
   atomic_fetch_sub_explicit(&scheduler.active_tasks, 1, memory_order_relaxed);
   atomic_fetch_add_explicit(&scheduler.completed_tasks, 1, memory_order_relaxed);
   tsnative_task *completion_waiter = task->completion_waiter;
@@ -194,7 +197,10 @@ static void execute_task(tsnative_task *task) {
   task->completion_waiter = NULL;
   task->completion_out = NULL;
   task->completion_consume = 0;
-  if (completion_waiter && completion_out && task->transfer_completion) {
+  if (completion_waiter && failed) {
+    completion_waiter->failure_ref = task->failure_ref;
+    atomic_store_explicit(&completion_waiter->failure_requested, 1, memory_order_release);
+  } else if (completion_waiter && completion_out && task->transfer_completion) {
     task->transfer_completion(task, completion_out);
   }
   pthread_cond_broadcast(&scheduler.task_done);

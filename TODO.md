@@ -119,7 +119,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Spill delayed nested `TaskRef` handles across suspension; typed joins await the existing handle and void joins use completion parking followed by explicit release, including worker=1 regression coverage.
         - [x] Stress StringRef/ObjectRef/JSValue state across branch/loop Phi merges and suspension on a single worker, including GC-managed dynamic values.
         - [x] Remove remaining spawned-task cooperative channel/sleep fallback shapes with compile-time continuation enforcement.
-  - [ ] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
+  - [~] Add Promise rejection/exception propagation and standard Promise combinators where selected for the native runtime.
+    - [x] Async `throw` lowers to a GC-rooted JSValue task failure, propagates through stackless await completion waiters, and terminates an uncaught top-level join with the rejection value.
+    - [ ] Add native `try`/`catch`/`finally`, rejection recovery, and selected Promise combinators.
 - [~] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.

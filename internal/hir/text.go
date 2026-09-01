@@ -168,6 +168,8 @@ func formatTerminator(term Terminator) string {
 			return "return"
 		}
 		return fmt.Sprintf("return v%d", *term.Value)
+	case ThrowTerm:
+		return fmt.Sprintf("throw v%d", term.Value)
 	case JumpTerm:
 		return fmt.Sprintf("jump b%d", term.Target)
 	case BranchTerm:

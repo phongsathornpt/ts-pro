@@ -17,6 +17,7 @@ var childProperties = map[uint32][]string{
 	KindWhileStatement:              {"expression", "statement"},
 	KindForStatement:                {"initializer", "condition", "incrementor", "statement"},
 	KindReturnStatement:             {"expression"},
+	KindThrowStatement:              {"expression"},
 	KindBinaryExpression:            {"modifiers", "left", "type", "operatorToken", "right"},
 	KindArrayLiteralExpression:      {"elements"},
 	KindObjectLiteralExpression:     {"properties"},

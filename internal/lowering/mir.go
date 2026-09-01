@@ -380,6 +380,8 @@ func lowerMIRTerminator(source hir.Terminator) (mir.Terminator, error) {
 		}
 		value := mir.ValueID(*term.Value)
 		return mir.Return{Value: &value}, nil
+	case hir.ThrowTerm:
+		return mir.Throw{Value: mir.ValueID(term.Value)}, nil
 	case hir.JumpTerm:
 		return mir.Jump{Target: mir.BlockID(term.Target)}, nil
 	case hir.BranchTerm:

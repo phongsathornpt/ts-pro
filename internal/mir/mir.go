@@ -346,6 +346,7 @@ func (DynamicBinaryJSValue) isOperation() {}
 type Terminator interface{ isTerminator() }
 
 type Return struct{ Value *ValueID }
+type Throw struct{ Value ValueID }
 type Jump struct{ Target BlockID }
 type Branch struct {
 	Condition ValueID
@@ -354,5 +355,6 @@ type Branch struct {
 }
 
 func (Return) isTerminator() {}
+func (Throw) isTerminator()  {}
 func (Jump) isTerminator()   {}
 func (Branch) isTerminator() {}

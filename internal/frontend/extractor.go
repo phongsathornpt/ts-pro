@@ -62,6 +62,7 @@ type extractor struct {
 	symbolSubstitutions map[uint64]SymbolID
 	pending             []pendingFunctionBody
 	currentThis         *SymbolID
+	currentFunction     *FunctionID
 	parameterAliases    map[string]SymbolID
 }
 
@@ -124,6 +125,8 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 	}
 	for _, pending := range e.pending {
 		e.currentThis = pending.This
+		current := pending.Function
+		e.currentFunction = &current
 		e.concreteClasses = map[SymbolID]*classInfo{}
 		var body []Statement
 		var err error
@@ -138,6 +141,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		e.result.Functions[pending.Function].Body = body
 	}
 	e.currentThis = nil
+	e.currentFunction = nil
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
 		case tsast.KindFunctionDeclaration, tsast.KindClassDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEndOfFile:
@@ -264,6 +268,20 @@ func (e *extractor) extractBlock(block tsast.Node) ([]Statement, error) {
 
 func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 	switch node.Kind() {
+	case tsast.KindThrowStatement:
+		if e.currentFunction == nil || int(*e.currentFunction) >= len(e.result.Functions) || !e.result.Functions[*e.currentFunction].Async {
+			return Statement{}, fmt.Errorf("throw at %d is currently supported only in native async functions", node.Pos())
+		}
+		exprNode, ok := node.NamedChild("expression")
+		if !ok {
+			return Statement{}, fmt.Errorf("throw at %d requires an expression", node.Pos())
+		}
+		expr, err := e.extractExpr(exprNode)
+		if err != nil {
+			return Statement{}, err
+		}
+		anyType := e.ensureSemanticType(TypeAny, "any")
+		return Statement{Kind: StmtThrow, Span: e.span(node), Type: anyType, Value: expr}, nil
 	case tsast.KindReturnStatement:
 		stmt := Statement{Kind: StmtReturn, Span: e.span(node)}
 		if exprNode, ok := node.NamedChild("expression"); ok {

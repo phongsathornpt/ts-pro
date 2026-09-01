@@ -111,6 +111,7 @@ const (
 	StmtBlock
 	StmtIf
 	StmtReturn
+	StmtThrow
 	StmtExpr
 	StmtVar
 	StmtAssign

@@ -87,7 +87,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref_release(ptr)\n")
-	b.WriteString("declare i32 @tsnative_task_cancel(ptr)\ndeclare i32 @tsnative_task_is_cancelled()\ndeclare void @tsnative_task_set_context(ptr)\ndeclare ptr @tsnative_task_get_context()\ndeclare i32 @tsnative_task_budget_poll_task()\ndeclare i32 @tsnative_task_yield_task()\ndeclare void @tsnative_task_yield()\n")
+	b.WriteString("declare i32 @tsnative_task_cancel(ptr)\ndeclare i32 @tsnative_task_is_cancelled()\ndeclare void @tsnative_task_set_context(ptr)\ndeclare ptr @tsnative_task_get_context()\ndeclare void @tsnative_task_fail_current(ptr)\ndeclare i32 @tsnative_task_budget_poll_task()\ndeclare i32 @tsnative_task_yield_task()\ndeclare void @tsnative_task_yield()\n")
 	b.WriteString("declare ptr @tsnative_gc_enter(ptr, i64)\n")
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")
@@ -978,6 +978,29 @@ func (e *emitter) emitTerminator(b *strings.Builder, fn mir.Function, term mir.T
 		}
 		fmt.Fprintf(b, "  ret %s %s\n", typ, op)
 		return nil
+	case mir.Throw:
+		value, err := operand(values, term.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_task_fail_current(ptr %s)\n", value)
+		if gc.count != 0 {
+			b.WriteString("  call void @tsnative_gc_leave(ptr %gc.frame)\n")
+		}
+		if fn.ReturnRepr == mir.ReprVoid {
+			b.WriteString("  ret void\n")
+			return nil
+		}
+		typ, err := llvmType(fn.ReturnRepr)
+		if err != nil {
+			return err
+		}
+		zero, err := llvmZero(fn.ReturnRepr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  ret %s %s\n", typ, zero)
+		return nil
 	case mir.Jump:
 		fmt.Fprintf(b, "  br label %%b%d\n", term.Target)
 		return nil
@@ -1001,7 +1024,7 @@ func llvmZero(repr mir.Repr) (string, error) {
 		return "0.000000e+00", nil
 	case mir.ReprJSValue:
 		return "null", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprTaskGroupRef:
 		return "null", nil
 	default:
 		return "", fmt.Errorf("no zero initializer for representation %d", repr)
