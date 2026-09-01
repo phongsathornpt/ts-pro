@@ -294,3 +294,32 @@ func TestEmitBoolTaskResult(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitNativeF64ChannelTryOps(t *testing.T) {
+	module := mir.Module{Name: "channel-try", Functions: []mir.Function{{ID: 0, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0,
+		Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1}},
+			{Result: 1, Repr: mir.ReprChannelRef, Op: mir.ChannelNewF64{Capacity: 0}},
+			{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+			{Result: 3, Repr: mir.ReprBool, Op: mir.ChannelTrySendF64{Channel: 1, Value: 2}},
+			{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}},
+			{Result: 5, Repr: mir.ReprF64, Op: mir.ChannelTryRecvOrF64{Channel: 1, Fallback: 4}},
+		}, Terminator: mir.Return{}}},
+	}}}
+	entry := mir.FunctionID(0)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"call ptr @tsnative_channel_f64_new_checked(double",
+		"call i32 @tsnative_channel_f64_try_send(ptr",
+		"icmp eq i32",
+		"call double @tsnative_channel_f64_try_recv_or(ptr",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}

@@ -65,6 +65,8 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 		return hir.Repr{Kind: hir.ReprFunctionRef}, diagnostics
 	case hir.TypeTask:
 		return hir.Repr{Kind: hir.ReprTaskRef}, diagnostics
+	case hir.TypeChannel:
+		return hir.Repr{Kind: hir.ReprChannelRef}, diagnostics
 	case hir.TypeUnion:
 		return hir.Repr{Kind: hir.ReprTaggedUnion}, diagnostics
 	case hir.TypeAny:

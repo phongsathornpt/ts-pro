@@ -65,6 +65,7 @@ const (
 	TypeUnion
 	TypeFunction
 	TypeTask
+	TypeChannel
 	TypeParameter
 )
 

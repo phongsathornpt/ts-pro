@@ -118,6 +118,12 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("task.join v%d", op.Task)
 	case TaskYieldOp:
 		return "task.yield"
+	case ChannelNewOp:
+		return fmt.Sprintf("channel.new v%d", op.Capacity)
+	case ChannelTrySendOp:
+		return fmt.Sprintf("channel.try_send v%d, v%d", op.Channel, op.Value)
+	case ChannelTryRecvOrOp:
+		return fmt.Sprintf("channel.try_recv_or v%d, v%d", op.Channel, op.Fallback)
 	case ClosureCallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

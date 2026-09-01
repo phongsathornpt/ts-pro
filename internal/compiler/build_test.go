@@ -354,3 +354,30 @@ func TestBuildNativeExtendedTaskResultMatrix(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildNativeChannelTryExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "channel-try")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_channel_try.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.ChannelCreates != 1 || result.Metrics.ChannelTrySends != 2 || result.Metrics.ChannelTryRecvs != 2 {
+		t.Fatalf("channel metrics = %d/%d/%d", result.Metrics.ChannelCreates, result.Metrics.ChannelTrySends, result.Metrics.ChannelTryRecvs)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run native channel try binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "1\n0\n42\n7" {
+		t.Fatalf("native channel try output = %q", got)
+	}
+}

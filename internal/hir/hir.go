@@ -143,29 +143,35 @@ type TaskSpawnOp struct {
 }
 type TaskJoinOp struct{ Task ValueID }
 type TaskYieldOp struct{}
+type ChannelNewOp struct{ Capacity ValueID }
+type ChannelTrySendOp struct{ Channel, Value ValueID }
+type ChannelTryRecvOrOp struct{ Channel, Fallback ValueID }
 
-func (ConstOp) isOperation()         {}
-func (UnaryExpr) isOperation()       {}
-func (BinaryExpr) isOperation()      {}
-func (BoxOp) isOperation()           {}
-func (DynamicBinaryOp) isOperation() {}
-func (CallOp) isOperation()          {}
-func (DispatchCallOp) isOperation()  {}
-func (IntrinsicCallOp) isOperation() {}
-func (PhiOp) isOperation()           {}
-func (ArrayNewOp) isOperation()      {}
-func (ArrayLengthOp) isOperation()   {}
-func (ArrayGetOp) isOperation()      {}
-func (ArraySetOp) isOperation()      {}
-func (ObjectNewOp) isOperation()     {}
-func (ObjectAllocOp) isOperation()   {}
-func (FieldSetOp) isOperation()      {}
-func (FieldGetOp) isOperation()      {}
-func (ClosureNewOp) isOperation()    {}
-func (ClosureCallOp) isOperation()   {}
-func (TaskSpawnOp) isOperation()     {}
-func (TaskJoinOp) isOperation()      {}
-func (TaskYieldOp) isOperation()     {}
+func (ConstOp) isOperation()            {}
+func (UnaryExpr) isOperation()          {}
+func (BinaryExpr) isOperation()         {}
+func (BoxOp) isOperation()              {}
+func (DynamicBinaryOp) isOperation()    {}
+func (CallOp) isOperation()             {}
+func (DispatchCallOp) isOperation()     {}
+func (IntrinsicCallOp) isOperation()    {}
+func (PhiOp) isOperation()              {}
+func (ArrayNewOp) isOperation()         {}
+func (ArrayLengthOp) isOperation()      {}
+func (ArrayGetOp) isOperation()         {}
+func (ArraySetOp) isOperation()         {}
+func (ObjectNewOp) isOperation()        {}
+func (ObjectAllocOp) isOperation()      {}
+func (FieldSetOp) isOperation()         {}
+func (FieldGetOp) isOperation()         {}
+func (ClosureNewOp) isOperation()       {}
+func (ClosureCallOp) isOperation()      {}
+func (TaskSpawnOp) isOperation()        {}
+func (TaskJoinOp) isOperation()         {}
+func (TaskYieldOp) isOperation()        {}
+func (ChannelNewOp) isOperation()       {}
+func (ChannelTrySendOp) isOperation()   {}
+func (ChannelTryRecvOrOp) isOperation() {}
 
 type LiteralKind uint8
 

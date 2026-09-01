@@ -65,6 +65,13 @@ static tsnative_channel_f64_waiter *waiter_pop(tsnative_channel_f64_waiter **hea
   return waiter;
 }
 
+tsnative_channel_f64 *tsnative_channel_f64_new_checked(double capacity) {
+  if (!(capacity >= 0.0) || capacity > (double)SIZE_MAX) abort();
+  size_t native_capacity = (size_t)capacity;
+  if ((double)native_capacity != capacity) abort();
+  return tsnative_channel_f64_new(native_capacity);
+}
+
 int tsnative_channel_f64_try_send(tsnative_channel_f64 *channel, double value) {
   if (!channel) return -1;
   pthread_mutex_lock(&channel->mutex);
@@ -111,6 +118,11 @@ int tsnative_channel_f64_try_recv(tsnative_channel_f64 *channel, double *out) {
   }
   pthread_mutex_unlock(&channel->mutex);
   return result;
+}
+
+double tsnative_channel_f64_try_recv_or(tsnative_channel_f64 *channel, double fallback) {
+  double value = fallback;
+  return tsnative_channel_f64_try_recv(channel, &value) == 1 ? value : fallback;
 }
 
 void tsnative_channel_f64_send(tsnative_channel_f64 *channel, double value) {

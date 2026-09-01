@@ -20,6 +20,9 @@ const (
 	ExprTaskSpawn
 	ExprTaskJoin
 	ExprTaskYield
+	ExprChannelNew
+	ExprChannelTrySend
+	ExprChannelTryRecvOr
 )
 
 type IntrinsicKind uint8

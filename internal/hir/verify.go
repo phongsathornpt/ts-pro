@@ -270,6 +270,14 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case TaskJoinOp:
 				checkValue(op.Task)
 			case TaskYieldOp:
+			case ChannelNewOp:
+				checkValue(op.Capacity)
+			case ChannelTrySendOp:
+				checkValue(op.Channel)
+				checkValue(op.Value)
+			case ChannelTryRecvOrOp:
+				checkValue(op.Channel)
+				checkValue(op.Fallback)
 			case nil:
 				add(fmt.Sprintf("instruction v%d has nil operation", instruction.Result))
 			}

@@ -48,6 +48,34 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Kind = ExprTaskJoin
 		expr.Callee = nil
 		return expr, nil
+	case "channel":
+		if len(expr.Args) != 1 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeChannel {
+			return nil, fmt.Errorf("channel at %d requires one capacity and a concrete native channel type", node.Pos())
+		}
+		channelType := e.result.Types[expr.Type]
+		if int(channelType.Element) >= len(e.result.Types) || e.result.Types[channelType.Element].Kind != TypeNumber {
+			return nil, fmt.Errorf("channel at %d currently supports only channel<number>", node.Pos())
+		}
+		if int(expr.Args[0].Type) >= len(e.result.Types) || e.result.Types[expr.Args[0].Type].Kind != TypeNumber {
+			return nil, fmt.Errorf("channel capacity at %d must be number", node.Pos())
+		}
+		expr.Kind = ExprChannelNew
+		expr.Callee = nil
+		return expr, nil
+	case "channelTrySend":
+		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeBoolean {
+			return nil, fmt.Errorf("channelTrySend at %d requires (channel<number>, number) and returns boolean", node.Pos())
+		}
+		expr.Kind = ExprChannelTrySend
+		expr.Callee = nil
+		return expr, nil
+	case "channelTryRecvOr":
+		if len(expr.Args) != 2 || !e.isNumberChannel(expr.Args[0].Type) || e.result.Types[expr.Args[1].Type].Kind != TypeNumber || e.result.Types[expr.Type].Kind != TypeNumber {
+			return nil, fmt.Errorf("channelTryRecvOr at %d requires (channel<number>, number) and returns number", node.Pos())
+		}
+		expr.Kind = ExprChannelTryRecvOr
+		expr.Callee = nil
+		return expr, nil
 	case "yieldNow":
 		if len(expr.Args) != 0 {
 			return nil, fmt.Errorf("yieldNow at %d takes no arguments", node.Pos())
@@ -77,4 +105,12 @@ func (e *extractor) compatibleTaskResult(left, right TypeID) bool {
 	default:
 		return false
 	}
+}
+
+func (e *extractor) isNumberChannel(typeID TypeID) bool {
+	if int(typeID) >= len(e.result.Types) {
+		return false
+	}
+	typ := e.result.Types[typeID]
+	return typ.Kind == TypeChannel && int(typ.Element) < len(e.result.Types) && e.result.Types[typ.Element].Kind == TypeNumber
 }

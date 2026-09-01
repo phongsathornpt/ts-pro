@@ -19,6 +19,7 @@ const (
 	ReprObjectRef
 	ReprFunctionRef
 	ReprTaskRef
+	ReprChannelRef
 	ReprTagged
 	ReprJSValue
 )
@@ -212,33 +213,39 @@ type TaskSpawn struct {
 }
 type TaskJoin struct{ Task ValueID }
 type TaskYield struct{}
+type ChannelNewF64 struct{ Capacity ValueID }
+type ChannelTrySendF64 struct{ Channel, Value ValueID }
+type ChannelTryRecvOrF64 struct{ Channel, Fallback ValueID }
 
-func (ConstBool) isOperation()         {}
-func (ConstF64) isOperation()          {}
-func (ConstString) isOperation()       {}
-func (StringConcat) isOperation()      {}
-func (FloatBinary) isOperation()       {}
-func (ProvenIntBinary) isOperation()   {}
-func (FloatCompare) isOperation()      {}
-func (Call) isOperation()              {}
-func (DispatchCall) isOperation()      {}
-func (IntrinsicCall) isOperation()     {}
-func (Phi) isOperation()               {}
-func (ArrayNewF64) isOperation()       {}
-func (ArrayLengthF64) isOperation()    {}
-func (ArrayGetF64) isOperation()       {}
-func (ArraySetF64) isOperation()       {}
-func (ObjectNew) isOperation()         {}
-func (ObjectAlloc) isOperation()       {}
-func (FieldSet) isOperation()          {}
-func (FieldGet) isOperation()          {}
-func (ClosureNew) isOperation()        {}
-func (ClosureCall) isOperation()       {}
-func (TaskSpawn) isOperation()         {}
-func (TaskJoin) isOperation()          {}
-func (TaskYield) isOperation()         {}
-func (BoxJSValue) isOperation()        {}
-func (DynamicAddJSValue) isOperation() {}
+func (ConstBool) isOperation()           {}
+func (ConstF64) isOperation()            {}
+func (ConstString) isOperation()         {}
+func (StringConcat) isOperation()        {}
+func (FloatBinary) isOperation()         {}
+func (ProvenIntBinary) isOperation()     {}
+func (FloatCompare) isOperation()        {}
+func (Call) isOperation()                {}
+func (DispatchCall) isOperation()        {}
+func (IntrinsicCall) isOperation()       {}
+func (Phi) isOperation()                 {}
+func (ArrayNewF64) isOperation()         {}
+func (ArrayLengthF64) isOperation()      {}
+func (ArrayGetF64) isOperation()         {}
+func (ArraySetF64) isOperation()         {}
+func (ObjectNew) isOperation()           {}
+func (ObjectAlloc) isOperation()         {}
+func (FieldSet) isOperation()            {}
+func (FieldGet) isOperation()            {}
+func (ClosureNew) isOperation()          {}
+func (ClosureCall) isOperation()         {}
+func (TaskSpawn) isOperation()           {}
+func (TaskJoin) isOperation()            {}
+func (TaskYield) isOperation()           {}
+func (ChannelNewF64) isOperation()       {}
+func (ChannelTrySendF64) isOperation()   {}
+func (ChannelTryRecvOrF64) isOperation() {}
+func (BoxJSValue) isOperation()          {}
+func (DynamicAddJSValue) isOperation()   {}
 
 type Terminator interface{ isTerminator() }
 

@@ -44,6 +44,9 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
+	b.WriteString("declare ptr @tsnative_channel_f64_new_checked(double)\n")
+	b.WriteString("declare i32 @tsnative_channel_f64_try_send(ptr, double)\n")
+	b.WriteString("declare double @tsnative_channel_f64_try_recv_or(ptr, double)\n")
 	b.WriteString("declare void @tsnative_array_f64_set(ptr, i64, double)\n")
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
@@ -372,6 +375,42 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 	case mir.TaskYield:
 		b.WriteString("  call void @tsnative_task_yield()\n")
 		return nil
+	case mir.ChannelNewF64:
+		capacity, err := operand(values, op.Capacity)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_channel_f64_new_checked(double %s)\n", name, capacity)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTrySendF64:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = call i32 @tsnative_channel_f64_try_send(ptr %s, double %s)\n", name, channel, value)
+		fmt.Fprintf(b, "  %s = icmp eq i32 %s.raw, 1\n", name, name)
+		values[inst.Result] = name
+		return nil
+	case mir.ChannelTryRecvOrF64:
+		channel, err := operand(values, op.Channel)
+		if err != nil {
+			return err
+		}
+		fallback, err := operand(values, op.Fallback)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call double @tsnative_channel_f64_try_recv_or(ptr %s, double %s)\n", name, channel, fallback)
+		values[inst.Result] = name
+		return nil
 	case mir.ClosureNew:
 		return e.emitClosureNew(b, inst, op, values)
 	case mir.ClosureCall:
@@ -696,7 +735,7 @@ func llvmType(repr mir.Repr) (string, error) {
 		return "i64", nil
 	case mir.ReprF64:
 		return "double", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprJSValue:
 		return "ptr", nil
 	case mir.ReprTagged:
 		return "i64", nil

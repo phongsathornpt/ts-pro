@@ -37,7 +37,7 @@ func buildGCRootLayout(fn mir.Function) gcRootLayout {
 
 func isGCReference(repr mir.Repr) bool {
 	switch repr {
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprChannelRef, mir.ReprJSValue:
 		return true
 	default:
 		return false
@@ -46,7 +46,7 @@ func isGCReference(repr mir.Repr) bool {
 
 func emitsGCAllocation(op mir.Operation) bool {
 	switch op.(type) {
-	case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew, mir.BoxJSValue, mir.DynamicAddJSValue, mir.TaskSpawn:
+	case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ObjectNew, mir.ObjectAlloc, mir.ClosureNew, mir.BoxJSValue, mir.DynamicAddJSValue, mir.TaskSpawn, mir.ChannelNewF64:
 		return true
 	default:
 		return false

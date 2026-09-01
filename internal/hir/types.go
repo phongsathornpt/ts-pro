@@ -18,6 +18,7 @@ const (
 	TypeUnion
 	TypeFunction
 	TypeTask
+	TypeChannel
 	TypeParameter
 )
 
@@ -56,6 +57,7 @@ const (
 	ReprObjectRef
 	ReprFunctionRef
 	ReprTaskRef
+	ReprChannelRef
 	ReprTaggedUnion
 	ReprJSValue
 )

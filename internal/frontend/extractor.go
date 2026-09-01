@@ -937,7 +937,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
-	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" {
+	if calleeIdentifier == "spawn" || calleeIdentifier == "join" || calleeIdentifier == "yieldNow" || calleeIdentifier == "channel" || calleeIdentifier == "channelTrySend" || calleeIdentifier == "channelTryRecvOr" {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
 	if generic != nil {
@@ -1052,6 +1052,20 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 				return 0, fmt.Errorf("native task result type %q could not be resolved from TypeScript type arguments", resultText)
 			}
 		}
+	}
+	if kind == TypeChannel {
+		args, argsErr := e.client.GetTypeArguments(e.ctx, e.snapshot, e.project, info.ID)
+		if argsErr != nil || len(args) != 1 {
+			return 0, fmt.Errorf("native channel type %q requires one resolved type argument", text)
+		}
+		elementID, elementErr := e.internAPIType(&args[0])
+		if elementErr != nil {
+			return 0, elementErr
+		}
+		if e.result.Types[elementID].Kind != TypeNumber && e.result.Types[elementID].Kind != TypeParameter {
+			return 0, fmt.Errorf("native channel element type %q is not supported yet", e.result.Types[elementID].Name)
+		}
+		typ.Element = elementID
 	}
 	if kind == TypeArray {
 		base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
@@ -1180,9 +1194,14 @@ func classifyType(text string) TypeKind {
 		return TypeString
 	case "TsnativeTask":
 		return TypeTask
+	case "TsnativeChannel":
+		return TypeChannel
 	}
 	if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 		return TypeTask
+	}
+	if strings.HasPrefix(text, "TsnativeChannel<") && strings.HasSuffix(text, ">") {
+		return TypeChannel
 	}
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
 		return TypeNumber

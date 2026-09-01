@@ -188,6 +188,12 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task)}
 	case hir.TaskYieldOp:
 		result.Op = mir.TaskYield{}
+	case hir.ChannelNewOp:
+		result.Op = mir.ChannelNewF64{Capacity: mir.ValueID(op.Capacity)}
+	case hir.ChannelTrySendOp:
+		result.Op = mir.ChannelTrySendF64{Channel: mir.ValueID(op.Channel), Value: mir.ValueID(op.Value)}
+	case hir.ChannelTryRecvOrOp:
+		result.Op = mir.ChannelTryRecvOrF64{Channel: mir.ValueID(op.Channel), Fallback: mir.ValueID(op.Fallback)}
 	case hir.PhiOp:
 		incoming := make([]mir.PhiIncoming, len(op.Incoming))
 		for i, item := range op.Incoming {
@@ -295,6 +301,8 @@ func lowerRepr(source hir.Repr) (mir.Repr, error) {
 		return mir.ReprFunctionRef, nil
 	case hir.ReprTaskRef:
 		return mir.ReprTaskRef, nil
+	case hir.ReprChannelRef:
+		return mir.ReprChannelRef, nil
 	case hir.ReprTaggedUnion:
 		return mir.ReprTagged, nil
 	case hir.ReprJSValue:
