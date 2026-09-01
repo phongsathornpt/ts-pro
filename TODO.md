@@ -147,7 +147,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [~] Migrate strings, arrays, objects, and JSValue.
     - [x] Migrate native string allocation/concat/logging to Go; remove `runtime/core/string.c`.
     - [x] Migrate specialized F64 arrays to the Go c-archive while preserving the `{len,data[]}` ABI, checked-index behavior, and shared heap/GC ownership.
-    - [ ] Migrate object allocation/runtime helpers.
+    - [x] Migrate object allocation/runtime helpers to the Go c-archive while preserving the existing heap-owned pointer ABI.
     - [ ] Migrate JSValue boxing/dynamic helpers.
   - [ ] Migrate scheduler/tasks to Go concurrency primitives where ABI-safe.
   - [ ] Migrate channels, timers, and the blocking-call pool.
