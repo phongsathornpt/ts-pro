@@ -191,11 +191,13 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Remote frees now enter the owning worker allocator inbox and are drained before its next allocation; only fully drained inactive spans become transferable.
     - Recursive tracing has been replaced by iterative owner-local mark work queues with cross-owner switching, removing native heap graph depth from the Go call stack.
     - Owner queues now batch marked blocks by native page before scanning, reducing queue churn and improving locality.
-    - Bounded parallel/idle-worker GC assist remains before global heap locking can be reduced further.
+    - Bounded parallel mark-page helpers now run for larger heaps, prefer owner-local queues, steal across owners when needed, and are capped by `TSNATIVE_GC_MARK_WORKERS` (hard maximum 8).
+    - Direct donation from already-idle scheduler workers and global-heap-lock reduction remain before nursery/generational policy work.
 
-15. `runtime: add Green-Tea-style local mark-page work`
-    - Page/span marking queues per worker after size-class spans and precise pointer metadata exist.
-    - Work stealing applies to GC pages as well as runnable tasks.
+15. `runtime: add Green-Tea-style local mark-page work` 🟡
+    - [x] Owner-local native-page mark queues exist on top of size-class spans and page-to-span metadata.
+    - [x] Bounded GC helpers steal mark pages across owner queues when their preferred owner has no work.
+    - [ ] Reuse already-idle scheduler workers for GC donation and profile lock contention before reducing the global heap lock.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
@@ -225,6 +227,7 @@ Environment controls:
 TSNATIVE_WORKERS
 TSNATIVE_MAX_TASKS
 TSNATIVE_BLOCKING_WORKERS
+TSNATIVE_GC_MARK_WORKERS
 TSNATIVE_SCHED_TRACE
 ```
 

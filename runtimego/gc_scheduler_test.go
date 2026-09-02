@@ -461,6 +461,47 @@ func TestGCMarkQueueSwitchesAcrossSpanOwners(t *testing.T) {
 	schedulerSetThread(-1, 0)
 }
 
+func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	previousProcs := runtime.GOMAXPROCS(4)
+	defer runtime.GOMAXPROCS(previousProcs)
+	t.Setenv("TSNATIVE_WORKERS", "4")
+	t.Setenv("TSNATIVE_GC_MARK_WORKERS", "4")
+
+	const rootsCount = 1024
+	roots := make([]unsafe.Pointer, rootsCount)
+	for i := range roots {
+		roots[i] = tsnative_heap_alloc(2048)
+		if roots[i] == nil {
+			t.Fatalf("root allocation %d failed", i)
+		}
+	}
+	token := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	if token == nil {
+		t.Fatal("root frame allocation failed")
+	}
+	tsnative_gc_collect()
+	workers, pages := nativeGCMarkAssist()
+	if workers != 3 {
+		t.Fatalf("GC assist workers = %d, want 3", workers)
+	}
+	if pages == 0 {
+		t.Fatal("parallel GC helpers processed no mark pages")
+	}
+	if got := tsnative_heap_live_allocations(); got != rootsCount {
+		t.Fatalf("live allocations = %d, want %d", got, rootsCount)
+	}
+	tsnative_gc_leave(token)
+	tsnative_gc_collect()
+	if got := tsnative_heap_live_allocations(); got != 0 {
+		t.Fatalf("live allocations after root release = %d, want 0", got)
+	}
+	runtime.KeepAlive(roots)
+}
+
 func TestGCMarkBatchesBlocksByPage(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

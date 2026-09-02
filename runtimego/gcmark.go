@@ -1,29 +1,66 @@
 package main
 
-import "unsafe"
+import (
+	"runtime"
+	"sync"
+	"unsafe"
+)
+
+const (
+	nativeGCMarkMaxWorkers        = 8
+	nativeGCParallelMarkMinBlocks = 512
+)
 
 type nativeGCMarkPage struct {
 	owner  int
 	blocks []*nativeHeapBlock
 	queued bool
+	active bool
 }
 
 type nativeGCMarkState struct {
+	mu sync.Mutex
+
+	cond           *sync.Cond
 	collectorOwner int
-	currentOwner   int
-	currentPage    uintptr
 	pages          map[uintptr]*nativeGCMarkPage
 	ownerQueues    map[int][]uintptr
-	pendingOwners  []int
+	ownerOrder     []int
+	ownerSeen      map[int]bool
+	activePages    int
+
+	work          uint64
+	pagesScanned  uint64
+	queueSwitches uint64
+	assistPages   uint64
 }
 
 func newNativeGCMarkState(owner int) *nativeGCMarkState {
-	return &nativeGCMarkState{
+	state := &nativeGCMarkState{
 		collectorOwner: owner,
-		currentOwner:   owner,
 		pages:          make(map[uintptr]*nativeGCMarkPage),
 		ownerQueues:    make(map[int][]uintptr),
+		ownerSeen:      make(map[int]bool),
 	}
+	state.cond = sync.NewCond(&state.mu)
+	return state
+}
+
+func configuredNativeGCMarkWorkers(blocks int) int {
+	if blocks < nativeGCParallelMarkMinBlocks {
+		return 1
+	}
+	limit := runtime.GOMAXPROCS(0)
+	if schedulerWorkers := configuredSchedulerWorkers(); schedulerWorkers < limit {
+		limit = schedulerWorkers
+	}
+	if limit > nativeGCMarkMaxWorkers {
+		limit = nativeGCMarkMaxWorkers
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return schedulerLimit("TSNATIVE_GC_MARK_WORKERS", limit, limit)
 }
 
 func nativeHeapBlockOwner(block *nativeHeapBlock) int {
@@ -61,9 +98,27 @@ func nativeGCMarkPageKey(block *nativeHeapBlock) uintptr {
 	return nativeAllocatorPageBase(block.ptr)
 }
 
+func (state *nativeGCMarkState) queuePageLocked(pageKey uintptr, page *nativeGCMarkPage) {
+	if page == nil || page.queued || page.active || len(page.blocks) == 0 {
+		return
+	}
+	if !state.ownerSeen[page.owner] {
+		state.ownerSeen[page.owner] = true
+		state.ownerOrder = append(state.ownerOrder, page.owner)
+	}
+	state.ownerQueues[page.owner] = append(state.ownerQueues[page.owner], pageKey)
+	page.queued = true
+	state.cond.Signal()
+}
+
 func (state *nativeGCMarkState) enqueue(candidate uintptr) {
+	if candidate == 0 {
+		return
+	}
+	state.mu.Lock()
 	block := resolveNativeHeapBlockLocked(candidate)
 	if block == nil || block.marked {
+		state.mu.Unlock()
 		return
 	}
 	block.marked = true
@@ -74,67 +129,99 @@ func (state *nativeGCMarkState) enqueue(candidate uintptr) {
 		state.pages[pageKey] = page
 	}
 	page.blocks = append(page.blocks, block)
-	if page.queued || pageKey == state.currentPage {
-		return
-	}
-	ownerQueue := state.ownerQueues[page.owner]
-	wasEmpty := len(ownerQueue) == 0
-	state.ownerQueues[page.owner] = append(ownerQueue, pageKey)
-	page.queued = true
-	if wasEmpty && page.owner != state.currentOwner {
-		state.pendingOwners = append(state.pendingOwners, page.owner)
-	}
+	state.queuePageLocked(pageKey, page)
+	state.mu.Unlock()
 }
 
-func (state *nativeGCMarkState) popPage() *nativeGCMarkPage {
-	for {
-		queue := state.ownerQueues[state.currentOwner]
-		if count := len(queue); count != 0 {
-			pageKey := queue[count-1]
-			state.ownerQueues[state.currentOwner] = queue[:count-1]
-			page := state.pages[pageKey]
-			if page == nil || len(page.blocks) == 0 {
-				if page != nil {
-					page.queued = false
-				}
-				continue
+func (state *nativeGCMarkState) popOwnerPageLocked(owner int) *nativeGCMarkPage {
+	queue := state.ownerQueues[owner]
+	for len(queue) != 0 {
+		last := len(queue) - 1
+		pageKey := queue[last]
+		queue[last] = 0
+		queue = queue[:last]
+		state.ownerQueues[owner] = queue
+		page := state.pages[pageKey]
+		if page == nil || page.active || len(page.blocks) == 0 {
+			if page != nil {
+				page.queued = false
 			}
-			page.queued = false
-			state.currentPage = pageKey
-			nativeHeap.markPages++
-			return page
-		}
-		if len(state.pendingOwners) == 0 {
-			return nil
-		}
-		last := len(state.pendingOwners) - 1
-		owner := state.pendingOwners[last]
-		state.pendingOwners = state.pendingOwners[:last]
-		if len(state.ownerQueues[owner]) == 0 {
 			continue
 		}
-		state.currentOwner = owner
-		if owner != state.collectorOwner {
-			nativeHeap.markQueueSwitches++
-		}
+		page.queued = false
+		page.active = true
+		state.activePages++
+		state.pagesScanned++
+		return page
 	}
+	return nil
+}
+
+func (state *nativeGCMarkState) popPageLocked(preferredOwner, workerID int) *nativeGCMarkPage {
+	if page := state.popOwnerPageLocked(preferredOwner); page != nil {
+		if workerID > 0 {
+			state.assistPages++
+		}
+		return page
+	}
+	for _, owner := range state.ownerOrder {
+		if owner == preferredOwner {
+			continue
+		}
+		page := state.popOwnerPageLocked(owner)
+		if page == nil {
+			continue
+		}
+		state.queueSwitches++
+		if workerID > 0 {
+			state.assistPages++
+		}
+		return page
+	}
+	return nil
 }
 
 func (state *nativeGCMarkState) drainPage(page *nativeGCMarkPage) {
 	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
-	for len(page.blocks) != 0 {
+	for {
+		state.mu.Lock()
+		if len(page.blocks) == 0 {
+			page.active = false
+			state.activePages--
+			state.cond.Broadcast()
+			state.mu.Unlock()
+			return
+		}
 		last := len(page.blocks) - 1
 		block := page.blocks[last]
 		page.blocks[last] = nil
 		page.blocks = page.blocks[:last]
-		nativeHeap.markWork++
+		state.work++
+		state.mu.Unlock()
+
 		count := block.size / wordSize
 		for i := uintptr(0); i < count; i++ {
 			word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
 			state.enqueue(word)
 		}
 	}
-	state.currentPage = 0
+}
+
+func (state *nativeGCMarkState) worker(workerID, preferredOwner int) {
+	for {
+		state.mu.Lock()
+		page := state.popPageLocked(preferredOwner, workerID)
+		for page == nil && state.activePages != 0 {
+			state.cond.Wait()
+			page = state.popPageLocked(preferredOwner, workerID)
+		}
+		if page == nil {
+			state.mu.Unlock()
+			return
+		}
+		state.mu.Unlock()
+		state.drainPage(page)
+	}
 }
 
 func markNativeHeapRootsLocked() {
@@ -146,13 +233,43 @@ func markNativeHeapRootsLocked() {
 			state.enqueue(*(*uintptr)(slotAddr))
 		}
 	}
-	for {
-		page := state.popPage()
-		if page == nil {
-			return
-		}
-		state.drainPage(page)
+
+	workerCount := configuredNativeGCMarkWorkers(len(nativeHeap.blocks))
+	state.mu.Lock()
+	hasWork := len(state.pages) != 0
+	state.mu.Unlock()
+	if !hasWork {
+		workerCount = 1
 	}
+
+	if workerCount == 1 {
+		state.worker(0, state.collectorOwner)
+	} else {
+		helperCount := workerCount - 1
+		var ready sync.WaitGroup
+		var workers sync.WaitGroup
+		start := make(chan struct{})
+		ready.Add(helperCount)
+		workers.Add(helperCount)
+		for workerID := 1; workerID < workerCount; workerID++ {
+			go func(id int) {
+				defer workers.Done()
+				ready.Done()
+				<-start
+				state.worker(id, id)
+			}(workerID)
+		}
+		ready.Wait()
+		close(start)
+		state.worker(0, state.collectorOwner)
+		workers.Wait()
+		nativeHeap.markAssistWorkers += uint64(helperCount)
+	}
+
+	nativeHeap.markWork += state.work
+	nativeHeap.markPages += state.pagesScanned
+	nativeHeap.markQueueSwitches += state.queueSwitches
+	nativeHeap.markAssistPages += state.assistPages
 }
 
 func nativeGCMarkWork() (uint64, uint64) {
@@ -168,4 +285,12 @@ func nativeGCMarkPages() uint64 {
 	pages := nativeHeap.markPages
 	nativeHeap.Unlock()
 	return pages
+}
+
+func nativeGCMarkAssist() (uint64, uint64) {
+	nativeHeap.Lock()
+	workers := nativeHeap.markAssistWorkers
+	pages := nativeHeap.markAssistPages
+	nativeHeap.Unlock()
+	return workers, pages
 }

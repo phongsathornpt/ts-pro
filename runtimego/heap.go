@@ -51,6 +51,8 @@ var nativeHeap = struct {
 	markWork          uint64
 	markPages         uint64
 	markQueueSwitches uint64
+	markAssistWorkers uint64
+	markAssistPages   uint64
 	bytes             uintptr
 	allocations       uintptr
 	collections       uintptr
@@ -372,6 +374,8 @@ func tsnative_heap_shutdown() {
 	nativeHeap.markWork = 0
 	nativeHeap.markPages = 0
 	nativeHeap.markQueueSwitches = 0
+	nativeHeap.markAssistWorkers = 0
+	nativeHeap.markAssistPages = 0
 	spans := make([]*nativeHeapSpan, 0, len(nativeHeap.spans))
 	for span := range nativeHeap.spans {
 		spans = append(spans, span)
