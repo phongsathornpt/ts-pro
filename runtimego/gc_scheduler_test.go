@@ -367,6 +367,9 @@ func TestMinorGCPromotesRootedNurseryObject(t *testing.T) {
 	if nativeGCPromotedBlocks.Load() != 1 {
 		t.Fatalf("promoted blocks = %d, want 1", nativeGCPromotedBlocks.Load())
 	}
+	if nativeGCPromotedBytes.Load() != 1024 || nativeHeapOldBytes.Load() != 1024 {
+		t.Fatalf("promoted bytes=%d old bytes=%d, want 1024/1024", nativeGCPromotedBytes.Load(), nativeHeapOldBytes.Load())
+	}
 	tsnative_gc_root_unregister(root)
 	tsnative_gc_collect()
 	if nativeHeapContains(raw) {
@@ -491,6 +494,78 @@ func TestGCStoreRefSkipsYoungParent(t *testing.T) {
 	}
 	if stored := *(*unsafe.Pointer)(parent); stored != child {
 		t.Fatalf("stored child = %p, want %p", stored, child)
+	}
+}
+
+func TestPromotedOldBytesTriggerMajorCadence(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "524288")
+
+	first := tsnative_heap_alloc(524288)
+	firstRoot := tsnative_gc_root_register(unsafe.Pointer(&first))
+	tsnative_gc_safepoint()
+	if nativeHeapOldBytes.Load() != 524288 || nativeGCMajorRequested.Load() {
+		t.Fatalf("after first promotion old=%d majorRequested=%v, want 524288/false", nativeHeapOldBytes.Load(), nativeGCMajorRequested.Load())
+	}
+
+	second := tsnative_heap_alloc(524288)
+	secondRoot := tsnative_gc_root_register(unsafe.Pointer(&second))
+	tsnative_gc_safepoint()
+	if nativeGCMinorCollections.Load() != 2 || nativeGCMajorCollections.Load() != 0 {
+		t.Fatalf("after second promotion minor=%d major=%d, want 2/0", nativeGCMinorCollections.Load(), nativeGCMajorCollections.Load())
+	}
+	if nativeHeapOldBytes.Load() != initialMajorGCThreshold || !nativeGCMajorRequested.Load() {
+		t.Fatalf("old=%d majorRequested=%v, want %d/true", nativeHeapOldBytes.Load(), nativeGCMajorRequested.Load(), initialMajorGCThreshold)
+	}
+
+	tsnative_gc_safepoint()
+	if nativeGCMajorCollections.Load() != 1 || nativeGCMajorRequested.Load() {
+		t.Fatalf("major collections=%d requested=%v, want 1/false", nativeGCMajorCollections.Load(), nativeGCMajorRequested.Load())
+	}
+	if nativeHeapOldBytes.Load() != initialMajorGCThreshold {
+		t.Fatalf("old bytes after rooted major = %d, want %d", nativeHeapOldBytes.Load(), initialMajorGCThreshold)
+	}
+	tsnative_gc_root_unregister(secondRoot)
+	tsnative_gc_root_unregister(firstRoot)
+}
+
+func TestAggregateYoungPressureDoesNotTriggerMajor(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "262144")
+
+	for owner := 0; owner < 8; owner++ {
+		schedulerSetThread(owner, 0)
+		_ = tsnative_heap_alloc(131072)
+	}
+	if got := nativeHeapBytes.Load(); got != 8*131072 {
+		t.Fatalf("young live bytes = %d, want %d", got, 8*131072)
+	}
+	if got := nativeHeapOldBytes.Load(); got != 0 {
+		t.Fatalf("old bytes under young-only pressure = %d, want 0", got)
+	}
+	if nativeGCMajorRequested.Load() || nativeGCMinorRequested.Load() {
+		t.Fatalf("premature GC request minor=%v major=%v", nativeGCMinorRequested.Load(), nativeGCMajorRequested.Load())
+	}
+
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(131072)
+	if !nativeGCMinorRequested.Load() {
+		t.Fatal("worker-local nursery bound did not request minor GC")
+	}
+	if nativeGCMajorRequested.Load() {
+		t.Fatal("aggregate young pressure incorrectly requested major GC")
+	}
+	tsnative_gc_safepoint()
+	schedulerSetThread(-1, 0)
+	if nativeGCMinorCollections.Load() != 1 || nativeGCMajorCollections.Load() != 0 {
+		t.Fatalf("collections minor=%d major=%d, want 1/0", nativeGCMinorCollections.Load(), nativeGCMajorCollections.Load())
+	}
+	if nativeHeapBytes.Load() != 0 || nativeHeapOldBytes.Load() != 0 {
+		t.Fatalf("post-minor bytes live=%d old=%d, want 0/0", nativeHeapBytes.Load(), nativeHeapOldBytes.Load())
 	}
 }
 

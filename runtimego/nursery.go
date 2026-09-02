@@ -34,6 +34,7 @@ var nativeNurseryLimitBytes atomic.Uint64
 var nativeGCMinorCollections atomic.Uint64
 var nativeGCMajorCollections atomic.Uint64
 var nativeGCPromotedBlocks atomic.Uint64
+var nativeGCPromotedBytes atomic.Uint64
 var nativeGCMinorOldScans atomic.Uint64
 var nativeGCMinorNurseryScans atomic.Uint64
 
@@ -134,6 +135,7 @@ func resetNativeGenerationalMetrics() {
 	nativeGCMinorCollections.Store(0)
 	nativeGCMajorCollections.Store(0)
 	nativeGCPromotedBlocks.Store(0)
+	nativeGCPromotedBytes.Store(0)
 	nativeGCMinorOldScans.Store(0)
 	nativeGCMinorNurseryScans.Store(0)
 }
@@ -151,6 +153,16 @@ func tsnative_gc_major_collections() C.uint64_t {
 //export tsnative_gc_promoted_blocks
 func tsnative_gc_promoted_blocks() C.uint64_t {
 	return C.uint64_t(nativeGCPromotedBlocks.Load())
+}
+
+//export tsnative_gc_promoted_bytes
+func tsnative_gc_promoted_bytes() C.uint64_t {
+	return C.uint64_t(nativeGCPromotedBytes.Load())
+}
+
+//export tsnative_gc_old_bytes
+func tsnative_gc_old_bytes() C.uint64_t {
+	return C.uint64_t(nativeHeapOldBytes.Load())
 }
 
 //export tsnative_gc_minor_old_scans

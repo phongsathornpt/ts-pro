@@ -52,6 +52,7 @@ var nativeHeap = struct {
 
 var nativeHeapWorld nativeMeasuredRWMutex
 var nativeHeapBytes atomic.Uint64
+var nativeHeapOldBytes atomic.Uint64
 var nativeHeapAllocations atomic.Uint64
 var nativeHeapCollections atomic.Uint64
 var nativeHeapThreshold = func() *atomic.Uint64 {
@@ -122,13 +123,13 @@ func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	}
 	nativeBlocks.set(block.ptr, block)
 	nativeNurseryTrack(owner, block)
-	liveBytes := nativeHeapBytes.Add(uint64(size))
+	nativeHeapBytes.Add(uint64(size))
 	nativeHeapAllocations.Add(1)
 	if nativeNurseryAdd(owner, size) >= nativeNurseryLimit() {
 		nativeGCMinorRequested.Store(true)
 		nativeGCRequested.Store(true)
 	}
-	if liveBytes >= nativeHeapThreshold.Load() {
+	if nativeHeapOldBytes.Load() >= nativeHeapThreshold.Load() {
 		nativeGCMajorRequested.Store(true)
 		nativeGCRequested.Store(true)
 	}
@@ -170,7 +171,7 @@ func collectIfSafeLocked(tid int, forceMajor bool) []*nativeHeapBlock {
 	if nativeGCMinorRequested.Load() {
 		blocks := collectMinorLocked()
 		nativeGCMinorRequested.Store(false)
-		if nativeHeapBytes.Load() >= nativeHeapThreshold.Load() {
+		if nativeHeapOldBytes.Load() >= nativeHeapThreshold.Load() {
 			nativeGCMajorRequested.Store(true)
 		}
 		refreshNativeGCRequested()
@@ -206,6 +207,7 @@ func collectMajorLocked() []*nativeHeapBlock {
 		return true
 	})
 	subtractNativeHeapLiveCounters(reclaimedBytes, reclaimedAllocations)
+	nativeHeapOldBytes.Store(nativeHeapBytes.Load())
 	clearNativeNurseryBytes()
 	clearNativeNurseryBlocks()
 	nativeRemembered.clear()
@@ -232,6 +234,7 @@ func collectMinorLocked() []*nativeHeapBlock {
 	var reclaimedBytes uint64
 	var reclaimedAllocations uint64
 	var promoted uint64
+	var promotedBytes uint64
 	for _, block := range nursery {
 		if block == nil || block.generation != nativeHeapGenerationNursery {
 			continue
@@ -239,6 +242,7 @@ func collectMinorLocked() []*nativeHeapBlock {
 		if block.marked {
 			block.generation = nativeHeapGenerationOld
 			promoted++
+			promotedBytes += uint64(block.size)
 			continue
 		}
 		removed := nativeBlocks.delete(block.ptr)
@@ -264,6 +268,10 @@ func collectMinorLocked() []*nativeHeapBlock {
 	nativeGCMinorCollections.Add(1)
 	if promoted != 0 {
 		nativeGCPromotedBlocks.Add(promoted)
+	}
+	if promotedBytes != 0 {
+		nativeHeapOldBytes.Add(promotedBytes)
+		nativeGCPromotedBytes.Add(promotedBytes)
 	}
 	return blocks
 }
@@ -325,6 +333,7 @@ func tsnative_heap_shutdown() {
 	nativeHeap.Lock()
 	blocks := nativeBlocks.drain()
 	nativeHeapBytes.Store(0)
+	nativeHeapOldBytes.Store(0)
 	nativeHeapAllocations.Store(0)
 	nativeHeapThreshold.Store(uint64(initialMajorGCThreshold))
 	nativeGCRequested.Store(false)

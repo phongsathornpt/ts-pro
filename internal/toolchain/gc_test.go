@@ -72,9 +72,12 @@ int main(void) {
   tsnative_gc_safepoint();
   assert(tsnative_heap_live_allocations() == 2);
   assert(tsnative_gc_remembered_parents() == 0);
+  assert(tsnative_gc_promoted_bytes() >= 65536);
+  assert(tsnative_gc_old_bytes() >= 65568);
   tsnative_gc_leave(parent_frame);
   tsnative_gc_collect();
   assert(tsnative_heap_live_allocations() == 0);
+  assert(tsnative_gc_old_bytes() == 0);
   tsnative_heap_shutdown();
   return 0;
 }

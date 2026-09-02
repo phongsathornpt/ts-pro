@@ -213,7 +213,9 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] In the 1,024-old-block/64 KiB nursery sample, remembered tracing measures roughly 75-79 µs/minor with no remembered parent and 106-119 µs with one remembered parent, versus 151-168 µs for the earlier conservative old scan.
     - [x] Track nursery membership in per-owner append-only block lists. Minor GC drains those lists under the world write barrier and resets/marks/reclaims only the listed young blocks, using targeted deletion from the 128-shard live-block table instead of whole-table sweep/count passes.
     - [x] With 1,024 old blocks, the same 64 KiB nursery workload measures roughly 14.4-14.9 µs/minor with no remembered parent and 17.8-18.0 µs with one remembered parent, down from roughly 75-79 µs and 106-119 µs before the membership index.
-    - [ ] Re-profile survival rates and major cadence before adding multi-age promotion or changing the 64 KiB per-worker nursery default.
+    - [x] Re-profile survival rates and major cadence before adding multi-age promotion. Major thresholds now track old-generation bytes, not aggregate young+old bytes; an 8-worker 256 KiB nursery run changes from 0 minors / 15 premature majors to 8-9 minors / 0 majors.
+    - [x] Keep the 64 KiB per-worker nursery default and promote-after-one-minor policy for now. Fixed-byte throughput is nearly flat from 64-512 KiB, while sampled 64B-object median minor pause rises roughly linearly from ~0.69 ms / 1.37 ms / 2.74 ms / 5.48 ms at 64 / 128 / 256 / 512 KiB. Synthetic 0-10% one-minor survival triggers no majors over 64 cycles; 50-100% survival adds only 2-4 majors, not enough to justify age-2 remembered-set retention complexity yet.
+    - [ ] Add precise heap layout/reference maps so tracing skips numeric/string bytes and other known non-reference words before further generational tuning.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
