@@ -20,7 +20,7 @@ var nativeTimers = struct {
 	stopping bool
 }{waiters: map[*nativeTimerWaiter]struct{}{}}
 
-func tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help uintptr) {}
+func timerBindScheduler(current, prepare, cancel, wake, help uintptr) {}
 
 func nativeTimerDuration(milliseconds float64) time.Duration {
 	if math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds < 0 {
@@ -59,23 +59,23 @@ func scheduleNativeTimer(duration time.Duration, task uintptr, cooperative bool)
 	return waiter
 }
 
-func tsnative_sleep_task(milliseconds float64) int32 {
+func sleepTask(milliseconds float64) int32 {
 	duration := nativeTimerDuration(milliseconds)
 	if duration == 0 {
 		return 1
 	}
 	task := schedulerCurrentTaskPtr()
-	if task == 0 || tsnative_scheduler_prepare_park() != 0 {
+	if task == 0 || schedulerPreparePark() != 0 {
 		return -1
 	}
 	if scheduleNativeTimer(duration, task, false) == nil {
-		tsnative_scheduler_cancel_park()
+		schedulerCancelPark()
 		return -1
 	}
 	return 0
 }
 
-func tsnative_sleep_cooperative(milliseconds float64) {
+func sleepCooperative(milliseconds float64) {
 	duration := nativeTimerDuration(milliseconds)
 	if duration == 0 {
 		return
@@ -94,7 +94,7 @@ func tsnative_sleep_cooperative(milliseconds float64) {
 			return
 		default:
 		}
-		if tsnative_scheduler_help_once() != 0 {
+		if schedulerHelpOnce() != 0 {
 			continue
 		}
 		select {
@@ -105,7 +105,7 @@ func tsnative_sleep_cooperative(milliseconds float64) {
 	}
 }
 
-func tsnative_timer_shutdown() {
+func timerShutdown() {
 	nativeTimers.Lock()
 	nativeTimers.stopping = true
 	waiters := make([]*nativeTimerWaiter, 0, len(nativeTimers.waiters))

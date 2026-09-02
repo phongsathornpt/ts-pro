@@ -153,20 +153,20 @@ func nativeBlockingJobWaitTask(raw unsafe.Pointer) int {
 	default:
 	}
 	task := schedulerCurrentTaskPtr()
-	if task == 0 || tsnative_scheduler_prepare_park() != 0 {
+	if task == 0 || schedulerPreparePark() != 0 {
 		return -1
 	}
 	job.mu.Lock()
 	select {
 	case <-job.done:
 		job.mu.Unlock()
-		tsnative_scheduler_cancel_park()
+		schedulerCancelPark()
 		return 1
 	default:
 	}
 	if job.waiter != 0 {
 		job.mu.Unlock()
-		tsnative_scheduler_cancel_park()
+		schedulerCancelPark()
 		return -1
 	}
 	job.waiter = task
@@ -185,7 +185,7 @@ func nativeBlockingJobWaitCooperative(raw unsafe.Pointer) {
 			return
 		default:
 		}
-		if tsnative_scheduler_help_once() != 0 {
+		if schedulerHelpOnce() != 0 {
 			continue
 		}
 		select {

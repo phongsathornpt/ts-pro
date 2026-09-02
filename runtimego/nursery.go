@@ -135,38 +135,38 @@ func resetNativeGenerationalMetrics() {
 	nativeGCMinorNurseryScans.Store(0)
 }
 
-func tsnative_gc_minor_collections() uint64 {
+func gcMinorCollections() uint64 {
 	return nativeGCMinorCollections.Load()
 }
 
-func tsnative_gc_major_collections() uint64 {
+func gcMajorCollections() uint64 {
 	return nativeGCMajorCollections.Load()
 }
 
-func tsnative_gc_promoted_blocks() uint64 {
+func gcPromotedBlocks() uint64 {
 	return nativeGCPromotedBlocks.Load()
 }
 
-func tsnative_gc_promoted_bytes() uint64 {
+func gcPromotedBytes() uint64 {
 	return nativeGCPromotedBytes.Load()
 }
 
-func tsnative_gc_old_bytes() uint64 {
+func gcOldBytes() uint64 {
 	return nativeHeapOldBytes.Load()
 }
 
-func tsnative_gc_minor_old_scans() uint64 {
+func gcMinorOldScans() uint64 {
 	return nativeGCMinorOldScans.Load()
 }
 
-func tsnative_gc_nursery_bytes() uint64 {
+func gcNurseryBytes() uint64 {
 	return nativeNurseryLiveBytes()
 }
 
-func tsnative_gc_nursery_blocks() uint64 {
+func gcNurseryBlocks() uint64 {
 	return uint64(nativeNurseryBlockCount())
 }
 
-func tsnative_gc_minor_nursery_scans() uint64 {
+func gcMinorNurseryScans() uint64 {
 	return nativeGCMinorNurseryScans.Load()
 }

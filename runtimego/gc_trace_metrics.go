@@ -19,18 +19,18 @@ func nativeGCTraceStats() nativeGCTraceMetrics {
 	return metrics
 }
 
-func tsnative_gc_trace_words() uint64 {
+func gcTraceWords() uint64 {
 	return nativeGCTraceStats().words
 }
 
-func tsnative_gc_trace_atomic_blocks() uint64 {
+func gcTraceAtomicBlocks() uint64 {
 	return nativeGCTraceStats().atomic
 }
 
-func tsnative_gc_trace_precise_blocks() uint64 {
+func gcTracePreciseBlocks() uint64 {
 	return nativeGCTraceStats().precise
 }
 
-func tsnative_gc_trace_conservative_blocks() uint64 {
+func gcTraceConservativeBlocks() uint64 {
 	return nativeGCTraceStats().conservative
 }

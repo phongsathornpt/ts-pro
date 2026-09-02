@@ -11,188 +11,188 @@ func nativeHeapContains(raw unsafe.Pointer) bool {
 }
 
 func TestNativeJSValueReferenceBoxesKeepPayloadAlive(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	object := tsnative_heap_alloc(16)
-	boxedObjectRaw := tsnative_jsvalue_box_object(object)
+	object := heapAlloc(16)
+	boxedObjectRaw := jsValueBoxObject(object)
 	boxedObject := (*nativeJSValue)(boxedObjectRaw)
 	if boxedObject.tag != nativeJSTagObject || nativeJSRef(boxedObject) != object {
 		t.Fatal("object JSValue tag/payload mismatch")
 	}
 
 	rootSlot := boxedObjectRaw
-	root := tsnative_gc_root_register(unsafe.Pointer(&rootSlot))
+	root := gcRootRegister(unsafe.Pointer(&rootSlot))
 	if root == nil {
 		t.Fatal("object JSValue root registration failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	if !nativeHeapContains(object) {
 		t.Fatal("boxed object payload was collected while JSValue was rooted")
 	}
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(object) {
 		t.Fatal("object payload survived after JSValue root release")
 	}
 
-	function := tsnative_heap_alloc(16)
-	boxedFunctionRaw := tsnative_jsvalue_box_function(function)
+	function := heapAlloc(16)
+	boxedFunctionRaw := jsValueBoxFunction(function)
 	boxedFunction := (*nativeJSValue)(boxedFunctionRaw)
 	if boxedFunction.tag != nativeJSTagFunction || nativeJSRef(boxedFunction) != function {
 		t.Fatal("function JSValue tag/payload mismatch")
 	}
 	rootSlot = boxedFunctionRaw
-	root = tsnative_gc_root_register(unsafe.Pointer(&rootSlot))
-	tsnative_gc_collect()
+	root = gcRootRegister(unsafe.Pointer(&rootSlot))
+	gcCollect()
 	if !nativeHeapContains(function) {
 		t.Fatal("boxed function payload was collected while JSValue was rooted")
 	}
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(function) {
 		t.Fatal("function payload survived after JSValue root release")
 	}
 }
 
 func TestNativeJSValueDynamicPrimitiveOperators(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	six := tsnative_jsvalue_box_string(nativeJSStringLiteral("6"))
-	seven := tsnative_jsvalue_box_f64(7)
-	if got := float64(tsnative_jsvalue_sub(six, tsnative_jsvalue_box_f64(1))); got != 5 {
+	six := jsValueBoxString(nativeJSStringLiteral("6"))
+	seven := jsValueBoxF64(7)
+	if got := float64(jsValueSub(six, jsValueBoxF64(1))); got != 5 {
 		t.Fatalf("sub = %v", got)
 	}
-	if got := float64(tsnative_jsvalue_mul(six, seven)); got != 42 {
+	if got := float64(jsValueMul(six, seven)); got != 42 {
 		t.Fatalf("mul = %v", got)
 	}
-	if got := float64(tsnative_jsvalue_div(tsnative_jsvalue_box_f64(84), seven)); got != 12 {
+	if got := float64(jsValueDiv(jsValueBoxF64(84), seven)); got != 12 {
 		t.Fatalf("div = %v", got)
 	}
-	if tsnative_jsvalue_lt(six, seven) == 0 {
+	if jsValueLt(six, seven) == 0 {
 		t.Fatal("6 < 7 should be true")
 	}
-	ten := tsnative_jsvalue_box_string(nativeJSStringLiteral("10"))
-	two := tsnative_jsvalue_box_string(nativeJSStringLiteral("2"))
-	if tsnative_jsvalue_lt(ten, two) == 0 {
+	ten := jsValueBoxString(nativeJSStringLiteral("10"))
+	two := jsValueBoxString(nativeJSStringLiteral("2"))
+	if jsValueLt(ten, two) == 0 {
 		t.Fatal("string 10 < 2 should be true")
 	}
-	if tsnative_jsvalue_eq(six, tsnative_jsvalue_box_f64(6)) == 0 {
+	if jsValueEq(six, jsValueBoxF64(6)) == 0 {
 		t.Fatal("loose equality should coerce string")
 	}
-	if tsnative_jsvalue_strict_eq(six, tsnative_jsvalue_box_f64(6)) != 0 {
+	if jsValueStrictEq(six, jsValueBoxF64(6)) != 0 {
 		t.Fatal("strict equality should not coerce string")
 	}
-	if tsnative_jsvalue_eq(tsnative_jsvalue_null(), tsnative_jsvalue_undefined()) == 0 {
+	if jsValueEq(jsValueNull(), jsValueUndefined()) == 0 {
 		t.Fatal("null == undefined should be true")
 	}
-	if tsnative_jsvalue_strict_eq(tsnative_jsvalue_null(), tsnative_jsvalue_undefined()) != 0 {
+	if jsValueStrictEq(jsValueNull(), jsValueUndefined()) != 0 {
 		t.Fatal("null === undefined should be false")
 	}
-	object := tsnative_heap_alloc(8)
-	left := tsnative_jsvalue_box_object(object)
-	right := tsnative_jsvalue_box_object(object)
-	if tsnative_jsvalue_strict_eq(left, right) == 0 {
+	object := heapAlloc(8)
+	left := jsValueBoxObject(object)
+	right := jsValueBoxObject(object)
+	if jsValueStrictEq(left, right) == 0 {
 		t.Fatal("same object payload should be strictly equal")
 	}
 }
 
 func TestNativeJSValueCheckedUnboxing(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	number := tsnative_jsvalue_box_f64(42)
-	if got := float64(tsnative_jsvalue_unbox_f64(number)); got != 42 {
+	number := jsValueBoxF64(42)
+	if got := float64(jsValueUnboxF64(number)); got != 42 {
 		t.Fatalf("number unbox = %v", got)
 	}
 	stringRef := nativeJSStringLiteral("checked")
-	stringValue := tsnative_jsvalue_box_string(stringRef)
-	if got := tsnative_jsvalue_unbox_string(stringValue); got != stringRef {
+	stringValue := jsValueBoxString(stringRef)
+	if got := jsValueUnboxString(stringValue); got != stringRef {
 		t.Fatal("string unbox did not preserve native reference")
 	}
-	truth := tsnative_jsvalue_box_bool(1)
-	if tsnative_jsvalue_unbox_bool(truth) == 0 {
+	truth := jsValueBoxBool(1)
+	if jsValueUnboxBool(truth) == 0 {
 		t.Fatal("boolean unbox = false; want true")
 	}
-	array := tsnative_heap_alloc(24)
-	arrayValue := tsnative_jsvalue_box_array(array)
+	array := heapAlloc(24)
+	arrayValue := jsValueBoxArray(array)
 	if (*nativeJSValue)(arrayValue).tag != nativeJSTagArray {
 		t.Fatal("array JSValue tag mismatch")
 	}
-	if got := tsnative_jsvalue_unbox_array(arrayValue); got != array {
+	if got := jsValueUnboxArray(arrayValue); got != array {
 		t.Fatal("array unbox did not preserve native reference")
 	}
 }
 
 func TestJSValueOrdinaryObjectAndArrayToPrimitive(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	objectRaw := tsnative_heap_alloc_atomic(8)
-	object := tsnative_jsvalue_box_object(objectRaw)
-	number := tsnative_jsvalue_box_f64(1)
-	added := (*nativeJSValue)(tsnative_jsvalue_add(object, number))
+	objectRaw := heapAllocAtomic(8)
+	object := jsValueBoxObject(objectRaw)
+	number := jsValueBoxF64(1)
+	added := (*nativeJSValue)(jsValueAdd(object, number))
 	if added.tag != nativeJSTagString || string(nativeStringBytes(nativeJSRef(added))) != "[object Object]1" {
 		t.Fatalf("object + 1 = tag=%d value=%q", added.tag, nativeStringBytes(nativeJSRef(added)))
 	}
-	objectText := tsnative_jsvalue_box_string(nativeJSStringLiteral("[object Object]"))
-	if tsnative_jsvalue_eq(object, objectText) == 0 {
+	objectText := jsValueBoxString(nativeJSStringLiteral("[object Object]"))
+	if jsValueEq(object, objectText) == 0 {
 		t.Fatal("ordinary object did not loose-equal its default primitive string")
 	}
 
-	arrayRaw := tsnative_array_f64_new(2)
-	tsnative_array_f64_set(arrayRaw, 0, 1)
-	tsnative_array_f64_set(arrayRaw, 1, 2)
-	array := tsnative_jsvalue_box_array(arrayRaw)
-	prefix := tsnative_jsvalue_box_string(nativeJSStringLiteral("values="))
-	arrayText := (*nativeJSValue)(tsnative_jsvalue_add(prefix, array))
+	arrayRaw := arrayF64New(2)
+	arrayF64Set(arrayRaw, 0, 1)
+	arrayF64Set(arrayRaw, 1, 2)
+	array := jsValueBoxArray(arrayRaw)
+	prefix := jsValueBoxString(nativeJSStringLiteral("values="))
+	arrayText := (*nativeJSValue)(jsValueAdd(prefix, array))
 	if arrayText.tag != nativeJSTagString || string(nativeStringBytes(nativeJSRef(arrayText))) != "values=1,2" {
 		t.Fatalf("prefix + array = tag=%d value=%q", arrayText.tag, nativeStringBytes(nativeJSRef(arrayText)))
 	}
 }
 
 func TestJSValueObjectArrayFunctionNumericCoercion(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	one := tsnative_array_f64_new(1)
-	tsnative_array_f64_set(one, 0, 5)
-	array := tsnative_jsvalue_box_array(one)
-	if got := float64(tsnative_jsvalue_sub(array, tsnative_jsvalue_box_f64(2))); got != 3 {
+	one := arrayF64New(1)
+	arrayF64Set(one, 0, 5)
+	array := jsValueBoxArray(one)
+	if got := float64(jsValueSub(array, jsValueBoxF64(2))); got != 3 {
 		t.Fatalf("[5] - 2 = %v, want 3", got)
 	}
 
-	object := tsnative_jsvalue_box_object(tsnative_heap_alloc_atomic(8))
-	if got := float64(tsnative_jsvalue_sub(object, tsnative_jsvalue_box_f64(1))); !math.IsNaN(got) {
+	object := jsValueBoxObject(heapAllocAtomic(8))
+	if got := float64(jsValueSub(object, jsValueBoxF64(1))); !math.IsNaN(got) {
 		t.Fatalf("object - 1 = %v, want NaN", got)
 	}
-	function := tsnative_jsvalue_box_function(tsnative_heap_alloc_atomic(8))
-	if got := float64(tsnative_jsvalue_mul(function, tsnative_jsvalue_box_f64(2))); !math.IsNaN(got) {
+	function := jsValueBoxFunction(heapAllocAtomic(8))
+	if got := float64(jsValueMul(function, jsValueBoxF64(2))); !math.IsNaN(got) {
 		t.Fatalf("function * 2 = %v, want NaN", got)
 	}
 }
 
 func TestNativeJSValueObjectShapeMetadataSurvivesGC(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	object := tsnative_heap_alloc_atomic(16)
-	boxed := tsnative_jsvalue_box_object_shape(object, 7)
-	if got := uint32(tsnative_jsvalue_object_shape(boxed)); got != 7 {
+	object := heapAllocAtomic(16)
+	boxed := jsValueBoxObjectShape(object, 7)
+	if got := uint32(jsValueObjectShape(boxed)); got != 7 {
 		t.Fatalf("boxed object shape = %d, want 7", got)
 	}
 	rootSlot := boxed
-	root := tsnative_gc_root_register(unsafe.Pointer(&rootSlot))
+	root := gcRootRegister(unsafe.Pointer(&rootSlot))
 	if root == nil {
 		t.Fatal("object shape JSValue root registration failed")
 	}
-	tsnative_gc_collect()
-	if got := uint32(tsnative_jsvalue_object_shape(boxed)); got != 7 {
+	gcCollect()
+	if got := uint32(jsValueObjectShape(boxed)); got != 7 {
 		t.Fatalf("boxed object shape after GC = %d, want 7", got)
 	}
 	if !nativeHeapContains(object) {
 		t.Fatal("shape-tagged boxed object lost payload during GC")
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }

@@ -81,7 +81,7 @@ func nativeAbortSignal() {
 }
 
 func nativeAbort(message string) {
-	_, _ = os.Stderr.WriteString("tsnative: " + message + "\n")
+	_, _ = os.Stderr.WriteString("ts-pro: " + message + "\n")
 	nativeAbortSignal()
 }
 
@@ -146,17 +146,17 @@ func allocateNativeHeapBlock(size uintptr, traceKind nativeHeapTraceKind, refOff
 	return block.raw
 }
 
-func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
+func heapAlloc(size uintptr) unsafe.Pointer {
 	return allocateNativeHeapBlock(size, nativeHeapTraceConservative, nil)
 }
 
-func tsnative_heap_alloc_atomic(size uintptr) unsafe.Pointer {
+func heapAllocAtomic(size uintptr) unsafe.Pointer {
 	return allocateNativeHeapBlock(size, nativeHeapTraceAtomic, nil)
 }
 
-func tsnative_heap_alloc_refs(size uintptr, offsets unsafe.Pointer, count uintptr) unsafe.Pointer {
+func heapAllocRefs(size uintptr, offsets unsafe.Pointer, count uintptr) unsafe.Pointer {
 	if count == 0 {
-		return tsnative_heap_alloc_atomic(size)
+		return heapAllocAtomic(size)
 	}
 	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
 	if offsets == nil || count > size/wordSize {
@@ -336,7 +336,7 @@ func finalizeShutdownNativeHeapBlocks(blocks []*nativeHeapBlock) {
 	}
 }
 
-func tsnative_gc_collect() {
+func gcCollect() {
 	nativeGCMajorRequested.Store(true)
 	nativeGCRequested.Store(true)
 	tid := nativeCurrentThreadID()
@@ -348,7 +348,7 @@ func tsnative_gc_collect() {
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
-func tsnative_gc_safepoint() {
+func gcSafepoint() {
 	if !nativeGCRequested.Load() {
 		return
 	}
@@ -361,7 +361,7 @@ func tsnative_gc_safepoint() {
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
-func tsnative_heap_shutdown() {
+func heapShutdown() {
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	blocks := nativeBlocks.drain()
@@ -422,14 +422,14 @@ func tsnative_heap_shutdown() {
 	nativeBlocks.resetMetrics()
 }
 
-func tsnative_heap_live_bytes() uintptr {
+func heapLiveBytes() uintptr {
 	return uintptr(nativeHeapBytes.Load())
 }
 
-func tsnative_heap_live_allocations() uintptr {
+func heapLiveAllocations() uintptr {
 	return uintptr(nativeHeapAllocations.Load())
 }
 
-func tsnative_gc_collections() uintptr {
+func gcCollections() uintptr {
 	return uintptr(nativeHeapCollections.Load())
 }

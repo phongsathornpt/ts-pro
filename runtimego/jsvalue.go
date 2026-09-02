@@ -32,9 +32,9 @@ func newNativeJSValue(tag uint32) *nativeJSValue {
 	switch tag {
 	case nativeJSTagString, nativeJSTagObject, nativeJSTagFunction, nativeJSTagArray:
 		offset := unsafe.Offsetof(nativeJSValue{}.payload)
-		raw = tsnative_heap_alloc_refs(size, unsafe.Pointer(&offset), 1)
+		raw = heapAllocRefs(size, unsafe.Pointer(&offset), 1)
 	default:
-		raw = tsnative_heap_alloc_atomic(size)
+		raw = heapAllocAtomic(size)
 	}
 	value := (*nativeJSValue)(raw)
 	value.tag = tag
@@ -58,19 +58,19 @@ func nativeJSBool(value *nativeJSValue) bool {
 	return value.payload != 0
 }
 
-func tsnative_jsvalue_box_f64(number float64) unsafe.Pointer {
+func jsValueBoxF64(number float64) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagNumber)
 	value.payload = math.Float64bits(number)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_box_string(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueBoxString(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagString)
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_box_bool(raw uint8) unsafe.Pointer {
+func jsValueBoxBool(raw uint8) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagBoolean)
 	if raw != 0 {
 		value.payload = 1
@@ -78,18 +78,18 @@ func tsnative_jsvalue_box_bool(raw uint8) unsafe.Pointer {
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_box_object(raw unsafe.Pointer) unsafe.Pointer {
-	return tsnative_jsvalue_box_object_shape(raw, 0)
+func jsValueBoxObject(raw unsafe.Pointer) unsafe.Pointer {
+	return jsValueBoxObjectShape(raw, 0)
 }
 
-func tsnative_jsvalue_box_object_shape(raw unsafe.Pointer, shape uint32) unsafe.Pointer {
+func jsValueBoxObjectShape(raw unsafe.Pointer, shape uint32) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagObject)
 	value.reserved = shape + 1
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_object_shape(raw unsafe.Pointer) uint32 {
+func jsValueObjectShape(raw unsafe.Pointer) uint32 {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagObject || value.reserved == 0 {
 		return ^uint32(0)
@@ -97,20 +97,20 @@ func tsnative_jsvalue_object_shape(raw unsafe.Pointer) uint32 {
 	return value.reserved - 1
 }
 
-func tsnative_jsvalue_box_function(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueBoxFunction(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagFunction)
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_box_function_target(raw unsafe.Pointer, target uint32) unsafe.Pointer {
+func jsValueBoxFunctionTarget(raw unsafe.Pointer, target uint32) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagFunction)
 	value.reserved = target + 1
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_function_target(raw unsafe.Pointer) uint32 {
+func jsValueFunctionTarget(raw unsafe.Pointer) uint32 {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagFunction || value.reserved == 0 {
 		return ^uint32(0)
@@ -118,13 +118,13 @@ func tsnative_jsvalue_function_target(raw unsafe.Pointer) uint32 {
 	return value.reserved - 1
 }
 
-func tsnative_jsvalue_box_array(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueBoxArray(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagArray)
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
-func tsnative_jsvalue_unbox_object(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueUnboxObject(raw unsafe.Pointer) unsafe.Pointer {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagObject {
 		nativeAbort("unbox object failed")
@@ -132,7 +132,7 @@ func tsnative_jsvalue_unbox_object(raw unsafe.Pointer) unsafe.Pointer {
 	return nativeJSRef(value)
 }
 
-func tsnative_jsvalue_unbox_object_shape(raw unsafe.Pointer, expected uint32) unsafe.Pointer {
+func jsValueUnboxObjectShape(raw unsafe.Pointer, expected uint32) unsafe.Pointer {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagObject || value.reserved == 0 || value.reserved-1 != expected {
 		nativeAbort("unbox object shape failed")
@@ -140,7 +140,7 @@ func tsnative_jsvalue_unbox_object_shape(raw unsafe.Pointer, expected uint32) un
 	return nativeJSRef(value)
 }
 
-func tsnative_jsvalue_unbox_function(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueUnboxFunction(raw unsafe.Pointer) unsafe.Pointer {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagFunction {
 		nativeAbort("unbox function failed")
@@ -148,15 +148,15 @@ func tsnative_jsvalue_unbox_function(raw unsafe.Pointer) unsafe.Pointer {
 	return nativeJSRef(value)
 }
 
-func tsnative_jsvalue_dynamic_set_missing() {
+func jsValueDynamicSetMissing() {
 	nativeAbort("dynamic property write requires an existing closed-shape field")
 }
 
-func tsnative_jsvalue_dynamic_call_invalid() {
+func jsValueDynamicCallInvalid() {
 	nativeAbort("dynamic call target or argument ABI is invalid")
 }
 
-func tsnative_jsvalue_unbox_f64(raw unsafe.Pointer) float64 {
+func jsValueUnboxF64(raw unsafe.Pointer) float64 {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagNumber {
 		nativeAbort("unbox f64 failed")
@@ -164,7 +164,7 @@ func tsnative_jsvalue_unbox_f64(raw unsafe.Pointer) float64 {
 	return nativeJSNumber(value)
 }
 
-func tsnative_jsvalue_unbox_string(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueUnboxString(raw unsafe.Pointer) unsafe.Pointer {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagString {
 		nativeAbort("unbox string failed")
@@ -172,7 +172,7 @@ func tsnative_jsvalue_unbox_string(raw unsafe.Pointer) unsafe.Pointer {
 	return nativeJSRef(value)
 }
 
-func tsnative_jsvalue_unbox_bool(raw unsafe.Pointer) uint8 {
+func jsValueUnboxBool(raw unsafe.Pointer) uint8 {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagBoolean {
 		nativeAbort("unbox bool failed")
@@ -180,7 +180,7 @@ func tsnative_jsvalue_unbox_bool(raw unsafe.Pointer) uint8 {
 	return nativeJSBoolResult(nativeJSBool(value))
 }
 
-func tsnative_jsvalue_unbox_array(raw unsafe.Pointer) unsafe.Pointer {
+func jsValueUnboxArray(raw unsafe.Pointer) unsafe.Pointer {
 	value := (*nativeJSValue)(raw)
 	if value == nil || value.tag != nativeJSTagArray {
 		nativeAbort("unbox array failed")
@@ -188,20 +188,20 @@ func tsnative_jsvalue_unbox_array(raw unsafe.Pointer) unsafe.Pointer {
 	return nativeJSRef(value)
 }
 
-func tsnative_jsvalue_null() unsafe.Pointer {
+func jsValueNull() unsafe.Pointer {
 	return unsafe.Pointer(newNativeJSValue(nativeJSTagNull))
 }
 
-func tsnative_jsvalue_undefined() unsafe.Pointer {
+func jsValueUndefined() unsafe.Pointer {
 	return unsafe.Pointer(newNativeJSValue(nativeJSTagUndefined))
 }
 
 func nativeJSStringLiteral(text string) unsafe.Pointer {
 	if len(text) == 0 {
-		return tsnative_string_new(nil, 0)
+		return stringNew(nil, 0)
 	}
 	bytes := []byte(text)
-	return tsnative_string_new(unsafe.Pointer(&bytes[0]), uint64(len(bytes)))
+	return stringNew(unsafe.Pointer(&bytes[0]), uint64(len(bytes)))
 }
 
 func nativeJSStringToNumber(raw unsafe.Pointer) float64 {
@@ -334,7 +334,7 @@ func nativeJSToPrimitive(value *nativeJSValue) *nativeJSValue {
 	}
 	switch value.tag {
 	case nativeJSTagObject, nativeJSTagArray, nativeJSTagFunction:
-		return (*nativeJSValue)(tsnative_jsvalue_box_string(nativeJSToString(value)))
+		return (*nativeJSValue)(jsValueBoxString(nativeJSToString(value)))
 	default:
 		return value
 	}
@@ -478,7 +478,7 @@ func nativeJSLooseEqual(left, right *nativeJSValue) bool {
 	return false
 }
 
-func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
+func jsValueAdd(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 	left := (*nativeJSValue)(leftRaw)
 	right := (*nativeJSValue)(rightRaw)
 	if left == nil || right == nil {
@@ -486,21 +486,21 @@ func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 	}
 	left, right = nativeJSToPrimitive(left), nativeJSToPrimitive(right)
 	if left.tag == nativeJSTagString || right.tag == nativeJSTagString {
-		combined := tsnative_string_concat(nativeJSToString(left), nativeJSToString(right))
-		return tsnative_jsvalue_box_string(combined)
+		combined := stringConcat(nativeJSToString(left), nativeJSToString(right))
+		return jsValueBoxString(combined)
 	}
-	return tsnative_jsvalue_box_f64(nativeJSToNumber(left) + nativeJSToNumber(right))
+	return jsValueBoxF64(nativeJSToNumber(left) + nativeJSToNumber(right))
 }
 
-func tsnative_jsvalue_sub(leftRaw, rightRaw unsafe.Pointer) float64 {
+func jsValueSub(leftRaw, rightRaw unsafe.Pointer) float64 {
 	return nativeJSToNumber((*nativeJSValue)(leftRaw)) - nativeJSToNumber((*nativeJSValue)(rightRaw))
 }
 
-func tsnative_jsvalue_mul(leftRaw, rightRaw unsafe.Pointer) float64 {
+func jsValueMul(leftRaw, rightRaw unsafe.Pointer) float64 {
 	return nativeJSToNumber((*nativeJSValue)(leftRaw)) * nativeJSToNumber((*nativeJSValue)(rightRaw))
 }
 
-func tsnative_jsvalue_div(leftRaw, rightRaw unsafe.Pointer) float64 {
+func jsValueDiv(leftRaw, rightRaw unsafe.Pointer) float64 {
 	return nativeJSToNumber((*nativeJSValue)(leftRaw)) / nativeJSToNumber((*nativeJSValue)(rightRaw))
 }
 
@@ -511,43 +511,43 @@ func nativeJSBoolResult(value bool) uint8 {
 	return 0
 }
 
-func tsnative_jsvalue_lt(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueLt(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
 	return nativeJSBoolResult(ok && cmp < 0)
 }
 
-func tsnative_jsvalue_le(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueLe(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
 	return nativeJSBoolResult(ok && cmp <= 0)
 }
 
-func tsnative_jsvalue_gt(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueGt(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
 	return nativeJSBoolResult(ok && cmp > 0)
 }
 
-func tsnative_jsvalue_ge(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueGe(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	cmp, ok := nativeJSRelationalCompare((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw))
 	return nativeJSBoolResult(ok && cmp >= 0)
 }
 
-func tsnative_jsvalue_eq(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueEq(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	return nativeJSBoolResult(nativeJSLooseEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
 }
 
-func tsnative_jsvalue_ne(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueNe(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	return nativeJSBoolResult(!nativeJSLooseEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
 }
 
-func tsnative_jsvalue_strict_eq(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueStrictEq(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	return nativeJSBoolResult(nativeJSStrictEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
 }
 
-func tsnative_jsvalue_strict_ne(leftRaw, rightRaw unsafe.Pointer) uint8 {
+func jsValueStrictNe(leftRaw, rightRaw unsafe.Pointer) uint8 {
 	return nativeJSBoolResult(!nativeJSStrictEqual((*nativeJSValue)(leftRaw), (*nativeJSValue)(rightRaw)))
 }
 
-func tsnative_console_log_jsvalue(raw unsafe.Pointer) {
+func consoleLogJSValue(raw unsafe.Pointer) {
 	value := (*nativeJSValue)(raw)
 	if value == nil {
 		nativeAbort("log nil jsvalue")
@@ -556,7 +556,7 @@ func tsnative_console_log_jsvalue(raw unsafe.Pointer) {
 	case nativeJSTagNumber:
 		fmt.Printf("%.17g\n", nativeJSNumber(value))
 	case nativeJSTagString:
-		tsnative_console_log_string(nativeJSRef(value))
+		consoleLogString(nativeJSRef(value))
 	case nativeJSTagBoolean:
 		if nativeJSBool(value) {
 			fmt.Println("true")

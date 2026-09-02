@@ -6,8 +6,8 @@ import (
 )
 
 func TestGoTaskContextOwnsPersistentGCRoot(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	var entry byte
 	task := createNativeTask(unsafe.Pointer(&entry), nil, nativeTaskResultVoid)
@@ -16,18 +16,18 @@ func TestGoTaskContextOwnsPersistentGCRoot(t *testing.T) {
 	}
 	defer destroyNativeTaskStorage(task)
 
-	payload := tsnative_heap_alloc(32)
+	payload := heapAlloc(32)
 	if payload == nil {
 		t.Fatal("payload allocation failed")
 	}
 	task.context = payload
-	tsnative_gc_collect()
+	gcCollect()
 	if !nativeHeapContains(payload) {
 		t.Fatal("task context payload was collected while rooted")
 	}
 
 	task.context = nil
-	tsnative_gc_collect()
+	gcCollect()
 	if nativeHeapContains(payload) {
 		t.Fatal("task context payload survived after context cleared")
 	}

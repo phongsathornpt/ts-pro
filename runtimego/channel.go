@@ -36,7 +36,7 @@ var nativeChannels = struct {
 	byHandle map[uintptr]*nativeF64Channel
 }{byHandle: map[uintptr]*nativeF64Channel{}}
 
-func tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help uintptr) {}
+func channelBindScheduler(current, prepare, cancel, wake, help uintptr) {}
 
 func lookupNativeF64Channel(raw unsafe.Pointer) *nativeF64Channel {
 	if raw == nil {
@@ -51,7 +51,7 @@ func newNativeF64Channel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
 		nativeAbort("negative channel capacity")
 	}
-	raw := tsnative_heap_alloc(1)
+	raw := heapAlloc(1)
 	channel := &nativeF64Channel{capacity: capacity}
 	if capacity > 0 {
 		channel.buffer = make([]float64, capacity)
@@ -98,14 +98,14 @@ func finishNativeChannelWaiter(waiter *nativeF64ChannelWaiter) {
 	})
 }
 
-func tsnative_channel_f64_new(capacity uintptr) unsafe.Pointer {
+func channelF64New(capacity uintptr) unsafe.Pointer {
 	if uint64(capacity) > uint64(math.MaxInt) {
 		nativeAbort("channel capacity overflow")
 	}
 	return newNativeF64Channel(int(capacity))
 }
 
-func tsnative_channel_f64_new_checked(capacity float64) unsafe.Pointer {
+func channelF64NewChecked(capacity float64) unsafe.Pointer {
 	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
 		nativeAbort("invalid channel capacity")
@@ -113,7 +113,7 @@ func tsnative_channel_f64_new_checked(capacity float64) unsafe.Pointer {
 	return newNativeF64Channel(int(value))
 }
 
-func tsnative_channel_f64_try_send(raw unsafe.Pointer, value float64) int32 {
+func channelF64TrySend(raw unsafe.Pointer, value float64) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		return -1
@@ -147,7 +147,7 @@ func tsnative_channel_f64_try_send(raw unsafe.Pointer, value float64) int32 {
 	return 1
 }
 
-func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) int32 {
+func channelF64TryRecv(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -185,15 +185,15 @@ func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) int32 {
 	return 0
 }
 
-func tsnative_channel_f64_try_recv_or(raw unsafe.Pointer, fallback float64) float64 {
+func channelF64TryRecvOr(raw unsafe.Pointer, fallback float64) float64 {
 	value := fallback
-	if tsnative_channel_f64_try_recv(raw, unsafe.Pointer(&value)) == 1 {
+	if channelF64TryRecv(raw, unsafe.Pointer(&value)) == 1 {
 		return value
 	}
 	return fallback
 }
 
-func tsnative_channel_f64_send(raw unsafe.Pointer, value float64) {
+func channelF64Send(raw unsafe.Pointer, value float64) {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		nativeAbort("send to nil f64 channel")
@@ -239,7 +239,7 @@ func tsnative_channel_f64_send(raw unsafe.Pointer, value float64) {
 	channel.mu.Unlock()
 }
 
-func tsnative_channel_f64_recv(raw unsafe.Pointer) float64 {
+func channelF64Recv(raw unsafe.Pointer) float64 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		nativeAbort("recv from nil f64 channel")
@@ -278,7 +278,7 @@ func tsnative_channel_f64_recv(raw unsafe.Pointer) float64 {
 	}
 }
 
-func tsnative_channel_f64_send_task(raw unsafe.Pointer, value float64) int32 {
+func channelF64SendTask(raw unsafe.Pointer, value float64) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		return -1
@@ -302,7 +302,7 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value float64) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
@@ -312,7 +312,7 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value float64) int32 {
 	return 0
 }
 
-func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) int32 {
+func channelF64RecvTask(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -350,7 +350,7 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
@@ -367,7 +367,7 @@ func waitNativeChannelCooperatively(waiter *nativeF64ChannelWaiter) {
 			return
 		default:
 		}
-		if tsnative_scheduler_help_once() != 0 {
+		if schedulerHelpOnce() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -379,14 +379,14 @@ func waitNativeChannelCooperatively(waiter *nativeF64ChannelWaiter) {
 	}
 }
 
-func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value float64) {
+func channelF64SendCooperative(raw unsafe.Pointer, value float64) {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		nativeAbort("send cooperative to nil f64 channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
-		tsnative_channel_f64_send(raw, value)
+		channelF64Send(raw, value)
 		return
 	}
 	channel.mu.Lock()
@@ -413,14 +413,14 @@ func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value float64) {
 	waitNativeChannelCooperatively(waiter)
 }
 
-func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) float64 {
+func channelF64RecvCooperative(raw unsafe.Pointer) float64 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		nativeAbort("recv cooperative from nil f64 channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
-		return tsnative_channel_f64_recv(raw)
+		return channelF64Recv(raw)
 	}
 	channel.mu.Lock()
 	if channel.capacity != 0 && channel.count != 0 {
@@ -462,7 +462,7 @@ type nativeRefRoot struct {
 func newNativeRefRoot(value unsafe.Pointer) *nativeRefRoot {
 	slot := unsafe.Pointer(new(unsafe.Pointer))
 	*(*unsafe.Pointer)(slot) = value
-	token := tsnative_gc_root_register(slot)
+	token := gcRootRegister(slot)
 	if token == nil {
 		nativeAbort("reference channel root registration failed")
 	}
@@ -481,7 +481,7 @@ func (root *nativeRefRoot) release() {
 		return
 	}
 	if root.token != nil {
-		tsnative_gc_root_unregister(root.token)
+		gcRootUnregister(root.token)
 		root.token = nil
 	}
 	root.slot = nil
@@ -554,7 +554,7 @@ func newNativeRefChannel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
 		nativeAbort("negative ref channel capacity")
 	}
-	raw := tsnative_heap_alloc(1)
+	raw := heapAlloc(1)
 	channel := &nativeRefChannel{capacity: capacity}
 	if capacity > 0 {
 		channel.buffer = make([]*nativeRefRoot, capacity)
@@ -622,7 +622,7 @@ func dequeueNativeRefRoot(channel *nativeRefChannel) *nativeRefRoot {
 	return root
 }
 
-func tsnative_channel_ref_new_checked(capacity float64) unsafe.Pointer {
+func channelRefNewChecked(capacity float64) unsafe.Pointer {
 	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
 		nativeAbort("invalid ref channel capacity")
@@ -630,7 +630,7 @@ func tsnative_channel_ref_new_checked(capacity float64) unsafe.Pointer {
 	return newNativeRefChannel(int(value))
 }
 
-func tsnative_channel_ref_try_send(raw, value unsafe.Pointer) int32 {
+func channelRefTrySend(raw, value unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		return -1
@@ -707,7 +707,7 @@ func nativeRefTryRecv(raw unsafe.Pointer) (unsafe.Pointer, bool) {
 	return nil, false
 }
 
-func tsnative_channel_ref_try_recv_or(raw, fallback unsafe.Pointer) unsafe.Pointer {
+func channelRefTryRecvOr(raw, fallback unsafe.Pointer) unsafe.Pointer {
 	if value, ok := nativeRefTryRecv(raw); ok {
 		return value
 	}
@@ -802,7 +802,7 @@ func nativeRefRecv(raw unsafe.Pointer) unsafe.Pointer {
 	}
 }
 
-func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) int32 {
+func channelRefSendTask(raw, value unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		return -1
@@ -825,7 +825,7 @@ func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		root.release()
 		return -1
@@ -836,7 +836,7 @@ func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) int32 {
 	return 0
 }
 
-func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) int32 {
+func channelRefRecvTask(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -877,7 +877,7 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
@@ -894,7 +894,7 @@ func waitNativeRefChannelCooperatively(waiter *nativeRefChannelWaiter) {
 			return
 		default:
 		}
-		if tsnative_scheduler_help_once() != 0 {
+		if schedulerHelpOnce() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -906,7 +906,7 @@ func waitNativeRefChannelCooperatively(waiter *nativeRefChannelWaiter) {
 	}
 }
 
-func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
+func channelRefSendCooperative(raw, value unsafe.Pointer) {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		nativeAbort("send cooperative to nil ref channel")
@@ -936,7 +936,7 @@ func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
 	waitNativeRefChannelCooperatively(waiter)
 }
 
-func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
+func channelRefRecvCooperative(raw unsafe.Pointer) unsafe.Pointer {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		nativeAbort("recv cooperative from nil ref channel")
@@ -1029,7 +1029,7 @@ func newNativeBoolChannel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
 		nativeAbort("negative bool channel capacity")
 	}
-	raw := tsnative_heap_alloc(1)
+	raw := heapAlloc(1)
 	channel := &nativeBoolChannel{capacity: capacity}
 	if capacity > 0 {
 		channel.buffer = make([]uint8, capacity)
@@ -1077,7 +1077,7 @@ func finishNativeBoolWaiter(waiter *nativeBoolChannelWaiter) {
 	})
 }
 
-func tsnative_channel_bool_new_checked(capacity float64) unsafe.Pointer {
+func channelBoolNewChecked(capacity float64) unsafe.Pointer {
 	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
 		nativeAbort("invalid bool channel capacity")
@@ -1085,7 +1085,7 @@ func tsnative_channel_bool_new_checked(capacity float64) unsafe.Pointer {
 	return newNativeBoolChannel(int(value))
 }
 
-func tsnative_channel_bool_try_send(raw unsafe.Pointer, value uint8) int32 {
+func channelBoolTrySend(raw unsafe.Pointer, value uint8) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return -1
@@ -1120,7 +1120,7 @@ func tsnative_channel_bool_try_send(raw unsafe.Pointer, value uint8) int32 {
 	return 1
 }
 
-func tsnative_channel_bool_try_recv_or(raw unsafe.Pointer, fallback uint8) uint8 {
+func channelBoolTryRecvOr(raw unsafe.Pointer, fallback uint8) uint8 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return fallback
@@ -1158,7 +1158,7 @@ func tsnative_channel_bool_try_recv_or(raw unsafe.Pointer, fallback uint8) uint8
 	return fallback
 }
 
-func tsnative_channel_bool_send_task(raw unsafe.Pointer, value uint8) int32 {
+func channelBoolSendTask(raw unsafe.Pointer, value uint8) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return -1
@@ -1183,7 +1183,7 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value uint8) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
@@ -1193,7 +1193,7 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value uint8) int32 {
 	return 0
 }
 
-func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) int32 {
+func channelBoolRecvTask(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -1231,7 +1231,7 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) int32 {
 		channel.mu.Unlock()
 		return 1
 	}
-	if tsnative_scheduler_prepare_park() != 0 {
+	if schedulerPreparePark() != 0 {
 		channel.mu.Unlock()
 		return -1
 	}
@@ -1248,7 +1248,7 @@ func waitNativeBoolChannelCooperatively(waiter *nativeBoolChannelWaiter) {
 			return
 		default:
 		}
-		if tsnative_scheduler_help_once() != 0 {
+		if schedulerHelpOnce() != 0 {
 			runtime.Gosched()
 			continue
 		}
@@ -1260,7 +1260,7 @@ func waitNativeBoolChannelCooperatively(waiter *nativeBoolChannelWaiter) {
 	}
 }
 
-func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value uint8) {
+func channelBoolSendCooperative(raw unsafe.Pointer, value uint8) {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		nativeAbort("send cooperative to nil bool channel")
@@ -1330,7 +1330,7 @@ func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value uint8) {
 	waitNativeBoolChannelCooperatively(waiter)
 }
 
-func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) uint8 {
+func channelBoolRecvCooperative(raw unsafe.Pointer) uint8 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		nativeAbort("recv cooperative from nil bool channel")

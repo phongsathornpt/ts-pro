@@ -276,23 +276,23 @@ func (state *nativePromiseAggregateState) observe(index int, child *nativeTask) 
 		case action.failed:
 			settleNativeAggregate(aggregate, true, action.failure, 0, 0, nil)
 		case action.allF64 != nil:
-			array := tsnative_array_f64_new(uint64(len(action.allF64)))
+			array := arrayF64New(uint64(len(action.allF64)))
 			for i, value := range action.allF64 {
-				tsnative_array_f64_set(array, uint64(i), value)
+				arrayF64Set(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case action.allBool != nil:
-			array := tsnative_array_bool_new(uint64(len(action.allBool)))
+			array := arrayBoolNew(uint64(len(action.allBool)))
 			for i, value := range action.allBool {
-				tsnative_array_bool_set(array, uint64(i), value)
+				arrayBoolSet(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case state.kind == nativePromiseAggregateRaceBool:
 			settleNativeAggregate(aggregate, false, nil, 0, action.boolean, nil)
 		case action.allRef != nil:
-			array := tsnative_array_ref_new(uint64(len(action.allRef)))
+			array := arrayRefNew(uint64(len(action.allRef)))
 			for i, value := range action.allRef {
-				tsnative_array_ref_set(array, uint64(i), value)
+				arrayRefSet(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case state.kind == nativePromiseAggregateRaceRef:
@@ -323,13 +323,13 @@ func startNativePromiseAggregate(kind nativePromiseAggregateKind, tasks []*nativ
 	}
 	if len(tasks) == 0 {
 		if kind == nativePromiseAggregateAllF64 {
-			array := tsnative_array_f64_new(0)
+			array := arrayF64New(0)
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		} else if kind == nativePromiseAggregateAllBool {
-			array := tsnative_array_bool_new(0)
+			array := arrayBoolNew(0)
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		} else if kind == nativePromiseAggregateAllRef {
-			array := tsnative_array_ref_new(0)
+			array := arrayRefNew(0)
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		}
 		return
@@ -342,7 +342,7 @@ func startNativePromiseAggregate(kind nativePromiseAggregateKind, tasks []*nativ
 	}
 }
 
-func tsnative_promise_all_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseAllF64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultF64)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
@@ -356,7 +356,7 @@ func tsnative_promise_all_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	return aggregate.handle
 }
 
-func tsnative_promise_race_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseRaceF64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty Promise.race is not supported yet")
 	}
@@ -373,7 +373,7 @@ func tsnative_promise_race_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer 
 	return aggregate.handle
 }
 
-func tsnative_promise_all_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseAllRef(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultRef)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
@@ -387,7 +387,7 @@ func tsnative_promise_all_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	return aggregate.handle
 }
 
-func tsnative_promise_race_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseRaceRef(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty reference Promise.race is not supported")
 	}
@@ -404,7 +404,7 @@ func tsnative_promise_race_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer 
 	return aggregate.handle
 }
 
-func tsnative_promise_all_bool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseAllBool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultBool)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
@@ -418,7 +418,7 @@ func tsnative_promise_all_bool(raw unsafe.Pointer, count uint64) unsafe.Pointer 
 	return aggregate.handle
 }
 
-func tsnative_promise_race_bool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+func promiseRaceBool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty boolean Promise.race is not supported")
 	}

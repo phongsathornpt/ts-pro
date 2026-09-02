@@ -9,138 +9,138 @@ import (
 )
 
 func TestPreciseHeapTraceMetricsCountOnlyDeclaredReferenceWords(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	conservative := tsnative_heap_alloc(64)
-	atomic := tsnative_heap_alloc_atomic(64)
-	child := tsnative_heap_alloc_atomic(16)
+	conservative := heapAlloc(64)
+	atomic := heapAllocAtomic(64)
+	child := heapAllocAtomic(16)
 	offset := uintptr(0)
-	precise := tsnative_heap_alloc_refs(64, unsafe.Pointer(&offset), 1)
+	precise := heapAllocRefs(64, unsafe.Pointer(&offset), 1)
 	*(*unsafe.Pointer)(precise) = child
 
-	conservativeRoot := tsnative_gc_root_register(unsafe.Pointer(&conservative))
-	atomicRoot := tsnative_gc_root_register(unsafe.Pointer(&atomic))
-	preciseRoot := tsnative_gc_root_register(unsafe.Pointer(&precise))
-	tsnative_gc_collect()
+	conservativeRoot := gcRootRegister(unsafe.Pointer(&conservative))
+	atomicRoot := gcRootRegister(unsafe.Pointer(&atomic))
+	preciseRoot := gcRootRegister(unsafe.Pointer(&precise))
+	gcCollect()
 	metrics := nativeGCTraceStats()
 	if metrics.words != 9 || metrics.conservative != 1 || metrics.precise != 1 || metrics.atomic != 2 {
 		t.Fatalf("trace metrics = %+v, want words=9 conservative=1 precise=1 atomic=2", metrics)
 	}
 	for _, token := range []unsafe.Pointer{preciseRoot, atomicRoot, conservativeRoot} {
-		tsnative_gc_root_unregister(token)
+		gcRootUnregister(token)
 	}
 }
 
 func TestAtomicHeapLayoutDoesNotTracePointerLikePayload(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	child := tsnative_heap_alloc_atomic(16)
-	parent := tsnative_heap_alloc_atomic(unsafe.Sizeof(uintptr(0)))
+	child := heapAllocAtomic(16)
+	parent := heapAllocAtomic(unsafe.Sizeof(uintptr(0)))
 	*(*uintptr)(parent) = uintptr(child)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
 	if !nativeHeapContains(parent) {
 		t.Fatal("rooted atomic parent was reclaimed")
 	}
 	if nativeHeapContains(child) {
 		t.Fatal("atomic pointer-like payload incorrectly retained child")
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestReferenceOffsetHeapLayoutTracesDeclaredSlot(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	child := tsnative_heap_alloc_atomic(16)
+	child := heapAllocAtomic(16)
 	offset := uintptr(unsafe.Sizeof(uintptr(0)))
-	parent := tsnative_heap_alloc_refs(2*unsafe.Sizeof(uintptr(0)), unsafe.Pointer(&offset), 1)
+	parent := heapAllocRefs(2*unsafe.Sizeof(uintptr(0)), unsafe.Pointer(&offset), 1)
 	*(*uintptr)(parent) = uintptr(0xdeadbeef)
 	*(*unsafe.Pointer)(unsafe.Add(parent, offset)) = child
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
 	if !nativeHeapContains(parent) || !nativeHeapContains(child) {
 		t.Fatal("declared reference slot did not retain child")
 	}
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(parent) || nativeHeapContains(child) {
 		t.Fatal("reference-layout graph survived after root removal")
 	}
 }
 
 func TestSettledReferencePromiseRootsResultUntilRelease(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	value := tsnative_heap_alloc_atomic(32)
-	promise := tsnative_promise_resolve_ref(value)
+	value := heapAllocAtomic(32)
+	promise := promiseResolveRef(value)
 	value = nil
-	tsnative_gc_collect()
+	gcCollect()
 	task := lookupNativeTask(uintptr(promise))
 	if task == nil || task.resultRef == nil || !nativeHeapContains(task.resultRef) {
 		t.Fatal("settled Promise.resolve reference result was not rooted")
 	}
-	tsnative_task_release(promise)
-	tsnative_gc_collect()
-	if tsnative_heap_live_allocations() != 0 {
-		t.Fatalf("released Promise.resolve retained %d heap allocations", tsnative_heap_live_allocations())
+	taskRelease(promise)
+	gcCollect()
+	if heapLiveAllocations() != 0 {
+		t.Fatalf("released Promise.resolve retained %d heap allocations", heapLiveAllocations())
 	}
 }
 
 func TestSettledPromiseRetainKeepsReferenceResultAlive(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	value := tsnative_heap_alloc_atomic(32)
-	promise := tsnative_promise_resolve_ref(value)
-	if tsnative_task_retain(promise) != 0 {
+	value := heapAllocAtomic(32)
+	promise := promiseResolveRef(value)
+	if taskRetain(promise) != 0 {
 		t.Fatal("retain settled Promise.resolve failed")
 	}
 	value = nil
-	tsnative_task_release(promise)
-	tsnative_gc_collect()
+	taskRelease(promise)
+	gcCollect()
 	task := lookupNativeTask(uintptr(promise))
 	if task == nil || task.refs.Load() != 1 || task.resultRef == nil || !nativeHeapContains(task.resultRef) {
 		t.Fatal("retained Promise.resolve did not preserve task/result lifetime")
 	}
-	tsnative_task_release(promise)
-	tsnative_gc_collect()
+	taskRelease(promise)
+	gcCollect()
 	if lookupNativeTask(uintptr(promise)) != nil {
 		t.Fatal("final Promise.resolve release did not destroy task storage")
 	}
-	if tsnative_heap_live_allocations() != 0 {
-		t.Fatalf("final retained Promise.resolve release left %d heap allocations", tsnative_heap_live_allocations())
+	if heapLiveAllocations() != 0 {
+		t.Fatalf("final retained Promise.resolve release left %d heap allocations", heapLiveAllocations())
 	}
 }
 
 func TestSettledRejectedPromiseRootsFailureUntilRelease(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	reason := tsnative_heap_alloc_atomic(32)
-	promise := tsnative_promise_reject(reason, 1)
+	reason := heapAllocAtomic(32)
+	promise := promiseReject(reason, 1)
 	reason = nil
-	tsnative_gc_collect()
+	gcCollect()
 	task := lookupNativeTask(uintptr(promise))
 	if task == nil || task.failureRef == nil || !nativeHeapContains(task.failureRef) {
 		t.Fatal("settled Promise.reject failure was not rooted")
 	}
-	tsnative_task_release(promise)
-	tsnative_gc_collect()
-	if tsnative_heap_live_allocations() != 0 {
-		t.Fatalf("released Promise.reject retained %d heap allocations", tsnative_heap_live_allocations())
+	taskRelease(promise)
+	gcCollect()
+	if heapLiveAllocations() != 0 {
+		t.Fatalf("released Promise.reject retained %d heap allocations", heapLiveAllocations())
 	}
 }
 
 func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	rooted := tsnative_heap_alloc(16)
-	garbage := tsnative_heap_alloc(16)
+	rooted := heapAlloc(16)
+	garbage := heapAlloc(16)
 	slot := uintptr(rooted)
 	foreignTID := nativeCurrentThreadID() + 1_000_000
 
@@ -156,7 +156,7 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	shard.Unlock()
 	nativeHeapWorld.RUnlock()
 
-	tsnative_gc_collect()
+	gcCollect()
 
 	after := nativeHeapCollections.Load()
 	garbageLive := nativeBlocks.get(uintptr(garbage)) != nil
@@ -180,7 +180,7 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 		t.Fatal("deferred collection did not retain GC request")
 	}
 
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeHeapContains(rooted) || nativeHeapContains(garbage) {
 		t.Fatal("deferred collection did not run after root stack became safe")
 	}
@@ -188,8 +188,8 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 }
 
 func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	nativeHeap.resetMetrics()
 	nativeHeap.Lock()
@@ -246,8 +246,8 @@ func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
 }
 
 func TestIndependentRootShardsDoNotSerialize(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	first := &nativeRoots.shards[0]
 	second := &nativeRoots.shards[1]
@@ -268,14 +268,14 @@ func TestIndependentRootShardsDoNotSerialize(t *testing.T) {
 }
 
 func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	slot := tsnative_heap_alloc(16)
+	slot := heapAlloc(16)
 	registeredTID := nativeCurrentThreadID()
-	token := tsnative_gc_root_register(unsafe.Pointer(&slot))
+	token := gcRootRegister(unsafe.Pointer(&slot))
 	if token == nil {
 		t.Fatal("persistent root registration failed")
 	}
@@ -284,7 +284,7 @@ func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		tid := nativeCurrentThreadID()
-		tsnative_gc_root_unregister(token)
+		gcRootUnregister(token)
 		unregisteredTID <- tid
 	}()
 	if tid := <-unregisteredTID; tid == registeredTID {
@@ -296,19 +296,19 @@ func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
 }
 
 func TestWorkerAllocationFastPathAvoidsGlobalHeapLock(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	schedulerSetThread(0, 0)
 	defer schedulerSetThread(-1, 0)
 
-	if raw := tsnative_heap_alloc(32); raw == nil {
+	if raw := heapAlloc(32); raw == nil {
 		t.Fatal("warm allocation failed")
 	}
 	nativeHeap.resetMetrics()
 	for i := 0; i < 1000; i++ {
-		if raw := tsnative_heap_alloc(32); raw == nil {
+		if raw := heapAlloc(32); raw == nil {
 			t.Fatalf("fast-path allocation %d failed", i)
 		}
 	}
@@ -318,8 +318,8 @@ func TestWorkerAllocationFastPathAvoidsGlobalHeapLock(t *testing.T) {
 }
 
 func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	nativeHeap.resetMetrics()
 	nativeRoots.resetMetrics()
 	nativeHeapWorld.resetMetrics()
@@ -337,9 +337,9 @@ func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T
 			schedulerSetThread(owner, 0)
 			defer schedulerSetThread(-1, 0)
 			for i := 0; i < allocationsPerWorker; i++ {
-				raw := tsnative_heap_alloc(32)
-				token := tsnative_gc_root_register(unsafe.Pointer(&raw))
-				tsnative_gc_root_unregister(token)
+				raw := heapAlloc(32)
+				token := gcRootRegister(unsafe.Pointer(&raw))
+				gcRootUnregister(token)
 			}
 		}(owner)
 	}
@@ -362,8 +362,8 @@ func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T
 }
 
 func TestConcurrentGCWorldBarrierProfile(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	nativeHeap.resetMetrics()
 	nativeRoots.resetMetrics()
 	nativeHeapWorld.resetMetrics()
@@ -384,7 +384,7 @@ func TestConcurrentGCWorldBarrierProfile(t *testing.T) {
 			defer schedulerSetThread(-1, 0)
 			<-start
 			for i := 0; i < allocationsPerWorker; i++ {
-				_ = tsnative_heap_alloc(32)
+				_ = heapAlloc(32)
 			}
 		}(owner)
 	}
@@ -392,7 +392,7 @@ func TestConcurrentGCWorldBarrierProfile(t *testing.T) {
 	go func() {
 		<-start
 		for i := 0; i < collections; i++ {
-			tsnative_gc_collect()
+			gcCollect()
 			runtime.Gosched()
 		}
 		close(collectorDone)
@@ -416,14 +416,14 @@ func TestConcurrentGCWorldBarrierProfile(t *testing.T) {
 }
 
 func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	rootShard := &nativeRoots.shards[0]
 	rootShard.Lock()
 	allocationDone := make(chan unsafe.Pointer, 1)
 	go func() {
-		allocationDone <- tsnative_heap_alloc(16)
+		allocationDone <- heapAlloc(16)
 	}()
 	var allocated unsafe.Pointer
 	select {
@@ -441,7 +441,7 @@ func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	nativeHeap.Lock()
 	rootDone := make(chan unsafe.Pointer, 1)
 	go func() {
-		rootDone <- tsnative_gc_root_register(unsafe.Pointer(slot))
+		rootDone <- gcRootRegister(unsafe.Pointer(slot))
 	}()
 	var token unsafe.Pointer
 	select {
@@ -454,19 +454,19 @@ func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	if token == nil {
 		t.Fatal("root registration failed while heap lock was held")
 	}
-	tsnative_gc_root_unregister(token)
+	gcRootUnregister(token)
 }
 
 func TestMinorGCReclaimsUnrootedNursery(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	raw := tsnative_heap_alloc(1024)
+	raw := heapAlloc(1024)
 	if raw == nil || !nativeGCMinorRequested.Load() {
 		t.Fatal("nursery threshold did not request minor GC")
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeHeapContains(raw) {
 		t.Fatal("unrooted nursery allocation survived minor GC")
 	}
@@ -479,13 +479,13 @@ func TestMinorGCReclaimsUnrootedNursery(t *testing.T) {
 }
 
 func TestMinorGCPromotesRootedNurseryObject(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	raw := tsnative_heap_alloc(1024)
-	root := tsnative_gc_root_register(unsafe.Pointer(&raw))
-	tsnative_gc_safepoint()
+	raw := heapAlloc(1024)
+	root := gcRootRegister(unsafe.Pointer(&raw))
+	gcSafepoint()
 	block := nativeBlocks.get(uintptr(raw))
 	if block == nil || block.generation != nativeHeapGenerationOld {
 		t.Fatalf("rooted nursery block = %+v, want promoted old block", block)
@@ -496,29 +496,29 @@ func TestMinorGCPromotesRootedNurseryObject(t *testing.T) {
 	if nativeGCPromotedBytes.Load() != 1024 || nativeHeapOldBytes.Load() != 1024 {
 		t.Fatalf("promoted bytes=%d old bytes=%d, want 1024/1024", nativeGCPromotedBytes.Load(), nativeHeapOldBytes.Load())
 	}
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(raw) {
 		t.Fatal("promoted object survived major GC after root release")
 	}
 }
 
 func TestMinorGCRequiresBarrierForOldToYoungReferences(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	parent := tsnative_heap_alloc(16)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
+	parent := heapAlloc(16)
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
 	parentBlock := nativeBlocks.get(uintptr(parent))
 	if parentBlock == nil || parentBlock.generation != nativeHeapGenerationOld {
 		t.Fatal("parent was not old after major GC")
 	}
 
-	child := tsnative_heap_alloc(1024)
+	child := heapAlloc(1024)
 	*(*unsafe.Pointer)(parent) = child
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeBlocks.get(uintptr(child)) != nil {
 		t.Fatal("raw old-to-young store survived minor GC without a remembered-set barrier")
 	}
@@ -529,22 +529,22 @@ func TestMinorGCRequiresBarrierForOldToYoungReferences(t *testing.T) {
 		t.Fatal("rooted old parent was reclaimed by minor GC")
 	}
 
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(parent) {
 		t.Fatal("old parent survived major GC after root release")
 	}
 }
 
 func TestGCStoreRefRecordsOldToYoungParent(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	parent := tsnative_heap_alloc(16)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
-	child := tsnative_heap_alloc(1024)
+	parent := heapAlloc(16)
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
+	child := heapAlloc(1024)
 	nativeGCStoreRef(parent, parent, child)
 	if got := nativeRemembered.count(); got != 1 {
 		t.Fatalf("remembered parents = %d, want 1", got)
@@ -552,7 +552,7 @@ func TestGCStoreRefRecordsOldToYoungParent(t *testing.T) {
 	if nativeRemembered.stores.Load() != 1 || nativeRemembered.records.Load() != 1 {
 		t.Fatalf("barrier stores=%d records=%d, want 1/1", nativeRemembered.stores.Load(), nativeRemembered.records.Load())
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	childBlock := nativeBlocks.get(uintptr(child))
 	if childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
 		t.Fatalf("remembered child = %+v, want promoted old block", childBlock)
@@ -560,18 +560,18 @@ func TestGCStoreRefRecordsOldToYoungParent(t *testing.T) {
 	if got := nativeRemembered.count(); got != 0 {
 		t.Fatalf("remembered parents after minor GC = %d, want 0", got)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestGCStoreRefSlotResolvesOldParentInterior(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	parent := tsnative_heap_alloc(32)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
-	child := tsnative_heap_alloc(1024)
+	parent := heapAlloc(32)
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
+	child := heapAlloc(1024)
 	slot := unsafe.Add(parent, unsafe.Sizeof(uintptr(0)))
 	nativeGCStoreRefSlot(slot, child)
 	if got := nativeRemembered.count(); got != 1 {
@@ -580,40 +580,40 @@ func TestGCStoreRefSlotResolvesOldParentInterior(t *testing.T) {
 	if stored := *(*unsafe.Pointer)(slot); stored != child {
 		t.Fatalf("interior slot child = %p, want %p", stored, child)
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if childBlock := nativeBlocks.get(uintptr(child)); childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
 		t.Fatalf("interior-slot child = %+v, want promoted old block", childBlock)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestGCStoreRefResolvesInteriorYoungChild(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
 
-	parent := tsnative_heap_alloc(16)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
-	tsnative_gc_collect()
-	child := tsnative_heap_alloc(1024)
+	parent := heapAlloc(16)
+	root := gcRootRegister(unsafe.Pointer(&parent))
+	gcCollect()
+	child := heapAlloc(1024)
 	interior := unsafe.Add(child, unsafe.Sizeof(uintptr(0)))
 	nativeGCStoreRef(parent, parent, interior)
 	if got := nativeRemembered.count(); got != 1 {
 		t.Fatalf("remembered parents = %d, want 1 for interior young child", got)
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if block := nativeBlocks.get(uintptr(child)); block == nil || block.generation != nativeHeapGenerationOld {
 		t.Fatalf("interior-referenced child = %+v, want promoted old block", block)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestGCStoreRefSkipsYoungParent(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	parent := tsnative_heap_alloc(16)
-	child := tsnative_heap_alloc(16)
+	parent := heapAlloc(16)
+	child := heapAlloc(16)
 	nativeGCStoreRef(parent, parent, child)
 	if got := nativeRemembered.count(); got != 0 {
 		t.Fatalf("young parent entered remembered set: %d", got)
@@ -624,20 +624,20 @@ func TestGCStoreRefSkipsYoungParent(t *testing.T) {
 }
 
 func TestPromotedOldBytesTriggerMajorCadence(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "524288")
 
-	first := tsnative_heap_alloc(524288)
-	firstRoot := tsnative_gc_root_register(unsafe.Pointer(&first))
-	tsnative_gc_safepoint()
+	first := heapAlloc(524288)
+	firstRoot := gcRootRegister(unsafe.Pointer(&first))
+	gcSafepoint()
 	if nativeHeapOldBytes.Load() != 524288 || nativeGCMajorRequested.Load() {
 		t.Fatalf("after first promotion old=%d majorRequested=%v, want 524288/false", nativeHeapOldBytes.Load(), nativeGCMajorRequested.Load())
 	}
 
-	second := tsnative_heap_alloc(524288)
-	secondRoot := tsnative_gc_root_register(unsafe.Pointer(&second))
-	tsnative_gc_safepoint()
+	second := heapAlloc(524288)
+	secondRoot := gcRootRegister(unsafe.Pointer(&second))
+	gcSafepoint()
 	if nativeGCMinorCollections.Load() != 2 || nativeGCMajorCollections.Load() != 0 {
 		t.Fatalf("after second promotion minor=%d major=%d, want 2/0", nativeGCMinorCollections.Load(), nativeGCMajorCollections.Load())
 	}
@@ -645,27 +645,27 @@ func TestPromotedOldBytesTriggerMajorCadence(t *testing.T) {
 		t.Fatalf("old=%d majorRequested=%v, want %d/true", nativeHeapOldBytes.Load(), nativeGCMajorRequested.Load(), initialMajorGCThreshold)
 	}
 
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeGCMajorCollections.Load() != 1 || nativeGCMajorRequested.Load() {
 		t.Fatalf("major collections=%d requested=%v, want 1/false", nativeGCMajorCollections.Load(), nativeGCMajorRequested.Load())
 	}
 	if nativeHeapOldBytes.Load() != initialMajorGCThreshold {
 		t.Fatalf("old bytes after rooted major = %d, want %d", nativeHeapOldBytes.Load(), initialMajorGCThreshold)
 	}
-	tsnative_gc_root_unregister(secondRoot)
-	tsnative_gc_root_unregister(firstRoot)
+	gcRootUnregister(secondRoot)
+	gcRootUnregister(firstRoot)
 }
 
 func TestAggregateYoungPressureDoesNotTriggerMajor(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "262144")
 
 	for owner := 0; owner < 8; owner++ {
 		schedulerSetThread(owner, 0)
-		_ = tsnative_heap_alloc(131072)
+		_ = heapAlloc(131072)
 	}
 	if got := nativeHeapBytes.Load(); got != 8*131072 {
 		t.Fatalf("young live bytes = %d, want %d", got, 8*131072)
@@ -678,14 +678,14 @@ func TestAggregateYoungPressureDoesNotTriggerMajor(t *testing.T) {
 	}
 
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(131072)
+	_ = heapAlloc(131072)
 	if !nativeGCMinorRequested.Load() {
 		t.Fatal("worker-local nursery bound did not request minor GC")
 	}
 	if nativeGCMajorRequested.Load() {
 		t.Fatal("aggregate young pressure incorrectly requested major GC")
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	schedulerSetThread(-1, 0)
 	if nativeGCMinorCollections.Load() != 1 || nativeGCMajorCollections.Load() != 0 {
 		t.Fatalf("collections minor=%d major=%d, want 1/0", nativeGCMinorCollections.Load(), nativeGCMajorCollections.Load())
@@ -696,29 +696,29 @@ func TestAggregateYoungPressureDoesNotTriggerMajor(t *testing.T) {
 }
 
 func TestMinorGCScansOnlyNurseryMembership(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
 
 	const oldChildren = 1024
 	wordSize := unsafe.Sizeof(uintptr(0))
-	parent := tsnative_heap_alloc(uintptr(oldChildren) * wordSize)
-	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	parent := heapAlloc(uintptr(oldChildren) * wordSize)
+	root := gcRootRegister(unsafe.Pointer(&parent))
 	for i := 0; i < oldChildren; i++ {
-		child := tsnative_heap_alloc(16)
+		child := heapAlloc(16)
 		*(*unsafe.Pointer)(unsafe.Add(parent, uintptr(i)*wordSize)) = child
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	if got := nativeNurseryBlockCount(); got != 0 {
 		t.Fatalf("nursery blocks after major = %d, want 0", got)
 	}
 	nativeGCMinorNurseryScans.Store(0)
 
-	young := tsnative_heap_alloc(65536)
+	young := heapAlloc(65536)
 	if got := nativeNurseryBlockCount(); got != 1 {
 		t.Fatalf("nursery blocks before minor = %d, want 1", got)
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeHeapContains(young) {
 		t.Fatal("unrooted indexed nursery block survived minor GC")
 	}
@@ -728,30 +728,30 @@ func TestMinorGCScansOnlyNurseryMembership(t *testing.T) {
 	if got := nativeNurseryBlockCount(); got != 0 {
 		t.Fatalf("nursery blocks after minor = %d, want 0", got)
 	}
-	if got := tsnative_heap_live_allocations(); got != oldChildren+1 {
+	if got := heapLiveAllocations(); got != oldChildren+1 {
 		t.Fatalf("live allocations after minor = %d, want %d old blocks", got, oldChildren+1)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestMinorGCDrainsAllWorkerNurseryBuckets(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
 
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	schedulerSetThread(1, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	if got := nativeNurseryBlockCount(); got != 3 {
 		t.Fatalf("nursery blocks across workers = %d, want 3", got)
 	}
 	nativeGCMinorNurseryScans.Store(0)
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	schedulerSetThread(-1, 0)
 	if got := nativeGCMinorNurseryScans.Load(); got != 3 {
 		t.Fatalf("minor nursery scans = %d, want all 3 worker-local blocks", got)
@@ -759,27 +759,27 @@ func TestMinorGCDrainsAllWorkerNurseryBuckets(t *testing.T) {
 	if got := nativeNurseryBlockCount(); got != 0 {
 		t.Fatalf("nursery blocks after cross-worker minor = %d, want 0", got)
 	}
-	if got := tsnative_heap_live_allocations(); got != 0 {
+	if got := heapLiveAllocations(); got != 0 {
 		t.Fatalf("live allocations after cross-worker minor = %d, want 0", got)
 	}
 }
 
 func TestNurseryThresholdIsBoundedPerWorker(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
 
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	schedulerSetThread(1, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	if nativeGCMinorRequested.Load() {
 		t.Fatal("separate worker nurseries incorrectly shared their threshold")
 	}
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(32768)
+	_ = heapAlloc(32768)
 	if !nativeGCMinorRequested.Load() {
 		t.Fatal("worker-local nursery did not request minor GC at its bound")
 	}
@@ -787,20 +787,20 @@ func TestNurseryThresholdIsBoundedPerWorker(t *testing.T) {
 }
 
 func TestAutomaticNurseryCollectionsDelayMajorGC(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
 
 	roots := make([]unsafe.Pointer, 8)
-	frame := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	frame := gcEnter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
 	for i := range roots {
-		roots[i] = tsnative_heap_alloc(65536)
+		roots[i] = heapAlloc(65536)
 		if !nativeGCMinorRequested.Load() {
 			t.Fatalf("cycle %d did not request minor GC", i)
 		}
-		tsnative_gc_safepoint()
+		gcSafepoint()
 		if got := nativeGCMinorCollections.Load(); got != uint64(i+1) {
 			t.Fatalf("minor collections after cycle %d = %d, want %d", i, got, i+1)
 		}
@@ -811,8 +811,8 @@ func TestAutomaticNurseryCollectionsDelayMajorGC(t *testing.T) {
 	if got := nativeHeapBytes.Load(); got != 8*65536 {
 		t.Fatalf("live bytes after nursery cycles = %d, want %d", got, 8*65536)
 	}
-	tsnative_gc_leave(frame)
-	tsnative_gc_collect()
+	gcLeave(frame)
+	gcCollect()
 	if nativeGCMajorCollections.Load() != 1 || nativeHeapAllocations.Load() != 0 {
 		t.Fatalf("final major collections=%d live=%d, want 1/0", nativeGCMajorCollections.Load(), nativeHeapAllocations.Load())
 	}
@@ -820,17 +820,17 @@ func TestAutomaticNurseryCollectionsDelayMajorGC(t *testing.T) {
 }
 
 func TestHeapThresholdRequestsDeferredGC(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	raw := tsnative_heap_alloc(initialGCThreshold)
+	raw := heapAlloc(initialGCThreshold)
 	if raw == nil {
 		t.Fatal("threshold allocation failed")
 	}
 	if !nativeGCRequested.Load() {
 		t.Fatal("heap threshold did not request GC")
 	}
-	tsnative_gc_safepoint()
+	gcSafepoint()
 	if nativeGCRequested.Load() {
 		t.Fatal("safe collection left request pending")
 	}
@@ -840,11 +840,11 @@ func TestHeapThresholdRequestsDeferredGC(t *testing.T) {
 }
 
 func TestParkedTaskStateRemainsExplicitlyRooted(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	payload := tsnative_heap_alloc(16)
-	state := tsnative_heap_alloc(unsafe.Sizeof(uintptr(0)))
+	payload := heapAlloc(16)
+	state := heapAlloc(unsafe.Sizeof(uintptr(0)))
 	*(*uintptr)(state) = uintptr(payload)
 	var entry byte
 	task := createNativeTask(unsafe.Pointer(&entry), state, nativeTaskResultVoid)
@@ -853,26 +853,26 @@ func TestParkedTaskStateRemainsExplicitlyRooted(t *testing.T) {
 	}
 	task.status.Store(nativeTaskWaiting)
 
-	tsnative_gc_collect()
+	gcCollect()
 	if !nativeHeapContains(state) || !nativeHeapContains(payload) {
 		t.Fatal("parked task state graph was not preserved by explicit task root")
 	}
 
 	destroyNativeTaskStorage(task)
-	tsnative_gc_collect()
+	gcCollect()
 	if nativeHeapContains(state) || nativeHeapContains(payload) {
 		t.Fatal("task state graph survived after task root destruction")
 	}
 }
 
 func TestSleepingTaskKeepsStateGraphRooted(t *testing.T) {
-	tsnative_heap_shutdown()
-	tsnative_timer_shutdown()
-	defer tsnative_heap_shutdown()
-	defer tsnative_timer_shutdown()
+	heapShutdown()
+	timerShutdown()
+	defer heapShutdown()
+	defer timerShutdown()
 
-	payload := tsnative_heap_alloc(16)
-	state := tsnative_heap_alloc(unsafe.Sizeof(uintptr(0)))
+	payload := heapAlloc(16)
+	state := heapAlloc(unsafe.Sizeof(uintptr(0)))
 	*(*uintptr)(state) = uintptr(payload)
 	var entry byte
 	task := createNativeTask(unsafe.Pointer(&entry), state, nativeTaskResultVoid)
@@ -884,32 +884,32 @@ func TestSleepingTaskKeepsStateGraphRooted(t *testing.T) {
 		t.Fatal("timer scheduling failed")
 	}
 
-	tsnative_gc_collect()
+	gcCollect()
 	if !nativeHeapContains(state) || !nativeHeapContains(payload) {
 		t.Fatal("sleeping task state graph was not preserved")
 	}
 
-	tsnative_timer_shutdown()
+	timerShutdown()
 	destroyNativeTaskStorage(task)
-	tsnative_gc_collect()
+	gcCollect()
 	if nativeHeapContains(state) || nativeHeapContains(payload) {
 		t.Fatal("sleeping task graph survived after timer/task release")
 	}
 }
 
 func TestHeapReusesWorkerLocalCachedBlocks(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	schedulerSetThread(0, 0)
 	defer schedulerSetThread(-1, 0)
 
-	first := tsnative_heap_alloc(32)
+	first := heapAlloc(32)
 	if first == nil {
 		t.Fatal("first allocation failed")
 	}
-	tsnative_gc_collect()
-	second := tsnative_heap_alloc(32)
+	gcCollect()
+	second := heapAlloc(32)
 	if second != first {
 		t.Fatalf("worker-local cache did not reuse block: first=%p second=%p", first, second)
 	}
@@ -921,14 +921,14 @@ func TestHeapReusesWorkerLocalCachedBlocks(t *testing.T) {
 }
 
 func TestHeapShutdownReclaimsCachedBlocks(t *testing.T) {
-	tsnative_heap_shutdown()
+	heapShutdown()
 
 	schedulerSetThread(0, 0)
-	first := tsnative_heap_alloc(32)
+	first := heapAlloc(32)
 	if first == nil {
 		t.Fatal("allocation failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	nativeHeap.Lock()
 	spanCount := len(nativeHeap.spans)
 	allocator := nativeAllocatorForOwner(0)
@@ -938,7 +938,7 @@ func TestHeapShutdownReclaimsCachedBlocks(t *testing.T) {
 		t.Fatalf("dead block was not returned to its span: spans=%d span=%+v", spanCount, span)
 	}
 
-	tsnative_heap_shutdown()
+	heapShutdown()
 	schedulerSetThread(-1, 0)
 	nativeHeap.Lock()
 	remaining := len(nativeHeap.spans)
@@ -952,13 +952,13 @@ func TestHeapShutdownReclaimsCachedBlocks(t *testing.T) {
 }
 
 func TestHeapFinalizerPinsSpanSlotUntilCompletion(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	schedulerSetThread(0, 0)
 	defer schedulerSetThread(-1, 0)
 
-	raw := tsnative_heap_alloc(32)
+	raw := heapAlloc(32)
 	if raw == nil {
 		t.Fatal("allocation failed")
 	}
@@ -967,9 +967,9 @@ func TestHeapFinalizerPinsSpanSlotUntilCompletion(t *testing.T) {
 	var observed byte
 	registerNativeHeapFinalizer(raw, func() {
 		observed = *(*byte)(raw)
-		replacement = tsnative_heap_alloc(32)
+		replacement = heapAlloc(32)
 	})
-	tsnative_gc_collect()
+	gcCollect()
 	if observed != 0x5a {
 		t.Fatalf("finalizer observed overwritten slot: %#x", observed)
 	}
@@ -979,15 +979,15 @@ func TestHeapFinalizerPinsSpanSlotUntilCompletion(t *testing.T) {
 }
 
 func TestSmallAllocationsShareWorkerSpan(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	schedulerSetThread(0, 0)
 	defer schedulerSetThread(-1, 0)
 
 	for index := 0; index < 1000; index++ {
-		if raw := tsnative_heap_alloc(32); raw == nil {
+		if raw := heapAlloc(32); raw == nil {
 			t.Fatalf("allocation %d failed", index)
 		}
 	}
@@ -1002,15 +1002,15 @@ func TestSmallAllocationsShareWorkerSpan(t *testing.T) {
 }
 
 func TestWorkerAllocatorsUseDistinctActiveSpans(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(32)
+	_ = heapAlloc(32)
 	schedulerSetThread(1, 0)
-	_ = tsnative_heap_alloc(32)
+	_ = heapAlloc(32)
 	schedulerSetThread(-1, 0)
 
 	nativeHeap.Lock()
@@ -1024,15 +1024,15 @@ func TestWorkerAllocatorsUseDistinctActiveSpans(t *testing.T) {
 }
 
 func TestHeapShutdownFinalizesBufferedReferenceChannelRoots(t *testing.T) {
-	tsnative_heap_shutdown()
+	heapShutdown()
 
 	channel := newNativeRefChannel(1)
-	payload := tsnative_heap_alloc(16)
-	if tsnative_channel_ref_try_send(channel, payload) != 1 {
+	payload := heapAlloc(16)
+	if channelRefTrySend(channel, payload) != 1 {
 		t.Fatal("reference channel send failed")
 	}
 
-	tsnative_heap_shutdown()
+	heapShutdown()
 	if lookupNativeRefChannel(channel) != nil {
 		t.Fatal("reference channel state survived heap shutdown")
 	}
@@ -1046,14 +1046,14 @@ func TestHeapShutdownFinalizesBufferedReferenceChannelRoots(t *testing.T) {
 }
 
 func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	schedulerSetThread(0, 0)
 	for index := uint32(0); index <= uint32(nativeSpanSize/2048); index++ {
-		if raw := tsnative_heap_alloc(2048); raw == nil {
+		if raw := heapAlloc(2048); raw == nil {
 			t.Fatalf("allocation %d failed", index)
 		}
 	}
@@ -1079,7 +1079,7 @@ func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
 	nativeHeap.Unlock()
 
 	schedulerSetThread(1, 0)
-	tsnative_gc_collect()
+	gcCollect()
 	nativeHeap.Lock()
 	if pageSpan.owner != 0 || nativeHeap.spanTransfers != transfersBefore {
 		nativeHeap.Unlock()
@@ -1087,9 +1087,9 @@ func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
 	}
 	nativeHeap.Unlock()
 	schedulerSetThread(0, 0)
-	_ = tsnative_heap_alloc(2048)
+	_ = heapAlloc(2048)
 	schedulerSetThread(1, 0)
-	_ = tsnative_heap_alloc(2048)
+	_ = heapAlloc(2048)
 
 	nativeHeap.Lock()
 	transfersAfter := nativeHeap.spanTransfers
@@ -1105,24 +1105,24 @@ func TestAllocatorPageMetadataAndRemoteSpanReuse(t *testing.T) {
 }
 
 func TestHeapPageMetadataKeepsInteriorPointerAlive(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
-	raw := tsnative_heap_alloc(32)
+	raw := heapAlloc(32)
 	if raw == nil {
 		t.Fatal("allocation failed")
 	}
 	interior := unsafe.Add(raw, 7)
-	root := tsnative_gc_root_register(unsafe.Pointer(&interior))
+	root := gcRootRegister(unsafe.Pointer(&interior))
 	if root == nil {
 		t.Fatal("interior root registration failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	if !nativeHeapContains(raw) {
 		t.Fatal("page metadata failed to resolve interior pointer")
 	}
-	tsnative_gc_root_unregister(root)
-	tsnative_gc_collect()
+	gcRootUnregister(root)
+	gcCollect()
 	if nativeHeapContains(raw) {
 		t.Fatal("allocation survived after interior root release")
 	}
@@ -1131,30 +1131,30 @@ func TestHeapPageMetadataKeepsInteriorPointerAlive(t *testing.T) {
 func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	schedulerSetThread(0, 0)
 	classIndex := nativeSizeClassIndex(32)
 	capacity := int(nativeSpanSize / nativeSizeClasses[classIndex])
 	for i := 0; i <= capacity; i++ {
-		if tsnative_heap_alloc(32) == nil {
+		if heapAlloc(32) == nil {
 			t.Fatalf("allocation %d failed", i)
 		}
 	}
 
 	schedulerSetThread(1, 0)
-	tsnative_gc_collect()
+	gcCollect()
 	if got := nativeAllocatorRemoteFrees(); got == 0 {
 		t.Fatal("cross-worker collection recorded no remote frees")
 	}
 	before := nativeAllocatorSpanTransfers()
 	schedulerSetThread(0, 0)
-	if tsnative_heap_alloc(32) == nil {
+	if heapAlloc(32) == nil {
 		t.Fatal("worker 0 remote-free drain allocation failed")
 	}
 	schedulerSetThread(1, 0)
-	if tsnative_heap_alloc(32) == nil {
+	if heapAlloc(32) == nil {
 		t.Fatal("worker 1 transfer allocation failed")
 	}
 	if got := nativeAllocatorSpanTransfers(); got <= before {
@@ -1164,54 +1164,54 @@ func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
 }
 
 func TestGCIterativeMarkHandlesDeepHeapGraph(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	const nodes = 20000
 	var head unsafe.Pointer
 	for i := 0; i < nodes; i++ {
-		node := tsnative_heap_alloc(16)
+		node := heapAlloc(16)
 		if node == nil {
 			t.Fatalf("node allocation %d failed", i)
 		}
 		*(*unsafe.Pointer)(node) = head
 		head = node
 	}
-	root := tsnative_gc_root_register(unsafe.Pointer(&head))
+	root := gcRootRegister(unsafe.Pointer(&head))
 	if root == nil {
 		t.Fatal("deep graph root registration failed")
 	}
-	tsnative_gc_collect()
-	if got := tsnative_heap_live_allocations(); got != nodes {
+	gcCollect()
+	if got := heapLiveAllocations(); got != nodes {
 		t.Fatalf("live allocations = %d, want %d", got, nodes)
 	}
 	work, _ := nativeGCMarkWork()
 	if work < nodes {
 		t.Fatalf("mark work = %d, want at least %d", work, nodes)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestGCMarkQueueSwitchesAcrossSpanOwners(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	schedulerSetThread(0, 0)
-	parent := tsnative_heap_alloc(16)
+	parent := heapAlloc(16)
 	schedulerSetThread(1, 0)
-	child := tsnative_heap_alloc(16)
+	child := heapAlloc(16)
 	if parent == nil || child == nil {
 		t.Fatal("cross-owner graph allocation failed")
 	}
 	*(*unsafe.Pointer)(parent) = child
 	rooted := parent
-	root := tsnative_gc_root_register(unsafe.Pointer(&rooted))
+	root := gcRootRegister(unsafe.Pointer(&rooted))
 	if root == nil {
 		t.Fatal("cross-owner root registration failed")
 	}
 	_, before := nativeGCMarkWork()
 	schedulerSetThread(0, 0)
-	tsnative_gc_collect()
+	gcCollect()
 	_, after := nativeGCMarkWork()
 	if after <= before {
 		t.Fatalf("mark queue switches = %d, want > %d", after, before)
@@ -1219,13 +1219,13 @@ func TestGCMarkQueueSwitchesAcrossSpanOwners(t *testing.T) {
 	if !nativeHeapContains(parent) || !nativeHeapContains(child) {
 		t.Fatal("cross-owner graph was not preserved")
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 	schedulerSetThread(-1, 0)
 }
 
 func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	previousProcs := runtime.GOMAXPROCS(4)
@@ -1236,16 +1236,16 @@ func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
 	const rootsCount = 1024
 	roots := make([]unsafe.Pointer, rootsCount)
 	for i := range roots {
-		roots[i] = tsnative_heap_alloc(2048)
+		roots[i] = heapAlloc(2048)
 		if roots[i] == nil {
 			t.Fatalf("root allocation %d failed", i)
 		}
 	}
-	token := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	token := gcEnter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
 	if token == nil {
 		t.Fatal("root frame allocation failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	workers, pages := nativeGCMarkAssist()
 	if workers != 3 {
 		t.Fatalf("GC assist workers = %d, want 3", workers)
@@ -1253,12 +1253,12 @@ func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
 	if pages == 0 {
 		t.Fatal("parallel GC helpers processed no mark pages")
 	}
-	if got := tsnative_heap_live_allocations(); got != rootsCount {
+	if got := heapLiveAllocations(); got != rootsCount {
 		t.Fatalf("live allocations = %d, want %d", got, rootsCount)
 	}
-	tsnative_gc_leave(token)
-	tsnative_gc_collect()
-	if got := tsnative_heap_live_allocations(); got != 0 {
+	gcLeave(token)
+	gcCollect()
+	if got := heapLiveAllocations(); got != 0 {
 		t.Fatalf("live allocations after root release = %d, want 0", got)
 	}
 	runtime.KeepAlive(roots)
@@ -1267,16 +1267,16 @@ func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
 func TestGCParallelMarkReusesIdleSchedulerWorkers(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	tsnative_scheduler_shutdown()
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
-	defer tsnative_scheduler_shutdown()
+	schedulerShutdown()
+	heapShutdown()
+	defer heapShutdown()
+	defer schedulerShutdown()
 	previousProcs := runtime.GOMAXPROCS(4)
 	defer runtime.GOMAXPROCS(previousProcs)
 	t.Setenv("TSNATIVE_WORKERS", "4")
 	t.Setenv("TSNATIVE_GC_MARK_WORKERS", "4")
 
-	if tsnative_scheduler_init() != 0 {
+	if schedulerInit() != 0 {
 		t.Fatal("scheduler init failed")
 	}
 	deadline := time.Now().Add(time.Second)
@@ -1291,16 +1291,16 @@ func TestGCParallelMarkReusesIdleSchedulerWorkers(t *testing.T) {
 	const rootsCount = 1024
 	roots := make([]unsafe.Pointer, rootsCount)
 	for i := range roots {
-		roots[i] = tsnative_heap_alloc(2048)
+		roots[i] = heapAlloc(2048)
 		if roots[i] == nil {
 			t.Fatalf("root allocation %d failed", i)
 		}
 	}
-	token := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	token := gcEnter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
 	if token == nil {
 		t.Fatal("root frame allocation failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	donors, pages := nativeGCMarkIdleAssist()
 	if donors != 3 {
 		t.Fatalf("idle GC donor workers = %d, want 3", donors)
@@ -1308,59 +1308,59 @@ func TestGCParallelMarkReusesIdleSchedulerWorkers(t *testing.T) {
 	if pages == 0 {
 		t.Fatal("idle scheduler GC donors processed no mark pages")
 	}
-	if got := tsnative_heap_live_allocations(); got != rootsCount {
+	if got := heapLiveAllocations(); got != rootsCount {
 		t.Fatalf("live allocations = %d, want %d", got, rootsCount)
 	}
-	tsnative_gc_leave(token)
-	tsnative_gc_collect()
-	if got := tsnative_heap_live_allocations(); got != 0 {
+	gcLeave(token)
+	gcCollect()
+	if got := heapLiveAllocations(); got != 0 {
 		t.Fatalf("live allocations after root release = %d, want 0", got)
 	}
 	runtime.KeepAlive(roots)
 }
 
 func TestGCMarkBatchesBlocksByPage(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	schedulerSetThread(0, 0)
 	defer schedulerSetThread(-1, 0)
-	container := tsnative_heap_alloc(128)
+	container := heapAlloc(128)
 	if container == nil {
 		t.Fatal("container allocation failed")
 	}
 	for i := 0; i < 10; i++ {
-		child := tsnative_heap_alloc(16)
+		child := heapAlloc(16)
 		if child == nil {
 			t.Fatalf("child allocation %d failed", i)
 		}
 		*(*unsafe.Pointer)(unsafe.Add(container, uintptr(i)*unsafe.Sizeof(uintptr(0)))) = child
 	}
 	rooted := container
-	root := tsnative_gc_root_register(unsafe.Pointer(&rooted))
+	root := gcRootRegister(unsafe.Pointer(&rooted))
 	if root == nil {
 		t.Fatal("page batch root registration failed")
 	}
-	tsnative_gc_collect()
+	gcCollect()
 	work, _ := nativeGCMarkWork()
 	pages := nativeGCMarkPages()
 	if work < 11 || pages == 0 || pages >= work {
 		t.Fatalf("mark batching work=%d pages=%d", work, pages)
 	}
-	tsnative_gc_root_unregister(root)
+	gcRootUnregister(root)
 }
 
 func TestUnresolvedThenablePromiseLastReleaseDoesNotBlock(t *testing.T) {
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
-	promise := tsnative_promise_thenable_new(1)
+	heapShutdown()
+	defer heapShutdown()
+	promise := promiseThenableNew(1)
 	if promise == nil {
 		t.Fatal("thenable Promise allocation failed")
 	}
 	if task := lookupNativeTask(uintptr(promise)); task == nil || task.status.Load() != nativeTaskWaiting {
 		t.Fatal("thenable Promise was not created pending")
 	}
-	tsnative_task_release(promise)
+	taskRelease(promise)
 	if task := lookupNativeTask(uintptr(promise)); task != nil {
 		t.Fatal("unresolved thenable Promise survived final release")
 	}

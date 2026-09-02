@@ -9,25 +9,25 @@ import (
 func benchmarkTraceLayout(b *testing.B, atomicLayout bool) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	tsnative_heap_shutdown()
-	defer tsnative_heap_shutdown()
+	heapShutdown()
+	defer heapShutdown()
 
 	const blocks = 1024
 	roots := make([]unsafe.Pointer, blocks)
 	for i := range roots {
 		if atomicLayout {
-			roots[i] = tsnative_heap_alloc_atomic(2048)
+			roots[i] = heapAllocAtomic(2048)
 		} else {
-			roots[i] = tsnative_heap_alloc(2048)
+			roots[i] = heapAlloc(2048)
 		}
 	}
-	frame := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
-	defer tsnative_gc_leave(frame)
-	tsnative_gc_collect()
+	frame := gcEnter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	defer gcLeave(frame)
+	gcCollect()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tsnative_gc_collect()
+		gcCollect()
 	}
 	b.StopTimer()
 	runtime.KeepAlive(roots)

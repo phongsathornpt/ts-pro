@@ -128,15 +128,15 @@ func nativeGCStoreRef(parent, slot, child unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-func tsnative_gc_store_ref(parent, slot, child unsafe.Pointer) {
+func gcStoreRef(parent, slot, child unsafe.Pointer) {
 	nativeGCStoreRef(parent, slot, child)
 }
 
-func tsnative_gc_store_ref_slot(slot, child unsafe.Pointer) {
+func gcStoreRefSlot(slot, child unsafe.Pointer) {
 	nativeGCStoreRefSlot(slot, child)
 }
 
-func tsnative_gc_remembered_parents() uintptr {
+func gcRememberedParents() uintptr {
 	return uintptr(nativeRemembered.count())
 }
 func resetNativeRememberedState() {
@@ -145,10 +145,10 @@ func resetNativeRememberedState() {
 	nativeRemembered.records.Store(0)
 }
 
-func tsnative_gc_barrier_stores() uint64 {
+func gcBarrierStores() uint64 {
 	return nativeRemembered.stores.Load()
 }
 
-func tsnative_gc_remembered_records() uint64 {
+func gcRememberedRecords() uint64 {
 	return nativeRemembered.records.Load()
 }

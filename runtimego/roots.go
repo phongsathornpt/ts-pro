@@ -184,7 +184,7 @@ func (state *nativeRootState) shutdown() [][]byte {
 	return pages
 }
 
-func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
+func gcEnter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
 	nativeHeapWorld.RLock()
 	tid := nativeCurrentThreadID()
 	index := nativeRootShardIndexForThread(tid)
@@ -197,7 +197,7 @@ func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
 	return token
 }
 
-func tsnative_gc_leave(raw unsafe.Pointer) {
+func gcLeave(raw unsafe.Pointer) {
 	nativeHeapWorld.RLock()
 	token := uintptr(raw)
 	tid := nativeCurrentThreadID()
@@ -223,7 +223,7 @@ func tsnative_gc_leave(raw unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
+func gcRootRegister(slot unsafe.Pointer) unsafe.Pointer {
 	if slot == nil {
 		return nil
 	}
@@ -236,7 +236,7 @@ func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
 	return token
 }
 
-func tsnative_gc_root_unregister(raw unsafe.Pointer) {
+func gcRootUnregister(raw unsafe.Pointer) {
 	if raw == nil {
 		return
 	}
@@ -257,13 +257,13 @@ func tsnative_gc_root_unregister(raw unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-func tsnative_gc_handoff_begin() {
+func gcHandoffBegin() {
 	nativeHeapWorld.RLock()
 	nativeRoots.handoffs.Add(1)
 	nativeHeapWorld.RUnlock()
 }
 
-func tsnative_gc_handoff_end() {
+func gcHandoffEnd() {
 	nativeHeapWorld.RLock()
 	for {
 		count := nativeRoots.handoffs.Load()

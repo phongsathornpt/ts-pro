@@ -71,7 +71,7 @@ func taskGroupSpawn(raw, entry, state unsafe.Pointer, kind int32) unsafe.Pointer
 	if _, ok := taskGroupState(raw); !ok || entry == nil {
 		return nil
 	}
-	if tsnative_scheduler_init() != 0 {
+	if schedulerInit() != 0 {
 		return nil
 	}
 	task := createNativeTask(entry, state, kind)
@@ -82,7 +82,7 @@ func taskGroupSpawn(raw, entry, state unsafe.Pointer, kind int32) unsafe.Pointer
 		destroyNativeTaskStorage(task)
 		return nil
 	}
-	if tsnative_scheduler_submit(task.handle) != 0 {
+	if schedulerSubmit(task.handle) != 0 {
 		taskGroupDetach(nativeTaskKey(task))
 		destroyNativeTaskStorage(task)
 		return nil
@@ -90,7 +90,7 @@ func taskGroupSpawn(raw, entry, state unsafe.Pointer, kind int32) unsafe.Pointer
 	return task.handle
 }
 
-func tsnative_task_group_new() unsafe.Pointer {
+func taskGroupNew() unsafe.Pointer {
 	handle := allocNativeHandle()
 	if handle == nil {
 		return nil
@@ -109,23 +109,23 @@ func taskGroupSpawnOrAbort(group, entry, state unsafe.Pointer, kind int32) unsaf
 	return task
 }
 
-func tsnative_task_group_spawn_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
+func taskGroupSpawnVoidOrAbort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultVoid)
 }
 
-func tsnative_task_group_spawn_f64_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
+func taskGroupSpawnF64OrAbort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultF64)
 }
 
-func tsnative_task_group_spawn_bool_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
+func taskGroupSpawnBoolOrAbort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultBool)
 }
 
-func tsnative_task_group_spawn_ref_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
+func taskGroupSpawnRefOrAbort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultRef)
 }
 
-func tsnative_task_group_cancel(raw unsafe.Pointer) int32 {
+func taskGroupCancel(raw unsafe.Pointer) int32 {
 	group, ok := taskGroupState(raw)
 	if !ok {
 		return -1
@@ -144,7 +144,7 @@ func tsnative_task_group_cancel(raw unsafe.Pointer) int32 {
 	return 0
 }
 
-func tsnative_task_group_join_release(raw unsafe.Pointer) int32 {
+func taskGroupJoinRelease(raw unsafe.Pointer) int32 {
 	group, ok := taskGroupState(raw)
 	if !ok {
 		return -1

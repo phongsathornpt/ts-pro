@@ -118,73 +118,73 @@ func (m *nativeMeasuredRWMutex) resetMetrics() {
 func nativeHeapLockMetrics() nativeLockMetrics { return nativeHeap.nativeMeasuredMutex.snapshot() }
 func nativeRootLockMetrics() nativeLockMetrics { return nativeRoots.metrics() }
 
-func tsnative_heap_lock_acquisitions() uint64 {
+func heapLockAcquisitions() uint64 {
 	return nativeHeapLockMetrics().acquisitions
 }
 
-func tsnative_heap_lock_contentions() uint64 {
+func heapLockContentions() uint64 {
 	return nativeHeapLockMetrics().contended
 }
 
-func tsnative_heap_lock_wait_ns() uint64 { return nativeHeapLockMetrics().waitNanos }
+func heapLockWaitNs() uint64 { return nativeHeapLockMetrics().waitNanos }
 
-func tsnative_root_lock_acquisitions() uint64 {
+func rootLockAcquisitions() uint64 {
 	return nativeRootLockMetrics().acquisitions
 }
 
-func tsnative_root_lock_contentions() uint64 {
+func rootLockContentions() uint64 {
 	return nativeRootLockMetrics().contended
 }
 
-func tsnative_root_lock_wait_ns() uint64 { return nativeRootLockMetrics().waitNanos }
+func rootLockWaitNs() uint64 { return nativeRootLockMetrics().waitNanos }
 
 func nativeWorldLockMetrics() nativeRWLockMetrics { return nativeHeapWorld.snapshot() }
 func nativeBlockLockMetrics() nativeRWLockMetrics { return nativeBlocks.metrics() }
 
-func tsnative_world_read_lock_acquisitions() uint64 {
+func worldReadLockAcquisitions() uint64 {
 	return nativeWorldLockMetrics().read.acquisitions
 }
 
-func tsnative_world_read_lock_contentions() uint64 {
+func worldReadLockContentions() uint64 {
 	return nativeWorldLockMetrics().read.contended
 }
 
-func tsnative_world_read_lock_wait_ns() uint64 {
+func worldReadLockWaitNs() uint64 {
 	return nativeWorldLockMetrics().read.waitNanos
 }
 
-func tsnative_world_write_lock_acquisitions() uint64 {
+func worldWriteLockAcquisitions() uint64 {
 	return nativeWorldLockMetrics().write.acquisitions
 }
 
-func tsnative_world_write_lock_contentions() uint64 {
+func worldWriteLockContentions() uint64 {
 	return nativeWorldLockMetrics().write.contended
 }
 
-func tsnative_world_write_lock_wait_ns() uint64 {
+func worldWriteLockWaitNs() uint64 {
 	return nativeWorldLockMetrics().write.waitNanos
 }
 
-func tsnative_block_read_lock_acquisitions() uint64 {
+func blockReadLockAcquisitions() uint64 {
 	return nativeBlockLockMetrics().read.acquisitions
 }
 
-func tsnative_block_read_lock_contentions() uint64 {
+func blockReadLockContentions() uint64 {
 	return nativeBlockLockMetrics().read.contended
 }
 
-func tsnative_block_read_lock_wait_ns() uint64 {
+func blockReadLockWaitNs() uint64 {
 	return nativeBlockLockMetrics().read.waitNanos
 }
 
-func tsnative_block_write_lock_acquisitions() uint64 {
+func blockWriteLockAcquisitions() uint64 {
 	return nativeBlockLockMetrics().write.acquisitions
 }
 
-func tsnative_block_write_lock_contentions() uint64 {
+func blockWriteLockContentions() uint64 {
 	return nativeBlockLockMetrics().write.contended
 }
 
-func tsnative_block_write_lock_wait_ns() uint64 {
+func blockWriteLockWaitNs() uint64 {
 	return nativeBlockLockMetrics().write.waitNanos
 }
