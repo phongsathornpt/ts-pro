@@ -1350,3 +1350,19 @@ func TestGCMarkBatchesBlocksByPage(t *testing.T) {
 	}
 	tsnative_gc_root_unregister(root)
 }
+
+func TestUnresolvedThenablePromiseLastReleaseDoesNotBlock(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	promise := tsnative_promise_thenable_new(1)
+	if promise == nil {
+		t.Fatal("thenable Promise allocation failed")
+	}
+	if task := lookupNativeTask(uintptr(promise)); task == nil || task.status.Load() != nativeTaskWaiting {
+		t.Fatal("thenable Promise was not created pending")
+	}
+	tsnative_task_release(promise)
+	if task := lookupNativeTask(uintptr(promise)); task != nil {
+		t.Fatal("unresolved thenable Promise survived final release")
+	}
+}

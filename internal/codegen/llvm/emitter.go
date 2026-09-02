@@ -106,7 +106,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
-	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\ndeclare ptr @tsnative_promise_thenable_require_settled(ptr)\n")
+	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\ndeclare ptr @tsnative_promise_thenable_new(i32)\ndeclare void @tsnative_promise_thenable_resolve_f64(ptr, double)\ndeclare void @tsnative_promise_thenable_resolve_bool(ptr, i8)\ndeclare void @tsnative_promise_thenable_resolve_ref(ptr, ptr)\ndeclare void @tsnative_promise_thenable_reject(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_promise_all_f64(ptr, i64)\ndeclare ptr @tsnative_promise_race_f64(ptr, i64)\ndeclare ptr @tsnative_promise_all_bool(ptr, i64)\ndeclare ptr @tsnative_promise_race_bool(ptr, i64)\ndeclare ptr @tsnative_promise_all_ref(ptr, i64)\ndeclare ptr @tsnative_promise_race_ref(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
@@ -120,6 +120,8 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")
 	b.WriteString("declare void @tsnative_gc_handoff_end()\n")
+	b.WriteString("declare ptr @tsnative_gc_root_register(ptr)\n")
+	b.WriteString("declare void @tsnative_gc_root_unregister(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_safepoint()\n")
 	b.WriteString("declare void @tsnative_gc_store_ref(ptr, ptr, ptr)\n\n")
 	if err := e.emitClosureTypes(&b); err != nil {

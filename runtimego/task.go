@@ -294,12 +294,53 @@ func tsnative_promise_resolve_ref(value unsafe.Pointer) unsafe.Pointer {
 	return settledNativePromise(nativeTaskResultRef, nativeTaskDone, value, 0, 0)
 }
 
-//export tsnative_promise_thenable_require_settled
-func tsnative_promise_thenable_require_settled(raw unsafe.Pointer) unsafe.Pointer {
-	if raw == nil {
-		nativeAbort("asynchronous or unresolved thenable is not supported yet")
+//export tsnative_promise_thenable_new
+func tsnative_promise_thenable_new(kind C.int) unsafe.Pointer {
+	if int32(kind) < nativeTaskResultF64 || int32(kind) > nativeTaskResultRef {
+		nativeAbort("invalid thenable Promise result kind")
 	}
-	return raw
+	task := allocateNativeTask(nil, int32(kind))
+	if task == nil {
+		nativeAbort("thenable Promise allocation failed")
+	}
+	task.status.Store(nativeTaskWaiting)
+	return task.handle
+}
+
+//export tsnative_promise_thenable_resolve_f64
+func tsnative_promise_thenable_resolve_f64(raw unsafe.Pointer, value C.double) {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultF64 {
+		return
+	}
+	settleNativeAggregate(task, false, nil, float64(value), 0, nil)
+}
+
+//export tsnative_promise_thenable_resolve_bool
+func tsnative_promise_thenable_resolve_bool(raw unsafe.Pointer, value C.uint8_t) {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultBool {
+		return
+	}
+	settleNativeAggregate(task, false, nil, 0, uint8(value), nil)
+}
+
+//export tsnative_promise_thenable_resolve_ref
+func tsnative_promise_thenable_resolve_ref(raw, value unsafe.Pointer) {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultRef {
+		return
+	}
+	settleNativeAggregate(task, false, nil, 0, 0, value)
+}
+
+//export tsnative_promise_thenable_reject
+func tsnative_promise_thenable_reject(raw, reason unsafe.Pointer) {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil {
+		return
+	}
+	settleNativeAggregate(task, true, reason, 0, 0, nil)
 }
 
 //export tsnative_promise_reject
@@ -679,6 +720,10 @@ func tsnative_task_release(raw unsafe.Pointer) {
 				return
 			}
 			continue
+		}
+		if task.entry == nil && !nativeTaskIsTerminal(task) {
+			releaseNativeTaskRef(task)
+			return
 		}
 		_ = tsnative_scheduler_wait(raw)
 		releaseNativeTaskRef(task)

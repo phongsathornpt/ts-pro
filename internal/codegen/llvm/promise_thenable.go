@@ -62,18 +62,16 @@ func emitPromiseThenableResolveHelper(b *strings.Builder, repr mir.Repr) error {
 		return err
 	}
 	fmt.Fprintf(b, "define void @tsnative_thenable_resolve_%s(ptr %%env, %s %%value) {\n", name, valueType)
-	b.WriteString("entry:\n  %settled.ptr = getelementptr { i1, ptr }, ptr %env, i32 0, i32 0\n")
-	b.WriteString("  %settled = load i1, ptr %settled.ptr\n  br i1 %settled, label %done, label %settle\nsettle:\n")
+	b.WriteString("entry:\n  %task = load ptr, ptr %env\n")
 	switch repr {
 	case mir.ReprF64:
-		b.WriteString("  %task = call ptr @tsnative_promise_resolve_f64(double %value)\n")
+		b.WriteString("  call void @tsnative_promise_thenable_resolve_f64(ptr %task, double %value)\n")
 	case mir.ReprBool:
-		b.WriteString("  %value.i8 = zext i1 %value to i8\n  %task = call ptr @tsnative_promise_resolve_bool(i8 %value.i8)\n")
+		b.WriteString("  %value.i8 = zext i1 %value to i8\n  call void @tsnative_promise_thenable_resolve_bool(ptr %task, i8 %value.i8)\n")
 	case mir.ReprJSValue:
-		b.WriteString("  %task = call ptr @tsnative_promise_resolve_ref(ptr %value)\n")
+		b.WriteString("  call void @tsnative_promise_thenable_resolve_ref(ptr %task, ptr %value)\n")
 	}
-	b.WriteString("  %task.ptr = getelementptr { i1, ptr }, ptr %env, i32 0, i32 1\n")
-	b.WriteString("  store ptr %task, ptr %task.ptr\n  store i1 true, ptr %settled.ptr\n  br label %done\ndone:\n  ret void\n}\n\n")
+	b.WriteString("  ret void\n}\n\n")
 	return nil
 }
 
@@ -82,21 +80,8 @@ func emitPromiseThenableRejectHelper(b *strings.Builder, repr mir.Repr) error {
 	if name == "invalid" {
 		return fmt.Errorf("unsupported thenable result representation %d", repr)
 	}
-	kind := 0
-	switch repr {
-	case mir.ReprF64:
-		kind = 1
-	case mir.ReprBool:
-		kind = 2
-	case mir.ReprJSValue:
-		kind = 3
-	}
 	fmt.Fprintf(b, "define void @tsnative_thenable_reject_%s(ptr %%env, ptr %%reason) {\n", name)
-	b.WriteString("entry:\n  %settled.ptr = getelementptr { i1, ptr }, ptr %env, i32 0, i32 0\n")
-	b.WriteString("  %settled = load i1, ptr %settled.ptr\n  br i1 %settled, label %done, label %settle\nsettle:\n")
-	fmt.Fprintf(b, "  %%task = call ptr @tsnative_promise_reject(ptr %%reason, i32 %d)\n", kind)
-	b.WriteString("  %task.ptr = getelementptr { i1, ptr }, ptr %env, i32 0, i32 1\n")
-	b.WriteString("  store ptr %task, ptr %task.ptr\n  store i1 true, ptr %settled.ptr\n  br label %done\ndone:\n  ret void\n}\n\n")
+	b.WriteString("entry:\n  %task = load ptr, ptr %env\n  call void @tsnative_promise_thenable_reject(ptr %task, ptr %reason)\n  ret void\n}\n\n")
 	return nil
 }
 
@@ -110,18 +95,21 @@ func (e *emitter) emitPromiseThenable(b *strings.Builder, inst mir.Instruction, 
 	if resultName == "invalid" || (op.Arity != 1 && op.Arity != 2) {
 		return fmt.Errorf("invalid Promise thenable result or callback arity")
 	}
-	fmt.Fprintf(b, "  %s.ctx = alloca { i1, ptr }\n", name)
-	fmt.Fprintf(b, "  %s.settled = getelementptr { i1, ptr }, ptr %s.ctx, i32 0, i32 0\n", name, name)
-	fmt.Fprintf(b, "  %s.task = getelementptr { i1, ptr }, ptr %s.ctx, i32 0, i32 1\n", name, name)
-	fmt.Fprintf(b, "  store i1 false, ptr %s.settled\n  store ptr null, ptr %s.task\n", name, name)
-	if err := emitPromiseThenableCallbackClosure(b, name+".resolve", name+".ctx", "tsnative_thenable_resolve_"+resultName); err != nil {
+	kind := map[mir.Repr]int{mir.ReprF64: 1, mir.ReprBool: 2, mir.ReprJSValue: 3}[op.Result]
+	fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_thenable_new(i32 %d)\n", name, kind)
+	fmt.Fprintf(b, "  %s.env = call ptr @tsnative_object_alloc_atomic(i64 8)\n", name)
+	fmt.Fprintf(b, "  store ptr %s, ptr %s.env\n", name, name)
+	emitPromiseThenableTemporaryRoot(b, name+".env", name+".env")
+	if err := emitPromiseThenableCallbackClosure(b, name+".resolve", name+".env", "tsnative_thenable_resolve_"+resultName); err != nil {
 		return err
 	}
+	emitPromiseThenableTemporaryRoot(b, name+".resolve", name+".resolve")
 	emitPromiseThenableFunctionBox(b, name+".resolve.box", name+".resolve")
 	if op.Arity == 2 {
-		if err := emitPromiseThenableCallbackClosure(b, name+".reject", name+".ctx", "tsnative_thenable_reject_"+resultName); err != nil {
+		if err := emitPromiseThenableCallbackClosure(b, name+".reject", name+".env", "tsnative_thenable_reject_"+resultName); err != nil {
 			return err
 		}
+		emitPromiseThenableTemporaryRoot(b, name+".reject", name+".reject")
 		emitPromiseThenableFunctionBox(b, name+".reject.box", name+".reject")
 	}
 	fmt.Fprintf(b, "  %s.then = call ptr @%s(ptr %s)\n", name, dynamicFieldGetHelperName("then"), thenable)
@@ -131,14 +119,25 @@ func (e *emitter) emitPromiseThenable(b *strings.Builder, inst mir.Instruction, 
 		fmt.Fprintf(b, ", ptr %s.reject.box", name)
 	}
 	b.WriteString(")\n")
-	fmt.Fprintf(b, "  %s.raw = load ptr, ptr %s.task\n", name, name)
-	fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_thenable_require_settled(ptr %s.raw)\n", name, name)
+	if op.Arity == 2 {
+		fmt.Fprintf(b, "  call void @tsnative_gc_root_unregister(ptr %s.reject.root)\n", name)
+	}
+	fmt.Fprintf(b, "  call void @tsnative_gc_root_unregister(ptr %s.resolve.root)\n", name)
+	fmt.Fprintf(b, "  call void @tsnative_gc_root_unregister(ptr %s.env.root)\n", name)
 	values[inst.Result] = name
 	return nil
 }
 
+func emitPromiseThenableTemporaryRoot(b *strings.Builder, name, value string) {
+	fmt.Fprintf(b, "  %s.slot = alloca ptr\n", name)
+	fmt.Fprintf(b, "  store ptr %s, ptr %s.slot\n", value, name)
+	fmt.Fprintf(b, "  %s.root = call ptr @tsnative_gc_root_register(ptr %s.slot)\n", name, name)
+}
+
 func emitPromiseThenableCallbackClosure(b *strings.Builder, name, env, code string) error {
-	fmt.Fprintf(b, "  %s = alloca %%tsnative_closure\n", name)
+	fmt.Fprintf(b, "  %s.sizeptr = getelementptr %%tsnative_closure, ptr null, i32 1\n", name)
+	fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
+	emitHeapObjectAlloc(b, name, name+".size", closureRefDescriptorName, 1)
 	fmt.Fprintf(b, "  %s.code = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 0\n", name, name)
 	fmt.Fprintf(b, "  store ptr @%s, ptr %s.code\n", code, name)
 	fmt.Fprintf(b, "  %s.env = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 1\n", name, name)
