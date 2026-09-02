@@ -154,7 +154,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Replace recursive heap tracing with iterative owner-local mark work queues and cross-owner queue switching.
   - [x] Batch mark work by native page within owner queues.
   - [x] Add bounded parallel mark-page assist (up to 8 workers, enabled for heaps with at least 512 blocks) with owner-local preference, cross-owner queue stealing, `TSNATIVE_GC_MARK_WORKERS`, and helper-work regression coverage.
-  - [ ] Let already-idle scheduler workers donate GC mark work directly, then reduce the global heap lock and add nursery/generational policy only after profiling.
+  - [x] Let already-idle scheduler workers donate bounded GC mark work directly before creating fallback helper goroutines; donor-worker/page accounting has dedicated regression coverage.
+  - [ ] Profile contention and reduce the global heap lock, then add nursery/generational policy only after measured results justify it.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.
@@ -230,7 +231,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Current critical path
 
 1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
-2. Finish scheduler idle-worker GC donation and reduce the global heap lock, then add nursery/generational policy after profiling.
+2. Reduce the global heap lock using measured contention data, then add nursery/generational policy only after profiling.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

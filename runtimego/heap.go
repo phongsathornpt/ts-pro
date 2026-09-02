@@ -37,27 +37,29 @@ type nativeRootFrame struct {
 
 var nativeHeap = struct {
 	sync.Mutex
-	blocks            map[uintptr]*nativeHeapBlock
-	roots             map[uintptr]*nativeRootFrame
-	threadStacks      map[int][]uintptr
-	tokenPages        [][]byte
-	tokenFree         []unsafe.Pointer
-	allocators        map[int]*nativeWorkerAllocator
-	spans             map[*nativeHeapSpan]struct{}
-	spanPages         map[uintptr]*nativeHeapSpan
-	freeSpans         [nativeSizeClassCount][]*nativeHeapSpan
-	remoteFrees       uint64
-	spanTransfers     uint64
-	markWork          uint64
-	markPages         uint64
-	markQueueSwitches uint64
-	markAssistWorkers uint64
-	markAssistPages   uint64
-	bytes             uintptr
-	allocations       uintptr
-	collections       uintptr
-	threshold         uintptr
-	handoffs          uintptr
+	blocks                map[uintptr]*nativeHeapBlock
+	roots                 map[uintptr]*nativeRootFrame
+	threadStacks          map[int][]uintptr
+	tokenPages            [][]byte
+	tokenFree             []unsafe.Pointer
+	allocators            map[int]*nativeWorkerAllocator
+	spans                 map[*nativeHeapSpan]struct{}
+	spanPages             map[uintptr]*nativeHeapSpan
+	freeSpans             [nativeSizeClassCount][]*nativeHeapSpan
+	remoteFrees           uint64
+	spanTransfers         uint64
+	markWork              uint64
+	markPages             uint64
+	markQueueSwitches     uint64
+	markAssistWorkers     uint64
+	markAssistPages       uint64
+	markIdleAssistWorkers uint64
+	markIdleAssistPages   uint64
+	bytes                 uintptr
+	allocations           uintptr
+	collections           uintptr
+	threshold             uintptr
+	handoffs              uintptr
 }{
 	blocks:       map[uintptr]*nativeHeapBlock{},
 	roots:        map[uintptr]*nativeRootFrame{},
@@ -376,6 +378,8 @@ func tsnative_heap_shutdown() {
 	nativeHeap.markQueueSwitches = 0
 	nativeHeap.markAssistWorkers = 0
 	nativeHeap.markAssistPages = 0
+	nativeHeap.markIdleAssistWorkers = 0
+	nativeHeap.markIdleAssistPages = 0
 	spans := make([]*nativeHeapSpan, 0, len(nativeHeap.spans))
 	for span := range nativeHeap.spans {
 		spans = append(spans, span)

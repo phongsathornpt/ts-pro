@@ -64,13 +64,21 @@ type nativeSchedulerState struct {
 	mu       sync.Mutex
 	wake     *sync.Cond
 	done     *sync.Cond
+	gcAssist *sync.Cond
 	workers  []*nativeSchedulerWorker
 	inject   []uintptr
 	started  bool
 	stopping bool
 	maxTasks int64
 	nextID   uint64
-	wg       sync.WaitGroup
+	idle     int
+
+	gcMarkState  *nativeGCMarkState
+	gcMarkSlots  int
+	gcMarkClaims int
+	gcMarkActive int
+
+	wg sync.WaitGroup
 
 	active    atomic.Int64
 	peak      atomic.Int64
@@ -87,6 +95,7 @@ var goScheduler = func() *nativeSchedulerState {
 	s := &nativeSchedulerState{}
 	s.wake = sync.NewCond(&s.mu)
 	s.done = sync.NewCond(&s.mu)
+	s.gcAssist = sync.NewCond(&s.mu)
 	return s
 }()
 
@@ -254,6 +263,76 @@ func schedulerWakeTask(handle uintptr) int {
 	return 0
 }
 
+func schedulerStartGCIdleAssist(state *nativeGCMarkState, limit int) int {
+	if state == nil || limit <= 0 {
+		return 0
+	}
+	goScheduler.mu.Lock()
+	if !goScheduler.started || goScheduler.stopping || goScheduler.idle == 0 || goScheduler.gcMarkState != nil {
+		goScheduler.mu.Unlock()
+		return 0
+	}
+	slots := limit
+	if slots > goScheduler.idle {
+		slots = goScheduler.idle
+	}
+	goScheduler.gcMarkState = state
+	goScheduler.gcMarkSlots = slots
+	goScheduler.gcMarkClaims = 0
+	goScheduler.gcMarkActive = 0
+	goScheduler.wake.Broadcast()
+	for goScheduler.gcMarkClaims < slots {
+		goScheduler.gcAssist.Wait()
+	}
+	donors := goScheduler.gcMarkClaims
+	goScheduler.mu.Unlock()
+	return donors
+}
+
+func schedulerClaimGCIdleAssistLocked() *nativeGCMarkState {
+	if goScheduler.gcMarkState == nil || goScheduler.gcMarkClaims >= goScheduler.gcMarkSlots {
+		return nil
+	}
+	state := goScheduler.gcMarkState
+	goScheduler.gcMarkClaims++
+	goScheduler.gcMarkActive++
+	goScheduler.gcAssist.Broadcast()
+	return state
+}
+
+func schedulerFinishGCIdleAssist(state *nativeGCMarkState) {
+	goScheduler.mu.Lock()
+	if goScheduler.gcMarkState == state && goScheduler.gcMarkActive > 0 {
+		goScheduler.gcMarkActive--
+		goScheduler.gcAssist.Broadcast()
+	}
+	goScheduler.mu.Unlock()
+}
+
+func schedulerStopGCIdleAssist(state *nativeGCMarkState) {
+	if state == nil {
+		return
+	}
+	goScheduler.mu.Lock()
+	for goScheduler.gcMarkState == state && goScheduler.gcMarkActive != 0 {
+		goScheduler.gcAssist.Wait()
+	}
+	if goScheduler.gcMarkState == state {
+		goScheduler.gcMarkState = nil
+		goScheduler.gcMarkSlots = 0
+		goScheduler.gcMarkClaims = 0
+		goScheduler.gcMarkActive = 0
+	}
+	goScheduler.mu.Unlock()
+}
+
+func schedulerIdleWorkerCount() int {
+	goScheduler.mu.Lock()
+	idle := goScheduler.idle
+	goScheduler.mu.Unlock()
+	return idle
+}
+
 func schedulerExecuteTask(handle uintptr) {
 	task := lookupNativeTask(handle)
 	if task == nil {
@@ -299,17 +378,36 @@ func schedulerWorkerLoop(worker *nativeSchedulerWorker) {
 			schedulerExecuteTask(task)
 			continue
 		}
+
 		goScheduler.mu.Lock()
+		if assist := schedulerClaimGCIdleAssistLocked(); assist != nil {
+			goScheduler.mu.Unlock()
+			assist.worker(nativeGCMarkWorkerSchedulerDonor, worker.index)
+			schedulerFinishGCIdleAssist(assist)
+			continue
+		}
 		if goScheduler.stopping && goScheduler.runnable.Load() == 0 {
 			goScheduler.mu.Unlock()
 			return
 		}
-		for !goScheduler.stopping && len(goScheduler.inject) == 0 && goScheduler.runnable.Load() == 0 {
-			goScheduler.parks.Add(1)
-			goScheduler.wake.Wait()
-			goScheduler.wakeups.Add(1)
-		}
+
+		goScheduler.idle++
+		goScheduler.parks.Add(1)
+		goScheduler.wake.Wait()
+		goScheduler.wakeups.Add(1)
+		goScheduler.idle--
+		assist := schedulerClaimGCIdleAssistLocked()
+		stopping := goScheduler.stopping && goScheduler.runnable.Load() == 0
 		goScheduler.mu.Unlock()
+
+		if assist != nil {
+			assist.worker(nativeGCMarkWorkerSchedulerDonor, worker.index)
+			schedulerFinishGCIdleAssist(assist)
+			continue
+		}
+		if stopping {
+			return
+		}
 	}
 }
 
@@ -330,6 +428,11 @@ func tsnative_scheduler_init() int32 {
 	goScheduler.stopping = false
 	goScheduler.maxTasks = int64(configuredSchedulerMaxTasks())
 	goScheduler.nextID = 0
+	goScheduler.idle = 0
+	goScheduler.gcMarkState = nil
+	goScheduler.gcMarkSlots = 0
+	goScheduler.gcMarkClaims = 0
+	goScheduler.gcMarkActive = 0
 	resetSchedulerMetrics()
 	workers := append([]*nativeSchedulerWorker(nil), goScheduler.workers...)
 	goScheduler.mu.Unlock()
@@ -442,6 +545,11 @@ func tsnative_scheduler_shutdown() {
 	goScheduler.inject = nil
 	goScheduler.started = false
 	goScheduler.stopping = false
+	goScheduler.idle = 0
+	goScheduler.gcMarkState = nil
+	goScheduler.gcMarkSlots = 0
+	goScheduler.gcMarkClaims = 0
+	goScheduler.gcMarkActive = 0
 	goScheduler.mu.Unlock()
 }
 

@@ -11,6 +11,14 @@ const (
 	nativeGCParallelMarkMinBlocks = 512
 )
 
+type nativeGCMarkWorkerRole uint8
+
+const (
+	nativeGCMarkWorkerCollector nativeGCMarkWorkerRole = iota
+	nativeGCMarkWorkerHelper
+	nativeGCMarkWorkerSchedulerDonor
+)
+
 type nativeGCMarkPage struct {
 	owner  int
 	blocks []*nativeHeapBlock
@@ -29,10 +37,11 @@ type nativeGCMarkState struct {
 	ownerSeen      map[int]bool
 	activePages    int
 
-	work          uint64
-	pagesScanned  uint64
-	queueSwitches uint64
-	assistPages   uint64
+	work            uint64
+	pagesScanned    uint64
+	queueSwitches   uint64
+	assistPages     uint64
+	idleAssistPages uint64
 }
 
 func newNativeGCMarkState(owner int) *nativeGCMarkState {
@@ -157,10 +166,13 @@ func (state *nativeGCMarkState) popOwnerPageLocked(owner int) *nativeGCMarkPage 
 	return nil
 }
 
-func (state *nativeGCMarkState) popPageLocked(preferredOwner, workerID int) *nativeGCMarkPage {
+func (state *nativeGCMarkState) popPageLocked(preferredOwner int, role nativeGCMarkWorkerRole) *nativeGCMarkPage {
 	if page := state.popOwnerPageLocked(preferredOwner); page != nil {
-		if workerID > 0 {
+		if role != nativeGCMarkWorkerCollector {
 			state.assistPages++
+		}
+		if role == nativeGCMarkWorkerSchedulerDonor {
+			state.idleAssistPages++
 		}
 		return page
 	}
@@ -173,8 +185,11 @@ func (state *nativeGCMarkState) popPageLocked(preferredOwner, workerID int) *nat
 			continue
 		}
 		state.queueSwitches++
-		if workerID > 0 {
+		if role != nativeGCMarkWorkerCollector {
 			state.assistPages++
+		}
+		if role == nativeGCMarkWorkerSchedulerDonor {
+			state.idleAssistPages++
 		}
 		return page
 	}
@@ -207,13 +222,13 @@ func (state *nativeGCMarkState) drainPage(page *nativeGCMarkPage) {
 	}
 }
 
-func (state *nativeGCMarkState) worker(workerID, preferredOwner int) {
+func (state *nativeGCMarkState) worker(role nativeGCMarkWorkerRole, preferredOwner int) {
 	for {
 		state.mu.Lock()
-		page := state.popPageLocked(preferredOwner, workerID)
+		page := state.popPageLocked(preferredOwner, role)
 		for page == nil && state.activePages != 0 {
 			state.cond.Wait()
-			page = state.popPageLocked(preferredOwner, workerID)
+			page = state.popPageLocked(preferredOwner, role)
 		}
 		if page == nil {
 			state.mu.Unlock()
@@ -243,33 +258,39 @@ func markNativeHeapRootsLocked() {
 	}
 
 	if workerCount == 1 {
-		state.worker(0, state.collectorOwner)
+		state.worker(nativeGCMarkWorkerCollector, state.collectorOwner)
 	} else {
 		helperCount := workerCount - 1
+		idleDonors := schedulerStartGCIdleAssist(state, helperCount)
+		fallbackHelpers := helperCount - idleDonors
+
 		var ready sync.WaitGroup
 		var workers sync.WaitGroup
 		start := make(chan struct{})
-		ready.Add(helperCount)
-		workers.Add(helperCount)
-		for workerID := 1; workerID < workerCount; workerID++ {
+		ready.Add(fallbackHelpers)
+		workers.Add(fallbackHelpers)
+		for workerID := 0; workerID < fallbackHelpers; workerID++ {
 			go func(id int) {
 				defer workers.Done()
 				ready.Done()
 				<-start
-				state.worker(id, id)
+				state.worker(nativeGCMarkWorkerHelper, id)
 			}(workerID)
 		}
 		ready.Wait()
 		close(start)
-		state.worker(0, state.collectorOwner)
+		state.worker(nativeGCMarkWorkerCollector, state.collectorOwner)
 		workers.Wait()
+		schedulerStopGCIdleAssist(state)
 		nativeHeap.markAssistWorkers += uint64(helperCount)
+		nativeHeap.markIdleAssistWorkers += uint64(idleDonors)
 	}
 
 	nativeHeap.markWork += state.work
 	nativeHeap.markPages += state.pagesScanned
 	nativeHeap.markQueueSwitches += state.queueSwitches
 	nativeHeap.markAssistPages += state.assistPages
+	nativeHeap.markIdleAssistPages += state.idleAssistPages
 }
 
 func nativeGCMarkWork() (uint64, uint64) {
@@ -291,6 +312,14 @@ func nativeGCMarkAssist() (uint64, uint64) {
 	nativeHeap.Lock()
 	workers := nativeHeap.markAssistWorkers
 	pages := nativeHeap.markAssistPages
+	nativeHeap.Unlock()
+	return workers, pages
+}
+
+func nativeGCMarkIdleAssist() (uint64, uint64) {
+	nativeHeap.Lock()
+	workers := nativeHeap.markIdleAssistWorkers
+	pages := nativeHeap.markIdleAssistPages
 	nativeHeap.Unlock()
 	return workers, pages
 }

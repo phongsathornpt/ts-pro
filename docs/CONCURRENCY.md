@@ -192,12 +192,14 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Recursive tracing has been replaced by iterative owner-local mark work queues with cross-owner switching, removing native heap graph depth from the Go call stack.
     - Owner queues now batch marked blocks by native page before scanning, reducing queue churn and improving locality.
     - Bounded parallel mark-page helpers now run for larger heaps, prefer owner-local queues, steal across owners when needed, and are capped by `TSNATIVE_GC_MARK_WORKERS` (hard maximum 8).
-    - Direct donation from already-idle scheduler workers and global-heap-lock reduction remain before nursery/generational policy work.
+    - Already-parked scheduler workers are claimed first as bounded mark donors; fallback goroutines are created only for missing assist slots.
+    - Global-heap-lock reduction remains before nursery/generational policy work.
 
 15. `runtime: add Green-Tea-style local mark-page work` 🟡
     - [x] Owner-local native-page mark queues exist on top of size-class spans and page-to-span metadata.
     - [x] Bounded GC helpers steal mark pages across owner queues when their preferred owner has no work.
-    - [ ] Reuse already-idle scheduler workers for GC donation and profile lock contention before reducing the global heap lock.
+    - [x] Reuse already-idle scheduler workers for GC donation, with deterministic donor claiming under the scheduler lock and dedicated donor-worker/page metrics.
+    - [ ] Profile lock contention and reduce the global heap lock without weakening root/sweep correctness.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

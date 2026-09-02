@@ -502,6 +502,61 @@ func TestGCParallelMarkUsesBoundedAssistWorkers(t *testing.T) {
 	runtime.KeepAlive(roots)
 }
 
+func TestGCParallelMarkReusesIdleSchedulerWorkers(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	tsnative_scheduler_shutdown()
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	defer tsnative_scheduler_shutdown()
+	previousProcs := runtime.GOMAXPROCS(4)
+	defer runtime.GOMAXPROCS(previousProcs)
+	t.Setenv("TSNATIVE_WORKERS", "4")
+	t.Setenv("TSNATIVE_GC_MARK_WORKERS", "4")
+
+	if tsnative_scheduler_init() != 0 {
+		t.Fatal("scheduler init failed")
+	}
+	deadline := time.Now().Add(time.Second)
+	for schedulerIdleWorkerCount() != 4 && time.Now().Before(deadline) {
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	if idle := schedulerIdleWorkerCount(); idle != 4 {
+		t.Fatalf("idle scheduler workers = %d, want 4", idle)
+	}
+
+	const rootsCount = 1024
+	roots := make([]unsafe.Pointer, rootsCount)
+	for i := range roots {
+		roots[i] = tsnative_heap_alloc(2048)
+		if roots[i] == nil {
+			t.Fatalf("root allocation %d failed", i)
+		}
+	}
+	token := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	if token == nil {
+		t.Fatal("root frame allocation failed")
+	}
+	tsnative_gc_collect()
+	donors, pages := nativeGCMarkIdleAssist()
+	if donors != 3 {
+		t.Fatalf("idle GC donor workers = %d, want 3", donors)
+	}
+	if pages == 0 {
+		t.Fatal("idle scheduler GC donors processed no mark pages")
+	}
+	if got := tsnative_heap_live_allocations(); got != rootsCount {
+		t.Fatalf("live allocations = %d, want %d", got, rootsCount)
+	}
+	tsnative_gc_leave(token)
+	tsnative_gc_collect()
+	if got := tsnative_heap_live_allocations(); got != 0 {
+		t.Fatalf("live allocations after root release = %d, want 0", got)
+	}
+	runtime.KeepAlive(roots)
+}
+
 func TestGCMarkBatchesBlocksByPage(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()
