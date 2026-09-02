@@ -92,7 +92,8 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_gc_leave(ptr)\n")
 	b.WriteString("declare void @tsnative_gc_handoff_begin()\n")
 	b.WriteString("declare void @tsnative_gc_handoff_end()\n")
-	b.WriteString("declare void @tsnative_gc_safepoint()\n\n")
+	b.WriteString("declare void @tsnative_gc_safepoint()\n")
+	b.WriteString("declare void @tsnative_gc_store_ref(ptr, ptr, ptr)\n\n")
 	if err := e.emitClosureTypes(&b); err != nil {
 		return "", err
 	}
@@ -367,7 +368,11 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
-		fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
+		if isGCHeapReferenceRepr(shape.Fields[op.Field].Repr) {
+			fmt.Fprintf(b, "  call void @tsnative_gc_store_ref(ptr %s, ptr %s.ptr, ptr %s)\n", object, name, value)
+		} else {
+			fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
+		}
 		values[inst.Result] = value
 		return nil
 	case mir.TaskSpawn:
@@ -1168,6 +1173,15 @@ func buildValueReprs(fn mir.Function) map[mir.ValueID]mir.Repr {
 		}
 	}
 	return result
+}
+
+func isGCHeapReferenceRepr(repr mir.Repr) bool {
+	switch repr {
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprChannelRef, mir.ReprJSValue:
+		return true
+	default:
+		return false
+	}
 }
 
 func shapeFieldIndex(shape mir.Shape, field uint32) uint32 {

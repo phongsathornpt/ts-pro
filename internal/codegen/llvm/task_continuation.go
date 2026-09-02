@@ -582,7 +582,11 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", typ, result, slot.Index)
+	if isGCHeapReferenceRepr(slot.Repr) {
+		fmt.Fprintf(b, "  call void @tsnative_gc_store_ref(ptr %%state, ptr %%spill%d.ptr, ptr %s)\n", slot.Index, result)
+	} else {
+		fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", typ, result, slot.Index)
+	}
 	return nil
 }
 
@@ -594,6 +598,7 @@ func (e *emitter) emitContinuationPhiEdge(b *strings.Builder, descriptor taskDes
 	type pendingStore struct {
 		typ, value string
 		slot       int
+		repr       mir.Repr
 	}
 	stores := make([]pendingStore, 0, len(phis))
 	for i, phi := range phis {
@@ -613,10 +618,14 @@ func (e *emitter) emitContinuationPhiEdge(b *strings.Builder, descriptor taskDes
 			return err
 		}
 		slot := descriptor.Continuation.SpillSlots[phi.Result]
-		stores = append(stores, pendingStore{typ: typ, value: value, slot: slot.Index})
+		stores = append(stores, pendingStore{typ: typ, value: value, slot: slot.Index, repr: repr})
 	}
 	for _, store := range stores {
-		fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", store.typ, store.value, store.slot)
+		if isGCHeapReferenceRepr(store.repr) {
+			fmt.Fprintf(b, "  call void @tsnative_gc_store_ref(ptr %%state, ptr %%spill%d.ptr, ptr %s)\n", store.slot, store.value)
+		} else {
+			fmt.Fprintf(b, "  store %s %s, ptr %%spill%d.ptr\n", store.typ, store.value, store.slot)
+		}
 	}
 	return nil
 }

@@ -133,6 +133,31 @@ func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
 	}
 }
 
+func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
+	result := mir.ValueID(2)
+	module := mir.Module{
+		Name:   "object-ref-store",
+		Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, Name: "set", ReturnRepr: mir.ReprStringRef, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+				{Result: 1, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},
+				{Result: 2, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 1}},
+			}, Terminator: mir.Return{Value: &result}}},
+		}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "call void @tsnative_gc_store_ref(ptr %v0, ptr %v2.ptr, ptr %v1)") {
+		t.Fatalf("reference field store missing GC write barrier:\n%s", text)
+	}
+	if strings.Contains(text, "store ptr %v1, ptr %v2.ptr") {
+		t.Fatalf("reference field store bypassed GC write barrier:\n%s", text)
+	}
+}
+
 func TestEmitProvenIntegerFastArithmetic(t *testing.T) {
 	result := mir.ValueID(2)
 	module := mir.Module{Name: "intfast", Functions: []mir.Function{{
@@ -570,7 +595,7 @@ func TestEmitStacklessReferenceAndJSValueLinearContinuation(t *testing.T) {
 		"call ptr @tsnative_jsvalue_box_string(ptr",
 		"call ptr @tsnative_jsvalue_add(ptr",
 		"call void @tsnative_gc_safepoint()",
-		"store ptr %v4, ptr %spill4.ptr",
+		"call void @tsnative_gc_store_ref(ptr %state, ptr %spill4.ptr, ptr %v4)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)

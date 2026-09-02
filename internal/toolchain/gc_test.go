@@ -56,6 +56,22 @@ int main(void) {
   assert(tsnative_world_write_lock_acquisitions() >= 2);
   assert(tsnative_block_read_lock_acquisitions() > 0);
   assert(tsnative_block_write_lock_acquisitions() > 0);
+
+  void *parent = tsnative_heap_alloc(32);
+  void *parent_slots[1] = {parent};
+  void *parent_frame = tsnative_gc_enter(parent_slots, 1);
+  tsnative_gc_collect();
+  void *child = tsnative_heap_alloc(65536);
+  tsnative_gc_store_ref(parent, parent, child);
+  assert(tsnative_gc_remembered_parents() == 1);
+  assert(tsnative_gc_barrier_stores() >= 1);
+  assert(tsnative_gc_remembered_records() >= 1);
+  tsnative_gc_safepoint();
+  assert(tsnative_heap_live_allocations() == 2);
+  assert(tsnative_gc_remembered_parents() == 0);
+  tsnative_gc_leave(parent_frame);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
   tsnative_heap_shutdown();
   return 0;
 }

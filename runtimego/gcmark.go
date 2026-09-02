@@ -324,20 +324,23 @@ func markNativeNurseryRootsLocked() {
 	state := newNativeGCMarkState(nativeAllocatorOwner(), nativeGCMarkNursery)
 	seedNativeGCRootsLocked(state)
 
-	oldBlocks := make([]*nativeHeapBlock, 0)
 	nurseryPopulation := 0
 	nativeBlocks.rangeBlocks(func(_ uintptr, block *nativeHeapBlock) {
 		if block.generation == nativeHeapGenerationNursery {
 			nurseryPopulation++
+		}
+	})
+	rememberedScans := uint64(0)
+	nativeRemembered.rangeParents(func(parent uintptr) {
+		block := nativeBlocks.get(parent)
+		if block == nil || block.generation != nativeHeapGenerationOld {
 			return
 		}
-		oldBlocks = append(oldBlocks, block)
-	})
-	for _, block := range oldBlocks {
 		scanNativeHeapBlockPointers(block, state.enqueue)
-	}
-	if len(oldBlocks) != 0 {
-		nativeGCMinorOldScans.Add(uint64(len(oldBlocks)))
+		rememberedScans++
+	})
+	if rememberedScans != 0 {
+		nativeGCMinorOldScans.Add(rememberedScans)
 	}
 	runNativeGCMarkStateLocked(state, nurseryPopulation)
 }

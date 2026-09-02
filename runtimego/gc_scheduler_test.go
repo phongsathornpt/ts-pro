@@ -374,7 +374,7 @@ func TestMinorGCPromotesRootedNurseryObject(t *testing.T) {
 	}
 }
 
-func TestMinorGCConservativelyScansOldToYoungReferences(t *testing.T) {
+func TestMinorGCRequiresBarrierForOldToYoungReferences(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()
 	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
@@ -390,18 +390,107 @@ func TestMinorGCConservativelyScansOldToYoungReferences(t *testing.T) {
 	child := tsnative_heap_alloc(1024)
 	*(*unsafe.Pointer)(parent) = child
 	tsnative_gc_safepoint()
-	childBlock := nativeBlocks.get(uintptr(child))
-	if childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
-		t.Fatalf("old-to-young child = %+v, want preserved and promoted", childBlock)
+	if nativeBlocks.get(uintptr(child)) != nil {
+		t.Fatal("raw old-to-young store survived minor GC without a remembered-set barrier")
 	}
-	if nativeGCMinorOldScans.Load() == 0 {
-		t.Fatal("minor GC did not scan old blocks")
+	if got := nativeGCMinorOldScans.Load(); got != 0 {
+		t.Fatalf("minor old scans = %d, want 0 without remembered parents", got)
+	}
+	if !nativeHeapContains(parent) {
+		t.Fatal("rooted old parent was reclaimed by minor GC")
 	}
 
 	tsnative_gc_root_unregister(root)
 	tsnative_gc_collect()
-	if nativeHeapContains(parent) || nativeHeapContains(child) {
-		t.Fatal("old-to-young graph survived major GC after root release")
+	if nativeHeapContains(parent) {
+		t.Fatal("old parent survived major GC after root release")
+	}
+}
+
+func TestGCStoreRefRecordsOldToYoungParent(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	parent := tsnative_heap_alloc(16)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	child := tsnative_heap_alloc(1024)
+	nativeGCStoreRef(parent, parent, child)
+	if got := nativeRemembered.count(); got != 1 {
+		t.Fatalf("remembered parents = %d, want 1", got)
+	}
+	if nativeRemembered.stores.Load() != 1 || nativeRemembered.records.Load() != 1 {
+		t.Fatalf("barrier stores=%d records=%d, want 1/1", nativeRemembered.stores.Load(), nativeRemembered.records.Load())
+	}
+	tsnative_gc_safepoint()
+	childBlock := nativeBlocks.get(uintptr(child))
+	if childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
+		t.Fatalf("remembered child = %+v, want promoted old block", childBlock)
+	}
+	if got := nativeRemembered.count(); got != 0 {
+		t.Fatalf("remembered parents after minor GC = %d, want 0", got)
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestGCStoreRefSlotResolvesOldParentInterior(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	parent := tsnative_heap_alloc(32)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	child := tsnative_heap_alloc(1024)
+	slot := unsafe.Add(parent, unsafe.Sizeof(uintptr(0)))
+	nativeGCStoreRefSlot(slot, child)
+	if got := nativeRemembered.count(); got != 1 {
+		t.Fatalf("remembered parents = %d, want 1 for interior slot", got)
+	}
+	if stored := *(*unsafe.Pointer)(slot); stored != child {
+		t.Fatalf("interior slot child = %p, want %p", stored, child)
+	}
+	tsnative_gc_safepoint()
+	if childBlock := nativeBlocks.get(uintptr(child)); childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
+		t.Fatalf("interior-slot child = %+v, want promoted old block", childBlock)
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestGCStoreRefResolvesInteriorYoungChild(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	parent := tsnative_heap_alloc(16)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	child := tsnative_heap_alloc(1024)
+	interior := unsafe.Add(child, unsafe.Sizeof(uintptr(0)))
+	nativeGCStoreRef(parent, parent, interior)
+	if got := nativeRemembered.count(); got != 1 {
+		t.Fatalf("remembered parents = %d, want 1 for interior young child", got)
+	}
+	tsnative_gc_safepoint()
+	if block := nativeBlocks.get(uintptr(child)); block == nil || block.generation != nativeHeapGenerationOld {
+		t.Fatalf("interior-referenced child = %+v, want promoted old block", block)
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestGCStoreRefSkipsYoungParent(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	parent := tsnative_heap_alloc(16)
+	child := tsnative_heap_alloc(16)
+	nativeGCStoreRef(parent, parent, child)
+	if got := nativeRemembered.count(); got != 0 {
+		t.Fatalf("young parent entered remembered set: %d", got)
+	}
+	if stored := *(*unsafe.Pointer)(parent); stored != child {
+		t.Fatalf("stored child = %p, want %p", stored, child)
 	}
 }
 

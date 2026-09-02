@@ -206,6 +206,7 @@ func collectMajorLocked() []*nativeHeapBlock {
 	})
 	subtractNativeHeapLiveCounters(reclaimedBytes, reclaimedAllocations)
 	clearNativeNurseryBytes()
+	nativeRemembered.clear()
 	nativeHeapCollections.Add(1)
 	nativeGCMajorCollections.Add(1)
 	next := nativeHeapBytes.Load() * 2
@@ -250,6 +251,7 @@ func collectMinorLocked() []*nativeHeapBlock {
 	})
 	subtractNativeHeapLiveCounters(reclaimedBytes, reclaimedAllocations)
 	clearNativeNurseryBytes()
+	nativeRemembered.clear()
 	nativeHeapCollections.Add(1)
 	nativeGCMinorCollections.Add(1)
 	if promoted != 0 {
@@ -359,6 +361,7 @@ func tsnative_heap_shutdown() {
 		nativeUnmap(page)
 	}
 	resetNativeGenerationalMetrics()
+	resetNativeRememberedState()
 	nativeHeap.resetMetrics()
 	nativeRoots.resetMetrics()
 	nativeHeapWorld.resetMetrics()

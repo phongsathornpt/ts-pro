@@ -319,7 +319,7 @@ func transferNativeTaskResult(task *nativeTask, out unsafe.Pointer) {
 		*(*uint8)(out) = task.resultBool
 	case nativeTaskResultRef:
 		tsnative_gc_handoff_begin()
-		*(*unsafe.Pointer)(out) = task.resultRef
+		nativeGCStoreRefSlot(out, task.resultRef)
 		task.completionHandoff = true
 	}
 }
@@ -393,13 +393,13 @@ func tsnative_task_get_failure(raw, out unsafe.Pointer) int32 {
 	if task == nil || out == nil {
 		return -1
 	}
-	*(*unsafe.Pointer)(out) = nil
+	nativeGCStoreRefSlot(out, nil)
 	_ = tsnative_scheduler_wait(raw)
 	task.completionMu.Lock()
 	defer task.completionMu.Unlock()
 	status := task.status.Load()
 	if status == nativeTaskFailed && task.failureRef != nil {
-		*(*unsafe.Pointer)(out) = task.failureRef
+		nativeGCStoreRefSlot(out, task.failureRef)
 		return 1
 	}
 	if status == nativeTaskDone {

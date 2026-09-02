@@ -629,7 +629,7 @@ func deliverNativeRefRoot(waiter *nativeRefChannelWaiter, root *nativeRefRoot) {
 		waiter.value = root
 		return
 	}
-	*(*unsafe.Pointer)(waiter.out) = root.get()
+	nativeGCStoreRefSlot(waiter.out, root.get())
 	root.release()
 }
 
@@ -878,7 +878,7 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 	channel.mu.Lock()
 	if channel.capacity != 0 && channel.count != 0 {
 		root := dequeueNativeRefRoot(channel)
-		*(*unsafe.Pointer)(out) = root.get()
+		nativeGCStoreRefSlot(out, root.get())
 		root.release()
 		sender := popRefChannelWaiter(&channel.sendQueue)
 		if sender != nil {
@@ -891,7 +891,7 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 		return 1
 	}
 	if sender := popRefChannelWaiter(&channel.sendQueue); sender != nil {
-		*(*unsafe.Pointer)(out) = sender.value.get()
+		nativeGCStoreRefSlot(out, sender.value.get())
 		sender.value.release()
 		sender.value = nil
 		channel.mu.Unlock()
@@ -901,7 +901,7 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 	if channel.capacity == 0 && channel.slot != nil {
 		root := channel.slot
 		channel.slot = nil
-		*(*unsafe.Pointer)(out) = root.get()
+		nativeGCStoreRefSlot(out, root.get())
 		root.release()
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
