@@ -3,8 +3,11 @@ package escape
 import "github.com/projectthorn/tsv7-bin/internal/mir"
 
 type ScalarObject struct {
-	Shape  mir.ShapeID
-	Fields []mir.ValueID
+	Shape           mir.ShapeID
+	Block           mir.BlockID
+	Fields          []mir.ValueID
+	Mutable         bool
+	ZeroInitialized bool
 }
 
 type ScalarObjectResult map[mir.FunctionID]map[mir.ValueID]ScalarObject
@@ -26,10 +29,12 @@ func ScalarObjects(module mir.Module, stack StackObjectResult) ScalarObjectResul
 }
 func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool) map[mir.ValueID]ScalarObject {
 	prov := make(provenance)
+	allocationBlocks := make(map[mir.ValueID]mir.BlockID)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			if stack[inst.Result] {
 				prov[inst.Result] = valueSet{inst.Result: {}}
+				allocationBlocks[inst.Result] = block.ID
 			}
 		}
 	}
@@ -42,31 +47,48 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool) map[m
 			}
 		}
 	}
+
 	mutated := make(map[mir.ValueID]bool)
+	fieldUseOutsideBlock := make(map[mir.ValueID]bool)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
-			set, ok := inst.Op.(mir.FieldSet)
-			if !ok {
-				continue
-			}
-			for origin := range prov[set.Object] {
-				mutated[origin] = true
+			switch op := inst.Op.(type) {
+			case mir.FieldSet:
+				for origin := range prov[op.Object] {
+					mutated[origin] = true
+					if allocationBlocks[origin] != block.ID {
+						fieldUseOutsideBlock[origin] = true
+					}
+				}
+			case mir.FieldGet:
+				for origin := range prov[op.Object] {
+					if allocationBlocks[origin] != block.ID {
+						fieldUseOutsideBlock[origin] = true
+					}
+				}
 			}
 		}
 	}
+
 	result := make(map[mir.ValueID]ScalarObject)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
-			if !stack[inst.Result] || aliased[inst.Result] || mutated[inst.Result] {
+			if !stack[inst.Result] || aliased[inst.Result] {
 				continue
 			}
-			object, ok := inst.Op.(mir.ObjectNew)
-			if !ok {
+			isMutable := mutated[inst.Result]
+			if isMutable && fieldUseOutsideBlock[inst.Result] {
 				continue
 			}
-			result[inst.Result] = ScalarObject{
-				Shape:  object.Shape,
-				Fields: append([]mir.ValueID(nil), object.Fields...),
+			switch object := inst.Op.(type) {
+			case mir.ObjectNew:
+				result[inst.Result] = ScalarObject{
+					Shape: object.Shape, Block: block.ID, Fields: append([]mir.ValueID(nil), object.Fields...), Mutable: isMutable,
+				}
+			case mir.ObjectAlloc:
+				result[inst.Result] = ScalarObject{
+					Shape: object.Shape, Block: block.ID, Mutable: isMutable, ZeroInitialized: true,
+				}
 			}
 		}
 	}

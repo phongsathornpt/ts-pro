@@ -138,7 +138,7 @@ func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
 	}
 }
 
-func TestEmitMutableNumericObjectUsesStackStorage(t *testing.T) {
+func TestEmitSingleBlockMutableNumericObjectIsScalarReplaced(t *testing.T) {
 	ret := mir.ValueID(4)
 	module := mir.Module{
 		Name:   "mutable-stack-object",
@@ -154,11 +154,39 @@ func TestEmitMutableNumericObjectUsesStackStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(text, "ret double 7.000000e+00") {
+		t.Fatalf("mutable scalar replacement did not preserve field value:\n%s", text)
+	}
+	for _, forbidden := range []string{"%v0 = alloca %tsnative_shape_s0", "call ptr @tsnative_object_alloc_atomic(i64 %v0.size)", "getelementptr %tsnative_shape_s0"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("single-block mutable scalar retained %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestEmitCrossBlockMutableNumericObjectUsesStackStorage(t *testing.T) {
+	ret := mir.ValueID(4)
+	module := mir.Module{
+		Name:   "cross-block-mutable-object",
+		Shapes: []mir.Shape{{ID: 0, Name: "Counter", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Name: "counter", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Jump{Target: 1}},
+			{ID: 1, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}},
+				{Result: 2, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 1}},
+				{Result: 4, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 0, Shape: 0, Field: 0}},
+			}, Terminator: mir.Return{Value: &ret}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") {
-		t.Fatalf("mutable local object did not use stack storage:\n%s", text)
+		t.Fatalf("cross-block mutable object did not retain stack storage:\n%s", text)
 	}
 	if strings.Contains(text, "call ptr @tsnative_object_alloc_atomic(i64 %v0.size)") {
-		t.Fatalf("mutable local object unexpectedly used heap allocation:\n%s", text)
+		t.Fatalf("cross-block mutable local object unexpectedly used heap allocation:\n%s", text)
 	}
 }
 
