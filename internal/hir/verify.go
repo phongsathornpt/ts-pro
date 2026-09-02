@@ -315,6 +315,11 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if op.Result == TaskResultInvalid || (op.Arity != 1 && op.Arity != 2) {
 					add("Promise thenable has invalid result kind or callback arity")
 				}
+				for _, target := range op.Cases {
+					if _, exists := functionIDs[target.Callee]; !exists {
+						add(fmt.Sprintf("Promise thenable references unknown method f%d", target.Callee))
+					}
+				}
 			case PromiseRejectOp:
 				checkValue(op.Reason)
 				if op.Result == TaskResultInvalid {

@@ -148,7 +148,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
               - [x] Replace the single completion waiter slot with a cgo-safe external waiter table and fan out settlement to multiple parked tasks.
               - [x] Make compiled Promise awaits non-consuming for owned function-scope Promise locals, retaining settled result/failure roots until deterministic final local release; repeated numeric/reference awaits pass under worker=1 + 1 KiB nursery. Promise local copies now retain ownership; function-scope reassignment retains the incoming alias before releasing the previous handle, including self-assignment and identity adoption; `if` and loop-carried Promise reassignments now merge ownership through the same SSA/Phi state as locals.
             - [x] Add `Promise.resolve(existingPromise)` adoption with identity-preserving TaskRef lowering, retain-on-copy for function-scope Promise locals, direct Promise local alias ownership, and repeated-await number/reference GC coverage.
-            - [~] Add thenable assimilation. Structural thenables now support receiver-correct `this`, resolve/reject, first-settlement-wins, and escaping/asynchronous callbacks through heap-backed callback closures and pending TaskRef settlement under GC stress; nullable/optional callback unions and non-void `then` returns are supported; arbitrary callback-return ABIs remain.
+            - [~] Add thenable assimilation. Structural thenables now support receiver-correct `this`, resolve/reject, first-settlement-wins, escaping/asynchronous callbacks through heap-backed callback closures and pending TaskRef settlement under GC stress, nullable/optional callback unions, non-void `then` returns, and native class `then` methods with hidden-class override dispatch; arbitrary callback-return ABIs remain.
             - [~] Add homogeneous `Promise.all` / `Promise.race`, then heterogeneous tuple results after tuple semantics land.
               - [x] Add non-blocking homogeneous `Promise<number>` aggregate fan-in for array-literal inputs: `Promise.all<number>` preserves input order and returns `number[]`; `Promise.race<number>` preserves deterministic already-settled input order and first pending settlement. Aggregate runtime ownership retains aliased inputs, releases fresh temporaries without blocking non-last owners, propagates rejection, and passes worker=1 + 1 KiB nursery coverage.
               - [~] Extend aggregates to homogeneous reference/bool results, raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
@@ -156,7 +156,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
                 - [x] Add homogeneous boolean aggregates on compact boolean[] storage, including ordered Promise.all<boolean>, Promise.race<boolean>, pending settlement, rejection propagation, and single-worker stress coverage.
                 - [~] Add raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
                   - [x] Normalize homogeneous raw `T` values in aggregate array literals into immediate native Promises alongside `Promise<T>` inputs for number/bool/reference result families.
-                  - [~] Add structural PromiseLike/thenable assimilation. One/two-callback function-property thenables now support synchronous and escaping/asynchronous settlement; nullable/optional callback unions and non-void `then` returns are supported; arbitrary callback-return ABIs and additional structural forms remain.
+                  - [~] Add structural PromiseLike/thenable assimilation. One/two-callback function-property thenables now support synchronous and escaping/asynchronous settlement; nullable/optional callback unions, non-void `then` returns, and native class `then` methods with override dispatch are supported; arbitrary callback-return ABIs and additional generic PromiseLike forms remain.
                   - [ ] Add non-literal iterables and heterogeneous tuple results.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
@@ -304,7 +304,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Extend structural `PromiseLike` assimilation to arbitrary callback-return ABIs and additional structural forms beyond function-property thenables.
+1. Extend structural `PromiseLike` assimilation to arbitrary callback-return ABIs and full generic standard-library `PromiseLike<T>` forms; function-property and native-class `then` forms are implemented.
 2. Finish selected Promise combinators: non-literal iterable inputs and heterogeneous tuple results after tuple/container ownership semantics land.
 3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths, including optional/dynamic/computed properties and shape transitions.
 4. Finish advanced generics, integer SSA across calls/loops, array growth/mutators, tuples/destructuring/rest-spread/optional chaining/nullish/switch/for-of/templates/default params/enums, and selected standard-library APIs.

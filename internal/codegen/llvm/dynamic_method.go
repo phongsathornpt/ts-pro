@@ -24,8 +24,14 @@ func (e *emitter) dynamicMethodCalls() []mir.DynamicMethodCall {
 	for _, fn := range e.module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				if op, ok := inst.Op.(mir.DynamicMethodCall); ok {
+				switch op := inst.Op.(type) {
+				case mir.DynamicMethodCall:
 					unique[dynamicMethodCallHelperName(op)] = op
+				case mir.PromiseThenable:
+					if len(op.Cases) != 0 {
+						method := mir.DynamicMethodCall{Args: make([]mir.ValueID, int(op.Arity)), Cases: op.Cases}
+						unique[dynamicMethodCallHelperName(method)] = method
+					}
 				}
 			}
 		}

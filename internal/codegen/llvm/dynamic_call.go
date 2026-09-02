@@ -29,7 +29,9 @@ func (e *emitter) dynamicCallShapes() []dynamicCallShape {
 				case mir.DynamicCall:
 					set[dynamicCallShape{arity: len(op.Args), hasReceiver: op.HasReceiver}] = struct{}{}
 				case mir.PromiseThenable:
-					set[dynamicCallShape{arity: int(op.Arity), hasReceiver: true}] = struct{}{}
+					if len(op.Cases) == 0 {
+						set[dynamicCallShape{arity: int(op.Arity), hasReceiver: true}] = struct{}{}
+					}
 				}
 			}
 		}

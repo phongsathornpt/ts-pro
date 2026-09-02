@@ -227,6 +227,7 @@ type PromiseThenableOp struct {
 	Thenable ValueID
 	Result   TaskResultKind
 	Arity    uint8
+	Cases    []DispatchCase
 }
 type PromiseRejectOp struct {
 	Reason ValueID

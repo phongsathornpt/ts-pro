@@ -105,7 +105,7 @@ func (e *emitter) emitHeapTraceDescriptors(b *strings.Builder) error {
 		fields := taskEnvRefFields(fn, descriptor)
 		emitRefOffsetDescriptor(b, taskEnvRefDescriptorName(descriptor.Callee), taskEnvTypeName(descriptor.Callee), fields)
 	}
-	if len(e.closures) != 0 {
+	if len(e.closures) != 0 || len(e.promiseThenableResults()) != 0 {
 		emitRefOffsetDescriptor(b, closureRefDescriptorName, "%tsnative_closure", []int{1})
 	}
 	b.WriteString("\n")

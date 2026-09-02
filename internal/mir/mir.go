@@ -314,6 +314,7 @@ type PromiseThenable struct {
 	Thenable ValueID
 	Result   Repr
 	Arity    uint8
+	Cases    []DispatchCase
 }
 type PromiseReject struct {
 	Reason ValueID

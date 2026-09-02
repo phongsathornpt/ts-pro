@@ -23,7 +23,9 @@ func (e *emitter) dynamicFieldNames() []string {
 				case mir.DynamicFieldGet:
 					set[op.Field] = struct{}{}
 				case mir.PromiseThenable:
-					set["then"] = struct{}{}
+					if len(op.Cases) == 0 {
+						set["then"] = struct{}{}
+					}
 				}
 			}
 		}

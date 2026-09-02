@@ -29,10 +29,11 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 				return nil, fmt.Errorf("Promise.resolve at %d cannot adopt incompatible Promise result", node.Pos())
 			}
 			expr.Kind = ExprPromiseAdopt
-		} else if arity, ok := e.structuralThenableArity(expr.Args[0].Type, promiseType.ReturnType); ok {
+		} else if arity, dispatch, ok := e.structuralThenableInfo(expr.Args[0].Type, promiseType.ReturnType); ok {
 			e.ensureSemanticType(TypeAny, "any")
 			expr.Kind = ExprPromiseThenable
 			expr.FieldIndex = uint32(arity)
+			expr.Dispatch = dispatch
 		} else {
 			expr.Kind = ExprPromiseResolve
 		}
@@ -115,39 +116,97 @@ func supportedImmediatePromiseResult(kind TypeKind) bool {
 	}
 }
 
-func (e *extractor) structuralThenableArity(typeID, resultType TypeID) (int, bool) {
+func (e *extractor) structuralThenableInfo(typeID, resultType TypeID) (int, []DispatchTarget, bool) {
 	if int(typeID) >= len(e.result.Types) {
-		return 0, false
+		return 0, nil, false
+	}
+	if class, ok := e.thenableClass(typeID); ok {
+		targets := e.dispatchTargets(class, "then")
+		if len(targets) == 0 {
+			return 0, nil, false
+		}
+		arity := 0
+		for _, target := range targets {
+			if int(target.Function) >= len(e.result.Functions) {
+				return 0, nil, false
+			}
+			fn := e.result.Functions[target.Function]
+			if len(fn.Params) < 2 {
+				return 0, nil, false
+			}
+			params := make([]TypeID, 0, len(fn.Params)-1)
+			for _, param := range fn.Params[1:] {
+				params = append(params, param.Type)
+			}
+			candidate, ok := e.thenableCallbackArity(params, resultType)
+			if !ok || (arity != 0 && arity != candidate) {
+				return 0, nil, false
+			}
+			arity = candidate
+		}
+		return arity, targets, true
 	}
 	typ := e.result.Types[typeID]
 	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) {
-		return 0, false
+		return 0, nil, false
 	}
 	for _, field := range e.result.Shapes[typ.Shape].Fields {
 		if field.Name != "then" || int(field.Type) >= len(e.result.Types) {
 			continue
 		}
 		thenType := e.result.Types[field.Type]
-		if thenType.Kind != TypeFunction || len(thenType.Params) < 1 || len(thenType.Params) > 2 {
-			return 0, false
+		if thenType.Kind != TypeFunction {
+			return 0, nil, false
 		}
-		resolveType, ok := e.thenableCallbackFunction(thenType.Params[0])
-		if !ok || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
-			return 0, false
-		}
-		if len(thenType.Params) == 2 {
-			rejectType, ok := e.thenableCallbackFunction(thenType.Params[1])
-			if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
-				return 0, false
-			}
-			reasonKind := e.result.Types[rejectType.Params[0]].Kind
-			if reasonKind != TypeAny && reasonKind != TypeUnion && reasonKind != TypeUnknown {
-				return 0, false
-			}
-		}
-		return len(thenType.Params), true
+		arity, ok := e.thenableCallbackArity(thenType.Params, resultType)
+		return arity, nil, ok
 	}
-	return 0, false
+	return 0, nil, false
+}
+
+func (e *extractor) thenableClass(typeID TypeID) (*classInfo, bool) {
+	if class, ok := e.classesByType[typeID]; ok {
+		return class, true
+	}
+	if int(typeID) >= len(e.result.Types) {
+		return nil, false
+	}
+	typ := e.result.Types[typeID]
+	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) || e.result.Shapes[typ.Shape].ClassTag == 0 {
+		return nil, false
+	}
+	seen := map[*classInfo]struct{}{}
+	for _, class := range e.classesByType {
+		if _, duplicate := seen[class]; duplicate {
+			continue
+		}
+		seen[class] = struct{}{}
+		if class.Shape == typ.Shape {
+			return class, true
+		}
+	}
+	return nil, false
+}
+
+func (e *extractor) thenableCallbackArity(params []TypeID, resultType TypeID) (int, bool) {
+	if len(params) < 1 || len(params) > 2 {
+		return 0, false
+	}
+	resolveType, ok := e.thenableCallbackFunction(params[0])
+	if !ok || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
+		return 0, false
+	}
+	if len(params) == 2 {
+		rejectType, ok := e.thenableCallbackFunction(params[1])
+		if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
+			return 0, false
+		}
+		reasonKind := e.result.Types[rejectType.Params[0]].Kind
+		if reasonKind != TypeAny && reasonKind != TypeUnion && reasonKind != TypeUnknown {
+			return 0, false
+		}
+	}
+	return len(params), true
 }
 
 func (e *extractor) thenableCallbackFunction(typeID TypeID) (Type, bool) {

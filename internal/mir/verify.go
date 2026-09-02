@@ -502,6 +502,11 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Thenable); err != nil {
 					return err
 				}
+				for _, target := range op.Cases {
+					if _, ok := functions[target.Callee]; !ok {
+						return fmt.Errorf("Promise thenable references unknown method f%d", target.Callee)
+					}
+				}
 			case PromiseReject:
 				if inst.Repr != ReprTaskRef || (op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue) {
 					return fmt.Errorf("Promise.reject v%d has invalid task representation", inst.Result)

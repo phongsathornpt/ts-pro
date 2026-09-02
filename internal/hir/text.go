@@ -132,7 +132,7 @@ func formatOperation(op Operation) string {
 	case PromiseAdoptOp:
 		return fmt.Sprintf("promise.adopt v%d", op.Promise)
 	case PromiseThenableOp:
-		return fmt.Sprintf("promise.thenable v%d arity=%d", op.Thenable, op.Arity)
+		return fmt.Sprintf("promise.thenable v%d arity=%d cases=%d", op.Thenable, op.Arity, len(op.Cases))
 	case PromiseRejectOp:
 		return fmt.Sprintf("promise.reject v%d, kind=%d", op.Reason, op.Result)
 	case TaskSpawnOp:

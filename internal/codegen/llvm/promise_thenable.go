@@ -112,8 +112,13 @@ func (e *emitter) emitPromiseThenable(b *strings.Builder, inst mir.Instruction, 
 		emitPromiseThenableTemporaryRoot(b, name+".reject", name+".reject")
 		emitPromiseThenableFunctionBox(b, name+".reject.box", name+".reject")
 	}
-	fmt.Fprintf(b, "  %s.then = call ptr @%s(ptr %s)\n", name, dynamicFieldGetHelperName("then"), thenable)
-	fmt.Fprintf(b, "  %s.call = call ptr @%s(ptr %s.then, ptr %s", name, dynamicCallHelperName(int(op.Arity), true), name, thenable)
+	if len(op.Cases) != 0 {
+		method := mir.DynamicMethodCall{Args: make([]mir.ValueID, int(op.Arity)), Cases: op.Cases}
+		fmt.Fprintf(b, "  %s.call = call ptr @%s(ptr %s", name, dynamicMethodCallHelperName(method), thenable)
+	} else {
+		fmt.Fprintf(b, "  %s.then = call ptr @%s(ptr %s)\n", name, dynamicFieldGetHelperName("then"), thenable)
+		fmt.Fprintf(b, "  %s.call = call ptr @%s(ptr %s.then, ptr %s", name, dynamicCallHelperName(int(op.Arity), true), name, thenable)
+	}
 	fmt.Fprintf(b, ", ptr %s.resolve.box", name)
 	if op.Arity == 2 {
 		fmt.Fprintf(b, ", ptr %s.reject.box", name)

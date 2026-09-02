@@ -317,7 +317,11 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		if err != nil {
 			return mir.Instruction{}, err
 		}
-		result.Op = mir.PromiseThenable{Thenable: mir.ValueID(op.Thenable), Result: resultRepr, Arity: op.Arity}
+		cases := make([]mir.DispatchCase, len(op.Cases))
+		for i, target := range op.Cases {
+			cases[i] = mir.DispatchCase{ClassTag: target.ClassTag, Callee: mir.FunctionID(target.Callee)}
+		}
+		result.Op = mir.PromiseThenable{Thenable: mir.ValueID(op.Thenable), Result: resultRepr, Arity: op.Arity, Cases: cases}
 	case hir.PromiseAllF64Op:
 		promises := make([]mir.ValueID, len(op.Promises))
 		for i, value := range op.Promises {
