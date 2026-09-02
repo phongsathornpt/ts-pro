@@ -8,13 +8,19 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
-type gcRootLayout struct {
-	slots map[mir.ValueID]int
-	count int
+type stackFieldRoot struct {
+	object mir.ValueID
+	field  uint32
 }
 
-func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
-	layout := gcRootLayout{slots: map[mir.ValueID]int{}}
+type gcRootLayout struct {
+	slots       map[mir.ValueID]int
+	stackFields map[stackFieldRoot]int
+	count       int
+}
+
+func buildGCRootLayout(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, stackObjects map[mir.ValueID]bool, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
+	layout := gcRootLayout{slots: map[mir.ValueID]int{}, stackFields: map[stackFieldRoot]int{}}
 	add := func(value mir.ValueID, repr mir.Repr) {
 		if !isGCReference(repr) {
 			return
@@ -31,6 +37,17 @@ func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool, scala
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			if stackObjects[inst.Result] {
+				if shapeID, ok := stackObjectShapeForGC(inst.Op); ok {
+					shape := shapes[shapeID]
+					for field, info := range shape.Fields {
+						if !isGCHeapReferenceRepr(info.Repr) {
+							continue
+						}
+						key := stackFieldRoot{object: inst.Result, field: uint32(field)}
+						layout.stackFields[key] = layout.count
+						layout.count++
+					}
+				}
 				continue
 			}
 			if _, ok := scalarObjects[inst.Result]; ok {
@@ -40,6 +57,17 @@ func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool, scala
 		}
 	}
 	return layout
+}
+
+func stackObjectShapeForGC(op mir.Operation) (mir.ShapeID, bool) {
+	switch op := op.(type) {
+	case mir.ObjectNew:
+		return op.Shape, true
+	case mir.ObjectAlloc:
+		return op.Shape, true
+	default:
+		return 0, false
+	}
 }
 
 func isGCReference(repr mir.Repr) bool {
@@ -93,5 +121,33 @@ func (layout gcRootLayout) emitStore(b *strings.Builder, inst mir.Instruction, v
 		return err
 	}
 	fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
+	return nil
+}
+
+func (layout gcRootLayout) emitStackFieldSync(b *strings.Builder, inst mir.Instruction, values map[mir.ValueID]string) error {
+	switch op := inst.Op.(type) {
+	case mir.ObjectNew:
+		for field, valueID := range op.Fields {
+			slot, ok := layout.stackFields[stackFieldRoot{object: inst.Result, field: uint32(field)}]
+			if !ok {
+				continue
+			}
+			value, err := operand(values, valueID)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
+		}
+	case mir.FieldSet:
+		slot, ok := layout.stackFields[stackFieldRoot{object: op.Object, field: op.Field}]
+		if !ok {
+			return nil
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
+	}
 	return nil
 }

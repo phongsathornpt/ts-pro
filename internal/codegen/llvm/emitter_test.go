@@ -391,6 +391,52 @@ func TestEmitLoopNumericObjectRemainsHeapAllocated(t *testing.T) {
 	}
 }
 
+func TestEmitReferenceStackObjectSynchronizesFieldRoots(t *testing.T) {
+	module := mir.Module{
+		Name:   "stack-ref-object",
+		Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, Name: "loop", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Jump{Target: 1}},
+			{ID: 1, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},
+				{Result: 2, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 1}},
+			}, Terminator: mir.Jump{Target: 1}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") {
+		t.Fatalf("reference-bearing object was not stack allocated:\n%s", text)
+	}
+	for _, forbidden := range []string{
+		"call ptr @tsnative_object_alloc_refs(i64 %v0.size",
+		"call void @tsnative_gc_store_ref(ptr %v0",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("stack reference object retained heap path %q:\n%s", forbidden, text)
+		}
+	}
+	if strings.Count(text, "store ptr %v1, ptr %gc.slot.") < 2 {
+		t.Fatalf("FieldSet did not synchronize SSA and stack-field roots:\n%s", text)
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "stack-ref-object.ll"), filepath.Join(dir, "stack-ref-object.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile stack reference LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
 func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
 	result := mir.ValueID(0)
 	module := mir.Module{

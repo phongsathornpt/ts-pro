@@ -45,13 +45,26 @@ func TestStackObjectsRejectsReturnedClosure(t *testing.T) {
 	}
 }
 
-func TestStackObjectsRejectsReferenceShape(t *testing.T) {
+func TestStackObjectsAcceptsReferenceShape(t *testing.T) {
 	module := mir.Module{
 		Shapes:    []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},
 		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{objectAlloc(0)}, Terminator: mir.Return{}}}}},
 	}
+	if !StackObjects(module, Analyze(module)).Contains(0, 0) {
+		t.Fatal("reference-bearing object was not selected for stack allocation")
+	}
+}
+
+func TestStackObjectsRejectsAliasedReferenceObject(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},
+		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			objectAlloc(0),
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 0}}}},
+		}, Terminator: mir.Return{}}}}},
+	}
 	if StackObjects(module, Analyze(module)).Contains(0, 0) {
-		t.Fatal("reference-bearing object was selected for stack allocation")
+		t.Fatal("aliased reference-bearing object was selected for stack allocation")
 	}
 }
 func TestStackObjectsRejectsCyclicAllocationBlock(t *testing.T) {

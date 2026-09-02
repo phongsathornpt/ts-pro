@@ -187,7 +187,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
-	gc := buildGCRootLayout(fn, e.stackObjects[fn.ID], e.scalarObjects[fn.ID])
+	gc := buildGCRootLayout(fn, e.shapes, e.stackObjects[fn.ID], e.scalarObjects[fn.ID])
 	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
@@ -224,6 +224,9 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 			}
 			if err := gc.emitStore(b, inst, values); err != nil {
 				return fmt.Errorf("function %s root v%d: %w", fn.Name, inst.Result, err)
+			}
+			if err := gc.emitStackFieldSync(b, inst, values); err != nil {
+				return fmt.Errorf("function %s stack-field roots v%d: %w", fn.Name, inst.Result, err)
 			}
 		}
 		if err := e.emitTerminator(b, fn, block.Terminator, values, gc); err != nil {
@@ -474,7 +477,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
-		if isGCHeapReferenceRepr(shape.Fields[op.Field].Repr) {
+		if isGCHeapReferenceRepr(shape.Fields[op.Field].Repr) && !e.isStackObject(fn.ID, op.Object) {
 			fmt.Fprintf(b, "  call void @tsnative_gc_store_ref(ptr %s, ptr %s.ptr, ptr %s)\n", object, name, value)
 		} else {
 			fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)

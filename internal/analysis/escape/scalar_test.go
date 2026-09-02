@@ -94,7 +94,7 @@ func TestScalarObjectsPlansMutableDiamondPhi(t *testing.T) {
 	}
 }
 
-func TestScalarObjectsSelectsReferenceBearingObjectWithoutStackAllocation(t *testing.T) {
+func TestScalarObjectsSelectsReferenceBearingStackCandidate(t *testing.T) {
 	module := mir.Module{
 		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
 		Functions: []mir.Function{{ID: 0, ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
@@ -105,8 +105,8 @@ func TestScalarObjectsSelectsReferenceBearingObjectWithoutStackAllocation(t *tes
 	}
 	escapes := Analyze(module)
 	stack := StackObjects(module, escapes)
-	if stack.Contains(0, 1) {
-		t.Fatal("reference-bearing object was selected for physical stack allocation")
+	if !stack.Contains(0, 1) {
+		t.Fatal("reference-bearing object was not selected as a stack candidate")
 	}
 	object, ok := ScalarObjectsWithEscapeAnalysis(module, stack, escapes).Get(0, 1)
 	if !ok || object.Mutable || len(object.Fields) != 1 || object.Fields[0] != 0 {

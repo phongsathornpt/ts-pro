@@ -24,12 +24,13 @@ func stackObjectsForFunction(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, 
 	result := make(map[mir.ValueID]bool)
 	cyclic := cyclicBlocks(fn)
 	blocked := stackBlockedValues(fn)
+	aliased := stackAliasedValues(fn)
 	for _, block := range fn.Blocks {
 		if cyclic[block.ID] {
 			continue
 		}
 		for _, inst := range block.Instructions {
-			if blocked[inst.Result] || !escapes.CanStackAllocate(inst.Result) {
+			if blocked[inst.Result] || aliased[inst.Result] || !escapes.CanStackAllocate(inst.Result) {
 				continue
 			}
 			if _, ok := inst.Op.(mir.ClosureNew); ok {
@@ -41,7 +42,7 @@ func stackObjectsForFunction(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, 
 				continue
 			}
 			shape, ok := shapes[shapeID]
-			if !ok || !stackAtomicShape(shape) {
+			if !ok || !stackSupportedShape(shape) {
 				continue
 			}
 			result[inst.Result] = true
@@ -60,18 +61,29 @@ func stackObjectShape(op mir.Operation) (mir.ShapeID, bool) {
 		return 0, false
 	}
 }
-func stackAtomicShape(shape mir.Shape) bool {
-	if shape.ClassTag == 0 && len(shape.Fields) == 0 {
-		return false
-	}
-	for _, field := range shape.Fields {
-		switch field.Repr {
-		case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef,
-			mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprJSValue:
-			return false
+func stackSupportedShape(shape mir.Shape) bool {
+	return shape.ClassTag != 0 || len(shape.Fields) != 0
+}
+
+func stackAliasedValues(fn mir.Function) map[mir.ValueID]bool {
+	prov := make(provenance)
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			if allocationKind(inst.Op) != AllocationInvalid {
+				prov[inst.Result] = valueSet{inst.Result: {}}
+			}
 		}
 	}
-	return true
+	propagateAliases(fn, prov)
+	aliased := make(map[mir.ValueID]bool)
+	for value, origins := range prov {
+		for origin := range origins {
+			if value != origin {
+				aliased[origin] = true
+			}
+		}
+	}
+	return aliased
 }
 
 func stackBlockedValues(fn mir.Function) map[mir.ValueID]bool {
