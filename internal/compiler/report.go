@@ -3,6 +3,7 @@ package compiler
 import (
 	"time"
 
+	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
 	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	"github.com/projectthorn/tsv7-bin/internal/hir"
 	"github.com/projectthorn/tsv7-bin/internal/mir"
@@ -13,6 +14,7 @@ type BuildTimings struct {
 	HIR        time.Duration
 	Repr       time.Duration
 	MIR        time.Duration
+	Escape     time.Duration
 	LLVM       time.Duration
 	Codegen    time.Duration
 	Runtime    time.Duration
@@ -21,32 +23,35 @@ type BuildTimings struct {
 }
 
 type BuildMetrics struct {
-	Functions       int
-	Shapes          int
-	Values          int
-	NativeValues    int
-	DynamicValues   int
-	BoxingSites     int
-	DynamicDispatch int
-	I32Candidates   int
-	I64Candidates   int
-	I32FastOps      int
-	I64FastOps      int
-	TaskSpawns      int
-	TaskJoins       int
-	TaskYields      int
-	ChannelCreates  int
-	ChannelTrySends int
-	ChannelTryRecvs int
-	ChannelSends    int
-	ChannelRecvs    int
-	Sleeps          int
-	RuntimeCalls    int
-	CacheHits       int
-	CacheMisses     int
+	Functions            int
+	Shapes               int
+	Values               int
+	NativeValues         int
+	DynamicValues        int
+	BoxingSites          int
+	DynamicDispatch      int
+	I32Candidates        int
+	I64Candidates        int
+	I32FastOps           int
+	I64FastOps           int
+	TaskSpawns           int
+	TaskJoins            int
+	TaskYields           int
+	ChannelCreates       int
+	ChannelTrySends      int
+	ChannelTryRecvs      int
+	ChannelSends         int
+	ChannelRecvs         int
+	Sleeps               int
+	RuntimeCalls         int
+	AllocationCandidates int
+	StackAllocCandidates int
+	EscapingAllocations  int
+	CacheHits            int
+	CacheMisses          int
 }
 
-func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetrics {
+func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes escapeanalysis.Result) BuildMetrics {
 	metrics := BuildMetrics{Functions: len(mirModule.Functions), Shapes: len(mirModule.Shapes)}
 	count := func(repr hir.Repr) {
 		if repr.Kind == hir.ReprVoid || repr.Kind == hir.ReprUnproven {
@@ -91,7 +96,22 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module) BuildMetric
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.Sleeps = countSleepOps(mirModule)
 	metrics.RuntimeCalls = countRuntimeCalls(mirModule)
+	metrics.AllocationCandidates, metrics.StackAllocCandidates, metrics.EscapingAllocations = countEscapeAllocations(escapes)
 	return metrics
+}
+
+func countEscapeAllocations(result escapeanalysis.Result) (candidates, stack, escaping int) {
+	for _, fn := range result {
+		for _, info := range fn {
+			candidates++
+			if info.Escapes {
+				escaping++
+			} else {
+				stack++
+			}
+		}
+	}
+	return candidates, stack, escaping
 }
 
 func countIntegerFastOps(module mir.Module) (i32, i64 int) {

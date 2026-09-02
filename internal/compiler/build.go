@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
 	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
@@ -87,7 +88,10 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 	timings.MIR = time.Since(mirStart)
-	metrics := collectBuildMetrics(hirModule, mirModule)
+	escapeStart := time.Now()
+	escapes := escapeanalysis.Analyze(mirModule)
+	timings.Escape = time.Since(escapeStart)
+	metrics := collectBuildMetrics(hirModule, mirModule, escapes)
 	llvmStart := time.Now()
 	llvmIR, err := llvmcodegen.Emit(mirModule)
 	if err != nil {

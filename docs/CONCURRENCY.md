@@ -217,7 +217,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Keep the 64 KiB per-worker nursery default and promote-after-one-minor policy for now. Fixed-byte throughput is nearly flat from 64-512 KiB, while sampled 64B-object median minor pause rises roughly linearly from ~0.69 ms / 1.37 ms / 2.74 ms / 5.48 ms at 64 / 128 / 256 / 512 KiB. Synthetic 0-10% one-minor survival triggers no majors over 64 cycles; 50-100% survival adds only 2-4 majors, not enough to justify age-2 remembered-set retention complexity yet.
     - [x] Add precise heap layout/reference maps: LLVM emits reference-offset descriptors for object shapes, task environments, closure environments, and closure objects; strings/F64 arrays and non-reference JSValue boxes are atomic, while reference JSValue boxes trace only the payload slot. Unknown ABI allocations remain conservative for compatibility.
     - [x] Measure trace-word reduction. A 2 MiB live-heap full-GC benchmark (1,024 × 2 KiB blocks) drops from roughly 1.60-1.68 ms under conservative scanning to 0.956-1.004 ms for atomic layouts; ABI counters expose traced words and atomic/precise/conservative block counts.
-    - [ ] Add MIR escape analysis and stack allocation for proven local-only heap candidates before adding more generational policy complexity.
+    - [x] Add conservative MIR escape analysis with Phi/containment propagation and explicit escape reasons for returns, stores, calls, tasks, channels, boxing, and suspension; compiler performance reports expose stack-eligible versus escaping allocation candidates.
+    - [ ] Stack-allocate only proven non-escaping numeric-only object shapes first, then add reference-bearing stack objects/closures only with precise root and interior-pointer handling.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
