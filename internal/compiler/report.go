@@ -15,6 +15,7 @@ type BuildTimings struct {
 	Repr       time.Duration
 	MIR        time.Duration
 	Escape     time.Duration
+	Go         time.Duration
 	LLVM       time.Duration
 	Codegen    time.Duration
 	Runtime    time.Duration

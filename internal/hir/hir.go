@@ -224,10 +224,12 @@ type PromiseResolveOp struct {
 }
 type PromiseAdoptOp struct{ Promise ValueID }
 type PromiseThenableOp struct {
-	Thenable ValueID
-	Result   TaskResultKind
-	Arity    uint8
-	Cases    []DispatchCase
+	Thenable         ValueID
+	Result           TaskResultKind
+	Arity            uint8
+	Cases            []DispatchCase
+	ResolveReturnsJS bool
+	RejectReturnsJS  bool
 }
 type PromiseRejectOp struct {
 	Reason ValueID

@@ -52,3 +52,30 @@ func TestAnalyzeRejectsUnsupportedTaggedUnionMember(t *testing.T) {
 		t.Fatal("expected unsupported union member diagnostic")
 	}
 }
+
+func TestAnalyzeUsesJSValueForUnresolvedTypeParameters(t *testing.T) {
+	typeParam := hir.NewTypeID(0)
+	union := hir.NewTypeID(1)
+	module := hir.Module{
+		Types: []hir.SemanticType{
+			{Kind: hir.TypeParameter},
+			{Kind: hir.TypeUnion, Members: []hir.TypeID{typeParam, hir.NewTypeID(2)}},
+			{Kind: hir.TypeUndefined},
+		},
+		Functions: []hir.Function{{
+			ID: hir.NewFunctionID(0), Name: "genericBoundary", ReturnType: typeParam, Entry: hir.NewBlockID(0),
+			Params: []hir.Param{
+				{Value: hir.NewValueID(0), Name: "value", SemanticType: typeParam},
+				{Value: hir.NewValueID(1), Name: "optional", SemanticType: union},
+			},
+			Blocks: []hir.Block{{ID: hir.NewBlockID(0), Terminator: hir.ReturnTerm{Value: func() *hir.ValueID { v := hir.NewValueID(0); return &v }()}}},
+		}},
+	}
+	if diagnostics := Analyze(&module); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+	fn := module.Functions[0]
+	if fn.ReturnRepr.Kind != hir.ReprJSValue || fn.Params[0].Repr.Kind != hir.ReprJSValue || fn.Params[1].Repr.Kind != hir.ReprJSValue {
+		t.Fatalf("generic boundary repr = return=%+v params=%+v", fn.ReturnRepr, fn.Params)
+	}
+}

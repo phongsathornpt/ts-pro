@@ -85,33 +85,35 @@ type ObjectFieldExpr struct {
 }
 
 type Expr struct {
-	Kind          ExprKind
-	Type          TypeID
-	Symbol        SymbolID
-	Name          string
-	Boolean       bool
-	Number        float64
-	String        string
-	Operator      BinaryOperator
-	Left          *Expr
-	Right         *Expr
-	Callee        *Expr
-	Args          []*Expr
-	CallTarget    *FunctionID
-	Intrinsic     IntrinsicKind
-	Elements      []*Expr
-	Object        *Expr
-	Index         *Expr
-	Fields        []ObjectFieldExpr
-	Captures      []*Expr
-	Field         string
-	FieldIndex    uint32
-	Constructor   *FunctionID
-	Dispatch      []DispatchTarget
-	ConcreteType  TypeID
-	ConcreteKnown bool
-	TaskShared    bool
-	Span          Span
+	Kind               ExprKind
+	Type               TypeID
+	Symbol             SymbolID
+	Name               string
+	Boolean            bool
+	Number             float64
+	String             string
+	Operator           BinaryOperator
+	Left               *Expr
+	Right              *Expr
+	Callee             *Expr
+	Args               []*Expr
+	CallTarget         *FunctionID
+	Intrinsic          IntrinsicKind
+	Elements           []*Expr
+	Object             *Expr
+	Index              *Expr
+	Fields             []ObjectFieldExpr
+	Captures           []*Expr
+	Field              string
+	FieldIndex         uint32
+	Constructor        *FunctionID
+	Dispatch           []DispatchTarget
+	ThenResolveJSValue bool
+	ThenRejectJSValue  bool
+	ConcreteType       TypeID
+	ConcreteKnown      bool
+	TaskShared         bool
+	Span               Span
 }
 
 type StmtKind uint8

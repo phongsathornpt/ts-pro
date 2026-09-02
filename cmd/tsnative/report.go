@@ -37,6 +37,7 @@ func formatBuildReport(result compiler.BuildResult) string {
 	writeTiming(&b, "representation", t.Repr)
 	writeTiming(&b, "mir", t.MIR)
 	writeTiming(&b, "escape", t.Escape)
+	writeTiming(&b, "go", t.Go)
 	writeTiming(&b, "llvm-ir", t.LLVM)
 	writeTiming(&b, "codegen", t.Codegen)
 	writeTiming(&b, "runtime", t.Runtime)

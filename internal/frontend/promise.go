@@ -29,11 +29,13 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 				return nil, fmt.Errorf("Promise.resolve at %d cannot adopt incompatible Promise result", node.Pos())
 			}
 			expr.Kind = ExprPromiseAdopt
-		} else if arity, dispatch, ok := e.structuralThenableInfo(expr.Args[0].Type, promiseType.ReturnType); ok {
+		} else if info, ok := e.structuralThenableInfo(expr.Args[0].Type, promiseType.ReturnType); ok {
 			e.ensureSemanticType(TypeAny, "any")
 			expr.Kind = ExprPromiseThenable
-			expr.FieldIndex = uint32(arity)
-			expr.Dispatch = dispatch
+			expr.FieldIndex = uint32(info.Arity)
+			expr.Dispatch = info.Dispatch
+			expr.ThenResolveJSValue = info.ResolveJSValue
+			expr.ThenRejectJSValue = info.RejectJSValue
 		} else {
 			expr.Kind = ExprPromiseResolve
 		}
@@ -116,39 +118,50 @@ func supportedImmediatePromiseResult(kind TypeKind) bool {
 	}
 }
 
-func (e *extractor) structuralThenableInfo(typeID, resultType TypeID) (int, []DispatchTarget, bool) {
+type thenableInfo struct {
+	Arity          int
+	Dispatch       []DispatchTarget
+	ResolveJSValue bool
+	RejectJSValue  bool
+}
+
+func (e *extractor) structuralThenableInfo(typeID, resultType TypeID) (thenableInfo, bool) {
 	if int(typeID) >= len(e.result.Types) {
-		return 0, nil, false
+		return thenableInfo{}, false
 	}
 	if class, ok := e.thenableClass(typeID); ok {
 		targets := e.dispatchTargets(class, "then")
 		if len(targets) == 0 {
-			return 0, nil, false
+			return thenableInfo{}, false
 		}
-		arity := 0
+		var merged thenableInfo
 		for _, target := range targets {
 			if int(target.Function) >= len(e.result.Functions) {
-				return 0, nil, false
+				return thenableInfo{}, false
 			}
 			fn := e.result.Functions[target.Function]
 			if len(fn.Params) < 2 {
-				return 0, nil, false
+				return thenableInfo{}, false
 			}
 			params := make([]TypeID, 0, len(fn.Params)-1)
 			for _, param := range fn.Params[1:] {
 				params = append(params, param.Type)
 			}
-			candidate, ok := e.thenableCallbackArity(params, resultType)
-			if !ok || (arity != 0 && arity != candidate) {
-				return 0, nil, false
+			candidate, ok := e.thenableCallbackInfo(params, resultType)
+			if !ok {
+				return thenableInfo{}, false
 			}
-			arity = candidate
+			if merged.Arity != 0 && (merged.Arity != candidate.Arity || merged.ResolveJSValue != candidate.ResolveJSValue || merged.RejectJSValue != candidate.RejectJSValue) {
+				return thenableInfo{}, false
+			}
+			merged = candidate
 		}
-		return arity, targets, true
+		merged.Dispatch = targets
+		return merged, true
 	}
 	typ := e.result.Types[typeID]
 	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) {
-		return 0, nil, false
+		return thenableInfo{}, false
 	}
 	for _, field := range e.result.Shapes[typ.Shape].Fields {
 		if field.Name != "then" || int(field.Type) >= len(e.result.Types) {
@@ -156,12 +169,11 @@ func (e *extractor) structuralThenableInfo(typeID, resultType TypeID) (int, []Di
 		}
 		thenType := e.result.Types[field.Type]
 		if thenType.Kind != TypeFunction {
-			return 0, nil, false
+			return thenableInfo{}, false
 		}
-		arity, ok := e.thenableCallbackArity(thenType.Params, resultType)
-		return arity, nil, ok
+		return e.thenableCallbackInfo(thenType.Params, resultType)
 	}
-	return 0, nil, false
+	return thenableInfo{}, false
 }
 
 func (e *extractor) thenableClass(typeID TypeID) (*classInfo, bool) {
@@ -188,25 +200,49 @@ func (e *extractor) thenableClass(typeID TypeID) (*classInfo, bool) {
 	return nil, false
 }
 
-func (e *extractor) thenableCallbackArity(params []TypeID, resultType TypeID) (int, bool) {
+func (e *extractor) thenableCallbackInfo(params []TypeID, resultType TypeID) (thenableInfo, bool) {
 	if len(params) < 1 || len(params) > 2 {
-		return 0, false
+		return thenableInfo{}, false
 	}
 	resolveType, ok := e.thenableCallbackFunction(params[0])
-	if !ok || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
-		return 0, false
+	if !ok || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) {
+		return thenableInfo{}, false
 	}
+	resolveJSValue, ok := e.thenableCallbackReturn(resolveType.ReturnType)
+	if !ok {
+		return thenableInfo{}, false
+	}
+	info := thenableInfo{Arity: len(params), ResolveJSValue: resolveJSValue}
 	if len(params) == 2 {
 		rejectType, ok := e.thenableCallbackFunction(params[1])
-		if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
-			return 0, false
+		if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) {
+			return thenableInfo{}, false
 		}
 		reasonKind := e.result.Types[rejectType.Params[0]].Kind
 		if reasonKind != TypeAny && reasonKind != TypeUnion && reasonKind != TypeUnknown {
-			return 0, false
+			return thenableInfo{}, false
 		}
+		rejectJSValue, ok := e.thenableCallbackReturn(rejectType.ReturnType)
+		if !ok {
+			return thenableInfo{}, false
+		}
+		info.RejectJSValue = rejectJSValue
 	}
-	return len(params), true
+	return info, true
+}
+
+func (e *extractor) thenableCallbackReturn(typeID TypeID) (bool, bool) {
+	if int(typeID) >= len(e.result.Types) {
+		return false, false
+	}
+	switch e.result.Types[typeID].Kind {
+	case TypeVoid:
+		return false, true
+	case TypeAny, TypeUnion, TypeParameter, TypeNull, TypeUndefined:
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 func (e *extractor) thenableCallbackFunction(typeID TypeID) (Type, bool) {

@@ -12,6 +12,56 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Keep Go under `runtimego/` (and native-library packages) for allocator/GC, scheduler/tasks, channels, timers, blocking pool, JSValue, strings/arrays/objects, and native libraries.
   - [x] Remove all handwritten runtime C after Go runtime parity; the cached Go `c-archive` now publishes its generated C-compatible ABI header for toolchain/tests.
 
+## Pure Go only refactor
+
+The current Go c-archive/C ABI path is transitional and is superseded by this
+target. Pure Go means the repository builds and tests with `CGO_ENABLED=0` and
+contains no C or assembly implementation dependency.
+
+- [ ] Freeze the pure-Go contract.
+  - [ ] Require `CGO_ENABLED=0 go test ./...`, `CGO_ENABLED=0 go vet ./...`, and `CGO_ENABLED=0 go build ./...` in CI.
+  - [ ] Reject new `import "C"`, `//export`, cgo build tags, C/C++ sources, c-archive builds, and C ABI shims.
+  - [ ] Decide and document the supported `GOOS`/`GOARCH` matrix for the pure-Go runtime.
+- [ ] Inventory and quarantine transitional native integration.
+  - [ ] Remove the temporary `runtimego/blocking_abi_cgo.go` and `runtimego/trampoline_cgo.go` compatibility shims.
+  - [ ] Remove `runtimego/trampoline_amd64.s` and replace native function-pointer callbacks with Go function values.
+  - [ ] Track every remaining `unsafe`, `syscall.Mmap`, raw pointer, and OS-specific dependency with an explicit replacement or exception.
+- [ ] Extract a normal importable Go runtime package from `runtimego`.
+  - [ ] Separate runtime implementation from executable/ABI wrapper concerns.
+  - [ ] Replace C-sized argument/result types with typed Go APIs.
+  - [ ] Replace opaque native pointer handles with typed Go handles and ownership rules.
+  - [ ] Replace raw callback addresses with typed task and blocking-job functions.
+- [ ] Define the pure-Go memory model.
+  - [ ] Use Go-managed strings, slices, structs, and interfaces for runtime values.
+  - [ ] Replace the raw mmap heap/object layout with typed Go storage, or document the minimal pure-Go `unsafe` boundary that remains.
+  - [ ] Remove explicit native root registration, handoff, remembered-set, and custom GC machinery where Go GC ownership makes it unnecessary.
+  - [ ] Preserve JavaScript/TypeScript semantics for `JSValue`, object shapes, promises, arrays, and closures with Go-native representations.
+- [ ] Replace the LLVM/clang/c-archive output path.
+  - [~] Add a Go source backend for the currently supported TypeScript subset; the initial scalar/string/control-flow slice is available through `--pure-go`.
+  - [x] Generate a temporary Go module/package for each compiled program.
+  - [x] Build the initial generated programs with `go build` only and `CGO_ENABLED=0`.
+  - [ ] Replace LLVM object caching with deterministic generated-Go/build caching.
+  - [ ] Retire `internal/codegen/llvm`, clang discovery, C compilation, C linking, and Go c-archive orchestration after parity.
+- [ ] Port runtime behavior to the Go API.
+  - [ ] Port scalar/string/array/object/closure operations.
+  - [ ] Port scheduler, tasks, channels, timers, blocking jobs, cancellation, and task groups.
+  - [ ] Port promises, async/await, rejection propagation, and combinators.
+  - [ ] Preserve worker limits, task ownership, cancellation, and observable ordering.
+- [ ] Rewrite integration and differential tests.
+  - [ ] Replace embedded C ABI tests with generated-Go integration tests.
+  - [ ] Add pure-Go runtime unit tests for every migrated subsystem.
+  - [ ] Keep TypeScript/JavaScript differential tests for observable semantics.
+  - [ ] Add race-enabled scheduler/runtime coverage.
+- [ ] Complete cleanup and documentation.
+  - [ ] Remove all cgo/C/assembly references from active build and test paths.
+  - [ ] Update `README.md`, `docs/GO_RUNTIME.md`, `docs/GO_LAYOUT.md`, `docs/STATUS.md`, and `docs/ROADMAP.md` to describe the pure-Go target.
+  - [ ] Retire transitional Go compiler/backend packages only after the TypeScript 7 implementation reaches parity.
+- [ ] Final acceptance gate.
+  - [ ] `CGO_ENABLED=0 go test ./...`
+  - [ ] `CGO_ENABLED=0 go vet ./...`
+  - [ ] `CGO_ENABLED=0 go build ./...`
+  - [ ] Pure-Go generated binaries pass acceptance, concurrency, GC, Promise, and differential suites.
+
 ## Project completion goal
 
 - [~] Reach 100% of the compiler roadmap tracked in this file, with every completed capability covered by native acceptance/regression tests and differential tests where TypeScript/JavaScript observable behavior applies.

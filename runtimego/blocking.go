@@ -1,13 +1,5 @@
 package main
 
-/*
-#include <stdint.h>
-#include <stdlib.h>
-typedef void (*tsnative_blocking_entry_fn)(void *);
-static void tsnative_blocking_call_entry(uintptr_t fn, void *state) { ((tsnative_blocking_entry_fn)fn)(state); }
-*/
-import "C"
-
 import (
 	"os"
 	"strconv"
@@ -48,8 +40,7 @@ var nativeBlocking = struct {
 	completed uint64
 }{jobs: map[uintptr]*nativeBlockingJob{}}
 
-//export tsnative_blocking_bind_scheduler
-func tsnative_blocking_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
+func nativeBlockingBindScheduler(current, prepare, cancel, wake, help uintptr) {}
 
 func parseBlockingLimit(name string, fallback, hardMax int) int {
 	raw := os.Getenv(name)
@@ -69,7 +60,7 @@ func parseBlockingLimit(name string, fallback, hardMax int) int {
 func nativeBlockingWorker(queue <-chan *nativeBlockingJob) {
 	defer nativeBlocking.wg.Done()
 	for job := range queue {
-		C.tsnative_blocking_call_entry(C.uintptr_t(uintptr(job.entry)), job.state)
+		callNativeEntry1(uintptr(job.entry), job.state)
 		completeNativeBlockingJob(job)
 	}
 }
@@ -127,8 +118,7 @@ func completeNativeBlockingJob(job *nativeBlockingJob) {
 	})
 }
 
-//export tsnative_blocking_submit
-func tsnative_blocking_submit(entry unsafe.Pointer, state unsafe.Pointer) unsafe.Pointer {
+func nativeBlockingSubmit(entry unsafe.Pointer, state unsafe.Pointer) unsafe.Pointer {
 	if entry == nil || !ensureNativeBlockingStarted() {
 		return nil
 	}
@@ -137,11 +127,7 @@ func tsnative_blocking_submit(entry unsafe.Pointer, state unsafe.Pointer) unsafe
 		nativeBlocking.Unlock()
 		return nil
 	}
-	tokenPtr := C.malloc(1)
-	if tokenPtr == nil {
-		nativeBlocking.Unlock()
-		return nil
-	}
+	tokenPtr := allocNativeHandle()
 	job := &nativeBlockingJob{
 		token: uintptr(tokenPtr), entry: entry, state: state, done: make(chan struct{}),
 	}
@@ -156,8 +142,7 @@ func tsnative_blocking_submit(entry unsafe.Pointer, state unsafe.Pointer) unsafe
 	return tokenPtr
 }
 
-//export tsnative_blocking_job_wait_task
-func tsnative_blocking_job_wait_task(raw unsafe.Pointer) C.int {
+func nativeBlockingJobWaitTask(raw unsafe.Pointer) int {
 	job := lookupNativeBlockingJob(raw)
 	if job == nil {
 		return -1
@@ -189,11 +174,10 @@ func tsnative_blocking_job_wait_task(raw unsafe.Pointer) C.int {
 	return 0
 }
 
-//export tsnative_blocking_job_wait_cooperative
-func tsnative_blocking_job_wait_cooperative(raw unsafe.Pointer) {
+func nativeBlockingJobWaitCooperative(raw unsafe.Pointer) {
 	job := lookupNativeBlockingJob(raw)
 	if job == nil {
-		C.abort()
+		nativeAbort("invalid blocking job")
 	}
 	for {
 		select {
@@ -212,21 +196,19 @@ func tsnative_blocking_job_wait_cooperative(raw unsafe.Pointer) {
 	}
 }
 
-//export tsnative_blocking_job_release
-func tsnative_blocking_job_release(raw unsafe.Pointer) {
+func nativeBlockingJobRelease(raw unsafe.Pointer) {
 	if raw == nil {
 		return
 	}
-	tsnative_blocking_job_wait_cooperative(raw)
+	nativeBlockingJobWaitCooperative(raw)
 	token := uintptr(raw)
 	nativeBlocking.Lock()
 	delete(nativeBlocking.jobs, token)
 	nativeBlocking.Unlock()
-	C.free(raw)
+	freeNativeHandle(raw)
 }
 
-//export tsnative_blocking_pool_shutdown
-func tsnative_blocking_pool_shutdown() {
+func nativeBlockingPoolShutdown() {
 	nativeBlocking.Lock()
 	if !nativeBlocking.started {
 		nativeBlocking.Unlock()
@@ -251,8 +233,7 @@ func tsnative_blocking_pool_shutdown() {
 	nativeBlocking.Unlock()
 }
 
-//export tsnative_blocking_worker_count
-func tsnative_blocking_worker_count() C.size_t {
+func nativeBlockingWorkerCount() uintptr {
 	nativeBlocking.Lock()
 	workers := nativeBlocking.workers
 	started := nativeBlocking.started
@@ -260,37 +241,33 @@ func tsnative_blocking_worker_count() C.size_t {
 	if !started {
 		workers = parseBlockingLimit("TSNATIVE_BLOCKING_WORKERS", defaultBlockingWorkers, maxBlockingWorkers)
 	}
-	return C.size_t(workers)
+	return uintptr(workers)
 }
 
-//export tsnative_blocking_active_jobs
-func tsnative_blocking_active_jobs() C.size_t {
+func nativeBlockingActiveJobs() uintptr {
 	nativeBlocking.Lock()
 	value := nativeBlocking.active
 	nativeBlocking.Unlock()
-	return C.size_t(value)
+	return uintptr(value)
 }
 
-//export tsnative_blocking_peak_active_jobs
-func tsnative_blocking_peak_active_jobs() C.size_t {
+func nativeBlockingPeakActiveJobs() uintptr {
 	nativeBlocking.Lock()
 	value := nativeBlocking.peak
 	nativeBlocking.Unlock()
-	return C.size_t(value)
+	return uintptr(value)
 }
 
-//export tsnative_blocking_submitted_jobs
-func tsnative_blocking_submitted_jobs() C.uint64_t {
+func nativeBlockingSubmittedJobs() uint64 {
 	nativeBlocking.Lock()
 	value := nativeBlocking.submitted
 	nativeBlocking.Unlock()
-	return C.uint64_t(value)
+	return value
 }
 
-//export tsnative_blocking_completed_jobs
-func tsnative_blocking_completed_jobs() C.uint64_t {
+func nativeBlockingCompletedJobs() uint64 {
 	nativeBlocking.Lock()
 	value := nativeBlocking.completed
 	nativeBlocking.Unlock()
-	return C.uint64_t(value)
+	return value
 }

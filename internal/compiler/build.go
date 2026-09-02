@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,9 +12,11 @@ import (
 	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
 	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
 	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
+	golangcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/golang"
 	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
 	"github.com/projectthorn/tsv7-bin/internal/frontend"
 	"github.com/projectthorn/tsv7-bin/internal/lowering"
+	"github.com/projectthorn/tsv7-bin/internal/mir"
 	"github.com/projectthorn/tsv7-bin/internal/toolchain"
 	"github.com/projectthorn/tsv7-bin/internal/tsls"
 )
@@ -24,6 +27,7 @@ type BuildOptions struct {
 	Output            string
 	Config            string
 	Optimization      string
+	PureGo            bool
 	ReportPerformance bool
 }
 
@@ -92,6 +96,9 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	escapes := escapeanalysis.Analyze(mirModule)
 	timings.Escape = time.Since(escapeStart)
 	metrics := collectBuildMetrics(hirModule, mirModule, escapes)
+	if options.PureGo {
+		return buildPureGo(ctx, options, mirModule, metrics, timings, totalStart)
+	}
 	llvmStart := time.Now()
 	llvmIR, err := llvmcodegen.EmitWithEscapeAnalysis(mirModule, escapes)
 	if err != nil {
@@ -141,6 +148,44 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	timings.Link = time.Since(linkStart)
 	timings.Total = time.Since(totalStart)
 	return BuildResult{Output: options.Output, Functions: len(mirModule.Functions), Metrics: metrics, Timings: timings}, nil
+}
+
+func buildPureGo(ctx context.Context, options BuildOptions, module mir.Module, metrics BuildMetrics, timings BuildTimings, totalStart time.Time) (BuildResult, error) {
+	goStart := time.Now()
+	source, err := golangcodegen.Emit(module)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	timings.Go = time.Since(goStart)
+
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		return BuildResult{}, fmt.Errorf("go toolchain not found: %w", err)
+	}
+	workDir, err := os.MkdirTemp("", "tsnative-pure-go-*")
+	if err != nil {
+		return BuildResult{}, fmt.Errorf("create pure-Go build directory: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+	if err := os.WriteFile(filepath.Join(workDir, "go.mod"), []byte("module tsnative.generated\n\ngo 1.27\n"), 0o644); err != nil {
+		return BuildResult{}, fmt.Errorf("write generated Go module: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "main.go"), []byte(source), 0o644); err != nil {
+		return BuildResult{}, fmt.Errorf("write generated Go source: %w", err)
+	}
+	if err := toolchain.EnsureParent(options.Output); err != nil {
+		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
+	}
+	linkStart := time.Now()
+	command := exec.CommandContext(ctx, goPath, "build", "-trimpath", "-buildvcs=false", "-o", options.Output, ".")
+	command.Dir = workDir
+	command.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		return BuildResult{}, fmt.Errorf("build generated pure-Go program: %w: %s", runErr, output)
+	}
+	timings.Link = time.Since(linkStart)
+	timings.Total = time.Since(totalStart)
+	return BuildResult{Output: options.Output, Functions: len(module.Functions), Metrics: metrics, Timings: timings}, nil
 }
 
 func normalizeOptions(options BuildOptions) (BuildOptions, error) {

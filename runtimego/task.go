@@ -2,10 +2,6 @@ package main
 
 /*
 #include <stdint.h>
-typedef void (*tsnative_task_entry_fn)(void *, void *);
-static void tsnative_go_call_task(uintptr_t entry, void *state, void *result) {
-    ((tsnative_task_entry_fn)entry)(state, result);
-}
 */
 import "C"
 
@@ -495,7 +491,7 @@ func executeNativeTaskOnce(task *nativeTask) nativeTaskExecution {
 	task.parkRequested.Store(0)
 	task.wakeRequested.Store(0)
 	if task.failureRequested.Load() == 0 {
-		C.tsnative_go_call_task(C.uintptr_t(uintptr(task.entry)), task.state, nativeTaskResultSlot(task))
+		callNativeEntry2(uintptr(task.entry), task.state, nativeTaskResultSlot(task))
 	}
 	if task.parkRequested.Load() != 0 {
 		if task.wakeRequested.Swap(0) != 0 {

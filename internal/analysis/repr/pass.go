@@ -79,7 +79,7 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 			}
 		}
 		return hir.Repr{Kind: hir.ReprJSValue}, diagnostics
-	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull:
+	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull, hir.TypeParameter:
 		return hir.Repr{Kind: hir.ReprJSValue}, diagnostics
 	case hir.TypeUnknown:
 		diagnostics = append(diagnostics, Diagnostic{
@@ -97,7 +97,7 @@ func assignType(module *hir.Module, fn hir.FunctionID, value *hir.ValueID, typeI
 
 func jsValueUnionMember(kind hir.TypeKind) bool {
 	switch kind {
-	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull, hir.TypeBoolean, hir.TypeNumber, hir.TypeString, hir.TypeObject, hir.TypeArray, hir.TypeFunction, hir.TypeUnion:
+	case hir.TypeAny, hir.TypeUndefined, hir.TypeNull, hir.TypeBoolean, hir.TypeNumber, hir.TypeString, hir.TypeObject, hir.TypeArray, hir.TypeFunction, hir.TypeUnion, hir.TypeParameter:
 		return true
 	default:
 		return false

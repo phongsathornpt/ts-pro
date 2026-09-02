@@ -45,9 +45,6 @@ func collectClosureDescriptors(module mir.Module) (map[mir.FunctionID]closureDes
 }
 
 func (e *emitter) emitClosureTypes(b *strings.Builder) error {
-	if len(e.closures) == 0 && len(e.promiseThenableResults()) == 0 {
-		return nil
-	}
 	b.WriteString("%tsnative_closure = type { ptr, ptr, i32 }\n")
 	for _, descriptor := range sortedClosureDescriptors(e.closures) {
 		if descriptor.CaptureCount == 0 {

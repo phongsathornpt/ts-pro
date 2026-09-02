@@ -40,6 +40,32 @@ func TestBuildFibNativeExecutable(t *testing.T) {
 	}
 }
 
+func TestBuildFibPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "fib-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/fib.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output || result.Functions != 2 {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "6765" {
+		t.Fatalf("pure-Go output = %q", got)
+	}
+}
+
 func TestNormalizeRejectsUnknownOptimization(t *testing.T) {
 	_, err := normalizeOptions(BuildOptions{Root: ".", Input: "x.ts", Optimization: "-Ofast"})
 	if err == nil {

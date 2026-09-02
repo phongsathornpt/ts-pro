@@ -240,7 +240,7 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		for _, target := range expr.Dispatch {
 			cases = append(cases, hir.DispatchCase{ClassTag: target.ClassTag, Callee: hir.NewFunctionID(uint32(target.Function))})
 		}
-		return f.emit(expr.Type, hir.PromiseThenableOp{Thenable: thenable, Result: resultKind, Arity: uint8(expr.FieldIndex), Cases: cases}), nil
+		return f.emit(expr.Type, hir.PromiseThenableOp{Thenable: thenable, Result: resultKind, Arity: uint8(expr.FieldIndex), Cases: cases, ResolveReturnsJS: expr.ThenResolveJSValue, RejectReturnsJS: expr.ThenRejectJSValue}), nil
 	case frontend.ExprPromiseAll, frontend.ExprPromiseRace:
 		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypePromise {
 			return 0, fmt.Errorf("Promise aggregate has invalid semantic result type")

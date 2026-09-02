@@ -112,7 +112,7 @@ func buildFile(args []string) error {
 func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 	options := compiler.BuildOptions{Root: ".", Optimization: "-O2"}
 	if len(args) == 0 {
-		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--report-performance]")
+		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--pure-go] [--report-performance]")
 	}
 	options.Input = args[0]
 	for i := 1; i < len(args); i++ {
@@ -131,6 +131,8 @@ func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 			options.Config = args[i]
 		case "-O0", "-O1", "-O2", "-O3", "-Oz":
 			options.Optimization = args[i]
+		case "--pure-go":
+			options.PureGo = true
 		case "--report-performance":
 			options.ReportPerformance = true
 		default:
@@ -162,5 +164,6 @@ func usage() {
 	fmt.Println("  doctor        validate Go/TypeScript 7 frontend toolchain")
 	fmt.Println("  check <file>  type-check a TypeScript file through TypeScript-LS")
 	fmt.Println("  build <file>  compile TypeScript 7 to a native executable")
+	fmt.Println("                use --pure-go for the cgo-free Go backend")
 	fmt.Println("  version       print compiler version")
 }
