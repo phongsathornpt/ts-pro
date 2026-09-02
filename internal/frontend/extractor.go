@@ -152,7 +152,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 				return Snapshot{}, err
 			}
 			e.result.Entry = append(e.result.Entry, items...)
-		case tsast.KindExpressionStatement:
+		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindBlock:
 			stmt, err := e.extractStatement(node)
 			if err != nil {
 				return Snapshot{}, err
