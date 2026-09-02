@@ -1,4 +1,5 @@
 /node_modules/
+/bin/
 /build/
 /dist/
 *.o
@@ -9,3 +10,5 @@
 .DS_Store
 
 /.tsnative/
+/.tspro/
+

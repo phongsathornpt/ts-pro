@@ -14,7 +14,7 @@ func TestArchitecturePureGoEnforcement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, dir := range []string{"cmd", "internal", "runtimego"} {
+	for _, dir := range []string{"cmd", "internal", "runtime"} {
 		scanDir := filepath.Join(root, dir)
 		err := filepath.WalkDir(scanDir, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -32,8 +32,8 @@ func TestArchitecturePureGoEnforcement(t *testing.T) {
 				return nil
 			}
 
-			// In runtimego, handwritten C or header files are completely banned.
-			if dir == "runtimego" && (ext == ".c" || ext == ".h") {
+			// In runtime, handwritten C or header files are completely banned.
+			if dir == "runtime" && (ext == ".c" || ext == ".h") {
 				t.Errorf("C source/header forbidden in pure-Go runtime: %s", path)
 				return nil
 			}
@@ -62,8 +62,8 @@ func TestArchitecturePureGoEnforcement(t *testing.T) {
 				t.Errorf("forbidden cgo export annotation (//export) in %s", path)
 			}
 
-			if dir == "runtimego" && strings.HasPrefix(content, "package main") {
-				t.Errorf("runtimego files must declare package runtimego, found package main in %s", path)
+			if dir == "runtime" && strings.HasPrefix(content, "package main") {
+				t.Errorf("runtime files must declare package runtime, found package main in %s", path)
 			}
 
 			return nil

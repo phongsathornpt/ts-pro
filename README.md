@@ -21,8 +21,8 @@ Goal: compile strongly typed TypeScript 7 programs into native binaries without 
 The current transitional end-to-end path still uses the existing Go compiler driver while the TypeScript 7 compiler implementation is brought to parity. It covers typed scalars, mutable SSA control flow, specialized `number[]`, and native strings. From the project root:
 
 ```bash
-go build -o build/tsnative ./cmd/tsnative
-./build/tsnative build examples/basics/fib.ts -o build/fib -O2
+go build -o bin/tspro ./cmd/tspro
+./bin/tspro build examples/basics/fib.ts -o build/fib -O2
 ./build/fib
 ```
 

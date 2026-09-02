@@ -18,7 +18,7 @@ The runtime is stackless. Async functions and blocking task operations lower to 
 
 ## Implementation-language boundary
 
-Concurrency APIs are compiler-known TypeScript features, but their runtime implementation belongs in Go. Scheduler, tasks, channels, timers, blocking-call management, cancellation, and GC coordination must live in `runtimego/`. Do not move compiler HIR/MIR/LLVM ownership into Go merely because the runtime uses goroutines.
+Concurrency APIs are compiler-known TypeScript features, but their runtime implementation belongs in Go. Scheduler, tasks, channels, timers, blocking-call management, cancellation, and GC coordination must live in `runtime/`. Do not move compiler HIR/MIR/LLVM ownership into Go merely because the runtime uses goroutines.
 
 ## Design rules
 
@@ -62,7 +62,7 @@ These imports are compiler-known native libraries, not dynamic Node module looku
 ## Runtime layout
 
 ```text
-runtimego/
+runtime/
   scheduler.go     # bounded workers, queues, stealing, park/wake, metrics
   task.go          # task handles, completion, roots, results, cancellation
   taskgroup.go     # structured child ownership and group cancellation

@@ -12,12 +12,17 @@ TypeScript 7 compiler side
   representation proof and optimization
   Pure-Go code generation and build orchestration
 
-Go runtime side (package runtimego, CGO_ENABLED=0 pure-Go)
+Go runtime side (package runtime, CGO_ENABLED=0 pure-Go)
   allocator, spans, heap, nursery, roots, barriers, blocktable, gcmark
   strings, arrays, objects, JSValue, handles
   scheduler, task, channels, timers, blocking pool, task groups, context
+  virtual memory mapping (mmap_posix.go, mmap_windows.go)
   platform thread identification (thread_darwin.go, thread_linux.go, thread_other.go)
-  runtime.go: runtime coordinator and public symbols
+  runtime.go: runtime coordinator and camelCase symbol exports
+  doc.go: subsystem architecture reference
+CLI tools:
+  cmd/tspro: canonical ts-pro compiler CLI entrypoint
+  cmd/tsnative: legacy-compatible CLI entrypoint
 ```
 
 ## Hard boundary

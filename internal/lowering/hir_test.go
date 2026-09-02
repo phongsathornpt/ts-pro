@@ -32,7 +32,7 @@ func TestLowerTypedFibToHIR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(root, "examples", "fib.ts")
+	file := filepath.Join(root, "examples", "basics", "fib.ts")
 	semantic, err := frontend.ExtractFile(ctx, client, snapshot.Snapshot, project.ID, file)
 	if err != nil {
 		t.Fatal(err)

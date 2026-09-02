@@ -4,7 +4,7 @@
 
 - [ ] Move compiler-owned semantic normalization, HIR/MIR, representation analysis, LLVM emission, and build orchestration out of Go into the TypeScript 7 compiler implementation.
 - [ ] Freeze compile-time Go work to migration/parity fixes only.
-- [x] Complete `runtimego/` migration so Go is the sole handwritten runtime/native-library language.
+- [x] Complete `runtime/` migration so Go is the sole handwritten runtime/native-library language.
 - [x] Remove handwritten runtime C after Go ABI parity; ABI consumers use the generated Go `c-archive` header.
 - [ ] Retire transitional `cmd/` and `internal/` Go compiler packages after TypeScript-native parity tests pass.
 

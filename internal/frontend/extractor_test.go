@@ -25,7 +25,7 @@ func TestExtractTypedFibFromTypeScript7(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := snapshot.Projects[0]
-	file := filepath.Join(projectRootFrontend(t), "examples", "fib.ts")
+	file := filepath.Join(projectRootFrontend(t), "examples", "basics", "fib.ts")
 	semantic, err := ExtractFile(ctx, client, snapshot.Snapshot, project.ID, file)
 	if err != nil {
 		t.Fatal(err)

@@ -236,8 +236,8 @@ func normalizeOptions(options BuildOptions) (BuildOptions, error) {
 	if !validOptimization(options.Optimization) {
 		return options, fmt.Errorf("unsupported optimization %q", options.Optimization)
 	}
-	if !options.DisablePureGo {
-		options.PureGo = true
+	if options.DisablePureGo {
+		options.PureGo = false
 	}
 	return options, nil
 }
@@ -358,7 +358,7 @@ func recordCacheResult(metrics *BuildMetrics, hit bool) {
 }
 
 func compileRuntimeObjects(ctx context.Context, cache *toolchain.ObjectCache, root, opt string) ([]string, int, int, error) {
-	archive, hit, err := cache.BuildGoArchive(ctx, root, "./runtimego")
+	archive, hit, err := cache.BuildGoArchive(ctx, root, "./runtime")
 	if err != nil {
 		return nil, 0, 0, err
 	}

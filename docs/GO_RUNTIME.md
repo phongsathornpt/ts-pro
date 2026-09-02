@@ -22,6 +22,11 @@ Goal: keep Go as the **only handwritten native runtime/native-library implementa
 5. [x] Channels, timers, and blocking-call pool.
 6. [x] Remove legacy C headers/tests and the C compilation path; native ABI tests use the generated `c-archive` header.
 
-## Current boundary
+## Current boundary: Pure Go (`CGO_ENABLED=0`)
 
-`runtimego/` owns the runtime implementation. C appears only as generated cgo ABI glue or tiny in-source cgo trampolines required to cross safely between Go and LLVM/SysV callbacks; there are no handwritten runtime `.c` implementation files in the repository.
+The native runtime under `runtime/` is **100% pure Go**:
+- Zero `import "C"`, zero `//export`, and zero assembly files (`.s`).
+- All 220 runtime functions follow idiomatic `camelCase` naming (e.g. `heapAlloc`, `gcCollect`, `schedulerSpawn`, `channelF64Send`). The legacy `tsnative_*` prefix has been eliminated.
+- Virtual memory mapping is cleanly decoupled by target OS: POSIX platforms (Darwin, Linux) use `syscall.Mmap` in `runtime/mmap_posix.go`; Windows uses `VirtualAlloc`/`VirtualFree` in `runtime/mmap_windows.go`.
+- Code generation defaults to pure-Go (`internal/codegen/golang`), outputting executable Go packages that compile under `CGO_ENABLED=0`.
+- All 48 runtime unit tests and repository-wide test suites pass cleanly under `CGO_ENABLED=0 go test ./...`.

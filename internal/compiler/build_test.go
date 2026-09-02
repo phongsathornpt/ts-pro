@@ -49,7 +49,7 @@ func TestBuildFibPureGoExecutable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	result, err := Build(ctx, BuildOptions{
-		Root: root, Input: "examples/fib.ts", Output: output, PureGo: true,
+		Root: root, Input: "examples/basics/fib.ts", Output: output, PureGo: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +63,248 @@ func TestBuildFibPureGoExecutable(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(nativeOutput)); got != "6765" {
 		t.Fatalf("pure-Go output = %q", got)
+	}
+}
+
+func TestBuildConcurrencySleepPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "sleep-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_sleep.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "42" {
+		t.Fatalf("pure-Go output = %q", got)
+	}
+}
+
+func TestBuildConcurrencyChannelRefPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "chan-ref-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_channel_ref.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "1\nbuffered\nfallback\ntask-ref"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyTasksPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "tasks-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_tasks.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "42\n7"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyGroupPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "group-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_group.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	got := strings.TrimSpace(string(nativeOutput))
+	if got != "1\n2\n30" && got != "2\n1\n30" {
+		t.Fatalf("pure-Go output = %q, want 1\\n2\\n30 or 2\\n1\\n30", got)
+	}
+}
+
+func TestBuildStringArraysPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "string-arrays-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/arrays/string_arrays.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "3\nalpha\nupdated\ngamma"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyAsyncRefPhiPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "async-ref-phi-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_async_ref_phi.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "left:done\nright:done\nxyyy\n42\n7\ndynamic-left\ndynamic-right"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyPromiseAggregatePureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "promise-agg-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_promise_aggregate.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "345\n9\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root\n101\n1\n1\nbool-reject\n44\n123\n8\nraw:promise\n10"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyAsyncRejectPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "async-reject-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_async_reject.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "99"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildConcurrencyAsyncAwaitCatchPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "async-catch-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_async_await_catch.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "caught-await"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
 	}
 }
 
