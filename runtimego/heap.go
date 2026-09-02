@@ -43,18 +43,22 @@ type nativeHeapBlock struct {
 
 var nativeHeap = struct {
 	nativeMeasuredMutex
-	spans                 map[*nativeHeapSpan]struct{}
-	spanPages             map[uintptr]*nativeHeapSpan
-	freeSpans             [nativeSizeClassCount][]*nativeHeapSpan
-	remoteFrees           uint64
-	spanTransfers         uint64
-	markWork              uint64
-	markPages             uint64
-	markQueueSwitches     uint64
-	markAssistWorkers     uint64
-	markAssistPages       uint64
-	markIdleAssistWorkers uint64
-	markIdleAssistPages   uint64
+	spans                  map[*nativeHeapSpan]struct{}
+	spanPages              map[uintptr]*nativeHeapSpan
+	freeSpans              [nativeSizeClassCount][]*nativeHeapSpan
+	remoteFrees            uint64
+	spanTransfers          uint64
+	markWork               uint64
+	markPages              uint64
+	markQueueSwitches      uint64
+	markAssistWorkers      uint64
+	markAssistPages        uint64
+	markIdleAssistWorkers  uint64
+	markIdleAssistPages    uint64
+	markTraceWords         uint64
+	markAtomicBlocks       uint64
+	markPreciseBlocks      uint64
+	markConservativeBlocks uint64
 }{
 	spans:     map[*nativeHeapSpan]struct{}{},
 	spanPages: map[uintptr]*nativeHeapSpan{},
@@ -401,6 +405,10 @@ func tsnative_heap_shutdown() {
 	nativeHeap.markAssistPages = 0
 	nativeHeap.markIdleAssistWorkers = 0
 	nativeHeap.markIdleAssistPages = 0
+	nativeHeap.markTraceWords = 0
+	nativeHeap.markAtomicBlocks = 0
+	nativeHeap.markPreciseBlocks = 0
+	nativeHeap.markConservativeBlocks = 0
 	spans := make([]*nativeHeapSpan, 0, len(nativeHeap.spans))
 	for span := range nativeHeap.spans {
 		spans = append(spans, span)

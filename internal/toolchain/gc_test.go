@@ -59,6 +59,8 @@ int main(void) {
   assert(tsnative_world_write_lock_acquisitions() >= 2);
   assert(tsnative_block_read_lock_acquisitions() > 0);
   assert(tsnative_block_write_lock_acquisitions() > 0);
+  assert(tsnative_gc_trace_words() > 0);
+  assert(tsnative_gc_trace_conservative_blocks() > 0);
 
   void *parent = tsnative_heap_alloc(32);
   void *parent_slots[1] = {parent};
@@ -99,6 +101,8 @@ int main(void) {
   void *precise_frame = tsnative_gc_enter(precise_slots, 1);
   tsnative_gc_collect();
   assert(tsnative_heap_live_allocations() == 2);
+  assert(tsnative_gc_trace_atomic_blocks() > 0);
+  assert(tsnative_gc_trace_precise_blocks() > 0);
   tsnative_gc_leave(precise_frame);
   tsnative_gc_collect();
   assert(tsnative_heap_live_allocations() == 0);

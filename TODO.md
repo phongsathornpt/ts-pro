@@ -214,6 +214,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Add a per-owner append-only nursery membership index so minor reset/count/sweep touches young blocks only; major GC and shutdown clear the index, and native ABI metrics expose current nursery membership plus scanned candidates. With 1,024 old blocks, the 64 KiB nursery sample drops to roughly 14.4-14.9 µs/minor with no remembered parent and 17.8-18.0 µs with one remembered parent.
   - [x] Profile survivor age, nursery sizing, and major cadence. Major pressure now uses old-generation bytes rather than total live bytes, preventing aggregate young traffic from forcing premature full collections; in the 8-worker/256 KiB profile this changes 0 minor / 15 major collections to 8-9 minor / 0 major. Retain the 64 KiB per-worker default and promote-after-one-minor policy: 64-512 KiB gives nearly flat fixed-byte throughput, while sampled 64B-object median minor pause grows from ~0.69 ms at 64 KiB to ~5.48 ms at 512 KiB; synthetic 0-10% one-minor survival causes no majors over 64 cycles and even 50-100% survival adds only 2-4 majors.
   - [x] Add precise heap object/layout metadata: compiler-generated shape/task/closure allocations carry LLVM-derived reference-offset descriptors, runtime strings/F64 arrays and non-reference JSValue boxes are atomic, reference JSValue boxes trace only their payload slot, and unknown ABI allocations retain conservative fallback tracing.
+  - [x] Measure trace work by layout kind through native ABI counters. A 2 MiB live-heap major-GC benchmark (1,024 × 2 KiB blocks) measures roughly 1.60-1.68 ms with conservative word scanning versus 0.956-1.004 ms for atomic layouts, while exact regression coverage verifies only declared reference words are visited.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -242,8 +243,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Measure precise-layout trace-word reduction and extend metadata to any remaining heap-backed runtime types that still require conservative fallback.
-2. Add escape analysis and stack allocation for non-escaping object/closure/task-environment candidates, preserving explicit GC roots only where heap lifetime is required.
+1. Add MIR escape analysis for object/closure allocations and distinguish local-only values from references escaping through returns, heap stores, calls, tasks, channels, or suspension boundaries.
+2. Lower proven non-escaping object/closure allocations to stack storage with precise lifetime/root handling; task environments remain heap-backed when their lifetime crosses scheduler ownership.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

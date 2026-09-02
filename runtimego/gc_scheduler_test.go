@@ -9,6 +9,30 @@ import (
 	"unsafe"
 )
 
+func TestPreciseHeapTraceMetricsCountOnlyDeclaredReferenceWords(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	conservative := tsnative_heap_alloc(64)
+	atomic := tsnative_heap_alloc_atomic(64)
+	child := tsnative_heap_alloc_atomic(16)
+	offset := uintptr(0)
+	precise := tsnative_heap_alloc_refs(64, unsafe.Pointer(&offset), 1)
+	*(*unsafe.Pointer)(precise) = child
+
+	conservativeRoot := tsnative_gc_root_register(unsafe.Pointer(&conservative))
+	atomicRoot := tsnative_gc_root_register(unsafe.Pointer(&atomic))
+	preciseRoot := tsnative_gc_root_register(unsafe.Pointer(&precise))
+	tsnative_gc_collect()
+	metrics := nativeGCTraceStats()
+	if metrics.words != 9 || metrics.conservative != 1 || metrics.precise != 1 || metrics.atomic != 2 {
+		t.Fatalf("trace metrics = %+v, want words=9 conservative=1 precise=1 atomic=2", metrics)
+	}
+	for _, token := range []unsafe.Pointer{preciseRoot, atomicRoot, conservativeRoot} {
+		tsnative_gc_root_unregister(token)
+	}
+}
+
 func TestAtomicHeapLayoutDoesNotTracePointerLikePayload(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

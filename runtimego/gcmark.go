@@ -44,11 +44,15 @@ type nativeGCMarkState struct {
 	ownerSeen      map[int]bool
 	activePages    int
 
-	work            uint64
-	pagesScanned    uint64
-	queueSwitches   uint64
-	assistPages     uint64
-	idleAssistPages uint64
+	work               uint64
+	pagesScanned       uint64
+	queueSwitches      uint64
+	assistPages        uint64
+	idleAssistPages    uint64
+	traceWords         uint64
+	atomicBlocks       uint64
+	preciseBlocks      uint64
+	conservativeBlocks uint64
 }
 
 func newNativeGCMarkState(owner int, scope nativeGCMarkScope) *nativeGCMarkState {
@@ -221,6 +225,16 @@ func (state *nativeGCMarkState) drainPage(page *nativeGCMarkPage) {
 		page.blocks[last] = nil
 		page.blocks = page.blocks[:last]
 		state.work++
+		switch block.traceKind {
+		case nativeHeapTraceAtomic:
+			state.atomicBlocks++
+		case nativeHeapTraceOffsets:
+			state.preciseBlocks++
+			state.traceWords += uint64(len(block.refOffsets))
+		default:
+			state.conservativeBlocks++
+			state.traceWords += uint64(block.size / wordSize)
+		}
 		state.mu.Unlock()
 
 		switch block.traceKind {
@@ -322,6 +336,10 @@ func runNativeGCMarkStateLocked(state *nativeGCMarkState, population int) {
 	nativeHeap.markQueueSwitches += state.queueSwitches
 	nativeHeap.markAssistPages += state.assistPages
 	nativeHeap.markIdleAssistPages += state.idleAssistPages
+	nativeHeap.markTraceWords += state.traceWords
+	nativeHeap.markAtomicBlocks += state.atomicBlocks
+	nativeHeap.markPreciseBlocks += state.preciseBlocks
+	nativeHeap.markConservativeBlocks += state.conservativeBlocks
 }
 
 func markNativeHeapRootsLocked() {
