@@ -217,6 +217,8 @@ type PromiseRejectOp struct {
 }
 type PromiseAllF64Op struct{ Promises []ValueID }
 type PromiseRaceF64Op struct{ Promises []ValueID }
+type PromiseAllRefOp struct{ Promises []ValueID }
+type PromiseRaceRefOp struct{ Promises []ValueID }
 type TaskJoinOp struct {
 	Task   ValueID
 	Shared bool
@@ -293,6 +295,8 @@ func (PromiseAdoptOp) isOperation()     {}
 func (PromiseRejectOp) isOperation()    {}
 func (PromiseAllF64Op) isOperation()    {}
 func (PromiseRaceF64Op) isOperation()   {}
+func (PromiseAllRefOp) isOperation()    {}
+func (PromiseRaceRefOp) isOperation()   {}
 func (TaskJoinOp) isOperation()         {}
 func (TaskWaitOp) isOperation()         {}
 func (TaskFailureOp) isOperation()      {}

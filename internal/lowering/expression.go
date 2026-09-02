@@ -221,11 +221,29 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 				fresh = append(fresh, value)
 			}
 		}
+		if len(expr.Args) == 0 && expr.Kind == frontend.ExprPromiseRace {
+			return 0, fmt.Errorf("empty Promise.race is unsupported")
+		}
+		resultKind := hir.TaskResultF64
+		if len(expr.Args) != 0 {
+			_, resolvedKind, err := f.promiseResultKind(expr.Args[0].Type)
+			if err != nil {
+				return 0, err
+			}
+			resultKind = resolvedKind
+		}
 		var aggregate hir.ValueID
-		if expr.Kind == frontend.ExprPromiseAll {
+		switch {
+		case expr.Kind == frontend.ExprPromiseAll && resultKind == hir.TaskResultF64:
 			aggregate = f.emit(expr.Type, hir.PromiseAllF64Op{Promises: promises})
-		} else {
+		case expr.Kind == frontend.ExprPromiseRace && resultKind == hir.TaskResultF64:
 			aggregate = f.emit(expr.Type, hir.PromiseRaceF64Op{Promises: promises})
+		case expr.Kind == frontend.ExprPromiseAll && resultKind == hir.TaskResultRef:
+			aggregate = f.emit(expr.Type, hir.PromiseAllRefOp{Promises: promises})
+		case expr.Kind == frontend.ExprPromiseRace && resultKind == hir.TaskResultRef:
+			aggregate = f.emit(expr.Type, hir.PromiseRaceRefOp{Promises: promises})
+		default:
+			return 0, fmt.Errorf("unsupported Promise aggregate result kind %d", resultKind)
 		}
 		if len(fresh) != 0 {
 			voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)

@@ -452,6 +452,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case PromiseAllRef:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("reference Promise.all v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
+			case PromiseRaceRef:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("reference Promise.race v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
 			case TaskSpawn:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("task spawn v%d references unknown callee f%d", inst.Result, op.Callee)

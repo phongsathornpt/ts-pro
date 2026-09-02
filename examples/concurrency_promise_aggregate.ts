@@ -83,3 +83,26 @@ async function aggregateRaceReject(): Promise<number> {
 
 console.log(join(aggregatePendingRace()));
 console.log(join(aggregateRaceReject()));
+
+async function aggregateDelayedString(value: string): Promise<string> {
+  sleep(1);
+  return value + "-done";
+}
+
+async function aggregateAllStrings(): Promise<string> {
+  const values = await Promise.all<string>([
+    Promise.resolve("alpha"),
+    aggregateDelayedString("beta"),
+  ]);
+  return values[0]! + ":" + values[1]!;
+}
+
+async function aggregateRaceStrings(): Promise<string> {
+  return await Promise.race<string>([
+    Promise.resolve("first-root"),
+    aggregateDelayedString("second-root"),
+  ]);
+}
+
+console.log(join(aggregateAllStrings()));
+console.log(join(aggregateRaceStrings()));

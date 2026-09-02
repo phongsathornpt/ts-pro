@@ -151,7 +151,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
             - [ ] Add thenable assimilation after dynamic method/`this` call semantics are sufficient.
             - [~] Add homogeneous `Promise.all` / `Promise.race`, then heterogeneous tuple results after tuple semantics land.
               - [x] Add non-blocking homogeneous `Promise<number>` aggregate fan-in for array-literal inputs: `Promise.all<number>` preserves input order and returns `number[]`; `Promise.race<number>` preserves deterministic already-settled input order and first pending settlement. Aggregate runtime ownership retains aliased inputs, releases fresh temporaries without blocking non-last owners, propagates rejection, and passes worker=1 + 1 KiB nursery coverage.
-              - [ ] Extend aggregates to homogeneous reference/bool results, raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
+              - [~] Extend aggregates to homogeneous reference/bool results, raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
+                - [x] Add homogeneous reference-result aggregates with precise ref-array Promise.all, reference Promise.race, scheduler-owned child settlement watchers, rejection propagation, retained-child lifetime management, and worker=1 + 1 KiB nursery coverage.
+                - [ ] Add homogeneous boolean aggregates after boolean[] native representation lands.
+                - [ ] Add raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.

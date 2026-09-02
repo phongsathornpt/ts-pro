@@ -304,6 +304,14 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, promise := range op.Promises {
 					checkValue(promise)
 				}
+			case PromiseAllRefOp:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
+			case PromiseRaceRefOp:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
 			case TaskSpawnOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("task spawn references unknown function f%d", op.Callee))

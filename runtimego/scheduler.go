@@ -361,6 +361,7 @@ func schedulerExecuteTask(handle uintptr) {
 		for _, waiter := range execution.completionWaiters {
 			_ = schedulerWakeTask(waiter)
 		}
+		notifyNativePromiseAggregateWatchers(execution.aggregateWatchers, task)
 		for i := 0; i < execution.completionConsumes; i++ {
 			releaseNativeTaskRef(task)
 		}

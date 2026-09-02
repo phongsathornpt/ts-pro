@@ -5,11 +5,40 @@ package main
 */
 import "C"
 
-import "unsafe"
+import (
+	"sync"
+	"unsafe"
+)
 
-type nativePromiseObservation struct {
+type nativePromiseAggregateKind uint8
+
+const (
+	nativePromiseAggregateAllF64 nativePromiseAggregateKind = iota + 1
+	nativePromiseAggregateRaceF64
+	nativePromiseAggregateAllRef
+	nativePromiseAggregateRaceRef
+)
+
+type nativePromiseAggregateWatcher struct {
+	state *nativePromiseAggregateState
 	index int
-	task  *nativeTask
+}
+
+var nativePromiseAggregateWatchers = struct {
+	sync.Mutex
+	byTask map[uintptr][]nativePromiseAggregateWatcher
+}{byTask: map[uintptr][]nativePromiseAggregateWatcher{}}
+
+type nativePromiseAggregateState struct {
+	sync.Mutex
+	kind      nativePromiseAggregateKind
+	aggregate *nativeTask
+	tasks     []*nativeTask
+	observed  []bool
+	remaining int
+	settled   bool
+	f64       []float64
+	refs      []unsafe.Pointer
 }
 
 func retainNativePromiseInputs(raw unsafe.Pointer, count uint64, kind int32) []*nativeTask {
@@ -25,7 +54,7 @@ func retainNativePromiseInputs(raw unsafe.Pointer, count uint64, kind int32) []*
 		task := lookupNativeTask(uintptr(handle))
 		if task == nil || task.kind != kind || !retainNativeTaskRef(task) {
 			for _, held := range tasks {
-				releaseNativePromiseInputWhenTerminal(held)
+				releaseNativeTaskRef(held)
 			}
 			nativeAbort("invalid Promise aggregate task")
 		}
@@ -34,23 +63,40 @@ func retainNativePromiseInputs(raw unsafe.Pointer, count uint64, kind int32) []*
 	return tasks
 }
 
-func observeNativePromise(index int, task *nativeTask, out chan<- nativePromiseObservation) {
-	_ = tsnative_scheduler_wait(task.handle)
-	out <- nativePromiseObservation{index: index, task: task}
+func watchNativePromiseAggregate(task *nativeTask, watcher nativePromiseAggregateWatcher) bool {
+	if task == nil {
+		return false
+	}
+	task.completionMu.Lock()
+	if nativeTaskIsTerminal(task) {
+		task.completionMu.Unlock()
+		return false
+	}
+	nativePromiseAggregateWatchers.Lock()
+	key := nativeTaskKey(task)
+	nativePromiseAggregateWatchers.byTask[key] = append(nativePromiseAggregateWatchers.byTask[key], watcher)
+	nativePromiseAggregateWatchers.Unlock()
+	task.completionMu.Unlock()
+	return true
 }
 
-func releaseNativePromiseInputWhenTerminal(task *nativeTask) {
-	if task == nil {
-		return
+func takeNativePromiseAggregateWatchers(task uintptr) []nativePromiseAggregateWatcher {
+	if task == 0 {
+		return nil
 	}
-	if nativeTaskIsTerminal(task) {
-		releaseNativeTaskRef(task)
-		return
+	nativePromiseAggregateWatchers.Lock()
+	watchers := nativePromiseAggregateWatchers.byTask[task]
+	delete(nativePromiseAggregateWatchers.byTask, task)
+	nativePromiseAggregateWatchers.Unlock()
+	return watchers
+}
+
+func notifyNativePromiseAggregateWatchers(watchers []nativePromiseAggregateWatcher, task *nativeTask) {
+	for _, watcher := range watchers {
+		if watcher.state != nil {
+			watcher.state.observe(watcher.index, task)
+		}
 	}
-	go func() {
-		_ = tsnative_scheduler_wait(task.handle)
-		releaseNativeTaskRef(task)
-	}()
 }
 
 func settleNativeAggregate(task *nativeTask, failed bool, failure unsafe.Pointer, f64 float64, ref unsafe.Pointer) {
@@ -78,7 +124,7 @@ func settleNativeAggregate(task *nativeTask, failed bool, failure unsafe.Pointer
 		}
 		task.status.Store(nativeTaskDone)
 	}
-
+	aggregateWatchers := takeNativePromiseAggregateWatchers(nativeTaskKey(task))
 	completions := takeNativeTaskCompletions(nativeTaskKey(task))
 	waiters := make([]uintptr, 0, len(completions))
 	consumes := 0
@@ -112,119 +158,151 @@ func settleNativeAggregate(task *nativeTask, failed bool, failure unsafe.Pointer
 	for _, waiter := range waiters {
 		_ = schedulerWakeTask(waiter)
 	}
+	notifyNativePromiseAggregateWatchers(aggregateWatchers, task)
 	for i := 0; i < consumes; i++ {
 		releaseNativeTaskRef(task)
 	}
 }
 
-func settledNativePromiseF64(task *nativeTask) (status int32, failure unsafe.Pointer, value float64, terminal bool) {
-	task.completionMu.Lock()
-	defer task.completionMu.Unlock()
-	if !nativeTaskIsTerminal(task) {
-		return 0, nil, 0, false
-	}
-	return task.status.Load(), task.failureRef, task.resultF64, true
+type nativePromiseAggregateAction struct {
+	settle  bool
+	failed  bool
+	failure unsafe.Pointer
+	f64     float64
+	ref     unsafe.Pointer
+	allF64  []float64
+	allRef  []unsafe.Pointer
+	release bool
 }
 
-func finishNativePromiseAllF64(aggregate *nativeTask, results []float64) {
-	array := tsnative_array_f64_new(C.uint64_t(len(results)))
-	for index, value := range results {
-		tsnative_array_f64_set(array, C.uint64_t(index), C.double(value))
+func (state *nativePromiseAggregateState) observe(index int, child *nativeTask) {
+	if state == nil || child == nil {
+		return
 	}
-	settleNativeAggregate(aggregate, false, nil, 0, array)
+	child.completionMu.Lock()
+	status := child.status.Load()
+	failure := child.failureRef
+	f64 := child.resultF64
+	ref := child.resultRef
+	terminal := nativeTaskIsTerminal(child)
+	child.completionMu.Unlock()
+	if !terminal {
+		return
+	}
+
+	state.Lock()
+	if index < 0 || index >= len(state.tasks) || state.observed[index] {
+		state.Unlock()
+		return
+	}
+	state.observed[index] = true
+	state.remaining--
+	action := nativePromiseAggregateAction{}
+
+	switch state.kind {
+	case nativePromiseAggregateAllF64:
+		if status == nativeTaskFailed && !state.settled {
+			state.settled = true
+			action = nativePromiseAggregateAction{settle: true, failed: true, failure: failure}
+		} else if status == nativeTaskDone {
+			state.f64[index] = f64
+		}
+		if state.remaining == 0 && !state.settled {
+			state.settled = true
+			action = nativePromiseAggregateAction{settle: true, allF64: append([]float64(nil), state.f64...)}
+		}
+	case nativePromiseAggregateRaceF64:
+		if !state.settled {
+			state.settled = true
+			if status == nativeTaskFailed {
+				action = nativePromiseAggregateAction{settle: true, failed: true, failure: failure}
+			} else {
+				action = nativePromiseAggregateAction{settle: true, f64: f64}
+			}
+		}
+	case nativePromiseAggregateAllRef:
+		if status == nativeTaskFailed && !state.settled {
+			state.settled = true
+			action = nativePromiseAggregateAction{settle: true, failed: true, failure: failure}
+		} else if status == nativeTaskDone {
+			state.refs[index] = ref
+		}
+		if state.remaining == 0 && !state.settled {
+			state.settled = true
+			action = nativePromiseAggregateAction{settle: true, allRef: append([]unsafe.Pointer(nil), state.refs...)}
+		}
+	case nativePromiseAggregateRaceRef:
+		if !state.settled {
+			state.settled = true
+			if status == nativeTaskFailed {
+				action = nativePromiseAggregateAction{settle: true, failed: true, failure: failure}
+			} else {
+				action = nativePromiseAggregateAction{settle: true, ref: ref}
+			}
+		}
+	}
+	if state.remaining == 0 {
+		action.release = true
+	}
+	aggregate := state.aggregate
+	tasks := state.tasks
+	state.Unlock()
+
+	if action.settle {
+		switch {
+		case action.failed:
+			settleNativeAggregate(aggregate, true, action.failure, 0, nil)
+		case action.allF64 != nil:
+			array := tsnative_array_f64_new(C.uint64_t(len(action.allF64)))
+			for i, value := range action.allF64 {
+				tsnative_array_f64_set(array, C.uint64_t(i), C.double(value))
+			}
+			settleNativeAggregate(aggregate, false, nil, 0, array)
+		case action.allRef != nil:
+			array := tsnative_array_ref_new(C.uint64_t(len(action.allRef)))
+			for i, value := range action.allRef {
+				tsnative_array_ref_set(array, C.uint64_t(i), value)
+			}
+			settleNativeAggregate(aggregate, false, nil, 0, array)
+		case state.kind == nativePromiseAggregateRaceRef:
+			settleNativeAggregate(aggregate, false, nil, 0, action.ref)
+		default:
+			settleNativeAggregate(aggregate, false, nil, action.f64, nil)
+		}
+	}
+	if action.release {
+		for _, task := range tasks {
+			releaseNativeTaskRef(task)
+		}
+	}
 }
 
-func startNativePromiseAllF64(tasks []*nativeTask, aggregate *nativeTask) {
+func startNativePromiseAggregate(kind nativePromiseAggregateKind, tasks []*nativeTask, aggregate *nativeTask) {
+	state := &nativePromiseAggregateState{
+		kind: kind, aggregate: aggregate, tasks: tasks, observed: make([]bool, len(tasks)), remaining: len(tasks),
+	}
+	if kind == nativePromiseAggregateAllF64 {
+		state.f64 = make([]float64, len(tasks))
+	}
+	if kind == nativePromiseAggregateAllRef {
+		state.refs = make([]unsafe.Pointer, len(tasks))
+	}
 	if len(tasks) == 0 {
-		finishNativePromiseAllF64(aggregate, nil)
-		return
-	}
-	results := make([]float64, len(tasks))
-	pending := make([]nativePromiseObservation, 0, len(tasks))
-	for index, child := range tasks {
-		status, failure, value, terminal := settledNativePromiseF64(child)
-		if !terminal {
-			pending = append(pending, nativePromiseObservation{index: index, task: child})
-			continue
-		}
-		if status == nativeTaskFailed {
-			settleNativeAggregate(aggregate, true, failure, 0, nil)
-			for _, held := range tasks {
-				releaseNativePromiseInputWhenTerminal(held)
-			}
-			return
-		}
-		results[index] = value
-		releaseNativeTaskRef(child)
-		tasks[index] = nil
-	}
-	if len(pending) == 0 {
-		finishNativePromiseAllF64(aggregate, results)
-		return
-	}
-
-	observations := make(chan nativePromiseObservation, len(pending))
-	for _, item := range pending {
-		go observeNativePromise(item.index, item.task, observations)
-	}
-	go func() {
-		failed := false
-		for range pending {
-			observation := <-observations
-			child := observation.task
-			status, failure, value, _ := settledNativePromiseF64(child)
-			if status == nativeTaskFailed && !failed {
-				failed = true
-				settleNativeAggregate(aggregate, true, failure, 0, nil)
-			} else if status == nativeTaskDone {
-				results[observation.index] = value
-			}
-			releaseNativeTaskRef(child)
-		}
-		if !failed {
-			finishNativePromiseAllF64(aggregate, results)
-		}
-	}()
-}
-
-func startNativePromiseRaceF64(tasks []*nativeTask, aggregate *nativeTask) {
-	for _, child := range tasks {
-		status, failure, value, terminal := settledNativePromiseF64(child)
-		if !terminal {
-			continue
-		}
-		if status == nativeTaskFailed {
-			settleNativeAggregate(aggregate, true, failure, 0, nil)
-		} else {
-			settleNativeAggregate(aggregate, false, nil, value, nil)
-		}
-		for _, held := range tasks {
-			releaseNativePromiseInputWhenTerminal(held)
+		if kind == nativePromiseAggregateAllF64 {
+			array := tsnative_array_f64_new(0)
+			settleNativeAggregate(aggregate, false, nil, 0, array)
+		} else if kind == nativePromiseAggregateAllRef {
+			array := tsnative_array_ref_new(0)
+			settleNativeAggregate(aggregate, false, nil, 0, array)
 		}
 		return
 	}
-
-	observations := make(chan nativePromiseObservation, len(tasks))
 	for index, task := range tasks {
-		go observeNativePromise(index, task, observations)
-	}
-	go func() {
-		settled := false
-		for range tasks {
-			observation := <-observations
-			child := observation.task
-			status, failure, value, _ := settledNativePromiseF64(child)
-			if !settled {
-				settled = true
-				if status == nativeTaskFailed {
-					settleNativeAggregate(aggregate, true, failure, 0, nil)
-				} else {
-					settleNativeAggregate(aggregate, false, nil, value, nil)
-				}
-			}
-			releaseNativeTaskRef(child)
+		watcher := nativePromiseAggregateWatcher{state: state, index: index}
+		if !watchNativePromiseAggregate(task, watcher) {
+			state.observe(index, task)
 		}
-	}()
+	}
 }
 
 //export tsnative_promise_all_f64
@@ -233,12 +311,12 @@ func tsnative_promise_all_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Point
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
 		for _, task := range tasks {
-			releaseNativePromiseInputWhenTerminal(task)
+			releaseNativeTaskRef(task)
 		}
 		nativeAbort("Promise.all allocation failed")
 	}
 	aggregate.status.Store(nativeTaskWaiting)
-	startNativePromiseAllF64(tasks, aggregate)
+	startNativePromiseAggregate(nativePromiseAggregateAllF64, tasks, aggregate)
 	return aggregate.handle
 }
 
@@ -251,11 +329,44 @@ func tsnative_promise_race_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Poin
 	aggregate := allocateNativeTask(nil, nativeTaskResultF64)
 	if aggregate == nil {
 		for _, task := range tasks {
-			releaseNativePromiseInputWhenTerminal(task)
+			releaseNativeTaskRef(task)
 		}
 		nativeAbort("Promise.race allocation failed")
 	}
 	aggregate.status.Store(nativeTaskWaiting)
-	startNativePromiseRaceF64(tasks, aggregate)
+	startNativePromiseAggregate(nativePromiseAggregateRaceF64, tasks, aggregate)
+	return aggregate.handle
+}
+
+//export tsnative_promise_all_ref
+func tsnative_promise_all_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
+	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultRef)
+	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
+	if aggregate == nil {
+		for _, task := range tasks {
+			releaseNativeTaskRef(task)
+		}
+		nativeAbort("reference Promise.all allocation failed")
+	}
+	aggregate.status.Store(nativeTaskWaiting)
+	startNativePromiseAggregate(nativePromiseAggregateAllRef, tasks, aggregate)
+	return aggregate.handle
+}
+
+//export tsnative_promise_race_ref
+func tsnative_promise_race_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
+	if count == 0 {
+		nativeAbort("empty reference Promise.race is not supported")
+	}
+	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultRef)
+	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
+	if aggregate == nil {
+		for _, task := range tasks {
+			releaseNativeTaskRef(task)
+		}
+		nativeAbort("reference Promise.race allocation failed")
+	}
+	aggregate.status.Store(nativeTaskWaiting)
+	startNativePromiseAggregate(nativePromiseAggregateRaceRef, tasks, aggregate)
 	return aggregate.handle
 }

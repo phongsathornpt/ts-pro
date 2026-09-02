@@ -302,6 +302,18 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			promises[i] = mir.ValueID(value)
 		}
 		result.Op = mir.PromiseRaceF64{Promises: promises}
+	case hir.PromiseAllRefOp:
+		promises := make([]mir.ValueID, len(op.Promises))
+		for i, value := range op.Promises {
+			promises[i] = mir.ValueID(value)
+		}
+		result.Op = mir.PromiseAllRef{Promises: promises}
+	case hir.PromiseRaceRefOp:
+		promises := make([]mir.ValueID, len(op.Promises))
+		for i, value := range op.Promises {
+			promises[i] = mir.ValueID(value)
+		}
+		result.Op = mir.PromiseRaceRef{Promises: promises}
 	case hir.PromiseRejectOp:
 		resultRepr, err := lowerTaskResultRepr(op.Result)
 		if err != nil {

@@ -162,6 +162,10 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return append([]mir.ValueID(nil), op.Promises...), true
 	case mir.PromiseRaceF64:
 		return append([]mir.ValueID(nil), op.Promises...), true
+	case mir.PromiseAllRef:
+		return append([]mir.ValueID(nil), op.Promises...), true
+	case mir.PromiseRaceRef:
+		return append([]mir.ValueID(nil), op.Promises...), true
 	case mir.TaskSpawn:
 		values := append([]mir.ValueID(nil), op.Captures...)
 		if op.Group != nil {
@@ -351,6 +355,30 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.PromiseRaceF64:
+				for _, promise := range op.Promises {
+					if !available[promise] {
+						return nil
+					}
+				}
+				if inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseAllRef:
+				for _, promise := range op.Promises {
+					if !available[promise] {
+						return nil
+					}
+				}
+				if inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseRaceRef:
 				for _, promise := range op.Promises {
 					if !available[promise] {
 						return nil

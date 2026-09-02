@@ -412,6 +412,7 @@ type nativeTaskExecution struct {
 	kind               int
 	completionWaiters  []uintptr
 	completionConsumes int
+	aggregateWatchers  []nativePromiseAggregateWatcher
 }
 
 const (
@@ -465,6 +466,7 @@ func executeNativeTaskOnce(task *nativeTask) nativeTaskExecution {
 	} else {
 		task.status.Store(nativeTaskDone)
 	}
+	execution.aggregateWatchers = takeNativePromiseAggregateWatchers(nativeTaskKey(task))
 	completions := takeNativeTaskCompletions(nativeTaskKey(task))
 	for _, completion := range completions {
 		waiter := lookupNativeTask(completion.task)
@@ -576,7 +578,7 @@ func awaitNativeTask(raw unsafe.Pointer, kind int32, out unsafe.Pointer, statusO
 		}
 		task.completionMu.Unlock()
 		if consume {
-			destroyNativeTaskStorage(task)
+			releaseNativeTaskRef(task)
 		}
 		if status == nativeTaskDone || statusOnly {
 			return 1
