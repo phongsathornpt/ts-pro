@@ -193,13 +193,15 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Owner queues now batch marked blocks by native page before scanning, reducing queue churn and improving locality.
     - Bounded parallel mark-page helpers now run for larger heaps, prefer owner-local queues, steal across owners when needed, and are capped by `TSNATIVE_GC_MARK_WORKERS` (hard maximum 8).
     - Already-parked scheduler workers are claimed first as bounded mark donors; fallback goroutines are created only for missing assist slots.
-    - Global-heap-lock reduction remains before nursery/generational policy work.
+    - Root/token/thread-stack/handoff metadata now has a separate lock from heap allocation; GC still holds `heap -> roots` across mark/sweep to preserve a stable root/heap snapshot.
+    - Remaining heap-lock contention must be measured before further block-index/allocator lock splitting and nursery/generational policy work.
 
 15. `runtime: add Green-Tea-style local mark-page work` 🟡
     - [x] Owner-local native-page mark queues exist on top of size-class spans and page-to-span metadata.
     - [x] Bounded GC helpers steal mark pages across owner queues when their preferred owner has no work.
     - [x] Reuse already-idle scheduler workers for GC donation, with deterministic donor claiming under the scheduler lock and dedicated donor-worker/page metrics.
-    - [ ] Profile lock contention and reduce the global heap lock without weakening root/sweep correctness.
+    - [x] Separate root lifecycle metadata from heap/allocator locking while preserving `heap -> roots` collection lock order.
+    - [ ] Instrument remaining heap-lock contention and reduce block-index/allocator lock scope only where measurements support it.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

@@ -18,24 +18,28 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	foreignTID := syscall.Gettid() + 1_000_000
 
 	nativeHeap.Lock()
+	nativeRoots.Lock()
 	tokenPtr := allocRootTokenLocked()
 	token := uintptr(tokenPtr)
-	nativeHeap.roots[token] = &nativeRootFrame{
+	nativeRoots.roots[token] = &nativeRootFrame{
 		token: tokenPtr, slots: unsafe.Pointer(&slot), count: 1, tid: foreignTID,
 	}
-	nativeHeap.threadStacks[foreignTID] = []uintptr{token}
+	nativeRoots.threadStacks[foreignTID] = []uintptr{token}
 	before := nativeHeap.collections
+	nativeRoots.Unlock()
 	nativeHeap.Unlock()
 
 	tsnative_gc_collect()
 
 	nativeHeap.Lock()
+	nativeRoots.Lock()
 	after := nativeHeap.collections
 	_, garbageLive := nativeHeap.blocks[uintptr(garbage)]
-	frame := nativeHeap.roots[token]
-	delete(nativeHeap.roots, token)
-	delete(nativeHeap.threadStacks, foreignTID)
+	frame := nativeRoots.roots[token]
+	delete(nativeRoots.roots, token)
+	delete(nativeRoots.threadStacks, foreignTID)
 	freeRootTokenLocked(frame.token)
+	nativeRoots.Unlock()
 	nativeHeap.Unlock()
 
 	if after != before {
@@ -53,6 +57,47 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 		t.Fatal("deferred collection did not run after root stack became safe")
 	}
 	runtime.KeepAlive(&slot)
+}
+
+func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	nativeRoots.Lock()
+	allocationDone := make(chan unsafe.Pointer, 1)
+	go func() {
+		allocationDone <- tsnative_heap_alloc(16)
+	}()
+	var allocated unsafe.Pointer
+	select {
+	case allocated = <-allocationDone:
+	case <-time.After(250 * time.Millisecond):
+		nativeRoots.Unlock()
+		t.Fatal("heap allocation blocked on root metadata lock")
+	}
+	nativeRoots.Unlock()
+	if allocated == nil {
+		t.Fatal("heap allocation failed while root lock was held")
+	}
+
+	slot := new(unsafe.Pointer)
+	nativeHeap.Lock()
+	rootDone := make(chan unsafe.Pointer, 1)
+	go func() {
+		rootDone <- tsnative_gc_root_register(unsafe.Pointer(slot))
+	}()
+	var token unsafe.Pointer
+	select {
+	case token = <-rootDone:
+	case <-time.After(250 * time.Millisecond):
+		nativeHeap.Unlock()
+		t.Fatal("root registration blocked on heap allocation lock")
+	}
+	nativeHeap.Unlock()
+	if token == nil {
+		t.Fatal("root registration failed while heap lock was held")
+	}
+	tsnative_gc_root_unregister(token)
 }
 
 func TestHeapThresholdRequestsDeferredGC(t *testing.T) {
@@ -274,8 +319,10 @@ func TestHeapShutdownFinalizesBufferedReferenceChannelRoots(t *testing.T) {
 	if lookupNativeRefChannel(channel) != nil {
 		t.Fatal("reference channel state survived heap shutdown")
 	}
+	nativeRoots.Lock()
+	rootCount := len(nativeRoots.roots)
+	nativeRoots.Unlock()
 	nativeHeap.Lock()
-	rootCount := len(nativeHeap.roots)
 	spanCount := len(nativeHeap.spans)
 	nativeHeap.Unlock()
 	if rootCount != 0 || spanCount != 0 {
