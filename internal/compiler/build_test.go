@@ -1344,8 +1344,8 @@ func TestBuildStackLocalObjectNativeExecutable(t *testing.T) {
 	if result.Metrics.AllocationCandidates != 1 || result.Metrics.NonEscapingAllocations != 1 || result.Metrics.EscapingAllocations != 0 {
 		t.Fatalf("escape metrics = %d/%d/%d, want 1/1/0", result.Metrics.AllocationCandidates, result.Metrics.NonEscapingAllocations, result.Metrics.EscapingAllocations)
 	}
-	if result.Metrics.StackObjectAllocs != 1 {
-		t.Fatalf("stack object allocations = %d, want 1", result.Metrics.StackObjectAllocs)
+	if result.Metrics.ScalarObjectAllocs != 1 || result.Metrics.StackObjectAllocs != 0 {
+		t.Fatalf("object storage scalar/stack = %d/%d, want 1/0", result.Metrics.ScalarObjectAllocs, result.Metrics.StackObjectAllocs)
 	}
 	if result.Metrics.RuntimeCalls != 1 {
 		t.Fatalf("runtime calls = %d, want 1 console.log call", result.Metrics.RuntimeCalls)

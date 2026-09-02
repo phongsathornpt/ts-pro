@@ -28,7 +28,7 @@ func formatBuildReport(result compiler.BuildResult) string {
 	fmt.Fprintf(&b, "  timer ops: %d sleep\n", m.Sleeps)
 	fmt.Fprintf(&b, "  runtime calls: %d\n", m.RuntimeCalls)
 	fmt.Fprintf(&b, "  escape analysis: %d non-escaping / %d escaping / %d allocation candidates\n", m.NonEscapingAllocations, m.EscapingAllocations, m.AllocationCandidates)
-	fmt.Fprintf(&b, "  stack objects: %d\n", m.StackObjectAllocs)
+	fmt.Fprintf(&b, "  object storage: %d scalar-replaced / %d stack-allocated\n", m.ScalarObjectAllocs, m.StackObjectAllocs)
 	fmt.Fprintf(&b, "  object cache: %.1f%% (%d hit / %d miss)\n", m.CacheHitRate(), m.CacheHits, m.CacheMisses)
 	fmt.Fprintf(&b, "  timings:\n")
 	writeTiming(&b, "typescript", t.TypeScript)

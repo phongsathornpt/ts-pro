@@ -48,6 +48,7 @@ type BuildMetrics struct {
 	NonEscapingAllocations int
 	EscapingAllocations    int
 	StackObjectAllocs      int
+	ScalarObjectAllocs     int
 	CacheHits              int
 	CacheMisses            int
 }
@@ -97,9 +98,11 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes esc
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.Sleeps = countSleepOps(mirModule)
 	stackObjects := escapeanalysis.StackObjects(mirModule, escapes)
+	scalarObjects := escapeanalysis.ScalarObjects(mirModule, stackObjects)
 	metrics.RuntimeCalls = countRuntimeCallsWithStackObjects(mirModule, stackObjects)
 	metrics.AllocationCandidates, metrics.NonEscapingAllocations, metrics.EscapingAllocations = countEscapeAllocations(escapes)
-	metrics.StackObjectAllocs = countStackObjects(stackObjects)
+	metrics.ScalarObjectAllocs = countScalarObjects(scalarObjects)
+	metrics.StackObjectAllocs = countStackObjects(stackObjects) - metrics.ScalarObjectAllocs
 	return metrics
 }
 
@@ -118,6 +121,14 @@ func countEscapeAllocations(result escapeanalysis.Result) (candidates, nonEscapi
 }
 
 func countStackObjects(result escapeanalysis.StackObjectResult) int {
+	count := 0
+	for _, fn := range result {
+		count += len(fn)
+	}
+	return count
+}
+
+func countScalarObjects(result escapeanalysis.ScalarObjectResult) int {
 	count := 0
 	for _, fn := range result {
 		count += len(fn)

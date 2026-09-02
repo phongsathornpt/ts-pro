@@ -10,7 +10,7 @@ import (
 
 func TestFormatBuildReport(t *testing.T) {
 	result := compiler.BuildResult{
-		Metrics: compiler.BuildMetrics{Values: 10, NativeValues: 9, DynamicValues: 1, BoxingSites: 1, DynamicDispatch: 2, I32Candidates: 5, I64Candidates: 1, I32FastOps: 3, I64FastOps: 1, TaskSpawns: 2, TaskJoins: 1, TaskYields: 1, RuntimeCalls: 7, Shapes: 4, AllocationCandidates: 5, NonEscapingAllocations: 3, EscapingAllocations: 2, StackObjectAllocs: 2},
+		Metrics: compiler.BuildMetrics{Values: 10, NativeValues: 9, DynamicValues: 1, BoxingSites: 1, DynamicDispatch: 2, I32Candidates: 5, I64Candidates: 1, I32FastOps: 3, I64FastOps: 1, TaskSpawns: 2, TaskJoins: 1, TaskYields: 1, RuntimeCalls: 7, Shapes: 4, AllocationCandidates: 5, NonEscapingAllocations: 3, EscapingAllocations: 2, StackObjectAllocs: 2, ScalarObjectAllocs: 1},
 		Timings: compiler.BuildTimings{TypeScript: 12 * time.Millisecond, HIR: 50 * time.Microsecond, Total: 20 * time.Millisecond},
 	}
 	text := formatBuildReport(result)
@@ -24,7 +24,7 @@ func TestFormatBuildReport(t *testing.T) {
 		"task ops: 2 spawn / 1 join / 1 yield",
 		"runtime calls: 7",
 		"escape analysis: 3 non-escaping / 2 escaping / 5 allocation candidates",
-		"stack objects: 2",
+		"object storage: 1 scalar-replaced / 2 stack-allocated",
 		"typescript:    12ms",
 		"hir:           50µs",
 		"total:         20ms",

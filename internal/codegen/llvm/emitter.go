@@ -18,6 +18,7 @@ type emitter struct {
 	closures      map[mir.FunctionID]closureDescriptor
 	escapes       escapeanalysis.Result
 	stackObjects  escapeanalysis.StackObjectResult
+	scalarObjects escapeanalysis.ScalarObjectResult
 }
 
 func Emit(module mir.Module) (string, error) {
@@ -33,7 +34,12 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	if err != nil {
 		return "", err
 	}
-	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: escapeanalysis.StackObjects(module, escapes)}
+	stackObjects := escapeanalysis.StackObjects(module, escapes)
+	e := &emitter{
+		module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{},
+		stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: stackObjects,
+		scalarObjects: escapeanalysis.ScalarObjects(module, stackObjects),
+	}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
 	}
@@ -312,6 +318,9 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		typeName := shapeTypeName(op.Shape)
+		if _, scalar := e.scalarObjects.Get(fn.ID, inst.Result); scalar {
+			return nil
+		}
 		if e.isStackObject(fn.ID, inst.Result) {
 			fmt.Fprintf(b, "  %s = alloca %s\n", name, typeName)
 		} else {
@@ -688,6 +697,17 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		if int(op.Field) >= len(shape.Fields) {
 			return fmt.Errorf("invalid field %d for shape s%d", op.Field, op.Shape)
+		}
+		if scalar, ok := e.scalarObjects.Get(fn.ID, op.Object); ok {
+			if int(op.Field) >= len(scalar.Fields) {
+				return fmt.Errorf("scalar object v%d missing field %d", op.Object, op.Field)
+			}
+			value, err := operand(values, scalar.Fields[op.Field])
+			if err != nil {
+				return err
+			}
+			values[inst.Result] = value
+			return nil
 		}
 		object, err := operand(values, op.Object)
 		if err != nil {
