@@ -75,8 +75,16 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 		kind = hir.UnboxBoolean
 	case frontend.TypeArray:
 		kind = hir.UnboxArray
+	case frontend.TypeObject:
+		kind = hir.UnboxObject
+	case frontend.TypeFunction:
+		kind = hir.UnboxFunction
 	default:
 		return 0, fmt.Errorf("cannot safely unbox dynamic value into semantic type %q without runtime representation metadata", f.module.source.Types[target].Name)
 	}
-	return f.emit(target, hir.UnboxOp{Kind: kind, Value: value}), nil
+	unbox := hir.UnboxOp{Kind: kind, Value: value}
+	if kind == hir.UnboxObject {
+		unbox.Shape = hir.NewShapeID(uint32(f.module.source.Types[target].Shape))
+	}
+	return f.emit(target, unbox), nil
 }

@@ -81,11 +81,14 @@ const (
 	UnboxString
 	UnboxBoolean
 	UnboxArray
+	UnboxObject
+	UnboxFunction
 )
 
 type UnboxOp struct {
 	Kind  UnboxKind
 	Value ValueID
+	Shape ShapeID
 }
 
 type DynamicBinaryOp struct {

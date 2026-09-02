@@ -1237,6 +1237,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  %s = trunc i8 %s.raw to i1\n", name, name)
 		case mir.UnboxJSArray:
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_array(ptr %s)\n", name, value)
+		case mir.UnboxJSObject:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_object_shape(ptr %s, i32 %d)\n", name, value, uint32(op.Shape))
+		case mir.UnboxJSFunction:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_function(ptr %s)\n", name, value)
 		default:
 			return fmt.Errorf("unsupported JSValue unbox kind %d", op.Kind)
 		}

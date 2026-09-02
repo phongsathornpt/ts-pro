@@ -20,3 +20,16 @@ console.log(dynamicBoolScore(dynamicUnboxBooleanNative));
 let dynamicUnboxArray: any = [40, 2];
 let dynamicUnboxArrayNative: number[] = dynamicUnboxArray;
 console.log(dynamicUnboxArrayNative[0]! + dynamicUnboxArrayNative[1]!);
+
+type DynamicUnboxObject = { value: number };
+let dynamicUnboxObjectTyped: DynamicUnboxObject = { value: 42 };
+let dynamicUnboxObject: any = dynamicUnboxObjectTyped;
+let dynamicUnboxObjectNative: DynamicUnboxObject = dynamicUnboxObject;
+console.log(dynamicUnboxObjectNative.value);
+
+function dynamicUnboxFunctionTarget(value: number): number {
+  return value + 1;
+}
+let dynamicUnboxFunction: any = dynamicUnboxFunctionTarget;
+let dynamicUnboxFunctionNative: (value: number) => number = dynamicUnboxFunction;
+console.log(dynamicUnboxFunctionNative(41));

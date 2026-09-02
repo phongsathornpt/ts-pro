@@ -176,6 +176,9 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if op.Kind == UnboxInvalid {
 					add(fmt.Sprintf("unbox v%d has invalid kind", instruction.Result))
 				}
+				if op.Kind == UnboxObject && int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("object unbox v%d references unknown shape s%d", instruction.Result, op.Shape))
+				}
 				checkValue(op.Value)
 			case DynamicBinaryOp:
 				if op.Operator == 0 {

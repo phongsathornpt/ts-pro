@@ -167,11 +167,14 @@ const (
 	UnboxJSString
 	UnboxJSBoolean
 	UnboxJSArray
+	UnboxJSObject
+	UnboxJSFunction
 )
 
 type UnboxJSValue struct {
 	Kind  UnboxJSKind
 	Value ValueID
+	Shape ShapeID
 }
 
 type DynamicAddJSValue struct {

@@ -198,7 +198,13 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Add boxed `any`/union reference arrays with element boxing on construction/assignment and JSValue-tagged indexed reads.
     - [x] Add compact atomic `boolean[]` allocation/read/write/length specialization with i1/i8 LLVM boundary conversion and differential coverage.
   - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
-- [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
+- [~] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
+  - [x] Finish checked dynamic-to-native object/function conversions before broadening shape semantics.
+    - [x] Carry closed-object shape identity through dynamic boxes and validate exact object shape when unboxing `any`/union to a native object reference.
+    - [x] Unbox `any`/union function references back to typed native closures and invoke the recovered closure through the existing typed indirect-call ABI.
+  - [ ] Add optional properties and union-shape compatibility.
+  - [ ] Add computed/dynamic keys and shape transitions.
+  - [ ] Broaden structural object compatibility once shape evolution semantics are defined.
 - [~] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/for-of, templates, default/optional params, enums, and module linking.
   - [x] Native `do...while` lowers with mandatory first-body execution followed by the existing loop-carried SSA machinery; source-file top-level and function-body forms share the same semantic statement path.
 - [ ] Add selected standard-library/runtime APIs such as JSON, Map/Set, Date, and RegExp after their representation contracts are defined.
@@ -272,7 +278,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
   - [x] Primitive dynamic `-`, `*`, `/`, relational comparison, loose equality, and strict equality with TypeScript-correct result representations and JS-style primitive coercion; object/function reference equality is supported without ToPrimitive coercion.
   - [~] Dynamic property get/set, calls, object/function ToPrimitive coercion, and checked unboxing/conversions.
-    - [x] Checked JSValue unboxing to native number/string/boolean/number[] with distinct array tagging, MIR/LLVM/runtime ABI coverage, and differential native tests.
+    - [x] Checked JSValue unboxing to native number/string/boolean/array/object/function references with representation metadata.
+      - [x] Checked number/string/boolean/number[] unboxing with distinct array tagging, MIR/LLVM/runtime ABI coverage, and differential native tests.
+      - [x] Add exact closed-object shape validation for dynamic-to-native object unboxing.
+      - [x] Add dynamic-to-native function-reference unboxing with recovered native closure invocation coverage.
     - [~] Dynamic object/property get/set and calls, plus object/function ToPrimitive coercion.
       - [x] Add default native `ToPrimitive` fallback for boxed plain objects, F64 arrays, and function references. Object addition/string comparison uses `[object Object]`, F64 arrays stringify with comma-joined JS number text, numeric coercion flows through the primitive fallback, and loose equality no longer aborts on object/array/function operands.
       - [x] Preserve closed object shape identity through JSValue boxing. Object boxes encode `shapeID+1` in the existing non-GC metadata word, LLVM passes the semantic shape on every object box, MIR/HIR verification rejects unknown shapes, and GC stress verifies metadata/payload survival without growing JSValue.
@@ -280,6 +289,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Dynamic named property reads generate deterministic LLVM helpers keyed by property name. The helper switches on boxed shape identity, performs exact typed GEP/load/boxing, preserves nested object shape metadata, and returns `undefined` for missing/non-object properties.
         - [x] Dynamic named property writes use the same boxed-shape dispatch, checked JSValue unboxing for scalar/reference representations, nested-object shape validation, and `tsnative_gc_store_ref` remembered-set barriers for reference fields. Missing fields on closed shapes fail explicitly instead of corrupting layout. A 1 KiB nursery regression promotes the holder, stores a young string through `any`, forces further minors, and verifies the typed alias still observes the live value.
       - [x] Dynamic callable dispatch preserves native closure target identity through JSValue boxing and closure cells, checked-unboxes arguments against each target ABI (including object-shape validation), invokes the existing closure wrapper ABI, and boxes native results back to JSValue. `any`/union callees stay dynamic even when their symbol refers to a known function, and contextually-`any` captured closures are explicitly boxed instead of leaking raw closure pointers across the dynamic boundary.
+      - [ ] Preserve receiver `this` for dynamic method calls; this is the prerequisite for structural thenable/`PromiseLike` assimilation.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.
@@ -289,9 +299,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Finish physical stack allocation for non-scalarizable reference-bearing objects only after precise stack-root/interior-pointer handling is covered. Fully scalarizable reference-bearing objects already avoid physical storage, proven local closures now use parent-frame storage, and task environments remain heap-backed when their lifetime crosses scheduler ownership.
-2. Finish nested rejection recovery and selected Promise combinators.
-3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
-4. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+1. Preserve receiver `this` for dynamic method calls, then use it to implement structural `PromiseLike`/thenable assimilation.
+2. Finish selected Promise combinators: non-literal iterable inputs and heterogeneous tuple results after tuple/container ownership semantics land.
+3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths, including optional/dynamic/computed properties and shape transitions.
+4. Finish advanced generics, integer SSA across calls/loops, array growth/mutators, tuples/destructuring/rest-spread/optional chaining/nullish/switch/for-of/templates/default params/enums, and selected standard-library APIs.
 5. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
 6. Port compiler-owned semantic/HIR/MIR/LLVM/build orchestration to TypeScript 7 and retire transitional compile-time Go packages.
+7. Return to true interior-pointer/address-taking stack-allocation extensions when MIR exposes those operations; current single-origin Phi aliases are already covered.

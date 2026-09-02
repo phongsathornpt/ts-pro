@@ -867,14 +867,14 @@ func TestBuildNativeDynamicCheckedUnboxing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Metrics.BoxingSites != 4 {
-		t.Fatalf("boxing sites = %d; want 4", result.Metrics.BoxingSites)
+	if result.Metrics.BoxingSites != 6 {
+		t.Fatalf("boxing sites = %d; want 6", result.Metrics.BoxingSites)
 	}
 	got, err := exec.CommandContext(ctx, output).CombinedOutput()
 	if err != nil {
 		t.Fatalf("run dynamic checked unboxing: %v: %s", err, got)
 	}
-	if strings.TrimSpace(string(got)) != "42\nunboxed\n42\n42" {
+	if strings.TrimSpace(string(got)) != "42\nunboxed\n42\n42\n42\n42" {
 		t.Fatalf("output = %q", got)
 	}
 }

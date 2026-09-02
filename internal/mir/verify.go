@@ -168,6 +168,13 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					want = ReprBool
 				case UnboxJSArray:
 					want = ReprArrayRef
+				case UnboxJSObject:
+					want = ReprObjectRef
+					if _, ok := shapes[op.Shape]; !ok {
+						return fmt.Errorf("object JSValue unbox v%d references unknown shape s%d", inst.Result, op.Shape)
+					}
+				case UnboxJSFunction:
+					want = ReprFunctionRef
 				}
 				if want == ReprInvalid || inst.Repr != want {
 					return fmt.Errorf("JSValue unbox v%d has invalid kind/repr %d/%d", inst.Result, op.Kind, inst.Repr)
