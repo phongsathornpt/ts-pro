@@ -211,7 +211,9 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Add bounded per-worker nursery accounting (`TSNATIVE_GC_NURSERY_BYTES`, 64 KiB default), young-only minor tracing/sweep, survivor promotion, and a 1 MiB initial major-GC threshold.
     - [x] Add 64-shard remembered-parent tracking plus compiler/runtime reference-store barriers for mutable native-heap object fields, task continuation spills, channel receive slots, and task completion outputs. Minor GC now scans remembered old parents only; a negative raw-store regression proves the conservative old-generation safety net is gone.
     - [x] In the 1,024-old-block/64 KiB nursery sample, remembered tracing measures roughly 75-79 µs/minor with no remembered parent and 106-119 µs with one remembered parent, versus 151-168 µs for the earlier conservative old scan.
-    - [ ] Add a nursery membership index so reset/count/sweep no longer traverses the whole live-block table, then tune promotion age, nursery sizing, and major cadence from measured data.
+    - [x] Track nursery membership in per-owner append-only block lists. Minor GC drains those lists under the world write barrier and resets/marks/reclaims only the listed young blocks, using targeted deletion from the 128-shard live-block table instead of whole-table sweep/count passes.
+    - [x] With 1,024 old blocks, the same 64 KiB nursery workload measures roughly 14.4-14.9 µs/minor with no remembered parent and 17.8-18.0 µs with one remembered parent, down from roughly 75-79 µs and 106-119 µs before the membership index.
+    - [ ] Re-profile survival rates and major cadence before adding multi-age promotion or changing the 64 KiB per-worker nursery default.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

@@ -44,12 +44,15 @@ int main(void) {
   void *young = tsnative_heap_alloc(65536);
   assert(young);
   assert(tsnative_gc_nursery_bytes() >= 65536);
+  assert(tsnative_gc_nursery_blocks() == 1);
   tsnative_gc_safepoint();
   assert(tsnative_heap_live_allocations() == 0);
   assert(tsnative_gc_collections() == 3);
   assert(tsnative_gc_major_collections() == 2);
   assert(tsnative_gc_minor_collections() == 1);
   assert(tsnative_gc_nursery_bytes() == 0);
+  assert(tsnative_gc_nursery_blocks() == 0);
+  assert(tsnative_gc_minor_nursery_scans() == 1);
   assert(tsnative_heap_lock_acquisitions() > 0);
   assert(tsnative_root_lock_acquisitions() > 0);
   assert(tsnative_world_read_lock_acquisitions() > 0);

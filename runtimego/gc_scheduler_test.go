@@ -494,6 +494,75 @@ func TestGCStoreRefSkipsYoungParent(t *testing.T) {
 	}
 }
 
+func TestMinorGCScansOnlyNurseryMembership(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
+
+	const oldChildren = 1024
+	wordSize := unsafe.Sizeof(uintptr(0))
+	parent := tsnative_heap_alloc(uintptr(oldChildren) * wordSize)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	for i := 0; i < oldChildren; i++ {
+		child := tsnative_heap_alloc(16)
+		*(*unsafe.Pointer)(unsafe.Add(parent, uintptr(i)*wordSize)) = child
+	}
+	tsnative_gc_collect()
+	if got := nativeNurseryBlockCount(); got != 0 {
+		t.Fatalf("nursery blocks after major = %d, want 0", got)
+	}
+	nativeGCMinorNurseryScans.Store(0)
+
+	young := tsnative_heap_alloc(65536)
+	if got := nativeNurseryBlockCount(); got != 1 {
+		t.Fatalf("nursery blocks before minor = %d, want 1", got)
+	}
+	tsnative_gc_safepoint()
+	if nativeHeapContains(young) {
+		t.Fatal("unrooted indexed nursery block survived minor GC")
+	}
+	if got := nativeGCMinorNurseryScans.Load(); got != 1 {
+		t.Fatalf("minor nursery scans = %d, want 1 independent of %d old children", got, oldChildren)
+	}
+	if got := nativeNurseryBlockCount(); got != 0 {
+		t.Fatalf("nursery blocks after minor = %d, want 0", got)
+	}
+	if got := tsnative_heap_live_allocations(); got != oldChildren+1 {
+		t.Fatalf("live allocations after minor = %d, want %d old blocks", got, oldChildren+1)
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestMinorGCDrainsAllWorkerNurseryBuckets(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
+
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(32768)
+	schedulerSetThread(1, 0)
+	_ = tsnative_heap_alloc(32768)
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(32768)
+	if got := nativeNurseryBlockCount(); got != 3 {
+		t.Fatalf("nursery blocks across workers = %d, want 3", got)
+	}
+	nativeGCMinorNurseryScans.Store(0)
+	tsnative_gc_safepoint()
+	schedulerSetThread(-1, 0)
+	if got := nativeGCMinorNurseryScans.Load(); got != 3 {
+		t.Fatalf("minor nursery scans = %d, want all 3 worker-local blocks", got)
+	}
+	if got := nativeNurseryBlockCount(); got != 0 {
+		t.Fatalf("nursery blocks after cross-worker minor = %d, want 0", got)
+	}
+	if got := tsnative_heap_live_allocations(); got != 0 {
+		t.Fatalf("live allocations after cross-worker minor = %d, want 0", got)
+	}
+}
+
 func TestNurseryThresholdIsBoundedPerWorker(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

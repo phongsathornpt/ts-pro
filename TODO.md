@@ -211,7 +211,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [~] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and generational collection.
   - [x] Add the first conservative nursery generation with per-worker bounds, minor collection, survivor promotion, and native ABI metrics.
   - [x] Add remembered-set/write-barrier coverage for current mutable native-heap reference stores and remembered-parent minor tracing; negative sensitivity coverage proves raw old-to-young stores are not silently rescued by a conservative old scan.
-  - [ ] Add a nursery membership index so minor reset/count/sweep scales with young blocks rather than the whole live-block table, then tune promotion age/nursery sizing and major cadence from benchmarks.
+  - [x] Add a per-owner append-only nursery membership index so minor reset/count/sweep touches young blocks only; major GC and shutdown clear the index, and native ABI metrics expose current nursery membership plus scanned candidates. With 1,024 old blocks, the 64 KiB nursery sample drops to roughly 14.4-14.9 µs/minor with no remembered parent and 17.8-18.0 µs with one remembered parent.
+  - [ ] Tune survivor promotion age, nursery sizing, and major cadence from measured allocation/survival workloads; keep the current promote-after-one-minor policy until data justifies a more complex age policy.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -241,7 +242,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Current critical path
 
 1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
-2. Add a nursery membership index so minor collection scales with young blocks rather than the whole live-block table, then re-profile promotion age, nursery sizing, and major-GC cadence.
+2. Re-profile survivor age, nursery sizing, and major-GC cadence now that minor collection scales with young membership; change the promote-after-one-minor policy only when survival data justifies it.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

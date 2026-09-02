@@ -49,6 +49,17 @@ func (table *nativeHeapBlockTable) set(key uintptr, block *nativeHeapBlock) {
 	shard.Unlock()
 }
 
+func (table *nativeHeapBlockTable) delete(key uintptr) *nativeHeapBlock {
+	shard := table.shard(key)
+	shard.Lock()
+	block := shard.blocks[key]
+	if block != nil {
+		delete(shard.blocks, key)
+	}
+	shard.Unlock()
+	return block
+}
+
 func (table *nativeHeapBlockTable) rangeBlocks(visit func(uintptr, *nativeHeapBlock)) {
 	for i := range table.shards {
 		shard := &table.shards[i]

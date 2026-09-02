@@ -121,6 +121,7 @@ func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 		generation: nativeHeapGenerationNursery, nurseryOwner: owner,
 	}
 	nativeBlocks.set(block.ptr, block)
+	nativeNurseryTrack(owner, block)
 	liveBytes := nativeHeapBytes.Add(uint64(size))
 	nativeHeapAllocations.Add(1)
 	if nativeNurseryAdd(owner, size) >= nativeNurseryLimit() {
@@ -206,6 +207,7 @@ func collectMajorLocked() []*nativeHeapBlock {
 	})
 	subtractNativeHeapLiveCounters(reclaimedBytes, reclaimedAllocations)
 	clearNativeNurseryBytes()
+	clearNativeNurseryBlocks()
 	nativeRemembered.clear()
 	nativeHeapCollections.Add(1)
 	nativeGCMajorCollections.Add(1)
@@ -218,37 +220,43 @@ func collectMajorLocked() []*nativeHeapBlock {
 }
 
 func collectMinorLocked() []*nativeHeapBlock {
-	nativeBlocks.rangeBlocks(func(_ uintptr, block *nativeHeapBlock) {
-		if block.generation == nativeHeapGenerationNursery {
+	nursery := takeNativeNurseryBlocks()
+	for _, block := range nursery {
+		if block != nil && block.generation == nativeHeapGenerationNursery {
 			block.marked = false
 		}
-	})
-	markNativeNurseryRootsLocked()
+	}
+	nativeGCMinorNurseryScans.Add(uint64(len(nursery)))
+	markNativeNurseryRootsLocked(len(nursery))
 	blocks := make([]*nativeHeapBlock, 0)
 	var reclaimedBytes uint64
 	var reclaimedAllocations uint64
 	var promoted uint64
-	nativeBlocks.sweep(func(_ uintptr, block *nativeHeapBlock) bool {
-		if block.generation != nativeHeapGenerationNursery {
-			return false
+	for _, block := range nursery {
+		if block == nil || block.generation != nativeHeapGenerationNursery {
+			continue
 		}
 		if block.marked {
 			block.generation = nativeHeapGenerationOld
 			promoted++
-			return false
+			continue
+		}
+		removed := nativeBlocks.delete(block.ptr)
+		if removed != block {
+			nativeAbort("nursery block index diverged from live block table")
+			continue
 		}
 		reclaimedBytes += uint64(block.size)
 		reclaimedAllocations++
 		if block.finalizer != nil {
 			blocks = append(blocks, block)
-			return true
+			continue
 		}
 		if data := releaseNativeHeapBlockStorageLocked(block); len(data) != 0 {
 			block.data = data
 			blocks = append(blocks, block)
 		}
-		return true
-	})
+	}
 	subtractNativeHeapLiveCounters(reclaimedBytes, reclaimedAllocations)
 	clearNativeNurseryBytes()
 	nativeRemembered.clear()

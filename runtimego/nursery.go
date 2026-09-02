@@ -5,7 +5,10 @@ package main
 */
 import "C"
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 const (
 	nativeNurseryDefaultBytes = initialGCThreshold
@@ -20,12 +23,19 @@ const (
 	nativeHeapGenerationOld
 )
 
+type nativeNurseryBlockBucket struct {
+	sync.Mutex
+	blocks []*nativeHeapBlock
+}
+
 var nativeNurseryBytes [nativeNurseryBucketCount]atomic.Uint64
+var nativeNurseryBlocks [nativeNurseryBucketCount]nativeNurseryBlockBucket
 var nativeNurseryLimitBytes atomic.Uint64
 var nativeGCMinorCollections atomic.Uint64
 var nativeGCMajorCollections atomic.Uint64
 var nativeGCPromotedBlocks atomic.Uint64
 var nativeGCMinorOldScans atomic.Uint64
+var nativeGCMinorNurseryScans atomic.Uint64
 
 func nativeNurseryBucket(owner int) int {
 	if owner >= 0 && owner < nativeSchedulerMaxWorkers {
@@ -56,6 +66,50 @@ func nativeNurseryLimit() uint64 {
 func nativeNurseryAdd(owner int, size uintptr) uint64 {
 	return nativeNurseryBytes[nativeNurseryBucket(owner)].Add(uint64(size))
 }
+func nativeNurseryTrack(owner int, block *nativeHeapBlock) {
+	if block == nil {
+		return
+	}
+	bucket := &nativeNurseryBlocks[nativeNurseryBucket(owner)]
+	bucket.Lock()
+	bucket.blocks = append(bucket.blocks, block)
+	bucket.Unlock()
+}
+
+func takeNativeNurseryBlocks() []*nativeHeapBlock {
+	blocks := make([]*nativeHeapBlock, 0)
+	for i := range nativeNurseryBlocks {
+		bucket := &nativeNurseryBlocks[i]
+		bucket.Lock()
+		blocks = append(blocks, bucket.blocks...)
+		clear(bucket.blocks)
+		bucket.blocks = nil
+		bucket.Unlock()
+	}
+	return blocks
+}
+
+func clearNativeNurseryBlocks() {
+	for i := range nativeNurseryBlocks {
+		bucket := &nativeNurseryBlocks[i]
+		bucket.Lock()
+		clear(bucket.blocks)
+		bucket.blocks = nil
+		bucket.Unlock()
+	}
+}
+
+func nativeNurseryBlockCount() int {
+	count := 0
+	for i := range nativeNurseryBlocks {
+		bucket := &nativeNurseryBlocks[i]
+		bucket.Lock()
+		count += len(bucket.blocks)
+		bucket.Unlock()
+	}
+	return count
+}
+
 func nativeNurseryLiveBytes() uint64 {
 	var total uint64
 	for i := range nativeNurseryBytes {
@@ -72,6 +126,7 @@ func clearNativeNurseryBytes() {
 
 func resetNativeNurseryState() {
 	clearNativeNurseryBytes()
+	clearNativeNurseryBlocks()
 	nativeNurseryLimitBytes.Store(0)
 }
 
@@ -80,6 +135,7 @@ func resetNativeGenerationalMetrics() {
 	nativeGCMajorCollections.Store(0)
 	nativeGCPromotedBlocks.Store(0)
 	nativeGCMinorOldScans.Store(0)
+	nativeGCMinorNurseryScans.Store(0)
 }
 
 //export tsnative_gc_minor_collections
@@ -105,4 +161,14 @@ func tsnative_gc_minor_old_scans() C.uint64_t {
 //export tsnative_gc_nursery_bytes
 func tsnative_gc_nursery_bytes() C.uint64_t {
 	return C.uint64_t(nativeNurseryLiveBytes())
+}
+
+//export tsnative_gc_nursery_blocks
+func tsnative_gc_nursery_blocks() C.uint64_t {
+	return C.uint64_t(nativeNurseryBlockCount())
+}
+
+//export tsnative_gc_minor_nursery_scans
+func tsnative_gc_minor_nursery_scans() C.uint64_t {
+	return C.uint64_t(nativeGCMinorNurseryScans.Load())
 }

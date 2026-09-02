@@ -320,16 +320,10 @@ func markNativeHeapRootsLocked() {
 	runNativeGCMarkStateLocked(state, nativeBlocks.count())
 }
 
-func markNativeNurseryRootsLocked() {
+func markNativeNurseryRootsLocked(nurseryPopulation int) {
 	state := newNativeGCMarkState(nativeAllocatorOwner(), nativeGCMarkNursery)
 	seedNativeGCRootsLocked(state)
 
-	nurseryPopulation := 0
-	nativeBlocks.rangeBlocks(func(_ uintptr, block *nativeHeapBlock) {
-		if block.generation == nativeHeapGenerationNursery {
-			nurseryPopulation++
-		}
-	})
 	rememberedScans := uint64(0)
 	nativeRemembered.rangeParents(func(parent uintptr) {
 		block := nativeBlocks.get(parent)
