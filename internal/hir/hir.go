@@ -223,6 +223,11 @@ type PromiseResolveOp struct {
 	Result TaskResultKind
 }
 type PromiseAdoptOp struct{ Promise ValueID }
+type PromiseThenableOp struct {
+	Thenable ValueID
+	Result   TaskResultKind
+	Arity    uint8
+}
 type PromiseRejectOp struct {
 	Reason ValueID
 	Result TaskResultKind
@@ -307,6 +312,7 @@ func (ClosureCallOp) isOperation()       {}
 func (TaskSpawnOp) isOperation()         {}
 func (PromiseResolveOp) isOperation()    {}
 func (PromiseAdoptOp) isOperation()      {}
+func (PromiseThenableOp) isOperation()   {}
 func (PromiseRejectOp) isOperation()     {}
 func (PromiseAllF64Op) isOperation()     {}
 func (PromiseRaceF64Op) isOperation()    {}

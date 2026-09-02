@@ -19,8 +19,11 @@ func (e *emitter) dynamicFieldNames() []string {
 	for _, fn := range e.module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				if op, ok := inst.Op.(mir.DynamicFieldGet); ok {
+				switch op := inst.Op.(type) {
+				case mir.DynamicFieldGet:
 					set[op.Field] = struct{}{}
+				case mir.PromiseThenable:
+					set["then"] = struct{}{}
 				}
 			}
 		}

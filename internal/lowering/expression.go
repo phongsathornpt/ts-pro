@@ -220,6 +220,23 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.PromiseAdoptOp{Promise: promise}), nil
+	case frontend.ExprPromiseThenable:
+		if len(expr.Args) != 1 || (expr.FieldIndex != 1 && expr.FieldIndex != 2) {
+			return 0, fmt.Errorf("Promise thenable assimilation requires one synchronous thenable with one or two callbacks")
+		}
+		_, resultKind, err := f.promiseResultKind(expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+		if !ok {
+			return 0, fmt.Errorf("Promise thenable assimilation requires any semantic type")
+		}
+		thenable, err := f.lowerExprAs(expr.Args[0], anyType)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.PromiseThenableOp{Thenable: thenable, Result: resultKind, Arity: uint8(expr.FieldIndex)}), nil
 	case frontend.ExprPromiseAll, frontend.ExprPromiseRace:
 		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypePromise {
 			return 0, fmt.Errorf("Promise aggregate has invalid semantic result type")
@@ -611,7 +628,23 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 	if err != nil {
 		return 0, err
 	}
-	args, err := lowerArgs()
+	args := make([]hir.ValueID, 0, len(expr.Args))
+	if int(expr.Callee.Type) < len(f.module.source.Types) {
+		calleeType := f.module.source.Types[expr.Callee.Type]
+		if calleeType.Kind == frontend.TypeFunction && len(calleeType.Params) == len(expr.Args) {
+			for i, arg := range expr.Args {
+				value, err := f.lowerExprAs(arg, calleeType.Params[i])
+				if err != nil {
+					return 0, err
+				}
+				args = append(args, value)
+			}
+		} else {
+			args, err = lowerArgs()
+		}
+	} else {
+		args, err = lowerArgs()
+	}
 	if err != nil {
 		return 0, err
 	}

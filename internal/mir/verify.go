@@ -495,6 +495,13 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Promise); err != nil {
 					return err
 				}
+			case PromiseThenable:
+				if inst.Repr != ReprTaskRef || (op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue) || (op.Arity != 1 && op.Arity != 2) {
+					return fmt.Errorf("Promise thenable v%d has invalid task representation or callback arity", inst.Result)
+				}
+				if err := checkValue(op.Thenable); err != nil {
+					return err
+				}
 			case PromiseReject:
 				if inst.Repr != ReprTaskRef || (op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue) {
 					return fmt.Errorf("Promise.reject v%d has invalid task representation", inst.Result)

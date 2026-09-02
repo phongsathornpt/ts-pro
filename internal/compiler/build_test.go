@@ -1837,3 +1837,28 @@ func TestBuildNativeDynamicStructuralMethodPreservesThis(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildNativePromiseThenableAssimilation(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "promise-thenable")
+	if _, err := Build(ctx, BuildOptions{Root: root, Input: "examples/promise_thenable.ts", Output: output, Optimization: "-O2"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_GC_NURSERY_BYTES=256")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run Promise thenable GC stress: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42\nthenable-reject\n7" {
+		t.Fatalf("output = %q", got)
+	}
+}

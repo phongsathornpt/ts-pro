@@ -29,6 +29,10 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 				return nil, fmt.Errorf("Promise.resolve at %d cannot adopt incompatible Promise result", node.Pos())
 			}
 			expr.Kind = ExprPromiseAdopt
+		} else if arity, ok := e.structuralThenableArity(expr.Args[0].Type, promiseType.ReturnType); ok {
+			e.ensureSemanticType(TypeAny, "any")
+			expr.Kind = ExprPromiseThenable
+			expr.FieldIndex = uint32(arity)
 		} else {
 			expr.Kind = ExprPromiseResolve
 		}
@@ -109,4 +113,50 @@ func supportedImmediatePromiseResult(kind TypeKind) bool {
 	default:
 		return false
 	}
+}
+
+func (e *extractor) structuralThenableArity(typeID, resultType TypeID) (int, bool) {
+	if int(typeID) >= len(e.result.Types) {
+		return 0, false
+	}
+	typ := e.result.Types[typeID]
+	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) {
+		return 0, false
+	}
+	for _, field := range e.result.Shapes[typ.Shape].Fields {
+		if field.Name != "then" || int(field.Type) >= len(e.result.Types) {
+			continue
+		}
+		thenType := e.result.Types[field.Type]
+		if thenType.Kind != TypeFunction || len(thenType.Params) < 1 || len(thenType.Params) > 2 {
+			return 0, false
+		}
+		resolveTypeID := thenType.Params[0]
+		if int(resolveTypeID) >= len(e.result.Types) {
+			return 0, false
+		}
+		resolveType := e.result.Types[resolveTypeID]
+		if resolveType.Kind != TypeFunction || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
+			return 0, false
+		}
+		if int(thenType.ReturnType) >= len(e.result.Types) || e.result.Types[thenType.ReturnType].Kind != TypeVoid {
+			return 0, false
+		}
+		if len(thenType.Params) == 2 {
+			rejectTypeID := thenType.Params[1]
+			if int(rejectTypeID) >= len(e.result.Types) {
+				return 0, false
+			}
+			rejectType := e.result.Types[rejectTypeID]
+			if rejectType.Kind != TypeFunction || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
+				return 0, false
+			}
+			reasonKind := e.result.Types[rejectType.Params[0]].Kind
+			if reasonKind != TypeAny && reasonKind != TypeUnion {
+				return 0, false
+			}
+		}
+		return len(thenType.Params), true
+	}
+	return 0, false
 }

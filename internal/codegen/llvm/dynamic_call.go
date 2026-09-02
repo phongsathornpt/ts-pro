@@ -25,8 +25,11 @@ func (e *emitter) dynamicCallShapes() []dynamicCallShape {
 	for _, fn := range e.module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				if op, ok := inst.Op.(mir.DynamicCall); ok {
+				switch op := inst.Op.(type) {
+				case mir.DynamicCall:
 					set[dynamicCallShape{arity: len(op.Args), hasReceiver: op.HasReceiver}] = struct{}{}
+				case mir.PromiseThenable:
+					set[dynamicCallShape{arity: int(op.Arity), hasReceiver: true}] = struct{}{}
 				}
 			}
 		}

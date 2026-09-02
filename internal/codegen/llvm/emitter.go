@@ -106,7 +106,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
-	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\n")
+	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\ndeclare ptr @tsnative_promise_thenable_require_settled(ptr)\n")
 	b.WriteString("declare ptr @tsnative_promise_all_f64(ptr, i64)\ndeclare ptr @tsnative_promise_race_f64(ptr, i64)\ndeclare ptr @tsnative_promise_all_bool(ptr, i64)\ndeclare ptr @tsnative_promise_race_bool(ptr, i64)\ndeclare ptr @tsnative_promise_all_ref(ptr, i64)\ndeclare ptr @tsnative_promise_race_ref(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
@@ -169,6 +169,9 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 		return "", err
 	}
 	if err := e.emitDynamicMethodCallHelpers(&b); err != nil {
+		return "", err
+	}
+	if err := e.emitPromiseThenableHelpers(&b); err != nil {
 		return "", err
 	}
 	for _, global := range e.collectStringGlobals() {
@@ -662,6 +665,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		values[inst.Result] = promise
 		return nil
+	case mir.PromiseThenable:
+		return e.emitPromiseThenable(b, inst, op, values)
 	case mir.PromiseAllF64:
 		name := valueName(inst.Result)
 		if len(op.Promises) == 0 {

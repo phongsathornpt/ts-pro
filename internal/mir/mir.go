@@ -310,6 +310,11 @@ type PromiseResolve struct {
 	Result Repr
 }
 type PromiseAdopt struct{ Promise ValueID }
+type PromiseThenable struct {
+	Thenable ValueID
+	Result   Repr
+	Arity    uint8
+}
 type PromiseReject struct {
 	Reason ValueID
 	Result Repr
@@ -390,6 +395,7 @@ func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
 func (PromiseResolve) isOperation()       {}
 func (PromiseAdopt) isOperation()         {}
+func (PromiseThenable) isOperation()      {}
 func (PromiseReject) isOperation()        {}
 func (PromiseAllF64) isOperation()        {}
 func (PromiseRaceF64) isOperation()       {}

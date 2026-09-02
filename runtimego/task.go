@@ -294,6 +294,14 @@ func tsnative_promise_resolve_ref(value unsafe.Pointer) unsafe.Pointer {
 	return settledNativePromise(nativeTaskResultRef, nativeTaskDone, value, 0, 0)
 }
 
+//export tsnative_promise_thenable_require_settled
+func tsnative_promise_thenable_require_settled(raw unsafe.Pointer) unsafe.Pointer {
+	if raw == nil {
+		nativeAbort("asynchronous or unresolved thenable is not supported yet")
+	}
+	return raw
+}
+
 //export tsnative_promise_reject
 func tsnative_promise_reject(reason unsafe.Pointer, kind C.int) unsafe.Pointer {
 	if int32(kind) < nativeTaskResultF64 || int32(kind) > nativeTaskResultRef {

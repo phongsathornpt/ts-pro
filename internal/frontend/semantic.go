@@ -25,6 +25,7 @@ const (
 	ExprTaskSpawn
 	ExprPromiseResolve
 	ExprPromiseAdopt
+	ExprPromiseThenable
 	ExprPromiseReject
 	ExprPromiseAll
 	ExprPromiseRace

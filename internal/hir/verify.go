@@ -310,6 +310,11 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				}
 			case PromiseAdoptOp:
 				checkValue(op.Promise)
+			case PromiseThenableOp:
+				checkValue(op.Thenable)
+				if op.Result == TaskResultInvalid || (op.Arity != 1 && op.Arity != 2) {
+					add("Promise thenable has invalid result kind or callback arity")
+				}
 			case PromiseRejectOp:
 				checkValue(op.Reason)
 				if op.Result == TaskResultInvalid {

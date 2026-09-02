@@ -170,6 +170,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return []mir.ValueID{op.Value}, true
 	case mir.PromiseAdopt:
 		return []mir.ValueID{op.Promise}, true
+	case mir.PromiseThenable:
+		return []mir.ValueID{op.Thenable}, true
 	case mir.PromiseReject:
 		return []mir.ValueID{op.Reason}, true
 	case mir.PromiseAllF64:
@@ -373,6 +375,13 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.PromiseAdopt:
 				if !available[op.Promise] || inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseThenable:
+				if !available[op.Thenable] || inst.Repr != mir.ReprTaskRef {
 					return nil
 				}
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
