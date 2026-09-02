@@ -161,6 +161,23 @@ type TaskSpawnOp struct {
 	Captures []ValueID
 	Group    *ValueID
 }
+type TaskResultKind uint8
+
+const (
+	TaskResultInvalid TaskResultKind = iota
+	TaskResultF64
+	TaskResultBool
+	TaskResultRef
+)
+
+type PromiseResolveOp struct {
+	Value  ValueID
+	Result TaskResultKind
+}
+type PromiseRejectOp struct {
+	Reason ValueID
+	Result TaskResultKind
+}
 type TaskJoinOp struct{ Task ValueID }
 type TaskWaitOp struct{ Task ValueID }
 type TaskFailureOp struct{ Task ValueID }
@@ -225,6 +242,8 @@ func (FieldGetOp) isOperation()         {}
 func (ClosureNewOp) isOperation()       {}
 func (ClosureCallOp) isOperation()      {}
 func (TaskSpawnOp) isOperation()        {}
+func (PromiseResolveOp) isOperation()   {}
+func (PromiseRejectOp) isOperation()    {}
 func (TaskJoinOp) isOperation()         {}
 func (TaskWaitOp) isOperation()         {}
 func (TaskFailureOp) isOperation()      {}

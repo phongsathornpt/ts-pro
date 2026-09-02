@@ -139,7 +139,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Native async `finally` runs after normal/caught completion, including recovered awaited rejection on a single worker.
         - [x] Preserve pending return/rethrow completion through `finally`, evaluating the completion value before finalizer side effects and propagating catch rethrows to outer handlers.
         - [x] Add completion override from `return`/`throw` inside `finally`, including nested propagation into outer async catch handlers.
-        - [ ] Add broader nested recovery tests and selected Promise combinators.
+        - [~] Add broader nested recovery tests and selected Promise combinators.
+          - [x] Cover nested awaited rejection -> catch rethrow -> inner finally -> outer catch/finally recovery on a single scheduler worker.
+          - [x] Add immediate native `Promise.resolve(value)` and `Promise.reject<T>(reason)` settlement without scheduler work; number/bool/reference results use typed TaskRef slots and rejected reasons retain persistent GC roots until handle release.
+          - [ ] Add Promise adoption/thenable assimilation plus selected aggregate combinators (`Promise.all` / `Promise.race`) after array/heterogeneous tuple semantics are sufficient.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.

@@ -96,6 +96,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
+	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
@@ -485,6 +486,45 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  store %s %s, ptr %s.ptr\n", fieldType, value, name)
 		}
 		values[inst.Result] = value
+		return nil
+	case mir.PromiseResolve:
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		switch op.Result {
+		case mir.ReprF64:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_resolve_f64(double %s)\n", name, value)
+		case mir.ReprBool:
+			fmt.Fprintf(b, "  %s.bool = zext i1 %s to i8\n", name, value)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_resolve_bool(i8 %s.bool)\n", name, name)
+		case mir.ReprJSValue:
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_resolve_ref(ptr %s)\n", name, value)
+		default:
+			return fmt.Errorf("Promise.resolve has unsupported result representation %d", op.Result)
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.PromiseReject:
+		reason, err := operand(values, op.Reason)
+		if err != nil {
+			return err
+		}
+		kind := 0
+		switch op.Result {
+		case mir.ReprF64:
+			kind = 1
+		case mir.ReprBool:
+			kind = 2
+		case mir.ReprJSValue:
+			kind = 3
+		default:
+			return fmt.Errorf("Promise.reject has unsupported result representation %d", op.Result)
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_reject(ptr %s, i32 %d)\n", name, reason, kind)
+		values[inst.Result] = name
 		return nil
 	case mir.TaskSpawn:
 		return e.emitTaskSpawn(b, inst, op, values)

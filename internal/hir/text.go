@@ -108,6 +108,10 @@ func formatOperation(op Operation) string {
 			captures[i] = fmt.Sprintf("v%d", capture)
 		}
 		return fmt.Sprintf("closure.new f%d(%s)", op.Callee, strings.Join(captures, ", "))
+	case PromiseResolveOp:
+		return fmt.Sprintf("promise.resolve v%d, kind=%d", op.Value, op.Result)
+	case PromiseRejectOp:
+		return fmt.Sprintf("promise.reject v%d, kind=%d", op.Reason, op.Result)
 	case TaskSpawnOp:
 		captures := make([]string, len(op.Captures))
 		for i, capture := range op.Captures {

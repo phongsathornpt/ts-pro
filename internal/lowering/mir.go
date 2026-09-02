@@ -77,6 +77,19 @@ func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult) 
 	return result, nil
 }
 
+func lowerTaskResultRepr(kind hir.TaskResultKind) (mir.Repr, error) {
+	switch kind {
+	case hir.TaskResultF64:
+		return mir.ReprF64, nil
+	case hir.TaskResultBool:
+		return mir.ReprBool, nil
+	case hir.TaskResultRef:
+		return mir.ReprJSValue, nil
+	default:
+		return mir.ReprVoid, fmt.Errorf("invalid task result kind %d", kind)
+	}
+}
+
 func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionResult) (mir.Instruction, error) {
 	repr, err := lowerRepr(source.Repr)
 	if err != nil {
@@ -217,6 +230,18 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.ClosureCall{Closure: mir.ValueID(op.Closure), Args: args}
+	case hir.PromiseResolveOp:
+		resultRepr, err := lowerTaskResultRepr(op.Result)
+		if err != nil {
+			return mir.Instruction{}, err
+		}
+		result.Op = mir.PromiseResolve{Value: mir.ValueID(op.Value), Result: resultRepr}
+	case hir.PromiseRejectOp:
+		resultRepr, err := lowerTaskResultRepr(op.Result)
+		if err != nil {
+			return mir.Instruction{}, err
+		}
+		result.Op = mir.PromiseReject{Reason: mir.ValueID(op.Reason), Result: resultRepr}
 	case hir.TaskSpawnOp:
 		captures := make([]mir.ValueID, len(op.Captures))
 		for i, capture := range op.Captures {

@@ -1013,8 +1013,17 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		if !ok {
 			return nil, fmt.Errorf("method call at %d has no receiver", calleeNode.Pos())
 		}
-		nameNode, ok := calleeNode.NamedChild("name")
-		if !ok || nameNode.Kind() != tsast.KindIdentifier {
+		nameNode, nameOK := calleeNode.NamedChild("name")
+		if receiverNode.Kind() == tsast.KindIdentifier && nameOK && nameNode.Kind() == tsast.KindIdentifier {
+			receiverName, _ := receiverNode.Text()
+			methodName, _ := nameNode.Text()
+			if receiverName == "Promise" && (methodName == "resolve" || methodName == "reject") {
+				calleeIdentifier = "Promise." + methodName
+				expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeIdentifier, Span: e.span(calleeNode)}
+				break
+			}
+		}
+		if !nameOK || nameNode.Kind() != tsast.KindIdentifier {
 			return nil, fmt.Errorf("method call at %d has no method name", calleeNode.Pos())
 		}
 		receiver, err := e.extractExpr(receiverNode)
@@ -1068,6 +1077,9 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			}
 			expr.Args = append(expr.Args, arg)
 		}
+	}
+	if calleeIdentifier == "Promise.resolve" || calleeIdentifier == "Promise.reject" {
+		return e.extractPromiseStaticCall(node, expr, calleeIdentifier)
 	}
 	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)

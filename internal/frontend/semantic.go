@@ -20,6 +20,8 @@ const (
 	ExprClosure
 	ExprNewClass
 	ExprTaskSpawn
+	ExprPromiseResolve
+	ExprPromiseReject
 	ExprTaskJoin
 	ExprTaskYield
 	ExprTaskCancel

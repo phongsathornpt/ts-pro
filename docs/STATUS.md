@@ -30,7 +30,7 @@ The generated executable does not embed Node.js or V8.
 - strings, specialized `number[]`, closed objects, shared heap ownership, and root-aware mark/sweep GC;
 - tagged `JSValue` boundaries with primitive dynamic operators and checked unboxing;
 - bounded Go scheduler, stackless tasks, work stealing, execution budgets, typed channels, timers, and bounded blocking-call isolation;
-- stackless native async/await with typed result transfer, rejection propagation, `try`/`catch`/`finally`, task groups, cancellation, and inherited task-local context;
+- stackless native async/await with typed result transfer, rejection propagation, nested `try`/`catch`/`finally` recovery, immediate `Promise.resolve` / typed `Promise.reject` settlement, task groups, cancellation, and inherited task-local context;
 - deterministic Go runtime/object caching, generated `c-archive` ABI headers, native acceptance/differential tests, and performance reports;
 - resilient long-lived TypeScript LSP workspaces.
 

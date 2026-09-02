@@ -265,6 +265,16 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
+			case PromiseResolveOp:
+				checkValue(op.Value)
+				if op.Result == TaskResultInvalid {
+					add("Promise.resolve has invalid task result kind")
+				}
+			case PromiseRejectOp:
+				checkValue(op.Reason)
+				if op.Result == TaskResultInvalid {
+					add("Promise.reject has invalid task result kind")
+				}
 			case TaskSpawnOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("task spawn references unknown function f%d", op.Callee))

@@ -1199,6 +1199,66 @@ func TestBuildNativeAsyncAwaitCatchSingleWorker(t *testing.T) {
 	}
 }
 
+func TestBuildNativeAsyncNestedRecoverySingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "async-nested-recovery")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_async_nested_recovery.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 2 || result.Metrics.Sleeps != 1 {
+		t.Fatalf("nested recovery metrics = %d/%d/%d", result.Metrics.TaskSpawns, result.Metrics.TaskJoins, result.Metrics.Sleeps)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run nested recovery: %v: %s", err, got)
+	}
+	want := "leaf-rejection\ninner-finally\nmiddle-rethrow\nouter-finally\n7"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
+func TestBuildNativeImmediatePromiseSemanticsSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "promise-immediate")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/promise_immediate.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 3 || result.Metrics.TaskJoins != 6 {
+		t.Fatalf("immediate promise task metrics = %d/%d, want 3/6", result.Metrics.TaskSpawns, result.Metrics.TaskJoins)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1", "TSNATIVE_GC_NURSERY_BYTES=1024")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run immediate promises: %v: %s", err, got)
+	}
+	want := "41\npromise-reject\n42\nrooted-promise"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
 func TestBuildNativeAsyncFinallySingleWorker(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not installed")

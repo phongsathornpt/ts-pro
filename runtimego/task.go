@@ -120,11 +120,8 @@ func nativeTaskResultSlot(task *nativeTask) unsafe.Pointer {
 	}
 }
 
-func createNativeTask(entry, state unsafe.Pointer, kind int32) *nativeTask {
-	if entry == nil {
-		return nil
-	}
-	task := &nativeTask{handle: newNativeTaskHandle(), entry: entry, state: state, kind: kind}
+func allocateNativeTask(state unsafe.Pointer, kind int32) *nativeTask {
+	task := &nativeTask{handle: newNativeTaskHandle(), state: state, kind: kind}
 	if task.handle == nil {
 		return nil
 	}
@@ -162,6 +159,17 @@ func createNativeTask(entry, state unsafe.Pointer, kind int32) *nativeTask {
 	return task
 }
 
+func createNativeTask(entry, state unsafe.Pointer, kind int32) *nativeTask {
+	if entry == nil {
+		return nil
+	}
+	task := allocateNativeTask(state, kind)
+	if task != nil {
+		task.entry = entry
+	}
+	return task
+}
+
 func destroyNativeTaskStorage(task *nativeTask) {
 	if task == nil {
 		return
@@ -188,6 +196,50 @@ func destroyNativeTaskStorage(task *nativeTask) {
 		task.completionHandoff = false
 		tsnative_gc_handoff_end()
 	}
+}
+
+func settledNativePromise(kind int32, status int32, value unsafe.Pointer, f64 float64, boolean uint8) unsafe.Pointer {
+	task := allocateNativeTask(nil, kind)
+	if task == nil {
+		nativeAbort("promise allocation failed")
+	}
+	switch kind {
+	case nativeTaskResultF64:
+		task.resultF64 = f64
+	case nativeTaskResultBool:
+		task.resultBool = boolean
+	case nativeTaskResultRef:
+		task.resultRef = value
+	}
+	if status == nativeTaskFailed {
+		task.failureRef = value
+		task.failureRequested.Store(1)
+	}
+	task.status.Store(status)
+	return task.handle
+}
+
+//export tsnative_promise_resolve_f64
+func tsnative_promise_resolve_f64(value C.double) unsafe.Pointer {
+	return settledNativePromise(nativeTaskResultF64, nativeTaskDone, nil, float64(value), 0)
+}
+
+//export tsnative_promise_resolve_bool
+func tsnative_promise_resolve_bool(value C.uint8_t) unsafe.Pointer {
+	return settledNativePromise(nativeTaskResultBool, nativeTaskDone, nil, 0, uint8(value))
+}
+
+//export tsnative_promise_resolve_ref
+func tsnative_promise_resolve_ref(value unsafe.Pointer) unsafe.Pointer {
+	return settledNativePromise(nativeTaskResultRef, nativeTaskDone, value, 0, 0)
+}
+
+//export tsnative_promise_reject
+func tsnative_promise_reject(reason unsafe.Pointer, kind C.int) unsafe.Pointer {
+	if int32(kind) < nativeTaskResultF64 || int32(kind) > nativeTaskResultRef {
+		nativeAbort("invalid Promise.reject result kind")
+	}
+	return settledNativePromise(int32(kind), nativeTaskFailed, reason, 0, 0)
 }
 
 func spawnNativeTask(kind int32, entry, state unsafe.Pointer) unsafe.Pointer {

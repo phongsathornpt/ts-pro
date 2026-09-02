@@ -234,6 +234,10 @@ func collectEscapeUses(fn mir.Function, prov provenance, infos FunctionResult, c
 				markArguments(infos, prov, op.Args, ReasonCall)
 			case mir.ClosureCall:
 				markArguments(infos, prov, op.Args, ReasonCall)
+			case mir.PromiseResolve:
+				markOrigins(infos, prov[op.Value], ReasonTask)
+			case mir.PromiseReject:
+				markOrigins(infos, prov[op.Reason], ReasonTask)
 			case mir.TaskSpawn:
 				markArguments(infos, prov, op.Captures, ReasonTask)
 			case mir.TaskContextSet:

@@ -72,6 +72,44 @@ func TestReferenceOffsetHeapLayoutTracesDeclaredSlot(t *testing.T) {
 	}
 }
 
+func TestSettledReferencePromiseRootsResultUntilRelease(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	value := tsnative_heap_alloc_atomic(32)
+	promise := tsnative_promise_resolve_ref(value)
+	value = nil
+	tsnative_gc_collect()
+	task := lookupNativeTask(uintptr(promise))
+	if task == nil || task.resultRef == nil || !nativeHeapContains(task.resultRef) {
+		t.Fatal("settled Promise.resolve reference result was not rooted")
+	}
+	tsnative_task_release(promise)
+	tsnative_gc_collect()
+	if tsnative_heap_live_allocations() != 0 {
+		t.Fatalf("released Promise.resolve retained %d heap allocations", tsnative_heap_live_allocations())
+	}
+}
+
+func TestSettledRejectedPromiseRootsFailureUntilRelease(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	reason := tsnative_heap_alloc_atomic(32)
+	promise := tsnative_promise_reject(reason, 1)
+	reason = nil
+	tsnative_gc_collect()
+	task := lookupNativeTask(uintptr(promise))
+	if task == nil || task.failureRef == nil || !nativeHeapContains(task.failureRef) {
+		t.Fatal("settled Promise.reject failure was not rooted")
+	}
+	tsnative_task_release(promise)
+	tsnative_gc_collect()
+	if tsnative_heap_live_allocations() != 0 {
+		t.Fatalf("released Promise.reject retained %d heap allocations", tsnative_heap_live_allocations())
+	}
+}
+
 func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

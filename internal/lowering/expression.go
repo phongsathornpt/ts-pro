@@ -28,6 +28,27 @@ func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (front
 	}
 }
 
+func (f *functionLowerer) promiseResultKind(promiseType frontend.TypeID) (frontend.TypeID, hir.TaskResultKind, error) {
+	if int(promiseType) >= len(f.module.source.Types) {
+		return 0, hir.TaskResultInvalid, fmt.Errorf("promise type t%d is invalid", promiseType)
+	}
+	typ := f.module.source.Types[promiseType]
+	if typ.Kind != frontend.TypePromise || int(typ.ReturnType) >= len(f.module.source.Types) {
+		return 0, hir.TaskResultInvalid, fmt.Errorf("semantic type %q is not a concrete Promise", typ.Name)
+	}
+	result := f.module.source.Types[typ.ReturnType]
+	switch result.Kind {
+	case frontend.TypeNumber:
+		return typ.ReturnType, hir.TaskResultF64, nil
+	case frontend.TypeBoolean:
+		return typ.ReturnType, hir.TaskResultBool, nil
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
+		return typ.ReturnType, hir.TaskResultRef, nil
+	default:
+		return typ.ReturnType, hir.TaskResultInvalid, fmt.Errorf("Promise result type %q has no immediate native task representation", result.Name)
+	}
+}
+
 func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 	if expr == nil {
 		return 0, fmt.Errorf("nil semantic expression")
@@ -126,6 +147,30 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		shape := f.module.source.Types[expr.Object.Type].Shape
 		return f.emit(expr.Type, hir.FieldGetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: expr.FieldIndex}), nil
+	case frontend.ExprPromiseResolve:
+		resultType, resultKind, err := f.promiseResultKind(expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		value, err := f.lowerExprAs(expr.Args[0], resultType)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.PromiseResolveOp{Value: value, Result: resultKind}), nil
+	case frontend.ExprPromiseReject:
+		_, resultKind, err := f.promiseResultKind(expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+		if !ok {
+			return 0, fmt.Errorf("Promise.reject requires any semantic type")
+		}
+		reason, err := f.lowerExprAs(expr.Args[0], anyType)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.PromiseRejectOp{Reason: reason, Result: resultKind}), nil
 	case frontend.ExprTaskSpawn:
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("task spawn has no native target")

@@ -62,7 +62,7 @@
 - Tagged `JSValue` only for genuinely dynamic values.
 - Checked conversions, dynamic operators, and property slow paths.
 - Heap allocator and initial mark/sweep GC.
-- Exceptions, Promise, and async/await.
+- [~] Exceptions, Promise, and async/await: native rejection recovery and immediate `Promise.resolve` / `Promise.reject<T>` settlement are implemented; Promise adoption and aggregate combinators remain.
 - Incremental object cache, parallel codegen, ThinLTO, PGO, and cross compilation.
 
 

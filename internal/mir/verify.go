@@ -323,6 +323,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case PromiseResolve:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("Promise.resolve v%d must produce TaskRef", inst.Result)
+				}
+				if op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue {
+					return fmt.Errorf("Promise.resolve v%d has unsupported result representation %d", inst.Result, op.Result)
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case PromiseReject:
+				if inst.Repr != ReprTaskRef || (op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue) {
+					return fmt.Errorf("Promise.reject v%d has invalid task representation", inst.Result)
+				}
+				if err := checkValue(op.Reason); err != nil {
+					return err
+				}
 			case TaskSpawn:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("task spawn v%d references unknown callee f%d", inst.Result, op.Callee)

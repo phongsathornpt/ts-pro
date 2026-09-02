@@ -264,6 +264,14 @@ type TaskSpawn struct {
 	Captures []ValueID
 	Group    *ValueID
 }
+type PromiseResolve struct {
+	Value  ValueID
+	Result Repr
+}
+type PromiseReject struct {
+	Reason ValueID
+	Result Repr
+}
 type TaskJoin struct{ Task ValueID }
 type TaskWait struct{ Task ValueID }
 type TaskFailure struct{ Task ValueID }
@@ -316,6 +324,8 @@ func (FieldGet) isOperation()             {}
 func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
+func (PromiseResolve) isOperation()       {}
+func (PromiseReject) isOperation()        {}
 func (TaskJoin) isOperation()             {}
 func (TaskWait) isOperation()             {}
 func (TaskFailure) isOperation()          {}
