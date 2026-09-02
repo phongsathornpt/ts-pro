@@ -1,11 +1,9 @@
 package main
 
-import "sync"
-
-const nativeHeapBlockShardCount = 64
+const nativeHeapBlockShardCount = 128
 
 type nativeHeapBlockShard struct {
-	sync.RWMutex
+	nativeMeasuredRWMutex
 	blocks map[uintptr]*nativeHeapBlock
 }
 
@@ -102,4 +100,24 @@ func (table *nativeHeapBlockTable) update(key uintptr, update func(*nativeHeapBl
 	}
 	shard.Unlock()
 	return block != nil
+}
+
+func (table *nativeHeapBlockTable) metrics() nativeRWLockMetrics {
+	var total nativeRWLockMetrics
+	for i := range table.shards {
+		metrics := table.shards[i].snapshot()
+		total.read.acquisitions += metrics.read.acquisitions
+		total.read.contended += metrics.read.contended
+		total.read.waitNanos += metrics.read.waitNanos
+		total.write.acquisitions += metrics.write.acquisitions
+		total.write.contended += metrics.write.contended
+		total.write.waitNanos += metrics.write.waitNanos
+	}
+	return total
+}
+
+func (table *nativeHeapBlockTable) resetMetrics() {
+	for i := range table.shards {
+		table.shards[i].resetMetrics()
+	}
 }

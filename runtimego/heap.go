@@ -8,7 +8,6 @@ import "C"
 import (
 	"os"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -46,7 +45,7 @@ var nativeHeap = struct {
 	spanPages: map[uintptr]*nativeHeapSpan{},
 }
 
-var nativeHeapWorld sync.RWMutex
+var nativeHeapWorld nativeMeasuredRWMutex
 var nativeHeapBytes atomic.Uint64
 var nativeHeapAllocations atomic.Uint64
 var nativeHeapCollections atomic.Uint64
@@ -273,6 +272,8 @@ func tsnative_heap_shutdown() {
 	}
 	nativeHeap.resetMetrics()
 	nativeRoots.resetMetrics()
+	nativeHeapWorld.resetMetrics()
+	nativeBlocks.resetMetrics()
 }
 
 //export tsnative_heap_live_bytes

@@ -40,6 +40,10 @@ int main(void) {
   assert(tsnative_gc_collections() == 2);
   assert(tsnative_heap_lock_acquisitions() > 0);
   assert(tsnative_root_lock_acquisitions() > 0);
+  assert(tsnative_world_read_lock_acquisitions() > 0);
+  assert(tsnative_world_write_lock_acquisitions() >= 2);
+  assert(tsnative_block_read_lock_acquisitions() > 0);
+  assert(tsnative_block_write_lock_acquisitions() > 0);
   tsnative_heap_shutdown();
   return 0;
 }

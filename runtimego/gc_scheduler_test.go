@@ -196,6 +196,8 @@ func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T
 	defer tsnative_heap_shutdown()
 	nativeHeap.resetMetrics()
 	nativeRoots.resetMetrics()
+	nativeHeapWorld.resetMetrics()
+	nativeBlocks.resetMetrics()
 
 	const workers = 8
 	const allocationsPerWorker = 5000
@@ -219,10 +221,71 @@ func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T
 
 	heapMetrics := nativeHeapLockMetrics()
 	rootMetrics := nativeRootLockMetrics()
+	worldMetrics := nativeWorldLockMetrics()
+	blockMetrics := nativeBlockLockMetrics()
 	t.Logf("heap lock acquisitions=%d contentions=%d wait_ns=%d", heapMetrics.acquisitions, heapMetrics.contended, heapMetrics.waitNanos)
 	t.Logf("root lock acquisitions=%d contentions=%d wait_ns=%d", rootMetrics.acquisitions, rootMetrics.contended, rootMetrics.waitNanos)
+	t.Logf("world read acquisitions=%d contentions=%d wait_ns=%d", worldMetrics.read.acquisitions, worldMetrics.read.contended, worldMetrics.read.waitNanos)
+	t.Logf("block write acquisitions=%d contentions=%d wait_ns=%d", blockMetrics.write.acquisitions, blockMetrics.write.contended, blockMetrics.write.waitNanos)
+	if worldMetrics.read.contended != 0 {
+		t.Fatalf("steady-state world read contention = %d, want 0 without GC writers", worldMetrics.read.contended)
+	}
 	if heapMetrics.acquisitions >= 128 {
 		t.Fatalf("global heap lock acquisitions = %d, want < 128 for %d allocations", heapMetrics.acquisitions, workers*allocationsPerWorker)
+	}
+}
+
+func TestConcurrentGCWorldBarrierProfile(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	nativeHeap.resetMetrics()
+	nativeRoots.resetMetrics()
+	nativeHeapWorld.resetMetrics()
+	nativeBlocks.resetMetrics()
+
+	const workers = 8
+	const allocationsPerWorker = 2000
+	const collections = 32
+	start := make(chan struct{})
+	var workersDone sync.WaitGroup
+	workersDone.Add(workers)
+	for owner := 0; owner < workers; owner++ {
+		go func(owner int) {
+			defer workersDone.Done()
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			schedulerSetThread(owner, 0)
+			defer schedulerSetThread(-1, 0)
+			<-start
+			for i := 0; i < allocationsPerWorker; i++ {
+				_ = tsnative_heap_alloc(32)
+			}
+		}(owner)
+	}
+	collectorDone := make(chan struct{})
+	go func() {
+		<-start
+		for i := 0; i < collections; i++ {
+			tsnative_gc_collect()
+			runtime.Gosched()
+		}
+		close(collectorDone)
+	}()
+	close(start)
+	workersDone.Wait()
+	<-collectorDone
+
+	worldMetrics := nativeWorldLockMetrics()
+	blockMetrics := nativeBlockLockMetrics()
+	heapMetrics := nativeHeapLockMetrics()
+	t.Logf("GC profile world read=%+v write=%+v", worldMetrics.read, worldMetrics.write)
+	t.Logf("GC profile block read=%+v write=%+v", blockMetrics.read, blockMetrics.write)
+	t.Logf("GC profile heap=%+v collections=%d", heapMetrics, nativeHeapCollections.Load())
+	if worldMetrics.write.acquisitions < collections {
+		t.Fatalf("world write acquisitions = %d, want >= %d", worldMetrics.write.acquisitions, collections)
+	}
+	if blockMetrics.write.acquisitions == 0 {
+		t.Fatal("GC/allocation workload recorded no block-table writes")
 	}
 }
 
