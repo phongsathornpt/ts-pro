@@ -302,12 +302,62 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [ ] Add PGO after MIR quality and benchmark coverage are stable.
 - [ ] Add cross compilation after the Linux x86-64 runtime ABI is stable.
 
+## Remaining work
+
+- [ ] PromiseLike / Promise completeness
+  - [ ] Support arbitrary callback-return ABIs for structural `then(...)` callbacks.
+  - [ ] Support full generic standard-library `PromiseLike<T>` forms beyond the implemented function-property and native-class `then` shapes.
+  - [ ] Normalize PromiseLike inputs in `Promise.all` / `Promise.race` once generic PromiseLike callback ABI support is complete.
+  - [ ] Add non-literal iterable inputs for Promise combinators.
+  - [ ] Add heterogeneous tuple results for `Promise.all` and tuple-aware `Promise.race` typing/ownership.
+- [ ] Dynamic object / JavaScript semantics
+  - [ ] Add optional properties and union-shape compatibility.
+  - [ ] Add computed/dynamic property keys.
+  - [ ] Add object shape transitions for property creation/evolution where native layout contracts permit.
+  - [ ] Extend checked structural compatibility to optional, union, and evolving shapes.
+  - [ ] Finish selected object/function coercion and dynamic slow paths not covered by current closed-shape dispatch.
+- [ ] Arrays / containers
+  - [ ] Add JS-compatible array growth semantics.
+  - [ ] Add common mutators such as `push` / `pop` where representation contracts permit.
+  - [ ] Expand generic typed container behavior needed by tuples, iterables, and standard-library APIs.
+- [ ] TypeScript 7 language coverage
+  - [ ] Add tuples and tuple-aware representation/ownership.
+  - [ ] Add destructuring and rest/spread.
+  - [ ] Add optional chaining and nullish coalescing.
+  - [ ] Add `switch`, `for...of`, and template literals.
+  - [ ] Add default/optional parameters and enums.
+  - [ ] Finish advanced generics and specialization needed by standard-library-shaped types.
+  - [ ] Extend proven-integer SSA optimization across calls and loop-carried state where safe.
+- [ ] Selected standard-library/runtime APIs
+  - [ ] JSON.
+  - [ ] Map / Set.
+  - [ ] Date.
+  - [ ] RegExp.
+- [ ] Multi-module compiler and linking
+  - [ ] Add multi-module LLVM scheduling and deterministic parallel compilation.
+  - [ ] Add native module linking/import-export resolution.
+  - [ ] Add cross-module dispatch, specialization, and optimization.
+- [ ] Toolchain optimization
+  - [ ] ThinLTO.
+  - [ ] PGO.
+  - [ ] Cross compilation after the Linux x86-64 ABI is stable.
+- [ ] Compiler implementation migration
+  - [ ] Port compiler-owned semantic/frontend orchestration from Go to TypeScript 7.
+  - [ ] Port HIR/MIR construction and transforms from Go to TypeScript 7.
+  - [ ] Port LLVM emission/build orchestration from Go to TypeScript 7.
+  - [ ] Retire transitional compile-time Go packages while retaining Go for the native runtime/native libraries.
+- [ ] Remaining memory/GC extensions
+  - [ ] Add true interior-pointer/address-taking stack-placement support once MIR exposes those operations.
+  - [ ] Extend stack-allocation alias support beyond proven single-origin Phi aliases with explicit provenance/root synchronization.
+  - [ ] Continue heap/nursery contention tuning only when profiling demonstrates a measurable benefit.
+
 ## Current critical path
 
-1. Extend structural `PromiseLike` assimilation to arbitrary callback-return ABIs and full generic standard-library `PromiseLike<T>` forms; function-property and native-class `then` forms are implemented.
-2. Finish selected Promise combinators: non-literal iterable inputs and heterogeneous tuple results after tuple/container ownership semantics land.
-3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths, including optional/dynamic/computed properties and shape transitions.
-4. Finish advanced generics, integer SSA across calls/loops, array growth/mutators, tuples/destructuring/rest-spread/optional chaining/nullish/switch/for-of/templates/default params/enums, and selected standard-library APIs.
-5. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
-6. Port compiler-owned semantic/HIR/MIR/LLVM/build orchestration to TypeScript 7 and retire transitional compile-time Go packages.
-7. Return to true interior-pointer/address-taking stack-allocation extensions when MIR exposes those operations; current single-origin Phi aliases are already covered.
+1. Complete arbitrary callback-return ABI support and full generic standard-library `PromiseLike<T>` assimilation.
+2. Finish Promise combinators with PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
+3. Implement optional/union/computed object properties, shape transitions, and remaining dynamic/coercion slow paths.
+4. Add tuples/container semantics, then finish array growth/mutators and remaining TypeScript syntax/generics/stdlib coverage.
+5. Finish multi-module compilation/linking and cross-module specialization/optimization.
+6. Add ThinLTO, PGO, and cross-compilation after multi-module/object-cache foundations are stable.
+7. Port compiler-owned frontend/HIR/MIR/LLVM/build orchestration from Go to TypeScript 7.
+8. Return to true interior-pointer/address-taking stack-allocation extensions once MIR exposes those operations.
