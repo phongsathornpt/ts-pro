@@ -233,29 +233,31 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			return fmt.Errorf("variable %q has no value", stmt.Name)
 		}
 		isPromise := int(stmt.Type) < len(f.module.source.Types) && f.module.source.Types[stmt.Type].Kind == frontend.TypePromise
-		if isPromise && stmt.Kind == frontend.StmtAssign {
-			return fmt.Errorf("Promise local reassignment is not supported until retain-on-copy ownership is implemented")
-		}
-		if isPromise {
-			if f.scopeDepth != 1 {
-				return fmt.Errorf("Promise locals in nested control-flow scopes are not supported until lexical TaskRef cleanup is implemented")
-			}
+		if isPromise && f.scopeDepth != 1 {
+			return fmt.Errorf("Promise locals and reassignments in nested control-flow scopes are not supported until lexical TaskRef ownership merging is implemented")
 		}
 		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
 		if err != nil {
 			return err
 		}
-		f.locals[stmt.Symbol] = value
 		if isPromise {
+			voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+			if !ok {
+				return fmt.Errorf("Promise ownership requires void semantic type")
+			}
 			if !isFreshPromiseProducer(stmt.Value) {
-				voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
-				if !ok {
-					return fmt.Errorf("Promise retain requires void semantic type")
-				}
 				f.emit(voidType, hir.TaskRetainOp{Task: value})
+			}
+			if stmt.Kind == frontend.StmtAssign {
+				old, ok := f.ownedPromises[stmt.Symbol]
+				if !ok {
+					return fmt.Errorf("Promise local %q reassignment has no owned previous handle", stmt.Name)
+				}
+				f.emit(voidType, hir.TaskReleaseOp{Task: old})
 			}
 			f.ownedPromises[stmt.Symbol] = value
 		}
+		f.locals[stmt.Symbol] = value
 		return nil
 	case frontend.StmtWhile:
 		return f.lowerLoop(stmt.Expr, stmt.Then, nil)
