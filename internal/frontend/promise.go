@@ -131,32 +131,57 @@ func (e *extractor) structuralThenableArity(typeID, resultType TypeID) (int, boo
 		if thenType.Kind != TypeFunction || len(thenType.Params) < 1 || len(thenType.Params) > 2 {
 			return 0, false
 		}
-		resolveTypeID := thenType.Params[0]
-		if int(resolveTypeID) >= len(e.result.Types) {
-			return 0, false
-		}
-		resolveType := e.result.Types[resolveTypeID]
-		if resolveType.Kind != TypeFunction || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
-			return 0, false
-		}
-		if int(thenType.ReturnType) >= len(e.result.Types) || e.result.Types[thenType.ReturnType].Kind != TypeVoid {
+		resolveType, ok := e.thenableCallbackFunction(thenType.Params[0])
+		if !ok || len(resolveType.Params) != 1 || !e.compatibleArrayElement(resultType, resolveType.Params[0]) || int(resolveType.ReturnType) >= len(e.result.Types) || e.result.Types[resolveType.ReturnType].Kind != TypeVoid {
 			return 0, false
 		}
 		if len(thenType.Params) == 2 {
-			rejectTypeID := thenType.Params[1]
-			if int(rejectTypeID) >= len(e.result.Types) {
-				return 0, false
-			}
-			rejectType := e.result.Types[rejectTypeID]
-			if rejectType.Kind != TypeFunction || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
+			rejectType, ok := e.thenableCallbackFunction(thenType.Params[1])
+			if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) || int(rejectType.ReturnType) >= len(e.result.Types) || e.result.Types[rejectType.ReturnType].Kind != TypeVoid {
 				return 0, false
 			}
 			reasonKind := e.result.Types[rejectType.Params[0]].Kind
-			if reasonKind != TypeAny && reasonKind != TypeUnion {
+			if reasonKind != TypeAny && reasonKind != TypeUnion && reasonKind != TypeUnknown {
 				return 0, false
 			}
 		}
 		return len(thenType.Params), true
 	}
 	return 0, false
+}
+
+func (e *extractor) thenableCallbackFunction(typeID TypeID) (Type, bool) {
+	if int(typeID) >= len(e.result.Types) {
+		return Type{}, false
+	}
+	typ := e.result.Types[typeID]
+	if typ.Kind == TypeFunction {
+		return typ, true
+	}
+	if typ.Kind != TypeUnion {
+		return Type{}, false
+	}
+	var callback *Type
+	for _, memberID := range typ.Members {
+		if int(memberID) >= len(e.result.Types) {
+			return Type{}, false
+		}
+		member := e.result.Types[memberID]
+		switch member.Kind {
+		case TypeNull, TypeUndefined:
+			continue
+		case TypeFunction:
+			if callback != nil {
+				return Type{}, false
+			}
+			copy := member
+			callback = &copy
+		default:
+			return Type{}, false
+		}
+	}
+	if callback == nil {
+		return Type{}, false
+	}
+	return *callback, true
 }
