@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"unsafe"
 )
@@ -121,5 +122,53 @@ func TestNativeJSValueCheckedUnboxing(t *testing.T) {
 	}
 	if got := tsnative_jsvalue_unbox_array(arrayValue); got != array {
 		t.Fatal("array unbox did not preserve native reference")
+	}
+}
+
+func TestJSValueOrdinaryObjectAndArrayToPrimitive(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	objectRaw := tsnative_heap_alloc_atomic(8)
+	object := tsnative_jsvalue_box_object(objectRaw)
+	number := tsnative_jsvalue_box_f64(1)
+	added := (*nativeJSValue)(tsnative_jsvalue_add(object, number))
+	if added.tag != nativeJSTagString || string(nativeStringBytes(nativeJSRef(added))) != "[object Object]1" {
+		t.Fatalf("object + 1 = tag=%d value=%q", added.tag, nativeStringBytes(nativeJSRef(added)))
+	}
+	objectText := tsnative_jsvalue_box_string(nativeJSStringLiteral("[object Object]"))
+	if tsnative_jsvalue_eq(object, objectText) == 0 {
+		t.Fatal("ordinary object did not loose-equal its default primitive string")
+	}
+
+	arrayRaw := tsnative_array_f64_new(2)
+	tsnative_array_f64_set(arrayRaw, 0, 1)
+	tsnative_array_f64_set(arrayRaw, 1, 2)
+	array := tsnative_jsvalue_box_array(arrayRaw)
+	prefix := tsnative_jsvalue_box_string(nativeJSStringLiteral("values="))
+	arrayText := (*nativeJSValue)(tsnative_jsvalue_add(prefix, array))
+	if arrayText.tag != nativeJSTagString || string(nativeStringBytes(nativeJSRef(arrayText))) != "values=1,2" {
+		t.Fatalf("prefix + array = tag=%d value=%q", arrayText.tag, nativeStringBytes(nativeJSRef(arrayText)))
+	}
+}
+
+func TestJSValueObjectArrayFunctionNumericCoercion(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	one := tsnative_array_f64_new(1)
+	tsnative_array_f64_set(one, 0, 5)
+	array := tsnative_jsvalue_box_array(one)
+	if got := float64(tsnative_jsvalue_sub(array, tsnative_jsvalue_box_f64(2))); got != 3 {
+		t.Fatalf("[5] - 2 = %v, want 3", got)
+	}
+
+	object := tsnative_jsvalue_box_object(tsnative_heap_alloc_atomic(8))
+	if got := float64(tsnative_jsvalue_sub(object, tsnative_jsvalue_box_f64(1))); !math.IsNaN(got) {
+		t.Fatalf("object - 1 = %v, want NaN", got)
+	}
+	function := tsnative_jsvalue_box_function(tsnative_heap_alloc_atomic(8))
+	if got := float64(tsnative_jsvalue_mul(function, tsnative_jsvalue_box_f64(2))); !math.IsNaN(got) {
+		t.Fatalf("function * 2 = %v, want NaN", got)
 	}
 }

@@ -222,14 +222,40 @@ func nativeJSCompareUTF16(left, right unsafe.Pointer) int {
 	return 0
 }
 
-func nativeJSNumberToString(number float64) unsafe.Pointer {
-	text := strconv.FormatFloat(number, 'g', 17, 64)
-	if len(text) == 0 {
-		return tsnative_string_new(nil, 0)
+func nativeJSNumberText(number float64) string {
+	switch {
+	case math.IsNaN(number):
+		return "NaN"
+	case math.IsInf(number, 1):
+		return "Infinity"
+	case math.IsInf(number, -1):
+		return "-Infinity"
+	case number == 0:
+		return "0"
+	default:
+		return strconv.FormatFloat(number, 'g', -1, 64)
 	}
-	bytes := []byte(text)
-	return tsnative_string_new(unsafe.Pointer(&bytes[0]), C.uint64_t(len(bytes)))
 }
+
+func nativeJSNumberToString(number float64) unsafe.Pointer {
+	return nativeJSStringLiteral(nativeJSNumberText(number))
+}
+
+func nativeJSArrayToString(raw unsafe.Pointer) unsafe.Pointer {
+	length := nativeF64ArrayLen(raw)
+	if length == 0 {
+		return nativeJSStringLiteral("")
+	}
+	var text strings.Builder
+	for i := uint64(0); i < length; i++ {
+		if i != 0 {
+			text.WriteByte(',')
+		}
+		text.WriteString(nativeJSNumberText(*nativeF64ArrayElement(raw, i)))
+	}
+	return nativeJSStringLiteral(text.String())
+}
+
 func nativeJSToString(value *nativeJSValue) unsafe.Pointer {
 	if value == nil {
 		C.abort()
@@ -248,9 +274,27 @@ func nativeJSToString(value *nativeJSValue) unsafe.Pointer {
 		return nativeJSStringLiteral("null")
 	case nativeJSTagUndefined:
 		return nativeJSStringLiteral("undefined")
+	case nativeJSTagObject:
+		return nativeJSStringLiteral("[object Object]")
+	case nativeJSTagArray:
+		return nativeJSArrayToString(nativeJSRef(value))
+	case nativeJSTagFunction:
+		return nativeJSStringLiteral("function () { [native code] }")
 	default:
 		C.abort()
 		return nil
+	}
+}
+
+func nativeJSToPrimitive(value *nativeJSValue) *nativeJSValue {
+	if value == nil {
+		C.abort()
+	}
+	switch value.tag {
+	case nativeJSTagObject, nativeJSTagArray, nativeJSTagFunction:
+		return (*nativeJSValue)(tsnative_jsvalue_box_string(nativeJSToString(value)))
+	default:
+		return value
 	}
 }
 
@@ -272,6 +316,12 @@ func nativeJSToNumber(value *nativeJSValue) float64 {
 		return 0
 	case nativeJSTagUndefined:
 		return math.NaN()
+	case nativeJSTagObject, nativeJSTagArray, nativeJSTagFunction:
+		primitive := nativeJSToPrimitive(value)
+		if primitive == value {
+			return math.NaN()
+		}
+		return nativeJSToNumber(primitive)
 	default:
 		C.abort()
 		return 0
@@ -282,6 +332,7 @@ func nativeJSRelationalCompare(left, right *nativeJSValue) (int, bool) {
 	if left == nil || right == nil {
 		C.abort()
 	}
+	left, right = nativeJSToPrimitive(left), nativeJSToPrimitive(right)
 	if left.tag == nativeJSTagString && right.tag == nativeJSTagString {
 		return nativeJSCompareUTF16(nativeJSRef(left), nativeJSRef(right)), true
 	}
@@ -376,8 +427,11 @@ func nativeJSLooseEqual(left, right *nativeJSValue) bool {
 	if left.tag == nativeJSTagString && right.tag == nativeJSTagString {
 		return nativeJSStrictEqual(left, right)
 	}
-	if left.tag == nativeJSTagObject || left.tag == nativeJSTagArray || left.tag == nativeJSTagFunction || right.tag == nativeJSTagObject || right.tag == nativeJSTagArray || right.tag == nativeJSTagFunction {
-		C.abort()
+	if left.tag == nativeJSTagObject || left.tag == nativeJSTagArray || left.tag == nativeJSTagFunction {
+		return nativeJSLooseEqual(nativeJSToPrimitive(left), right)
+	}
+	if right.tag == nativeJSTagObject || right.tag == nativeJSTagArray || right.tag == nativeJSTagFunction {
+		return nativeJSLooseEqual(left, nativeJSToPrimitive(right))
 	}
 	return false
 }
@@ -389,6 +443,7 @@ func tsnative_jsvalue_add(leftRaw, rightRaw unsafe.Pointer) unsafe.Pointer {
 	if left == nil || right == nil {
 		C.abort()
 	}
+	left, right = nativeJSToPrimitive(left), nativeJSToPrimitive(right)
 	if left.tag == nativeJSTagString || right.tag == nativeJSTagString {
 		combined := tsnative_string_concat(nativeJSToString(left), nativeJSToString(right))
 		return tsnative_jsvalue_box_string(combined)

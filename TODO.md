@@ -251,7 +251,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Primitive dynamic `-`, `*`, `/`, relational comparison, loose equality, and strict equality with TypeScript-correct result representations and JS-style primitive coercion; object/function reference equality is supported without ToPrimitive coercion.
   - [~] Dynamic property get/set, calls, object/function ToPrimitive coercion, and checked unboxing/conversions.
     - [x] Checked JSValue unboxing to native number/string/boolean/number[] with distinct array tagging, MIR/LLVM/runtime ABI coverage, and differential native tests.
-    - [ ] Dynamic object/property get/set and calls, plus object/function ToPrimitive coercion.
+    - [~] Dynamic object/property get/set and calls, plus object/function ToPrimitive coercion.
+      - [x] Add default native `ToPrimitive` fallback for boxed plain objects, F64 arrays, and function references. Object addition/string comparison uses `[object Object]`, F64 arrays stringify with comma-joined JS number text, numeric coercion flows through the primitive fallback, and loose equality no longer aborts on object/array/function operands.
+      - [ ] Carry object shape/property metadata across JSValue boxing, then add dynamic named get/set and dynamic callable dispatch without unsafe offset guessing.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.
