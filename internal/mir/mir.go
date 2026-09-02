@@ -258,6 +258,11 @@ type DynamicFieldGet struct {
 	Object ValueID
 	Field  string
 }
+type DynamicFieldSet struct {
+	Object ValueID
+	Field  string
+	Value  ValueID
+}
 type ClosureNew struct {
 	Callee   FunctionID
 	Captures []ValueID
@@ -329,6 +334,7 @@ func (ObjectAlloc) isOperation()          {}
 func (FieldSet) isOperation()             {}
 func (FieldGet) isOperation()             {}
 func (DynamicFieldGet) isOperation()      {}
+func (DynamicFieldSet) isOperation()      {}
 func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}

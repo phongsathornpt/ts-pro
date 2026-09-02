@@ -104,6 +104,8 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("field.set v%d, s%d.%d, v%d", op.Object, op.Shape, op.Field, op.Value)
 	case DynamicFieldGetOp:
 		return fmt.Sprintf("dynamic.field.get v%d, %q", op.Object, op.Field)
+	case DynamicFieldSetOp:
+		return fmt.Sprintf("dynamic.field.set v%d, %q, v%d", op.Object, op.Field, op.Value)
 	case ClosureNewOp:
 		captures := make([]string, len(op.Captures))
 		for i, capture := range op.Captures {

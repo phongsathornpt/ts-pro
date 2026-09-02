@@ -217,6 +217,20 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		}
 		f.emit(stmt.Type, hir.ArraySetOp{Array: array, Index: index, Value: value})
 		return nil
+	case frontend.StmtDynamicFieldAssign:
+		if stmt.Object == nil || stmt.Value == nil {
+			return fmt.Errorf("dynamic field assignment %q is incomplete", stmt.Field)
+		}
+		object, err := f.lowerExpr(stmt.Object)
+		if err != nil {
+			return err
+		}
+		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
+		if err != nil {
+			return err
+		}
+		f.emit(stmt.Type, hir.DynamicFieldSetOp{Object: object, Field: stmt.Field, Value: value})
+		return nil
 	case frontend.StmtFieldAssign:
 		if stmt.Object == nil || stmt.Value == nil {
 			return fmt.Errorf("field assignment %q is incomplete", stmt.Field)

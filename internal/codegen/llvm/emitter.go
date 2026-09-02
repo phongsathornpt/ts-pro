@@ -56,7 +56,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_console_log_jsvalue(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_f64(double)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_box_string(ptr)\ndeclare ptr @tsnative_jsvalue_box_bool(i8)\ndeclare ptr @tsnative_jsvalue_box_object(ptr)\ndeclare ptr @tsnative_jsvalue_box_object_shape(ptr, i32)\ndeclare i32 @tsnative_jsvalue_object_shape(ptr)\ndeclare ptr @tsnative_jsvalue_box_array(ptr)\ndeclare ptr @tsnative_jsvalue_box_function(ptr)\ndeclare ptr @tsnative_jsvalue_null()\ndeclare ptr @tsnative_jsvalue_undefined()\n")
-	b.WriteString("declare double @tsnative_jsvalue_unbox_f64(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_object(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_string(ptr)\ndeclare i8 @tsnative_jsvalue_unbox_bool(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_array(ptr)\n")
+	b.WriteString("declare double @tsnative_jsvalue_unbox_f64(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_object(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_object_shape(ptr, i32)\ndeclare ptr @tsnative_jsvalue_unbox_function(ptr)\ndeclare void @tsnative_jsvalue_dynamic_set_missing()\ndeclare ptr @tsnative_jsvalue_unbox_string(ptr)\ndeclare i8 @tsnative_jsvalue_unbox_bool(ptr)\ndeclare ptr @tsnative_jsvalue_unbox_array(ptr)\n")
 	b.WriteString("declare ptr @tsnative_jsvalue_add(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_jsvalue_sub(ptr, ptr)\ndeclare double @tsnative_jsvalue_mul(ptr, ptr)\ndeclare double @tsnative_jsvalue_div(ptr, ptr)\n")
 	b.WriteString("declare i8 @tsnative_jsvalue_lt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_le(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_gt(ptr, ptr)\ndeclare i8 @tsnative_jsvalue_ge(ptr, ptr)\n")
@@ -146,6 +146,9 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 		return "", err
 	}
 	if err := e.emitDynamicFieldGetHelpers(&b); err != nil {
+		return "", err
+	}
+	if err := e.emitDynamicFieldSetHelpers(&b); err != nil {
 		return "", err
 	}
 	for _, global := range e.collectStringGlobals() {
@@ -459,6 +462,19 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s)\n", name, dynamicFieldGetHelperName(op.Field), object)
+		values[inst.Result] = name
+		return nil
+	case mir.DynamicFieldSet:
+		object, err := operand(values, op.Object)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s, ptr %s)\n", name, dynamicFieldSetHelperName(op.Field), object, value)
 		values[inst.Result] = name
 		return nil
 	case mir.FieldSet:

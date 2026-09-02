@@ -132,6 +132,29 @@ func tsnative_jsvalue_unbox_object(raw unsafe.Pointer) unsafe.Pointer {
 	return nativeJSRef(value)
 }
 
+//export tsnative_jsvalue_unbox_object_shape
+func tsnative_jsvalue_unbox_object_shape(raw unsafe.Pointer, expected C.uint32_t) unsafe.Pointer {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagObject || value.reserved == 0 || value.reserved-1 != uint32(expected) {
+		C.abort()
+	}
+	return nativeJSRef(value)
+}
+
+//export tsnative_jsvalue_unbox_function
+func tsnative_jsvalue_unbox_function(raw unsafe.Pointer) unsafe.Pointer {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagFunction {
+		C.abort()
+	}
+	return nativeJSRef(value)
+}
+
+//export tsnative_jsvalue_dynamic_set_missing
+func tsnative_jsvalue_dynamic_set_missing() {
+	nativeAbort("dynamic property write requires an existing closed-shape field")
+}
+
 //export tsnative_jsvalue_unbox_f64
 func tsnative_jsvalue_unbox_f64(raw unsafe.Pointer) C.double {
 	value := (*nativeJSValue)(raw)

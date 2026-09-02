@@ -254,6 +254,12 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 					add(fmt.Sprintf("dynamic field access v%d has empty name", instruction.Result))
 				}
 				checkValue(op.Object)
+			case DynamicFieldSetOp:
+				if op.Field == "" {
+					add(fmt.Sprintf("dynamic field store v%d has empty name", instruction.Result))
+				}
+				checkValue(op.Object)
+				checkValue(op.Value)
 			case FieldGetOp:
 				checkValue(op.Object)
 				if int(op.Shape) >= len(m.Shapes) {

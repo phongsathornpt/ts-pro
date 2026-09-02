@@ -153,6 +153,11 @@ type DynamicFieldGetOp struct {
 	Object ValueID
 	Field  string
 }
+type DynamicFieldSetOp struct {
+	Object ValueID
+	Field  string
+	Value  ValueID
+}
 type ClosureNewOp struct {
 	Callee   FunctionID
 	Captures []ValueID
@@ -245,6 +250,7 @@ func (ObjectAllocOp) isOperation()      {}
 func (FieldSetOp) isOperation()         {}
 func (FieldGetOp) isOperation()         {}
 func (DynamicFieldGetOp) isOperation()  {}
+func (DynamicFieldSetOp) isOperation()  {}
 func (ClosureNewOp) isOperation()       {}
 func (ClosureCallOp) isOperation()      {}
 func (TaskSpawnOp) isOperation()        {}

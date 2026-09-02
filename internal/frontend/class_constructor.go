@@ -113,12 +113,18 @@ func (e *extractor) buildFieldAssignment(node, target, rhs tsast.Node) (Statemen
 		return Statement{}, true, fmt.Errorf("field assignment %s has invalid receiver type", name)
 	}
 	typ := e.result.Types[object.Type]
-	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) {
-		return Statement{}, true, fmt.Errorf("field assignment %s requires a closed object", name)
-	}
 	value, err := e.extractExpr(rhs)
 	if err != nil {
 		return Statement{}, true, err
+	}
+	if typ.Kind == TypeAny || typ.Kind == TypeUnion {
+		return Statement{
+			Kind: StmtDynamicFieldAssign, Span: e.span(node), Type: e.ensureSemanticType(TypeAny, "any"),
+			Object: object, Field: name, Value: value,
+		}, true, nil
+	}
+	if typ.Kind != TypeObject || int(typ.Shape) >= len(e.result.Shapes) {
+		return Statement{}, true, fmt.Errorf("field assignment %s requires a closed object", name)
 	}
 	shape := e.result.Shapes[typ.Shape]
 	for fieldIndex, field := range shape.Fields {

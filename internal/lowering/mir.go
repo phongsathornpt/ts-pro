@@ -225,6 +225,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.FieldGet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field}
 	case hir.DynamicFieldGetOp:
 		result.Op = mir.DynamicFieldGet{Object: mir.ValueID(op.Object), Field: op.Field}
+	case hir.DynamicFieldSetOp:
+		result.Op = mir.DynamicFieldSet{Object: mir.ValueID(op.Object), Field: op.Field, Value: mir.ValueID(op.Value)}
 	case hir.ClosureNewOp:
 		captures := make([]mir.ValueID, len(op.Captures))
 		for i, capture := range op.Captures {

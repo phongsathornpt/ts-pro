@@ -105,6 +105,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return []mir.ValueID{op.Object}, true
 	case mir.DynamicFieldGet:
 		return []mir.ValueID{op.Object}, true
+	case mir.DynamicFieldSet:
+		return []mir.ValueID{op.Object, op.Value}, true
 	case mir.ClosureNew:
 		return append([]mir.ValueID(nil), op.Captures...), true
 	case mir.ClosureCall:
@@ -243,6 +245,13 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepBoxJSValue, Result: inst.Result, Inst: inst})
 			case mir.DynamicFieldGet:
 				if !available[op.Object] || inst.Repr != mir.ReprJSValue {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.DynamicFieldSet:
+				if !available[op.Object] || !available[op.Value] || inst.Repr != mir.ReprJSValue {
 					return nil
 				}
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
@@ -548,6 +557,14 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 			return err
 		}
 		values[op.Object] = value
+	case mir.DynamicFieldSet:
+		for _, valueID := range []mir.ValueID{op.Object, op.Value} {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
 	case mir.DynamicAddJSValue:
 		for _, valueID := range []mir.ValueID{op.Left, op.Right} {
 			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)

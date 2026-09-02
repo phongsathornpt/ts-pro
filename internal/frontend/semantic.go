@@ -123,6 +123,7 @@ const (
 	StmtFor
 	StmtClosureBind
 	StmtFieldAssign
+	StmtDynamicFieldAssign
 	StmtArrayAssign
 )
 

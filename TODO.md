@@ -256,7 +256,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
       - [x] Preserve closed object shape identity through JSValue boxing. Object boxes encode `shapeID+1` in the existing non-GC metadata word, LLVM passes the semantic shape on every object box, MIR/HIR verification rejects unknown shapes, and GC stress verifies metadata/payload survival without growing JSValue.
       - [~] Use boxed shape identity for dynamic named property get/set dispatch with compiler-generated field layout dispatch.
         - [x] Dynamic named property reads generate deterministic LLVM helpers keyed by property name. The helper switches on boxed shape identity, performs exact typed GEP/load/boxing, preserves nested object shape metadata, and returns `undefined` for missing/non-object properties.
-        - [ ] Add dynamic named property writes with checked JSValue conversion and GC remembered-set barriers for reference fields.
+        - [x] Dynamic named property writes use the same boxed-shape dispatch, checked JSValue unboxing for scalar/reference representations, nested-object shape validation, and `tsnative_gc_store_ref` remembered-set barriers for reference fields. Missing fields on closed shapes fail explicitly instead of corrupting layout. A 1 KiB nursery regression promotes the holder, stores a young string through `any`, forces further minors, and verifies the typed alias still observes the live value.
       - [ ] Carry object shape/property metadata across JSValue boxing, then add dynamic named get/set and dynamic callable dispatch without unsafe offset guessing.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
