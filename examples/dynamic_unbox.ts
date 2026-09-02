@@ -22,8 +22,7 @@ let dynamicUnboxArrayNative: number[] = dynamicUnboxArray;
 console.log(dynamicUnboxArrayNative[0]! + dynamicUnboxArrayNative[1]!);
 
 type DynamicUnboxObject = { value: number };
-let dynamicUnboxObjectTyped: DynamicUnboxObject = { value: 42 };
-let dynamicUnboxObject: any = dynamicUnboxObjectTyped;
+let dynamicUnboxObject: any = { value: 42 };
 let dynamicUnboxObjectNative: DynamicUnboxObject = dynamicUnboxObject;
 console.log(dynamicUnboxObjectNative.value);
 

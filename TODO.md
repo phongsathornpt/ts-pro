@@ -204,7 +204,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Unbox `any`/union function references back to typed native closures and invoke the recovered closure through the existing typed indirect-call ABI.
   - [ ] Add optional properties and union-shape compatibility.
   - [ ] Add computed/dynamic keys and shape transitions.
-  - [ ] Broaden structural object compatibility once shape evolution semantics are defined.
+  - [~] Broaden structural object compatibility once shape evolution semantics are defined.
+    - [x] Accept structurally identical closed shapes at checked dynamic-to-native object boundaries using compiler-generated compatible-shape dispatch, including nested closed-object fields; incompatible layouts still abort before typed access.
+    - [ ] Extend compatibility to optional/union/evolving shapes after those representations are defined.
 - [~] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/for-of, templates, default/optional params, enums, and module linking.
   - [x] Native `do...while` lowers with mandatory first-body execution followed by the existing loop-carried SSA machinery; source-file top-level and function-body forms share the same semantic statement path.
 - [ ] Add selected standard-library/runtime APIs such as JSON, Map/Set, Date, and RegExp after their representation contracts are defined.

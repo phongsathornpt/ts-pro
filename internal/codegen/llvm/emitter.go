@@ -156,6 +156,9 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	if err := e.emitHeapTraceDescriptors(&b); err != nil {
 		return "", err
 	}
+	if err := e.emitObjectUnboxHelpers(&b); err != nil {
+		return "", err
+	}
 	if err := e.emitDynamicFieldGetHelpers(&b); err != nil {
 		return "", err
 	}
@@ -1238,7 +1241,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		case mir.UnboxJSArray:
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_array(ptr %s)\n", name, value)
 		case mir.UnboxJSObject:
-			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_object_shape(ptr %s, i32 %d)\n", name, value, uint32(op.Shape))
+			fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s)\n", name, objectUnboxHelperName(op.Shape), value)
 		case mir.UnboxJSFunction:
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_function(ptr %s)\n", name, value)
 		default:
