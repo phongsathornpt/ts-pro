@@ -52,6 +52,8 @@ func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
 		return true
 	case TypeArray:
 		return e.compatibleArrayElement(want.Element, got.Element)
+	case TypePromise:
+		return e.compatibleTaskResult(want.ReturnType, got.ReturnType)
 	case TypeFunction:
 		if len(want.Params) != len(got.Params) {
 			return false

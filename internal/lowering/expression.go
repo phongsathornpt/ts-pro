@@ -48,6 +48,23 @@ func (f *functionLowerer) arrayElementKind(arrayType frontend.TypeID) (hir.Array
 	}
 }
 
+func (f *functionLowerer) taskResultKind(resultType frontend.TypeID) (hir.TaskResultKind, error) {
+	if int(resultType) >= len(f.module.source.Types) {
+		return hir.TaskResultInvalid, fmt.Errorf("task result type t%d is invalid", resultType)
+	}
+	result := f.module.source.Types[resultType]
+	switch result.Kind {
+	case frontend.TypeNumber:
+		return hir.TaskResultF64, nil
+	case frontend.TypeBoolean:
+		return hir.TaskResultBool, nil
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
+		return hir.TaskResultRef, nil
+	default:
+		return hir.TaskResultInvalid, fmt.Errorf("task result type %q has no immediate native representation", result.Name)
+	}
+}
+
 func (f *functionLowerer) promiseResultKind(promiseType frontend.TypeID) (frontend.TypeID, hir.TaskResultKind, error) {
 	if int(promiseType) >= len(f.module.source.Types) {
 		return 0, hir.TaskResultInvalid, fmt.Errorf("promise type t%d is invalid", promiseType)
@@ -56,17 +73,8 @@ func (f *functionLowerer) promiseResultKind(promiseType frontend.TypeID) (fronte
 	if typ.Kind != frontend.TypePromise || int(typ.ReturnType) >= len(f.module.source.Types) {
 		return 0, hir.TaskResultInvalid, fmt.Errorf("semantic type %q is not a concrete Promise", typ.Name)
 	}
-	result := f.module.source.Types[typ.ReturnType]
-	switch result.Kind {
-	case frontend.TypeNumber:
-		return typ.ReturnType, hir.TaskResultF64, nil
-	case frontend.TypeBoolean:
-		return typ.ReturnType, hir.TaskResultBool, nil
-	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
-		return typ.ReturnType, hir.TaskResultRef, nil
-	default:
-		return typ.ReturnType, hir.TaskResultInvalid, fmt.Errorf("Promise result type %q has no immediate native task representation", result.Name)
-	}
+	kind, err := f.taskResultKind(typ.ReturnType)
+	return typ.ReturnType, kind, err
 }
 
 func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
@@ -211,28 +219,45 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		return f.emit(expr.Type, hir.PromiseAdoptOp{Promise: promise}), nil
 	case frontend.ExprPromiseAll, frontend.ExprPromiseRace:
+		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypePromise {
+			return 0, fmt.Errorf("Promise aggregate has invalid semantic result type")
+		}
+		outputPromise := f.module.source.Types[expr.Type]
+		resultType := outputPromise.ReturnType
+		if expr.Kind == frontend.ExprPromiseAll {
+			if int(resultType) >= len(f.module.source.Types) || f.module.source.Types[resultType].Kind != frontend.TypeArray {
+				return 0, fmt.Errorf("Promise.all requires an array result type")
+			}
+			resultType = f.module.source.Types[resultType].Element
+		}
+		resultKind, err := f.taskResultKind(resultType)
+		if err != nil {
+			return 0, err
+		}
 		promises := make([]hir.ValueID, 0, len(expr.Args))
 		fresh := make([]hir.ValueID, 0, len(expr.Args))
 		for _, arg := range expr.Args {
-			value, err := f.lowerExpr(arg)
+			if int(arg.Type) < len(f.module.source.Types) && f.module.source.Types[arg.Type].Kind == frontend.TypePromise {
+				value, err := f.lowerExpr(arg)
+				if err != nil {
+					return 0, err
+				}
+				promises = append(promises, value)
+				if isFreshPromiseProducer(arg) {
+					fresh = append(fresh, value)
+				}
+				continue
+			}
+			value, err := f.lowerExprAs(arg, resultType)
 			if err != nil {
 				return 0, err
 			}
-			promises = append(promises, value)
-			if isFreshPromiseProducer(arg) {
-				fresh = append(fresh, value)
-			}
+			promise := f.emit(expr.Type, hir.PromiseResolveOp{Value: value, Result: resultKind})
+			promises = append(promises, promise)
+			fresh = append(fresh, promise)
 		}
 		if len(expr.Args) == 0 && expr.Kind == frontend.ExprPromiseRace {
 			return 0, fmt.Errorf("empty Promise.race is unsupported")
-		}
-		resultKind := hir.TaskResultF64
-		if len(expr.Args) != 0 {
-			_, resolvedKind, err := f.promiseResultKind(expr.Args[0].Type)
-			if err != nil {
-				return 0, err
-			}
-			resultKind = resolvedKind
 		}
 		var aggregate hir.ValueID
 		switch {

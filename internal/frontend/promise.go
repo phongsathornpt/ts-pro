@@ -53,41 +53,48 @@ func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Exp
 	}
 	input := expr.Args[0]
 	if int(input.Type) >= len(e.result.Types) || e.result.Types[input.Type].Kind != TypeArray {
-		return nil, fmt.Errorf("%s at %d requires a Promise array", name, node.Pos())
-	}
-	arrayType := e.result.Types[input.Type]
-	if int(arrayType.Element) >= len(e.result.Types) || e.result.Types[arrayType.Element].Kind != TypePromise {
-		return nil, fmt.Errorf("%s at %d requires homogeneous Promise inputs", name, node.Pos())
-	}
-	inputPromise := e.result.Types[arrayType.Element]
-	if int(inputPromise.ReturnType) >= len(e.result.Types) {
-		return nil, fmt.Errorf("%s at %d has invalid Promise input result type", name, node.Pos())
-	}
-	inputResult := e.result.Types[inputPromise.ReturnType]
-	switch inputResult.Kind {
-	case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
-	default:
-		return nil, fmt.Errorf("%s at %d does not support Promise result type %q yet", name, node.Pos(), inputResult.Name)
+		return nil, fmt.Errorf("%s at %d requires an array literal", name, node.Pos())
 	}
 	if name == "Promise.race" && len(input.Elements) == 0 {
 		return nil, fmt.Errorf("Promise.race at %d does not support an empty input until pending-forever Promise cleanup is modeled", node.Pos())
 	}
+	if int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypePromise {
+		return nil, fmt.Errorf("%s at %d must produce Promise<T>", name, node.Pos())
+	}
 	outputPromise := e.result.Types[expr.Type]
-	output := e.result.Types[outputPromise.ReturnType]
+	if int(outputPromise.ReturnType) >= len(e.result.Types) {
+		return nil, fmt.Errorf("%s at %d has invalid output result type", name, node.Pos())
+	}
+	resultType := outputPromise.ReturnType
 	if name == "Promise.all" {
-		if output.Kind != TypeArray || int(output.Element) >= len(e.result.Types) || !e.compatibleArrayElement(inputPromise.ReturnType, output.Element) {
-			return nil, fmt.Errorf("Promise.all at %d requires a homogeneous array result compatible with %s", node.Pos(), inputResult.Name)
+		output := e.result.Types[outputPromise.ReturnType]
+		if output.Kind != TypeArray || int(output.Element) >= len(e.result.Types) {
+			return nil, fmt.Errorf("Promise.all at %d requires a homogeneous array result", node.Pos())
 		}
+		resultType = output.Element
 		expr.Kind = ExprPromiseAll
 	} else {
-		if !e.compatibleArrayElement(inputPromise.ReturnType, outputPromise.ReturnType) {
-			return nil, fmt.Errorf("Promise.race at %d requires result compatible with %s", node.Pos(), inputResult.Name)
-		}
 		expr.Kind = ExprPromiseRace
 	}
+	result := e.result.Types[resultType]
+	switch result.Kind {
+	case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
+	default:
+		return nil, fmt.Errorf("%s at %d does not support Promise result type %q yet", name, node.Pos(), result.Name)
+	}
 	for _, item := range input.Elements {
-		if int(item.Type) >= len(e.result.Types) || e.result.Types[item.Type].Kind != TypePromise || !e.compatibleTaskResult(e.result.Types[item.Type].ReturnType, inputPromise.ReturnType) {
-			return nil, fmt.Errorf("%s at %d requires homogeneous Promise inputs", name, node.Pos())
+		if int(item.Type) >= len(e.result.Types) {
+			return nil, fmt.Errorf("%s at %d has invalid input type", name, node.Pos())
+		}
+		itemType := e.result.Types[item.Type]
+		if itemType.Kind == TypePromise {
+			if !e.compatibleTaskResult(itemType.ReturnType, resultType) {
+				return nil, fmt.Errorf("%s at %d has incompatible Promise input", name, node.Pos())
+			}
+			continue
+		}
+		if !e.compatibleArrayElement(resultType, item.Type) {
+			return nil, fmt.Errorf("%s at %d has raw input incompatible with %s", name, node.Pos(), result.Name)
 		}
 	}
 	expr.Args = append(expr.Args[:0], input.Elements...)

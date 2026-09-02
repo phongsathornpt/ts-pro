@@ -161,3 +161,40 @@ async function aggregateRejectBooleans(): Promise<number> {
 
 console.log(join(aggregatePendingRaceBooleans()));
 console.log(join(aggregateRejectBooleans()));
+
+async function aggregateMixedRawNumbers(): Promise<number> {
+  const values = await Promise.all<number>([
+    1,
+    Promise.resolve(2),
+    3,
+  ]);
+  return values[0]! * 100 + values[1]! * 10 + values[2]!;
+}
+
+async function aggregateRaceRawNumber(): Promise<number> {
+  return await Promise.race<number>([
+    8,
+    aggregateDelay(5, 9),
+  ]);
+}
+
+async function aggregateMixedRawStrings(): Promise<string> {
+  const values = await Promise.all<string>([
+    "raw",
+    Promise.resolve("promise"),
+  ]);
+  return values[0]! + ":" + values[1]!;
+}
+
+async function aggregateMixedRawBooleans(): Promise<number> {
+  const values = await Promise.all<boolean>([
+    true,
+    Promise.resolve(false),
+  ]);
+  return aggregateBoolScore(values[0]!) * 10 + aggregateBoolScore(values[1]!);
+}
+
+console.log(join(aggregateMixedRawNumbers()));
+console.log(join(aggregateRaceRawNumber()));
+console.log(join(aggregateMixedRawStrings()));
+console.log(join(aggregateMixedRawBooleans()));

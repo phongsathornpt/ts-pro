@@ -154,7 +154,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
               - [~] Extend aggregates to homogeneous reference/bool results, raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
                 - [x] Add homogeneous reference-result aggregates with precise ref-array Promise.all, reference Promise.race, scheduler-owned child settlement watchers, rejection propagation, retained-child lifetime management, and worker=1 + 1 KiB nursery coverage.
                 - [x] Add homogeneous boolean aggregates on compact boolean[] storage, including ordered Promise.all<boolean>, Promise.race<boolean>, pending settlement, rejection propagation, and single-worker stress coverage.
-                - [ ] Add raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
+                - [~] Add raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
+                  - [x] Normalize homogeneous raw `T` values in aggregate array literals into immediate native Promises alongside `Promise<T>` inputs for number/bool/reference result families.
+                  - [ ] Add structural PromiseLike/thenable assimilation once dynamic method calls preserve receiver `this`.
+                  - [ ] Add non-literal iterables and heterogeneous tuple results.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
