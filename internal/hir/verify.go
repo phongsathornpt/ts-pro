@@ -249,6 +249,11 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				} else if int(op.Field) >= len(m.Shapes[op.Shape].Fields) {
 					add(fmt.Sprintf("field store s%d.%d is out of range", op.Shape, op.Field))
 				}
+			case DynamicFieldGetOp:
+				if op.Field == "" {
+					add(fmt.Sprintf("dynamic field access v%d has empty name", instruction.Result))
+				}
+				checkValue(op.Object)
 			case FieldGetOp:
 				checkValue(op.Object)
 				if int(op.Shape) >= len(m.Shapes) {

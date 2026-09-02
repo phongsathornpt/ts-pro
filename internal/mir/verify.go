@@ -299,6 +299,16 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Value); err != nil {
 					return err
 				}
+			case DynamicFieldGet:
+				if op.Field == "" {
+					return fmt.Errorf("dynamic field access v%d has empty name", inst.Result)
+				}
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("dynamic field access v%d must produce JSValue", inst.Result)
+				}
+				if err := checkValue(op.Object); err != nil {
+					return err
+				}
 			case FieldGet:
 				shape, ok := shapes[op.Shape]
 				if !ok {

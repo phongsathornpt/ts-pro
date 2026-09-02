@@ -21,7 +21,12 @@ func LowerMIRWithRanges(source hir.Module, ranges rangeanalysis.Result) (mir.Mod
 			if err != nil {
 				return mir.Module{}, fmt.Errorf("shape %s field %s: %w", shape.Name, field.Name, err)
 			}
-			lowered.Fields = append(lowered.Fields, mir.ShapeField{Name: field.Name, Repr: repr})
+			loweredField := mir.ShapeField{Name: field.Name, Repr: repr}
+			if int(field.SemanticType) < len(source.Types) && source.Types[field.SemanticType].Kind == hir.TypeObject {
+				loweredField.ObjectShape = mir.ShapeID(source.Types[field.SemanticType].Shape)
+				loweredField.HasObjectShape = true
+			}
+			lowered.Fields = append(lowered.Fields, loweredField)
 		}
 		result.Shapes = append(result.Shapes, lowered)
 	}
@@ -218,6 +223,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.FieldSet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field, Value: mir.ValueID(op.Value)}
 	case hir.FieldGetOp:
 		result.Op = mir.FieldGet{Object: mir.ValueID(op.Object), Shape: mir.ShapeID(op.Shape), Field: op.Field}
+	case hir.DynamicFieldGetOp:
+		result.Op = mir.DynamicFieldGet{Object: mir.ValueID(op.Object), Field: op.Field}
 	case hir.ClosureNewOp:
 		captures := make([]mir.ValueID, len(op.Captures))
 		for i, capture := range op.Captures {

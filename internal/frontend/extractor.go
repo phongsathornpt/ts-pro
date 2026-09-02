@@ -864,6 +864,10 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			expr.Kind, expr.Object = ExprArrayLength, object
 			return expr, nil
 		}
+		if objectType.Kind == TypeAny || objectType.Kind == TypeUnion {
+			expr.Kind, expr.Object, expr.Field = ExprDynamicFieldGet, object, name
+			return expr, nil
+		}
 		if objectType.Kind != TypeObject || int(objectType.Shape) >= len(e.result.Shapes) {
 			return nil, fmt.Errorf("native property %q at %d requires a closed object shape; receiver type=%q kind=%d", name, node.Pos(), objectType.Name, objectType.Kind)
 		}

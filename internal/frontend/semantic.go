@@ -17,6 +17,7 @@ const (
 	ExprArrayLength
 	ExprObject
 	ExprFieldGet
+	ExprDynamicFieldGet
 	ExprClosure
 	ExprNewClass
 	ExprTaskSpawn

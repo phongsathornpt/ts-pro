@@ -147,6 +147,12 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		shape := f.module.source.Types[expr.Object.Type].Shape
 		return f.emit(expr.Type, hir.FieldGetOp{Object: object, Shape: hir.NewShapeID(uint32(shape)), Field: expr.FieldIndex}), nil
+	case frontend.ExprDynamicFieldGet:
+		object, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DynamicFieldGetOp{Object: object, Field: expr.Field}), nil
 	case frontend.ExprPromiseResolve:
 		resultType, resultKind, err := f.promiseResultKind(expr.Type)
 		if err != nil {

@@ -26,8 +26,10 @@ const (
 )
 
 type ShapeField struct {
-	Name string
-	Repr Repr
+	Name           string
+	Repr           Repr
+	ObjectShape    ShapeID
+	HasObjectShape bool
 }
 
 type Shape struct {
@@ -252,6 +254,10 @@ type FieldGet struct {
 	Shape  ShapeID
 	Field  uint32
 }
+type DynamicFieldGet struct {
+	Object ValueID
+	Field  string
+}
 type ClosureNew struct {
 	Callee   FunctionID
 	Captures []ValueID
@@ -322,6 +328,7 @@ func (ObjectNew) isOperation()            {}
 func (ObjectAlloc) isOperation()          {}
 func (FieldSet) isOperation()             {}
 func (FieldGet) isOperation()             {}
+func (DynamicFieldGet) isOperation()      {}
 func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}

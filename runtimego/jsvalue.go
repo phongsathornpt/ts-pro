@@ -123,6 +123,15 @@ func tsnative_jsvalue_box_array(raw unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(value)
 }
 
+//export tsnative_jsvalue_unbox_object
+func tsnative_jsvalue_unbox_object(raw unsafe.Pointer) unsafe.Pointer {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagObject {
+		C.abort()
+	}
+	return nativeJSRef(value)
+}
+
 //export tsnative_jsvalue_unbox_f64
 func tsnative_jsvalue_unbox_f64(raw unsafe.Pointer) C.double {
 	value := (*nativeJSValue)(raw)
