@@ -39,7 +39,7 @@ func (f *functionLowerer) arrayElementKind(arrayType frontend.TypeID) (hir.Array
 	switch f.module.source.Types[typ.Element].Kind {
 	case frontend.TypeNumber:
 		return hir.ArrayElementF64, nil
-	case frontend.TypeString:
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion:
 		return hir.ArrayElementRef, nil
 	default:
 		return hir.ArrayElementInvalid, fmt.Errorf("array element type %q has no native specialization", f.module.source.Types[typ.Element].Name)
@@ -104,7 +104,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			elements = append(elements, value)
 		}
 		element, err := f.arrayElementKind(expr.Type)
-		if err != nil { return 0, err }
+		if err != nil {
+			return 0, err
+		}
 		return f.emit(expr.Type, hir.ArrayNewOp{Elements: elements, Element: element}), nil
 	case frontend.ExprArrayLength:
 		array, err := f.lowerExpr(expr.Object)
@@ -112,7 +114,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		element, err := f.arrayElementKind(expr.Object.Type)
-		if err != nil { return 0, err }
+		if err != nil {
+			return 0, err
+		}
 		return f.emit(expr.Type, hir.ArrayLengthOp{Array: array, Element: element}), nil
 	case frontend.ExprIndex:
 		array, err := f.lowerExpr(expr.Object)
@@ -124,7 +128,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		element, err := f.arrayElementKind(expr.Object.Type)
-		if err != nil { return 0, err }
+		if err != nil {
+			return 0, err
+		}
 		return f.emit(expr.Type, hir.ArrayGetOp{Array: array, Index: index, Element: element}), nil
 	case frontend.ExprObject:
 		if int(expr.Type) >= len(f.module.source.Types) {

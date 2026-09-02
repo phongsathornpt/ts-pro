@@ -795,15 +795,17 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("array literal at %d has invalid element type", node.Pos())
 		}
 		elementKind := e.result.Types[arrayType.Element].Kind
-		if elementKind != TypeNumber && elementKind != TypeString {
-			return nil, fmt.Errorf("native array at %d currently supports number[] and string[]", node.Pos())
+		switch elementKind {
+		case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+		default:
+			return nil, fmt.Errorf("native array at %d does not support %s elements yet", node.Pos(), e.result.Types[arrayType.Element].Name)
 		}
 		for _, elementNode := range elements.ListElements() {
 			element, err := e.extractExpr(elementNode)
 			if err != nil {
 				return nil, err
 			}
-			if int(element.Type) >= len(e.result.Types) || e.result.Types[element.Type].Kind != elementKind {
+			if int(element.Type) >= len(e.result.Types) || !e.compatibleArrayElement(arrayType.Element, element.Type) {
 				return nil, fmt.Errorf("native array at %d requires homogeneous %s elements", node.Pos(), e.result.Types[arrayType.Element].Name)
 			}
 			expr.Elements = append(expr.Elements, element)
@@ -1290,14 +1292,28 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 		typ.Element = elementID
 	}
 	if kind == TypeArray {
-		base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
-		switch base {
-		case "number[]":
-			typ.Element = e.ensureSemanticType(TypeNumber, "number")
-		case "string[]":
-			typ.Element = e.ensureSemanticType(TypeString, "string")
-		default:
-			return 0, fmt.Errorf("native array type %q is not supported", text)
+		args, argsErr := e.client.GetTypeArguments(e.ctx, e.snapshot, e.project, info.ID)
+		if argsErr == nil && len(args) == 1 {
+			elementID, elementErr := e.internAPIType(&args[0])
+			if elementErr != nil {
+				return 0, elementErr
+			}
+			switch e.result.Types[elementID].Kind {
+			case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+				typ.Element = elementID
+			default:
+				return 0, fmt.Errorf("native array element type %q is not supported", e.result.Types[elementID].Name)
+			}
+		} else {
+			base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
+			switch base {
+			case "number[]":
+				typ.Element = e.ensureSemanticType(TypeNumber, "number")
+			case "string[]":
+				typ.Element = e.ensureSemanticType(TypeString, "string")
+			default:
+				return 0, fmt.Errorf("native array type %q is not supported", text)
+			}
 		}
 	}
 	if kind == TypeUnion {

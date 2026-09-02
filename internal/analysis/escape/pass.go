@@ -211,6 +211,12 @@ func collectEscapeUses(fn mir.Function, prov provenance, infos FunctionResult, c
 				for _, field := range op.Fields {
 					addContainment(contained, prov[inst.Result], prov[field])
 				}
+			case mir.ArrayNewRef:
+				for _, element := range op.Elements {
+					markOrigins(infos, prov[element], ReasonHeapStore)
+				}
+			case mir.ArraySetRef:
+				markOrigins(infos, prov[op.Value], ReasonHeapStore)
 			case mir.ClosureNew:
 				for _, capture := range op.Captures {
 					addContainment(contained, prov[inst.Result], prov[capture])

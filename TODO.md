@@ -184,7 +184,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Bounds-checked in-place indexed writes for specialized `number[]`.
   - [~] String/object arrays and typed generic array specializations.
     - [x] Add specialized `string[]` allocation/read/write/length with precise element GC metadata and remembered-set barriers.
-    - [ ] Add object/function/JSValue reference-array specializations with element-shape/tag validation.
+    - [x] Add closed-object reference arrays with structural element compatibility, precise GC tracing, heap-store escape propagation, and GC-churn differential coverage.
+    - [ ] Add function/JSValue/nested reference-array specializations with element tag/ownership validation.
   - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
 - [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
 - [~] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/for-of, templates, default/optional params, enums, and module linking.

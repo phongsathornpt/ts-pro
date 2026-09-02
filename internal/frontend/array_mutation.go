@@ -6,6 +6,39 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/tsast"
 )
 
+func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
+	if expected == actual {
+		return true
+	}
+	if int(expected) >= len(e.result.Types) || int(actual) >= len(e.result.Types) {
+		return false
+	}
+	want, got := e.result.Types[expected], e.result.Types[actual]
+	if want.Kind != got.Kind {
+		return false
+	}
+	switch want.Kind {
+	case TypeNumber, TypeString, TypeBoolean, TypeNull, TypeUndefined:
+		return true
+	case TypeObject:
+		if int(want.Shape) >= len(e.result.Shapes) || int(got.Shape) >= len(e.result.Shapes) {
+			return false
+		}
+		a, b := e.result.Shapes[want.Shape], e.result.Shapes[got.Shape]
+		if len(a.Fields) != len(b.Fields) {
+			return false
+		}
+		for i := range a.Fields {
+			if a.Fields[i].Name != b.Fields[i].Name || !e.compatibleArrayElement(a.Fields[i].Type, b.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statement, bool, error) {
 	arrayNode, ok := target.NamedChild("expression")
 	if !ok {
@@ -35,13 +68,15 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 		return Statement{}, true, fmt.Errorf("native indexed assignment requires a concrete array type")
 	}
 	elementKind := e.result.Types[arrayType.Element].Kind
-	if elementKind != TypeNumber && elementKind != TypeString {
-		return Statement{}, true, fmt.Errorf("native indexed assignment currently supports number[] and string[]")
+	switch elementKind {
+	case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+	default:
+		return Statement{}, true, fmt.Errorf("native indexed assignment does not support %s[] yet", e.result.Types[arrayType.Element].Name)
 	}
 	if int(index.Type) >= len(e.result.Types) || e.result.Types[index.Type].Kind != TypeNumber {
 		return Statement{}, true, fmt.Errorf("native array index must be number")
 	}
-	if int(value.Type) >= len(e.result.Types) || e.result.Types[value.Type].Kind != elementKind {
+	if int(value.Type) >= len(e.result.Types) || !e.compatibleArrayElement(arrayType.Element, value.Type) {
 		return Statement{}, true, fmt.Errorf("native array assignment requires %s value", e.result.Types[arrayType.Element].Name)
 	}
 	return Statement{
