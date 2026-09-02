@@ -194,14 +194,16 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Bounded parallel mark-page helpers now run for larger heaps, prefer owner-local queues, steal across owners when needed, and are capped by `TSNATIVE_GC_MARK_WORKERS` (hard maximum 8).
     - Already-parked scheduler workers are claimed first as bounded mark donors; fallback goroutines are created only for missing assist slots.
     - Root/token/thread-stack/handoff metadata now has a separate lock from heap allocation; GC still holds `heap -> roots` across mark/sweep to preserve a stable root/heap snapshot.
-    - Remaining heap-lock contention must be measured before further block-index/allocator lock splitting and nursery/generational policy work.
+    - Heap/root mutex acquisitions, contentions, and cumulative wait nanoseconds are now exported through the runtime ABI for measured follow-up.
+    - Remaining heap-lock data must justify any further block-index/allocator lock splitting and nursery/generational policy work.
 
 15. `runtime: add Green-Tea-style local mark-page work` 🟡
     - [x] Owner-local native-page mark queues exist on top of size-class spans and page-to-span metadata.
     - [x] Bounded GC helpers steal mark pages across owner queues when their preferred owner has no work.
     - [x] Reuse already-idle scheduler workers for GC donation, with deterministic donor claiming under the scheduler lock and dedicated donor-worker/page metrics.
     - [x] Separate root lifecycle metadata from heap/allocator locking while preserving `heap -> roots` collection lock order.
-    - [ ] Instrument remaining heap-lock contention and reduce block-index/allocator lock scope only where measurements support it.
+    - [x] Export heap/root lock acquisition, contention, and wait-time telemetry through the generated C ABI.
+    - [ ] Use native stress measurements to reduce block-index/allocator lock scope only where the data supports it.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
@@ -222,6 +224,7 @@ channel sends / receives / parks
 blocking jobs
 scheduler CPU time
 GC assist CPU time
+heap/root lock acquisitions / contentions / wait time
 peak task memory
 ```
 

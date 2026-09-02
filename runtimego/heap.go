@@ -8,7 +8,6 @@ import "C"
 import (
 	"os"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -36,7 +35,7 @@ type nativeRootFrame struct {
 }
 
 var nativeRoots = struct {
-	sync.Mutex
+	nativeMeasuredMutex
 	roots        map[uintptr]*nativeRootFrame
 	threadStacks map[int][]uintptr
 	tokenPages   [][]byte
@@ -48,7 +47,7 @@ var nativeRoots = struct {
 }
 
 var nativeHeap = struct {
-	sync.Mutex
+	nativeMeasuredMutex
 	blocks                map[uintptr]*nativeHeapBlock
 	allocators            map[int]*nativeWorkerAllocator
 	spans                 map[*nativeHeapSpan]struct{}
@@ -410,6 +409,8 @@ func tsnative_heap_shutdown() {
 	for _, page := range tokenPages {
 		nativeUnmap(page)
 	}
+	nativeHeap.resetMetrics()
+	nativeRoots.resetMetrics()
 }
 
 //export tsnative_heap_live_bytes

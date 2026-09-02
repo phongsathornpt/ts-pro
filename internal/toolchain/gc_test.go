@@ -38,6 +38,8 @@ int main(void) {
   tsnative_gc_collect();
   assert(tsnative_heap_live_allocations() == 0);
   assert(tsnative_gc_collections() == 2);
+  assert(tsnative_heap_lock_acquisitions() > 0);
+  assert(tsnative_root_lock_acquisitions() > 0);
   tsnative_heap_shutdown();
   return 0;
 }

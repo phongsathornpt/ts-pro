@@ -157,7 +157,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Let already-idle scheduler workers donate bounded GC mark work directly before creating fallback helper goroutines; donor-worker/page accounting has dedicated regression coverage.
   - [~] Profile contention and reduce the global heap lock, then add nursery/generational policy only after measured results justify it.
     - [x] Split root/token/thread-stack/handoff metadata onto its own mutex so root lifecycle operations no longer serialize with heap allocation; collection keeps `heap -> roots` lock order across mark/sweep.
-    - [ ] Instrument remaining heap-lock contention and split block-index/allocator metadata only where measurements justify the added synchronization complexity.
+    - [x] Instrument heap/root mutex acquisitions, contentions, and cumulative wait nanoseconds through the generated native ABI, with deterministic contention regressions.
+    - [ ] Use native stress measurements to decide whether block-index/allocator metadata should be sharded or split further; do not add synchronization layers without evidence.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.

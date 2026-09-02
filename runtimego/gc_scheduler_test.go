@@ -59,6 +59,63 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	runtime.KeepAlive(&slot)
 }
 
+func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	nativeHeap.resetMetrics()
+	nativeHeap.Lock()
+	heapStarted := make(chan struct{})
+	heapDone := make(chan struct{})
+	go func() {
+		close(heapStarted)
+		nativeHeap.Lock()
+		nativeHeap.Unlock()
+		close(heapDone)
+	}()
+	<-heapStarted
+	heapDeadline := time.Now().Add(250 * time.Millisecond)
+	for nativeHeapLockMetrics().contended == 0 && time.Now().Before(heapDeadline) {
+		runtime.Gosched()
+	}
+	if nativeHeapLockMetrics().contended == 0 {
+		nativeHeap.Unlock()
+		t.Fatal("heap lock contention was not observed")
+	}
+	nativeHeap.Unlock()
+	<-heapDone
+	heapMetrics := nativeHeapLockMetrics()
+	if heapMetrics.acquisitions < 2 || heapMetrics.waitNanos == 0 {
+		t.Fatalf("heap lock metrics = %+v, want acquisitions >= 2 and wait > 0", heapMetrics)
+	}
+
+	nativeRoots.resetMetrics()
+	nativeRoots.Lock()
+	rootStarted := make(chan struct{})
+	rootDone := make(chan struct{})
+	go func() {
+		close(rootStarted)
+		nativeRoots.Lock()
+		nativeRoots.Unlock()
+		close(rootDone)
+	}()
+	<-rootStarted
+	rootDeadline := time.Now().Add(250 * time.Millisecond)
+	for nativeRootLockMetrics().contended == 0 && time.Now().Before(rootDeadline) {
+		runtime.Gosched()
+	}
+	if nativeRootLockMetrics().contended == 0 {
+		nativeRoots.Unlock()
+		t.Fatal("root lock contention was not observed")
+	}
+	nativeRoots.Unlock()
+	<-rootDone
+	rootMetrics := nativeRootLockMetrics()
+	if rootMetrics.acquisitions < 2 || rootMetrics.waitNanos == 0 {
+		t.Fatalf("root lock metrics = %+v, want acquisitions >= 2 and wait > 0", rootMetrics)
+	}
+}
+
 func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()
