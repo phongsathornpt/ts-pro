@@ -48,7 +48,7 @@ func (e *emitter) emitClosureTypes(b *strings.Builder) error {
 	if len(e.closures) == 0 {
 		return nil
 	}
-	b.WriteString("%tsnative_closure = type { ptr, ptr }\n")
+	b.WriteString("%tsnative_closure = type { ptr, ptr, i32 }\n")
 	for _, descriptor := range sortedClosureDescriptors(e.closures) {
 		if descriptor.CaptureCount == 0 {
 			continue
@@ -182,6 +182,8 @@ func (e *emitter) emitClosureNew(b *strings.Builder, parent mir.FunctionID, inst
 	fmt.Fprintf(b, "  store ptr @%s, ptr %s.codeptr\n", closureWrapperName(op.Callee), name)
 	fmt.Fprintf(b, "  %s.envptr = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 1\n", name, name)
 	fmt.Fprintf(b, "  store ptr %s, ptr %s.envptr\n", env, name)
+	fmt.Fprintf(b, "  %s.targetptr = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 2\n", name, name)
+	fmt.Fprintf(b, "  store i32 %d, ptr %s.targetptr\n", uint32(op.Callee), name)
 	return nil
 }
 

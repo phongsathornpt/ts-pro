@@ -47,18 +47,22 @@ type Module struct {
 }
 
 type Function struct {
-	ID         FunctionID
-	Name       string
-	Params     []Param
-	ReturnRepr Repr
-	Entry      BlockID
-	Blocks     []Block
+	ID                   FunctionID
+	Name                 string
+	Params               []Param
+	ReturnRepr           Repr
+	ReturnObjectShape    ShapeID
+	HasReturnObjectShape bool
+	Entry                BlockID
+	Blocks               []Block
 }
 
 type Param struct {
-	Value ValueID
-	Name  string
-	Repr  Repr
+	Value          ValueID
+	Name           string
+	Repr           Repr
+	ObjectShape    ShapeID
+	HasObjectShape bool
 }
 
 type Block struct {
@@ -148,9 +152,11 @@ const (
 )
 
 type BoxJSValue struct {
-	Kind  BoxJSKind
-	Value ValueID
-	Shape ShapeID
+	Kind        BoxJSKind
+	Value       ValueID
+	Shape       ShapeID
+	Function    FunctionID
+	HasFunction bool
 }
 
 type UnboxJSKind uint8
@@ -198,6 +204,10 @@ type DynamicBinaryJSValue struct {
 
 type Call struct {
 	Callee FunctionID
+	Args   []ValueID
+}
+type DynamicCall struct {
+	Callee ValueID
 	Args   []ValueID
 }
 
@@ -322,6 +332,7 @@ func (FloatBinary) isOperation()          {}
 func (ProvenIntBinary) isOperation()      {}
 func (FloatCompare) isOperation()         {}
 func (Call) isOperation()                 {}
+func (DynamicCall) isOperation()          {}
 func (DispatchCall) isOperation()         {}
 func (IntrinsicCall) isOperation()        {}
 func (Phi) isOperation()                  {}

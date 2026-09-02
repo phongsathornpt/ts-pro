@@ -82,6 +82,12 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("box.%d v%d", op.Kind, op.Value)
 	case DynamicBinaryOp:
 		return fmt.Sprintf("dynamic.%s v%d, v%d", formatBinary(op.Operator), op.Left, op.Right)
+	case DynamicCallOp:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = fmt.Sprintf("v%d", arg)
+		}
+		return fmt.Sprintf("dynamic.call v%d(%s)", op.Callee, strings.Join(args, ", "))
 	case CallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

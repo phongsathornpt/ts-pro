@@ -66,9 +66,11 @@ const (
 )
 
 type BoxOp struct {
-	Kind  BoxKind
-	Value ValueID
-	Shape ShapeID
+	Kind        BoxKind
+	Value       ValueID
+	Shape       ShapeID
+	Function    FunctionID
+	HasFunction bool
 }
 
 type UnboxKind uint8
@@ -93,6 +95,10 @@ type DynamicBinaryOp struct {
 }
 type CallOp struct {
 	Callee FunctionID
+	Args   []ValueID
+}
+type DynamicCallOp struct {
+	Callee ValueID
 	Args   []ValueID
 }
 
@@ -238,6 +244,7 @@ func (BoxOp) isOperation()              {}
 func (UnboxOp) isOperation()            {}
 func (DynamicBinaryOp) isOperation()    {}
 func (CallOp) isOperation()             {}
+func (DynamicCallOp) isOperation()      {}
 func (DispatchCallOp) isOperation()     {}
 func (IntrinsicCallOp) isOperation()    {}
 func (PhiOp) isOperation()              {}

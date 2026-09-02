@@ -183,6 +183,11 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				}
 				checkValue(op.Left)
 				checkValue(op.Right)
+			case DynamicCallOp:
+				checkValue(op.Callee)
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
 			case CallOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("calls unknown function f%d", op.Callee))

@@ -74,6 +74,8 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.lowerBinary(expr)
 	case frontend.ExprCall:
 		return f.lowerCall(expr)
+	case frontend.ExprDynamicCall:
+		return f.lowerDynamicCall(expr)
 	case frontend.ExprArray:
 		elements := make([]hir.ValueID, 0, len(expr.Elements))
 		for _, element := range expr.Elements {
@@ -329,6 +331,17 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if expr.CallTarget == nil {
 			return 0, fmt.Errorf("closure value has no native target")
 		}
+		closureType := expr.Type
+		if int(closureType) < len(f.module.source.Types) {
+			kind := f.module.source.Types[closureType].Kind
+			if kind == frontend.TypeAny || kind == frontend.TypeUnion {
+				if nativeFunctionType, ok := findFrontendType(f.module.source, frontend.TypeFunction); ok {
+					closureType = nativeFunctionType
+				} else {
+					return 0, fmt.Errorf("dynamic closure value requires a native function semantic type")
+				}
+			}
+		}
 		captures := make([]hir.ValueID, 0, len(expr.Captures))
 		for _, capture := range expr.Captures {
 			value, err := f.lowerExpr(capture)
@@ -337,7 +350,7 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			}
 			captures = append(captures, value)
 		}
-		return f.emit(expr.Type, hir.ClosureNewOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Captures: captures}), nil
+		return f.emit(closureType, hir.ClosureNewOp{Callee: hir.NewFunctionID(uint32(*expr.CallTarget)), Captures: captures}), nil
 	default:
 		return 0, fmt.Errorf("unsupported semantic expression kind %d", expr.Kind)
 	}
@@ -480,6 +493,29 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 		return 0, err
 	}
 	return f.emit(expr.Type, hir.ClosureCallOp{Closure: closure, Args: args}), nil
+}
+
+func (f *functionLowerer) lowerDynamicCall(expr *frontend.Expr) (hir.ValueID, error) {
+	if expr.Callee == nil {
+		return 0, fmt.Errorf("dynamic call has no callee")
+	}
+	anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+	if !ok {
+		return 0, fmt.Errorf("dynamic call requires any semantic type")
+	}
+	callee, err := f.lowerExprAs(expr.Callee, anyType)
+	if err != nil {
+		return 0, err
+	}
+	args := make([]hir.ValueID, 0, len(expr.Args))
+	for _, arg := range expr.Args {
+		value, err := f.lowerExprAs(arg, anyType)
+		if err != nil {
+			return 0, err
+		}
+		args = append(args, value)
+	}
+	return f.emit(expr.Type, hir.DynamicCallOp{Callee: callee, Args: args}), nil
 }
 
 func (f *functionLowerer) lowerCaughtTaskJoin(expr *frontend.Expr) (hir.ValueID, error) {

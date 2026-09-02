@@ -116,6 +116,23 @@ func tsnative_jsvalue_box_function(raw unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(value)
 }
 
+//export tsnative_jsvalue_box_function_target
+func tsnative_jsvalue_box_function_target(raw unsafe.Pointer, target C.uint32_t) unsafe.Pointer {
+	value := newNativeJSValue(nativeJSTagFunction)
+	value.reserved = uint32(target) + 1
+	nativeJSSetRef(value, raw)
+	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_function_target
+func tsnative_jsvalue_function_target(raw unsafe.Pointer) C.uint32_t {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagFunction || value.reserved == 0 {
+		return C.uint32_t(^uint32(0))
+	}
+	return C.uint32_t(value.reserved - 1)
+}
+
 //export tsnative_jsvalue_box_array
 func tsnative_jsvalue_box_array(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagArray)
@@ -153,6 +170,11 @@ func tsnative_jsvalue_unbox_function(raw unsafe.Pointer) unsafe.Pointer {
 //export tsnative_jsvalue_dynamic_set_missing
 func tsnative_jsvalue_dynamic_set_missing() {
 	nativeAbort("dynamic property write requires an existing closed-shape field")
+}
+
+//export tsnative_jsvalue_dynamic_call_invalid
+func tsnative_jsvalue_dynamic_call_invalid() {
+	nativeAbort("dynamic call target or argument ABI is invalid")
 }
 
 //export tsnative_jsvalue_unbox_f64

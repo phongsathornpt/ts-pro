@@ -21,6 +21,14 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 	sourceDynamic := sourceKind == frontend.TypeAny || sourceKind == frontend.TypeUnion
 
 	if targetDynamic {
+		if expr.Kind == frontend.ExprClosure {
+			if expr.CallTarget == nil {
+				return 0, fmt.Errorf("cannot box closure without a concrete native target")
+			}
+			return f.emit(target, hir.BoxOp{
+				Kind: hir.BoxFunction, Value: value, Function: hir.NewFunctionID(uint32(*expr.CallTarget)), HasFunction: true,
+			}), nil
+		}
 		if sourceDynamic || sourceKind == frontend.TypeNull || sourceKind == frontend.TypeUndefined {
 			return value, nil
 		}
@@ -43,7 +51,15 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 		default:
 			return 0, fmt.Errorf("cannot box semantic type %q into dynamic value", f.module.source.Types[expr.Type].Name)
 		}
-		return f.emit(target, hir.BoxOp{Kind: kind, Value: value, Shape: shape}), nil
+		box := hir.BoxOp{Kind: kind, Value: value, Shape: shape}
+		if kind == hir.BoxFunction {
+			if expr.CallTarget == nil {
+				return 0, fmt.Errorf("cannot box function value without a concrete native closure target")
+			}
+			box.Function = hir.NewFunctionID(uint32(*expr.CallTarget))
+			box.HasFunction = true
+		}
+		return f.emit(target, box), nil
 	}
 
 	if !sourceDynamic {

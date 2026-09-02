@@ -143,6 +143,14 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return fmt.Errorf("JSValue object box v%d references unknown shape s%d", inst.Result, op.Shape)
 					}
 				}
+				if op.Kind == BoxJSFunction {
+					if !op.HasFunction {
+						return fmt.Errorf("JSValue function box v%d has no native target metadata", inst.Result)
+					}
+					if _, ok := functions[op.Function]; !ok {
+						return fmt.Errorf("JSValue function box v%d references unknown function f%d", inst.Result, op.Function)
+					}
+				}
 				if inst.Repr != ReprJSValue {
 					return fmt.Errorf("JSValue box v%d must produce JSValue representation", inst.Result)
 				}
@@ -193,6 +201,18 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				}
 				if err := checkValue(op.Right); err != nil {
 					return err
+				}
+			case DynamicCall:
+				if inst.Repr != ReprJSValue {
+					return fmt.Errorf("dynamic call v%d must produce JSValue", inst.Result)
+				}
+				if err := checkValue(op.Callee); err != nil {
+					return err
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
 				}
 			case Call:
 				if _, ok := functions[op.Callee]; !ok {

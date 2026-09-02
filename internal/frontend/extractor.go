@@ -983,11 +983,16 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		calleeName, _ := calleeNode.Text()
 		calleeIdentifier = calleeName
 		expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeName, Span: e.span(calleeNode)}
+		calleeType, err := e.typeAt(calleeNode)
+		if err != nil {
+			return nil, err
+		}
+		dynamicCallee := int(calleeType) < len(e.result.Types) && (e.result.Types[calleeType].Kind == TypeAny || e.result.Types[calleeType].Kind == TypeUnion)
 		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
 		if err != nil {
 			return nil, err
 		}
-		if symbol != nil {
+		if symbol != nil && !dynamicCallee {
 			if info, ok := e.generics[symbol.ID]; ok {
 				infoCopy := info
 				generic = &infoCopy
@@ -1126,7 +1131,15 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		return expr, nil
 	}
 	if expr.CallTarget == nil && len(expr.Dispatch) == 0 {
-		if expr.Callee == nil || int(expr.Callee.Type) >= len(e.result.Types) || e.result.Types[expr.Callee.Type].Kind != TypeFunction {
+		if expr.Callee == nil || int(expr.Callee.Type) >= len(e.result.Types) {
+			return nil, fmt.Errorf("dynamic call at %d has invalid callee type", node.Pos())
+		}
+		calleeKind := e.result.Types[expr.Callee.Type].Kind
+		if calleeKind == TypeAny || calleeKind == TypeUnion {
+			expr.Kind = ExprDynamicCall
+			return expr, nil
+		}
+		if calleeKind != TypeFunction {
 			return nil, fmt.Errorf("dynamic call at %d is not a proven native function value", node.Pos())
 		}
 	}

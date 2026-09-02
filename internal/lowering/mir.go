@@ -35,7 +35,7 @@ func LowerMIRWithRanges(source hir.Module, ranges rangeanalysis.Result) (mir.Mod
 		result.Entry = &entry
 	}
 	for _, fn := range source.Functions {
-		lowered, err := lowerMIRFunction(fn, ranges[fn.ID])
+		lowered, err := lowerMIRFunction(fn, ranges[fn.ID], source.Types)
 		if err != nil {
 			return mir.Module{}, err
 		}
@@ -47,7 +47,7 @@ func LowerMIRWithRanges(source hir.Module, ranges rangeanalysis.Result) (mir.Mod
 	return result, nil
 }
 
-func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult) (mir.Function, error) {
+func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult, types []hir.SemanticType) (mir.Function, error) {
 	returnRepr, err := lowerRepr(source.ReturnRepr)
 	if err != nil {
 		return mir.Function{}, fmt.Errorf("function %s return: %w", source.Name, err)
@@ -56,12 +56,21 @@ func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult) 
 		ID: mir.FunctionID(source.ID), Name: source.Name,
 		ReturnRepr: returnRepr, Entry: mir.BlockID(source.Entry),
 	}
+	if int(source.ReturnType) < len(types) && types[source.ReturnType].Kind == hir.TypeObject {
+		result.ReturnObjectShape = mir.ShapeID(types[source.ReturnType].Shape)
+		result.HasReturnObjectShape = true
+	}
 	for _, param := range source.Params {
 		repr, err := lowerRepr(param.Repr)
 		if err != nil {
 			return mir.Function{}, fmt.Errorf("function %s parameter %s: %w", source.Name, param.Name, err)
 		}
-		result.Params = append(result.Params, mir.Param{Value: mir.ValueID(param.Value), Name: param.Name, Repr: repr})
+		loweredParam := mir.Param{Value: mir.ValueID(param.Value), Name: param.Name, Repr: repr}
+		if int(param.SemanticType) < len(types) && types[param.SemanticType].Kind == hir.TypeObject {
+			loweredParam.ObjectShape = mir.ShapeID(types[param.SemanticType].Shape)
+			loweredParam.HasObjectShape = true
+		}
+		result.Params = append(result.Params, loweredParam)
 	}
 	for _, block := range source.Blocks {
 		lowered := mir.Block{ID: mir.BlockID(block.ID)}
@@ -150,7 +159,7 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		if kind == mir.BoxJSInvalid {
 			return mir.Instruction{}, fmt.Errorf("invalid JSValue box kind %d", op.Kind)
 		}
-		result.Op = mir.BoxJSValue{Kind: kind, Value: mir.ValueID(op.Value), Shape: mir.ShapeID(op.Shape)}
+		result.Op = mir.BoxJSValue{Kind: kind, Value: mir.ValueID(op.Value), Shape: mir.ShapeID(op.Shape), Function: mir.FunctionID(op.Function), HasFunction: op.HasFunction}
 	case hir.UnboxOp:
 		kind := mir.UnboxJSInvalid
 		switch op.Kind {
@@ -183,6 +192,12 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			return mir.Instruction{}, fmt.Errorf("unsupported dynamic binary operator %d", op.Operator)
 		}
 		result.Op = mir.DynamicBinaryJSValue{Operator: operator, Left: mir.ValueID(op.Left), Right: mir.ValueID(op.Right)}
+	case hir.DynamicCallOp:
+		args := make([]mir.ValueID, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = mir.ValueID(arg)
+		}
+		result.Op = mir.DynamicCall{Callee: mir.ValueID(op.Callee), Args: args}
 	case hir.CallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {
