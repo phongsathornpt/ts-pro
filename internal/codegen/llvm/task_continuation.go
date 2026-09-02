@@ -146,6 +146,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return []mir.ValueID{op.Value}, true
 	case mir.PromiseResolve:
 		return []mir.ValueID{op.Value}, true
+	case mir.PromiseAdopt:
+		return []mir.ValueID{op.Promise}, true
 	case mir.PromiseReject:
 		return []mir.ValueID{op.Reason}, true
 	case mir.TaskSpawn:
@@ -167,6 +169,8 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	case mir.TaskCancel:
 		return []mir.ValueID{op.Task}, true
 	case mir.TaskFailure:
+		return []mir.ValueID{op.Task}, true
+	case mir.TaskRetain:
 		return []mir.ValueID{op.Task}, true
 	case mir.TaskRelease:
 		return []mir.ValueID{op.Task}, true
@@ -303,6 +307,13 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.PromiseResolve:
 				if !available[op.Value] || inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseAdopt:
+				if !available[op.Promise] || inst.Repr != mir.ReprTaskRef {
 					return nil
 				}
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}

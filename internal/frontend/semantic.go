@@ -23,6 +23,7 @@ const (
 	ExprNewClass
 	ExprTaskSpawn
 	ExprPromiseResolve
+	ExprPromiseAdopt
 	ExprPromiseReject
 	ExprTaskJoin
 	ExprTaskYield

@@ -381,6 +381,13 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Value); err != nil {
 					return err
 				}
+			case PromiseAdopt:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("Promise adoption v%d must produce TaskRef", inst.Result)
+				}
+				if err := checkValue(op.Promise); err != nil {
+					return err
+				}
 			case PromiseReject:
 				if inst.Repr != ReprTaskRef || (op.Result != ReprF64 && op.Result != ReprBool && op.Result != ReprJSValue) {
 					return fmt.Errorf("Promise.reject v%d has invalid task representation", inst.Result)
@@ -423,6 +430,10 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if inst.Repr != ReprJSValue {
 					return fmt.Errorf("task failure v%d must produce JSValue", inst.Result)
 				}
+				if err := checkValue(op.Task); err != nil {
+					return err
+				}
+			case TaskRetain:
 				if err := checkValue(op.Task); err != nil {
 					return err
 				}

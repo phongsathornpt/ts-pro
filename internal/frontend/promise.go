@@ -24,9 +24,14 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 			return nil, fmt.Errorf("Promise.resolve at %d currently requires exactly one value", node.Pos())
 		}
 		if int(expr.Args[0].Type) < len(e.result.Types) && e.result.Types[expr.Args[0].Type].Kind == TypePromise {
-			return nil, fmt.Errorf("Promise.resolve at %d does not adopt an existing Promise yet", node.Pos())
+			input := e.result.Types[expr.Args[0].Type]
+			if !e.compatibleTaskResult(input.ReturnType, promiseType.ReturnType) {
+				return nil, fmt.Errorf("Promise.resolve at %d cannot adopt incompatible Promise result", node.Pos())
+			}
+			expr.Kind = ExprPromiseAdopt
+		} else {
+			expr.Kind = ExprPromiseResolve
 		}
-		expr.Kind = ExprPromiseResolve
 	case "Promise.reject":
 		if len(expr.Args) != 1 {
 			return nil, fmt.Errorf("Promise.reject at %d currently requires exactly one reason", node.Pos())

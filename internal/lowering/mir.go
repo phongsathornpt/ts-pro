@@ -260,6 +260,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			return mir.Instruction{}, err
 		}
 		result.Op = mir.PromiseResolve{Value: mir.ValueID(op.Value), Result: resultRepr}
+	case hir.PromiseAdoptOp:
+		result.Op = mir.PromiseAdopt{Promise: mir.ValueID(op.Promise)}
 	case hir.PromiseRejectOp:
 		resultRepr, err := lowerTaskResultRepr(op.Result)
 		if err != nil {
@@ -283,6 +285,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.TaskWait{Task: mir.ValueID(op.Task)}
 	case hir.TaskFailureOp:
 		result.Op = mir.TaskFailure{Task: mir.ValueID(op.Task)}
+	case hir.TaskRetainOp:
+		result.Op = mir.TaskRetain{Task: mir.ValueID(op.Task)}
 	case hir.TaskReleaseOp:
 		result.Op = mir.TaskRelease{Task: mir.ValueID(op.Task)}
 	case hir.TaskYieldOp:

@@ -190,6 +190,7 @@ type PromiseResolveOp struct {
 	Value  ValueID
 	Result TaskResultKind
 }
+type PromiseAdoptOp struct{ Promise ValueID }
 type PromiseRejectOp struct {
 	Reason ValueID
 	Result TaskResultKind
@@ -200,6 +201,7 @@ type TaskJoinOp struct {
 }
 type TaskWaitOp struct{ Task ValueID }
 type TaskFailureOp struct{ Task ValueID }
+type TaskRetainOp struct{ Task ValueID }
 type TaskReleaseOp struct{ Task ValueID }
 type TaskYieldOp struct{}
 type TaskCancelOp struct{ Task ValueID }
@@ -265,10 +267,12 @@ func (ClosureNewOp) isOperation()       {}
 func (ClosureCallOp) isOperation()      {}
 func (TaskSpawnOp) isOperation()        {}
 func (PromiseResolveOp) isOperation()   {}
+func (PromiseAdoptOp) isOperation()     {}
 func (PromiseRejectOp) isOperation()    {}
 func (TaskJoinOp) isOperation()         {}
 func (TaskWaitOp) isOperation()         {}
 func (TaskFailureOp) isOperation()      {}
+func (TaskRetainOp) isOperation()       {}
 func (TaskReleaseOp) isOperation()      {}
 func (TaskYieldOp) isOperation()        {}
 func (TaskCancelOp) isOperation()       {}

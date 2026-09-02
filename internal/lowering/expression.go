@@ -165,6 +165,15 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.PromiseResolveOp{Value: value, Result: resultKind}), nil
+	case frontend.ExprPromiseAdopt:
+		if len(expr.Args) != 1 {
+			return 0, fmt.Errorf("Promise adoption requires one Promise")
+		}
+		promise, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.PromiseAdoptOp{Promise: promise}), nil
 	case frontend.ExprPromiseReject:
 		_, resultKind, err := f.promiseResultKind(expr.Type)
 		if err != nil {

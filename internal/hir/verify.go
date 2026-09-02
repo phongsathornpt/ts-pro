@@ -289,6 +289,8 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if op.Result == TaskResultInvalid {
 					add("Promise.resolve has invalid task result kind")
 				}
+			case PromiseAdoptOp:
+				checkValue(op.Promise)
 			case PromiseRejectOp:
 				checkValue(op.Reason)
 				if op.Result == TaskResultInvalid {
@@ -309,6 +311,8 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 			case TaskWaitOp:
 				checkValue(op.Task)
 			case TaskFailureOp:
+				checkValue(op.Task)
+			case TaskRetainOp:
 				checkValue(op.Task)
 			case TaskReleaseOp:
 				checkValue(op.Task)

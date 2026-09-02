@@ -151,7 +151,7 @@ func (f *functionLowerer) releaseOwnedPromises() error {
 	return nil
 }
 
-func isOwnedPromiseProducer(expr *frontend.Expr) bool {
+func isFreshPromiseProducer(expr *frontend.Expr) bool {
 	if expr == nil {
 		return false
 	}
@@ -240,9 +240,6 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			if f.scopeDepth != 1 {
 				return fmt.Errorf("Promise locals in nested control-flow scopes are not supported until lexical TaskRef cleanup is implemented")
 			}
-			if !isOwnedPromiseProducer(stmt.Value) {
-				return fmt.Errorf("Promise local %q must own a newly created native Promise; Promise aliases require retain-on-copy", stmt.Name)
-			}
 		}
 		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
 		if err != nil {
@@ -250,6 +247,13 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		}
 		f.locals[stmt.Symbol] = value
 		if isPromise {
+			if !isFreshPromiseProducer(stmt.Value) {
+				voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+				if !ok {
+					return fmt.Errorf("Promise retain requires void semantic type")
+				}
+				f.emit(voidType, hir.TaskRetainOp{Task: value})
+			}
 			f.ownedPromises[stmt.Symbol] = value
 		}
 		return nil

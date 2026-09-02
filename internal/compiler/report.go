@@ -36,6 +36,7 @@ type BuildMetrics struct {
 	I64FastOps             int
 	TaskSpawns             int
 	TaskJoins              int
+	TaskRetains            int
 	TaskReleases           int
 	TaskYields             int
 	ChannelCreates         int
@@ -96,7 +97,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes esc
 	metrics.I32FastOps, metrics.I64FastOps = countIntegerFastOps(mirModule)
 	metrics.BoxingSites = countBoxingSites(mirModule)
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
-	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskReleases, metrics.TaskYields = countTaskOps(mirModule)
+	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskRetains, metrics.TaskReleases, metrics.TaskYields = countTaskOps(mirModule)
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.Sleeps = countSleepOps(mirModule)
 	stackObjects := escapeanalysis.StackObjects(mirModule, escapes)
@@ -198,7 +199,7 @@ func countDynamicDispatch(module mir.Module) int {
 	return count
 }
 
-func countTaskOps(module mir.Module) (spawns, joins, releases, yields int) {
+func countTaskOps(module mir.Module) (spawns, joins, retains, releases, yields int) {
 	for _, fn := range module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
@@ -207,6 +208,8 @@ func countTaskOps(module mir.Module) (spawns, joins, releases, yields int) {
 					spawns++
 				case mir.TaskJoin:
 					joins++
+				case mir.TaskRetain:
+					retains++
 				case mir.TaskRelease:
 					releases++
 				case mir.TaskYield:
@@ -215,7 +218,7 @@ func countTaskOps(module mir.Module) (spawns, joins, releases, yields int) {
 			}
 		}
 	}
-	return spawns, joins, releases, yields
+	return spawns, joins, retains, releases, yields
 }
 
 func countChannelOps(module mir.Module) (creates, trySends, tryRecvs, sends, recvs int) {
@@ -280,7 +283,7 @@ func countRuntimeCallsWithLocalObjects(module mir.Module, stackObjects escapeana
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64,
 					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicFieldGet, mir.DynamicFieldSet, mir.DynamicCall, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
-					mir.PromiseResolve, mir.PromiseReject, mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.TaskGroupNew, mir.TaskGroupJoin, mir.TaskGroupCancel, mir.TaskContextSet, mir.TaskContextGet, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
+					mir.PromiseResolve, mir.PromiseAdopt, mir.PromiseReject, mir.TaskSpawn, mir.TaskRetain, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.TaskGroupNew, mir.TaskGroupJoin, mir.TaskGroupCancel, mir.TaskContextSet, mir.TaskContextGet, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 					count++
 				}
 			}

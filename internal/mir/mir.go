@@ -290,6 +290,7 @@ type PromiseResolve struct {
 	Value  ValueID
 	Result Repr
 }
+type PromiseAdopt struct{ Promise ValueID }
 type PromiseReject struct {
 	Reason ValueID
 	Result Repr
@@ -300,6 +301,7 @@ type TaskJoin struct {
 }
 type TaskWait struct{ Task ValueID }
 type TaskFailure struct{ Task ValueID }
+type TaskRetain struct{ Task ValueID }
 type TaskRelease struct{ Task ValueID }
 type TaskYield struct{}
 type TaskCancel struct{ Task ValueID }
@@ -353,10 +355,12 @@ func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
 func (PromiseResolve) isOperation()       {}
+func (PromiseAdopt) isOperation()         {}
 func (PromiseReject) isOperation()        {}
 func (TaskJoin) isOperation()             {}
 func (TaskWait) isOperation()             {}
 func (TaskFailure) isOperation()          {}
+func (TaskRetain) isOperation()           {}
 func (TaskRelease) isOperation()          {}
 func (TaskYield) isOperation()            {}
 func (TaskCancel) isOperation()           {}

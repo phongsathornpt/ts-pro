@@ -120,6 +120,8 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("closure.new f%d(%s)", op.Callee, strings.Join(captures, ", "))
 	case PromiseResolveOp:
 		return fmt.Sprintf("promise.resolve v%d, kind=%d", op.Value, op.Result)
+	case PromiseAdoptOp:
+		return fmt.Sprintf("promise.adopt v%d", op.Promise)
 	case PromiseRejectOp:
 		return fmt.Sprintf("promise.reject v%d, kind=%d", op.Reason, op.Result)
 	case TaskSpawnOp:
@@ -140,6 +142,8 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("task.wait v%d", op.Task)
 	case TaskFailureOp:
 		return fmt.Sprintf("task.failure v%d", op.Task)
+	case TaskRetainOp:
+		return fmt.Sprintf("task.retain v%d", op.Task)
 	case TaskReleaseOp:
 		return fmt.Sprintf("task.release v%d", op.Task)
 	case TaskYieldOp:

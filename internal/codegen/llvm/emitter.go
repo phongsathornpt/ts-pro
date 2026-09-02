@@ -100,7 +100,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
-	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_task(ptr)\ndeclare i32 @tsnative_task_await_task_consume(ptr)\ndeclare i8 @tsnative_task_wait_status(ptr)\ndeclare ptr @tsnative_task_failure_ref(ptr)\ndeclare i32 @tsnative_task_await_status_task(ptr, ptr)\ndeclare void @tsnative_task_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_f64_shared(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_shared(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_shared(ptr, ptr)\n")
+	b.WriteString("declare void @tsnative_task_join_release(ptr)\ndeclare i32 @tsnative_task_await_task(ptr)\ndeclare i32 @tsnative_task_await_task_consume(ptr)\ndeclare i8 @tsnative_task_wait_status(ptr)\ndeclare ptr @tsnative_task_failure_ref(ptr)\ndeclare i32 @tsnative_task_await_status_task(ptr, ptr)\ndeclare i32 @tsnative_task_retain(ptr)\ndeclare void @tsnative_task_release(ptr)\ndeclare i32 @tsnative_task_await_f64_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_f64_shared(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_bool_shared(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_task(ptr, ptr)\ndeclare i32 @tsnative_task_await_ref_shared(ptr, ptr)\n")
 	b.WriteString("declare double @tsnative_task_join_f64(ptr)\ndeclare double @tsnative_task_join_f64_release(ptr)\n")
 	b.WriteString("declare i8 @tsnative_task_join_bool(ptr)\ndeclare i8 @tsnative_task_join_bool_release(ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_join_ref(ptr)\ndeclare ptr @tsnative_task_join_ref_release(ptr)\n")
@@ -537,6 +537,13 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		values[inst.Result] = name
 		return nil
+	case mir.PromiseAdopt:
+		promise, err := operand(values, op.Promise)
+		if err != nil {
+			return err
+		}
+		values[inst.Result] = promise
+		return nil
 	case mir.PromiseReject:
 		reason, err := operand(values, op.Reason)
 		if err != nil {
@@ -577,6 +584,13 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = call ptr @tsnative_task_failure_ref(ptr %s)\n", name, task)
 		values[inst.Result] = name
+		return nil
+	case mir.TaskRetain:
+		task, err := operand(values, op.Task)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call i32 @tsnative_task_retain(ptr %s)\n", task)
 		return nil
 	case mir.TaskRelease:
 		task, err := operand(values, op.Task)
