@@ -22,7 +22,7 @@ The current transitional end-to-end path still uses the existing Go compiler dri
 
 ```bash
 go build -o build/tsnative ./cmd/tsnative
-./build/tsnative build examples/fib.ts -o build/fib -O2
+./build/tsnative build examples/basics/fib.ts -o build/fib -O2
 ./build/fib
 ```
 
@@ -32,7 +32,7 @@ Expected output:
 6765
 ```
 
-The generated program is a native executable linked against the tsnative Go runtime/native libraries through a stable C-compatible ABI; Node.js and V8 are not part of the runtime path. Handwritten C runtime code is transitional and must be removed.
+The generated program is a native executable built under `CGO_ENABLED=0` without cgo, assembly, or external C toolchain dependencies; Node.js and V8 are not part of the runtime path. Handwritten C and assembly have been completely eliminated from the repository.
 
 Committed native coverage includes direct/recursive functions, numeric arithmetic and comparisons, mutable locals, `if`/`while`/`for` with SSA phi nodes, contiguous `number[]`, UTF-8 strings and concatenation, and native number/string console output. Closed object shapes are the active in-progress milestone.
 

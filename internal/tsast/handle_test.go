@@ -25,7 +25,7 @@ func TestExactNodeHandleSemanticQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := snapshot.Projects[0]
-	fileName := filepath.Join(projectRoot(t), "examples", "fib.ts")
+	fileName := filepath.Join(projectRoot(t), "examples", "basics", "fib.ts")
 	payload, err := client.GetSourceFile(ctx, snapshot.Snapshot, project.ID, fileName)
 	if err != nil {
 		t.Fatal(err)

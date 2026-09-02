@@ -205,6 +205,19 @@ func normalizeOptions(options BuildOptions) (BuildOptions, error) {
 		options.Input = filepath.Join(root, options.Input)
 	}
 	options.Input = filepath.Clean(options.Input)
+	if _, err := os.Stat(options.Input); err != nil {
+		examplesDir := filepath.Join(root, "examples")
+		if strings.HasPrefix(options.Input, examplesDir) {
+			baseName := filepath.Base(options.Input)
+			for _, sub := range []string{"basics", "arrays", "objects", "dynamic", "concurrency", "memory"} {
+				candidate := filepath.Join(examplesDir, sub, baseName)
+				if _, err2 := os.Stat(candidate); err2 == nil {
+					options.Input = candidate
+					break
+				}
+			}
+		}
+	}
 	if options.Config == "" {
 		options.Config = filepath.Join(root, "tsconfig.json")
 	} else if !filepath.IsAbs(options.Config) {

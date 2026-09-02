@@ -24,7 +24,7 @@ func TestTypeScriptAPISemanticQueries(t *testing.T) {
 	}
 	defer func() { _ = client.ReleaseSnapshot(context.Background(), snapshot.Snapshot) }()
 	project := snapshot.Projects[0]
-	file := filepath.Join(client.toolchain.Root, "examples", "fib.ts")
+	file := filepath.Join(client.toolchain.Root, "examples", "basics", "fib.ts")
 
 	data, err := client.GetSourceFile(ctx, snapshot.Snapshot, project.ID, file)
 	if err != nil {

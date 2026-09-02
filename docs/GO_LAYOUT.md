@@ -10,13 +10,14 @@ TypeScript 7 compiler side
   semantic DTOs
   HIR / MIR / SSA
   representation proof and optimization
-  LLVM IR generation and build orchestration
+  Pure-Go code generation and build orchestration
 
-Go runtime side
-  runtimego/core/          allocator, GC, strings, arrays, objects, JSValue
-  runtimego/concurrency/   scheduler, tasks, channels, timers, blocking pool
-  runtimego/libs/          native TypeScript libraries
-  runtime ABI              stable C-compatible exported symbols consumed by LLVM
+Go runtime side (package runtimego, CGO_ENABLED=0 pure-Go)
+  allocator, spans, heap, nursery, roots, barriers, blocktable, gcmark
+  strings, arrays, objects, JSValue, handles
+  scheduler, task, channels, timers, blocking pool, task groups, context
+  platform thread identification (thread_darwin.go, thread_linux.go, thread_other.go)
+  runtime.go: runtime coordinator and public symbols
 ```
 
 ## Hard boundary
