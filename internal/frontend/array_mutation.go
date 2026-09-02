@@ -34,6 +34,27 @@ func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
 			}
 		}
 		return true
+	case TypeArray:
+		return e.compatibleArrayElement(want.Element, got.Element)
+	case TypeFunction:
+		if len(want.Params) != len(got.Params) {
+			return false
+		}
+		for i := range want.Params {
+			if !e.compatibleArrayElement(want.Params[i], got.Params[i]) {
+				return false
+			}
+		}
+		return e.compatibleArrayElement(want.ReturnType, got.ReturnType)
+	case TypeAny:
+		return true
+	case TypeUnion:
+		for _, member := range want.Members {
+			if e.compatibleArrayElement(member, actual) {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
