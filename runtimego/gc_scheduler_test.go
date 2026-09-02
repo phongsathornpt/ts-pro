@@ -82,7 +82,8 @@ func TestParkedTaskStateRemainsExplicitlyRooted(t *testing.T) {
 	payload := tsnative_heap_alloc(16)
 	state := tsnative_heap_alloc(unsafe.Sizeof(uintptr(0)))
 	*(*uintptr)(state) = uintptr(payload)
-	task := createNativeTask(1, uintptr(state), nativeTaskResultVoid)
+	var entry byte
+	task := createNativeTask(unsafe.Pointer(&entry), state, nativeTaskResultVoid)
 	if task == nil {
 		t.Fatal("task allocation failed")
 	}
@@ -109,12 +110,13 @@ func TestSleepingTaskKeepsStateGraphRooted(t *testing.T) {
 	payload := tsnative_heap_alloc(16)
 	state := tsnative_heap_alloc(unsafe.Sizeof(uintptr(0)))
 	*(*uintptr)(state) = uintptr(payload)
-	task := createNativeTask(1, uintptr(state), nativeTaskResultVoid)
+	var entry byte
+	task := createNativeTask(unsafe.Pointer(&entry), state, nativeTaskResultVoid)
 	if task == nil {
 		t.Fatal("task allocation failed")
 	}
 	task.status.Store(nativeTaskWaiting)
-	if waiter := scheduleNativeTimer(time.Hour, task.handle, false); waiter == nil {
+	if waiter := scheduleNativeTimer(time.Hour, nativeTaskKey(task), false); waiter == nil {
 		t.Fatal("timer scheduling failed")
 	}
 
@@ -365,6 +367,8 @@ func TestHeapPageMetadataKeepsInteriorPointerAlive(t *testing.T) {
 }
 
 func TestAllocatorAccountsRemoteFreeAndSpanTransfer(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()
 

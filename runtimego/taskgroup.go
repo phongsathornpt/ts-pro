@@ -7,11 +7,11 @@ import "C"
 
 import (
 	"sync"
-	"sync/atomic"
 	"unsafe"
 )
 
 type nativeTaskGroup struct {
+	handle unsafe.Pointer
 	mu     sync.Mutex
 	done   *sync.Cond
 	tasks  map[uintptr]struct{}
@@ -20,18 +20,24 @@ type nativeTaskGroup struct {
 
 var nativeTaskGroups sync.Map
 var nativeTaskGroupsByTask sync.Map
-var nativeTaskGroupToken atomic.Uint64
 
-func taskGroupState(raw unsafe.Pointer) (*nativeTaskGroup, bool) {
-	if raw == nil {
+func taskGroupStateKey(key uintptr) (*nativeTaskGroup, bool) {
+	if key == 0 {
 		return nil, false
 	}
-	value, ok := nativeTaskGroups.Load(uintptr(raw))
+	value, ok := nativeTaskGroups.Load(key)
 	if !ok {
 		return nil, false
 	}
 	group, ok := value.(*nativeTaskGroup)
 	return group, ok
+}
+
+func taskGroupState(raw unsafe.Pointer) (*nativeTaskGroup, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	return taskGroupStateKey(uintptr(raw))
 }
 
 func taskGroupAttach(raw unsafe.Pointer, task uintptr) bool {
@@ -54,7 +60,7 @@ func taskGroupDetach(task uintptr) {
 	if !ok {
 		return
 	}
-	group, ok := taskGroupState(unsafe.Pointer(value.(uintptr)))
+	group, ok := taskGroupStateKey(value.(uintptr))
 	if !ok {
 		return
 	}
@@ -73,29 +79,32 @@ func taskGroupSpawn(raw, entry, state unsafe.Pointer, kind int32) unsafe.Pointer
 	if tsnative_scheduler_init() != 0 {
 		return nil
 	}
-	task := createNativeTask(uintptr(entry), uintptr(state), kind)
+	task := createNativeTask(entry, state, kind)
 	if task == nil {
 		return nil
 	}
-	if !taskGroupAttach(raw, task.handle) {
+	if !taskGroupAttach(raw, nativeTaskKey(task)) {
 		destroyNativeTaskStorage(task)
 		return nil
 	}
-	if tsnative_scheduler_submit(unsafe.Pointer(task.handle)) != 0 {
-		taskGroupDetach(task.handle)
+	if tsnative_scheduler_submit(task.handle) != 0 {
+		taskGroupDetach(nativeTaskKey(task))
 		destroyNativeTaskStorage(task)
 		return nil
 	}
-	return unsafe.Pointer(task.handle)
+	return task.handle
 }
 
 //export tsnative_task_group_new
 func tsnative_task_group_new() unsafe.Pointer {
-	handle := uintptr(nativeTaskGroupToken.Add(1)<<4 | 3)
-	group := &nativeTaskGroup{tasks: make(map[uintptr]struct{})}
+	handle := allocNativeHandle()
+	if handle == nil {
+		return nil
+	}
+	group := &nativeTaskGroup{handle: handle, tasks: make(map[uintptr]struct{})}
 	group.done = sync.NewCond(&group.mu)
-	nativeTaskGroups.Store(handle, group)
-	return unsafe.Pointer(handle)
+	nativeTaskGroups.Store(uintptr(handle), group)
+	return handle
 }
 
 func taskGroupSpawnOrAbort(group, entry, state unsafe.Pointer, kind int32) unsafe.Pointer {
@@ -159,5 +168,7 @@ func tsnative_task_group_join_release(raw unsafe.Pointer) C.int {
 	}
 	group.mu.Unlock()
 	nativeTaskGroups.Delete(uintptr(raw))
+	freeNativeHandle(group.handle)
+	group.handle = nil
 	return 0
 }

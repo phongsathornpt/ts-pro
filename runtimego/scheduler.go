@@ -494,7 +494,11 @@ func tsnative_scheduler_worker_wakeups() uint64 { return goScheduler.wakeups.Loa
 
 //export tsnative_scheduler_current_task
 func tsnative_scheduler_current_task() unsafe.Pointer {
-	return unsafe.Pointer(schedulerCurrentTaskPtr())
+	task := lookupNativeTask(schedulerCurrentTaskPtr())
+	if task == nil {
+		return nil
+	}
+	return task.handle
 }
 
 //export tsnative_scheduler_prepare_park

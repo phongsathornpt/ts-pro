@@ -27,6 +27,7 @@ Concurrency APIs are compiler-known TypeScript features, but their runtime imple
 - Blocking native calls must not block scheduler workers.
 - Scheduler concurrency must be bounded by CPU and memory budgets.
 - GC, scheduler safepoints, cancellation, and async suspension share one runtime lifecycle model.
+- Exported opaque task/group handles are valid native pointer tokens; `uintptr` is reserved for internal numeric scheduler/map keys, never pointer resurrection.
 - Linux x86-64 is the first scheduler target; OS primitives are abstracted before additional platforms.
 
 ## TypeScript surface
@@ -181,6 +182,7 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Task state/result/context/failure roots and queued reference-channel values have explicit lifetime roots; timer waiters retain opaque task handles whose task-owned state remains rooted.
     - Heap-threshold GC requests defer while foreign native root stacks are active and retry at task-return, wait, park, and execution-budget safepoints.
     - Idle-worker GC assistance remains an optional later optimization; correctness no longer depends on it.
+    - Task/group ABI handles and task/channel/blocking output slots are pointer-typed across the Go/native boundary; `go vet ./...` is clean without disabling `unsafeptr`.
 
 14. `runtime: add per-worker allocator caches` 🟡
     - Small allocations up to 2 KiB now use worker-owned size-class spans with zeroed slot reuse and bounded reusable-span caching.

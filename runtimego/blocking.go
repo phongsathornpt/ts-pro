@@ -25,8 +25,8 @@ const (
 
 type nativeBlockingJob struct {
 	token  uintptr
-	entry  uintptr
-	state  uintptr
+	entry  unsafe.Pointer
+	state  unsafe.Pointer
 	done   chan struct{}
 	once   sync.Once
 	mu     sync.Mutex
@@ -69,7 +69,7 @@ func parseBlockingLimit(name string, fallback, hardMax int) int {
 func nativeBlockingWorker(queue <-chan *nativeBlockingJob) {
 	defer nativeBlocking.wg.Done()
 	for job := range queue {
-		C.tsnative_blocking_call_entry(C.uintptr_t(job.entry), unsafe.Pointer(job.state))
+		C.tsnative_blocking_call_entry(C.uintptr_t(uintptr(job.entry)), job.state)
 		completeNativeBlockingJob(job)
 	}
 }
@@ -143,7 +143,7 @@ func tsnative_blocking_submit(entry unsafe.Pointer, state unsafe.Pointer) unsafe
 		return nil
 	}
 	job := &nativeBlockingJob{
-		token: uintptr(tokenPtr), entry: uintptr(entry), state: uintptr(state), done: make(chan struct{}),
+		token: uintptr(tokenPtr), entry: entry, state: state, done: make(chan struct{}),
 	}
 	nativeBlocking.jobs[job.token] = job
 	nativeBlocking.active++

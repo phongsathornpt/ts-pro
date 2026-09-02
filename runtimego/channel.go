@@ -17,7 +17,7 @@ import (
 type nativeF64ChannelWaiter struct {
 	task        uintptr
 	value       float64
-	out         uintptr
+	out         unsafe.Pointer
 	cooperative bool
 	done        chan struct{}
 	once        sync.Once
@@ -89,7 +89,7 @@ func deliverNativeChannelValue(waiter *nativeF64ChannelWaiter, value float64) {
 		waiter.value = value
 		return
 	}
-	*(*C.double)(unsafe.Pointer(waiter.out)) = C.double(value)
+	*(*C.double)(waiter.out) = C.double(value)
 }
 
 func finishNativeChannelWaiter(waiter *nativeF64ChannelWaiter) {
@@ -370,7 +370,7 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeF64ChannelWaiter{task: task, out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeF64ChannelWaiter{task: task, out: out})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
@@ -515,7 +515,7 @@ func (root *nativeRefRoot) release() {
 type nativeRefChannelWaiter struct {
 	task        uintptr
 	value       *nativeRefRoot
-	out         uintptr
+	out         unsafe.Pointer
 	cooperative bool
 	done        chan struct{}
 	once        sync.Once
@@ -629,7 +629,7 @@ func deliverNativeRefRoot(waiter *nativeRefChannelWaiter, root *nativeRefRoot) {
 		waiter.value = root
 		return
 	}
-	*(*unsafe.Pointer)(unsafe.Pointer(waiter.out)) = root.get()
+	*(*unsafe.Pointer)(waiter.out) = root.get()
 	root.release()
 }
 
@@ -911,7 +911,7 @@ func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeRefChannelWaiter{task: task, out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeRefChannelWaiter{task: task, out: out})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
@@ -1022,7 +1022,7 @@ func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
 type nativeBoolChannelWaiter struct {
 	task        uintptr
 	value       uint8
-	out         uintptr
+	out         unsafe.Pointer
 	cooperative bool
 	done        chan struct{}
 	once        sync.Once
@@ -1093,7 +1093,7 @@ func deliverNativeBoolValue(waiter *nativeBoolChannelWaiter, value uint8) {
 		waiter.value = value
 		return
 	}
-	*(*C.uint8_t)(unsafe.Pointer(waiter.out)) = C.uint8_t(value)
+	*(*C.uint8_t)(waiter.out) = C.uint8_t(value)
 }
 
 func finishNativeBoolWaiter(waiter *nativeBoolChannelWaiter) {
@@ -1272,7 +1272,7 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.recvQueue = append(channel.recvQueue, &nativeBoolChannelWaiter{task: task, out: uintptr(out)})
+	channel.recvQueue = append(channel.recvQueue, &nativeBoolChannelWaiter{task: task, out: out})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0

@@ -45,7 +45,11 @@ func nativeJSNumber(value *nativeJSValue) float64 {
 }
 
 func nativeJSRef(value *nativeJSValue) unsafe.Pointer {
-	return unsafe.Pointer(uintptr(value.payload))
+	return *(*unsafe.Pointer)(unsafe.Pointer(&value.payload))
+}
+
+func nativeJSSetRef(value *nativeJSValue, raw unsafe.Pointer) {
+	*(*unsafe.Pointer)(unsafe.Pointer(&value.payload)) = raw
 }
 
 func nativeJSBool(value *nativeJSValue) bool {
@@ -62,7 +66,7 @@ func tsnative_jsvalue_box_f64(number C.double) unsafe.Pointer {
 //export tsnative_jsvalue_box_string
 func tsnative_jsvalue_box_string(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagString)
-	value.payload = uint64(uintptr(raw))
+	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
@@ -78,21 +82,21 @@ func tsnative_jsvalue_box_bool(raw C.uint8_t) unsafe.Pointer {
 //export tsnative_jsvalue_box_object
 func tsnative_jsvalue_box_object(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagObject)
-	value.payload = uint64(uintptr(raw))
+	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
 //export tsnative_jsvalue_box_function
 func tsnative_jsvalue_box_function(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagFunction)
-	value.payload = uint64(uintptr(raw))
+	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 
 //export tsnative_jsvalue_box_array
 func tsnative_jsvalue_box_array(raw unsafe.Pointer) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagArray)
-	value.payload = uint64(uintptr(raw))
+	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
 }
 

@@ -21,7 +21,7 @@ func tsnative_task_set_context(value unsafe.Pointer) {
 	if task == nil {
 		nativeAbort("task context set outside task")
 	}
-	task.context = uintptr(value)
+	task.context = value
 }
 
 //export tsnative_task_get_context
@@ -30,5 +30,5 @@ func tsnative_task_get_context() unsafe.Pointer {
 	if task == nil {
 		nativeAbort("task context get outside task")
 	}
-	return unsafe.Pointer(task.context)
+	return task.context
 }
