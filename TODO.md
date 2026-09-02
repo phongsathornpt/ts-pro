@@ -178,7 +178,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [ ] String/object arrays and typed generic array specializations.
   - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
 - [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
-- [ ] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/do-while/for-of, templates, default/optional params, enums, and module linking.
+- [~] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/for-of, templates, default/optional params, enums, and module linking.
+  - [x] Native `do...while` lowers with mandatory first-body execution followed by the existing loop-carried SSA machinery; source-file top-level and function-body forms share the same semantic statement path.
 - [ ] Add selected standard-library/runtime APIs such as JSON, Map/Set, Date, and RegExp after their representation contracts are defined.
 
 ## LLVM, runtime, and build

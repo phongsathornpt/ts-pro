@@ -14,6 +14,7 @@ var childProperties = map[uint32][]string{
 	KindParameter:                   {"modifiers", "dotDotDotToken", "name", "questionToken", "type", "initializer"},
 	KindBlock:                       {"statements"},
 	KindIfStatement:                 {"expression", "thenStatement", "elseStatement"},
+	KindDoStatement:                 {"statement", "expression"},
 	KindWhileStatement:              {"expression", "statement"},
 	KindForStatement:                {"initializer", "condition", "incrementor", "statement"},
 	KindReturnStatement:             {"expression"},

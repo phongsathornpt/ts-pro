@@ -121,6 +121,7 @@ const (
 	StmtVar
 	StmtAssign
 	StmtWhile
+	StmtDoWhile
 	StmtFor
 	StmtClosureBind
 	StmtFieldAssign

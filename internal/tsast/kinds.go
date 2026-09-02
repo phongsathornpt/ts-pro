@@ -56,6 +56,7 @@ const (
 	KindVariableStatement            uint32 = 244
 	KindExpressionStatement          uint32 = 245
 	KindIfStatement                  uint32 = 246
+	KindDoStatement                  uint32 = 247
 	KindWhileStatement               uint32 = 248
 	KindForStatement                 uint32 = 249
 	KindReturnStatement              uint32 = 254
@@ -91,7 +92,7 @@ var kindNames = map[uint32]string{
 	KindParenthesizedExpression: "ParenthesizedExpression", KindAwaitExpression: "AwaitExpression", KindFunctionExpression: "FunctionExpression", KindArrowFunction: "ArrowFunction", KindNewExpression: "NewExpression",
 	KindExpressionWithTypeArguments: "ExpressionWithTypeArguments", KindPrefixUnaryExpression: "PrefixUnaryExpression", KindPostfixUnaryExpression: "PostfixUnaryExpression", KindNonNullExpression: "NonNullExpression",
 	KindBinaryExpression: "BinaryExpression", KindBlock: "Block", KindVariableStatement: "VariableStatement", KindExpressionStatement: "ExpressionStatement",
-	KindIfStatement: "IfStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement", KindThrowStatement: "ThrowStatement", KindTryStatement: "TryStatement",
+	KindIfStatement: "IfStatement", KindDoStatement: "DoStatement", KindWhileStatement: "WhileStatement", KindForStatement: "ForStatement", KindReturnStatement: "ReturnStatement", KindThrowStatement: "ThrowStatement", KindTryStatement: "TryStatement",
 	KindVariableDeclaration: "VariableDeclaration", KindVariableDeclarationList: "VariableDeclarationList", KindFunctionDeclaration: "FunctionDeclaration", KindClassDeclaration: "ClassDeclaration",
 	KindInterfaceDeclaration: "InterfaceDeclaration", KindTypeAliasDeclaration: "TypeAliasDeclaration",
 	KindHeritageClause: "HeritageClause", KindCatchClause: "CatchClause", KindPropertyAssignment: "PropertyAssignment", KindShorthandPropertyAssignment: "ShorthandPropertyAssignment",

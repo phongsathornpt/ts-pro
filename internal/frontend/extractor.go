@@ -152,7 +152,7 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 				return Snapshot{}, err
 			}
 			e.result.Entry = append(e.result.Entry, items...)
-		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindBlock:
+		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindDoStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindBlock:
 			stmt, err := e.extractStatement(node)
 			if err != nil {
 				return Snapshot{}, err
@@ -342,6 +342,8 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 		return Statement{Kind: StmtBlock, Span: e.span(node), Then: items}, nil
 	case tsast.KindWhileStatement:
 		return e.extractWhile(node)
+	case tsast.KindDoStatement:
+		return e.extractDoWhile(node)
 	case tsast.KindForStatement:
 		return e.extractFor(node)
 	case tsast.KindExpressionStatement:
@@ -523,6 +525,26 @@ func (e *extractor) extractWhile(node tsast.Node) (Statement, error) {
 	}
 	e.concreteClasses = mergeConcreteClasses(before, e.concreteClasses)
 	return Statement{Kind: StmtWhile, Span: e.span(node), Expr: condition, Then: body}, nil
+}
+
+func (e *extractor) extractDoWhile(node tsast.Node) (Statement, error) {
+	bodyNode, ok := node.NamedChild("statement")
+	if !ok {
+		return Statement{}, fmt.Errorf("do/while at %d has no body", node.Pos())
+	}
+	body, err := e.extractStatementBody(bodyNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	conditionNode, ok := node.NamedChild("expression")
+	if !ok {
+		return Statement{}, fmt.Errorf("do/while at %d has no condition", node.Pos())
+	}
+	condition, err := e.extractExpr(conditionNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	return Statement{Kind: StmtDoWhile, Span: e.span(node), Expr: condition, Then: body}, nil
 }
 
 func (e *extractor) extractFor(node tsast.Node) (Statement, error) {

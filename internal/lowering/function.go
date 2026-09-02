@@ -192,6 +192,14 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		return nil
 	case frontend.StmtWhile:
 		return f.lowerLoop(stmt.Expr, stmt.Then, nil)
+	case frontend.StmtDoWhile:
+		if err := f.lowerStatements(stmt.Then); err != nil {
+			return err
+		}
+		if f.terminated {
+			return nil
+		}
+		return f.lowerLoop(stmt.Expr, stmt.Then, nil)
 	case frontend.StmtFor:
 		if err := f.lowerStatements(stmt.Init); err != nil {
 			return err
@@ -562,7 +570,7 @@ func collectAssigned(statements []frontend.Statement, result map[frontend.Symbol
 		case frontend.StmtIf:
 			collectAssigned(stmt.Then, result)
 			collectAssigned(stmt.Else, result)
-		case frontend.StmtWhile:
+		case frontend.StmtWhile, frontend.StmtDoWhile:
 			collectAssigned(stmt.Then, result)
 		case frontend.StmtFor:
 			collectAssigned(stmt.Init, result)
