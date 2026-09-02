@@ -94,8 +94,16 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	switch op := op.(type) {
 	case mir.ArrayNewF64:
 		return append([]mir.ValueID(nil), op.Elements...), true
+	case mir.ArrayNewRef:
+		return append([]mir.ValueID(nil), op.Elements...), true
 	case mir.ArraySetF64:
 		return []mir.ValueID{op.Array, op.Index, op.Value}, true
+	case mir.ArraySetRef:
+		return []mir.ValueID{op.Array, op.Index, op.Value}, true
+	case mir.ArrayLengthRef:
+		return []mir.ValueID{op.Array}, true
+	case mir.ArrayGetRef:
+		return []mir.ValueID{op.Array, op.Index}, true
 	case mir.ObjectNew:
 		return append([]mir.ValueID(nil), op.Fields...), true
 	case mir.ObjectAlloc:

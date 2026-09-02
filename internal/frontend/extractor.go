@@ -787,13 +787,24 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		if !ok || !elements.IsList() {
 			return nil, fmt.Errorf("array literal at %d has no element list", node.Pos())
 		}
+		if int(typeID) >= len(e.result.Types) || e.result.Types[typeID].Kind != TypeArray {
+			return nil, fmt.Errorf("array literal at %d has non-array type", node.Pos())
+		}
+		arrayType := e.result.Types[typeID]
+		if int(arrayType.Element) >= len(e.result.Types) {
+			return nil, fmt.Errorf("array literal at %d has invalid element type", node.Pos())
+		}
+		elementKind := e.result.Types[arrayType.Element].Kind
+		if elementKind != TypeNumber && elementKind != TypeString {
+			return nil, fmt.Errorf("native array at %d currently supports number[] and string[]", node.Pos())
+		}
 		for _, elementNode := range elements.ListElements() {
 			element, err := e.extractExpr(elementNode)
 			if err != nil {
 				return nil, err
 			}
-			if int(element.Type) >= len(e.result.Types) || e.result.Types[element.Type].Kind != TypeNumber {
-				return nil, fmt.Errorf("native array at %d currently supports number elements only", node.Pos())
+			if int(element.Type) >= len(e.result.Types) || e.result.Types[element.Type].Kind != elementKind {
+				return nil, fmt.Errorf("native array at %d requires homogeneous %s elements", node.Pos(), e.result.Types[arrayType.Element].Name)
 			}
 			expr.Elements = append(expr.Elements, element)
 		}
@@ -862,6 +873,14 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
+		if int(object.Type) >= len(e.result.Types) || e.result.Types[object.Type].Kind != TypeArray {
+			return nil, fmt.Errorf("native element access at %d requires an array receiver", node.Pos())
+		}
+		arrayType := e.result.Types[object.Type]
+		if int(arrayType.Element) >= len(e.result.Types) {
+			return nil, fmt.Errorf("native element access at %d has invalid array element type", node.Pos())
+		}
+		expr.Type = arrayType.Element
 		expr.Kind, expr.Object, expr.Index = ExprIndex, object, index
 		return expr, nil
 	case tsast.KindPropertyAccessExpression:
@@ -1272,10 +1291,14 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 	}
 	if kind == TypeArray {
 		base := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
-		if base != "number[]" {
+		switch base {
+		case "number[]":
+			typ.Element = e.ensureSemanticType(TypeNumber, "number")
+		case "string[]":
+			typ.Element = e.ensureSemanticType(TypeString, "string")
+		default:
 			return 0, fmt.Errorf("native array type %q is not supported", text)
 		}
-		typ.Element = e.ensureSemanticType(TypeNumber, "number")
 	}
 	if kind == TypeUnion {
 		members, membersErr := e.client.GetTypesOfType(e.ctx, e.snapshot, e.project, info.ID)

@@ -64,6 +64,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
+	b.WriteString("declare ptr @tsnative_array_ref_new(i64)\n")
 	b.WriteString("declare ptr @tsnative_channel_f64_new_checked(double)\n")
 	b.WriteString("declare i32 @tsnative_channel_f64_try_send(ptr, double)\n")
 	b.WriteString("declare double @tsnative_channel_f64_try_recv_or(ptr, double)\n")
@@ -92,6 +93,10 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
+	b.WriteString("declare void @tsnative_array_ref_set(ptr, i64, ptr)\n")
+	b.WriteString("declare void @tsnative_array_ref_set_checked(ptr, double, ptr)\n")
+	b.WriteString("declare double @tsnative_array_ref_len(ptr)\n")
+	b.WriteString("declare ptr @tsnative_array_ref_get(ptr, double)\n")
 	b.WriteString("declare ptr @tsnative_object_alloc(i64)\ndeclare ptr @tsnative_object_alloc_atomic(i64)\ndeclare ptr @tsnative_object_alloc_refs(i64, ptr, i64)\n")
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
@@ -352,6 +357,20 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  call void @tsnative_array_f64_set(ptr %s, i64 %d, double %s)\n", name, i, value)
 		}
 		return nil
+	case mir.ArrayNewRef:
+		if inst.Repr != mir.ReprArrayRef {
+			return fmt.Errorf("array.new.ref requires arrayref result")
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_new(i64 %d)\n", name, len(op.Elements))
+		for i, element := range op.Elements {
+			value, err := operand(values, element)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  call void @tsnative_array_ref_set(ptr %s, i64 %d, ptr %s)\n", name, i, value)
+		}
+		return nil
 	case mir.ArrayLengthF64:
 		array, err := operand(values, op.Array)
 		if err != nil {
@@ -386,6 +405,40 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			return err
 		}
 		fmt.Fprintf(b, "  call void @tsnative_array_f64_set_checked(ptr %s, double %s, double %s)\n", array, index, value)
+		values[inst.Result] = value
+		return nil
+	case mir.ArrayLengthRef:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = call double @tsnative_array_ref_len(ptr %s)\n", valueName(inst.Result), array)
+		return nil
+	case mir.ArrayGetRef:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_get(ptr %s, double %s)\n", valueName(inst.Result), array, index)
+		return nil
+	case mir.ArraySetRef:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  call void @tsnative_array_ref_set_checked(ptr %s, double %s, ptr %s)\n", array, index, value)
 		values[inst.Result] = value
 		return nil
 	case mir.ObjectNew:

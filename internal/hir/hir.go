@@ -135,10 +135,30 @@ type PhiOp struct {
 	Incoming []PhiIncoming
 }
 
-type ArrayNewOp struct{ Elements []ValueID }
-type ArrayLengthOp struct{ Array ValueID }
-type ArrayGetOp struct{ Array, Index ValueID }
-type ArraySetOp struct{ Array, Index, Value ValueID }
+type ArrayElementKind uint8
+
+const (
+	ArrayElementInvalid ArrayElementKind = iota
+	ArrayElementF64
+	ArrayElementRef
+)
+
+type ArrayNewOp struct {
+	Elements []ValueID
+	Element  ArrayElementKind
+}
+type ArrayLengthOp struct {
+	Array   ValueID
+	Element ArrayElementKind
+}
+type ArrayGetOp struct {
+	Array, Index ValueID
+	Element      ArrayElementKind
+}
+type ArraySetOp struct {
+	Array, Index, Value ValueID
+	Element             ArrayElementKind
+}
 type ObjectNewOp struct {
 	Shape  ShapeID
 	Fields []ValueID

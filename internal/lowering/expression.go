@@ -28,6 +28,24 @@ func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (front
 	}
 }
 
+func (f *functionLowerer) arrayElementKind(arrayType frontend.TypeID) (hir.ArrayElementKind, error) {
+	if int(arrayType) >= len(f.module.source.Types) {
+		return hir.ArrayElementInvalid, fmt.Errorf("array type t%d is invalid", arrayType)
+	}
+	typ := f.module.source.Types[arrayType]
+	if typ.Kind != frontend.TypeArray || int(typ.Element) >= len(f.module.source.Types) {
+		return hir.ArrayElementInvalid, fmt.Errorf("semantic type %q is not a concrete array", typ.Name)
+	}
+	switch f.module.source.Types[typ.Element].Kind {
+	case frontend.TypeNumber:
+		return hir.ArrayElementF64, nil
+	case frontend.TypeString:
+		return hir.ArrayElementRef, nil
+	default:
+		return hir.ArrayElementInvalid, fmt.Errorf("array element type %q has no native specialization", f.module.source.Types[typ.Element].Name)
+	}
+}
+
 func (f *functionLowerer) promiseResultKind(promiseType frontend.TypeID) (frontend.TypeID, hir.TaskResultKind, error) {
 	if int(promiseType) >= len(f.module.source.Types) {
 		return 0, hir.TaskResultInvalid, fmt.Errorf("promise type t%d is invalid", promiseType)
@@ -85,13 +103,17 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			}
 			elements = append(elements, value)
 		}
-		return f.emit(expr.Type, hir.ArrayNewOp{Elements: elements}), nil
+		element, err := f.arrayElementKind(expr.Type)
+		if err != nil { return 0, err }
+		return f.emit(expr.Type, hir.ArrayNewOp{Elements: elements, Element: element}), nil
 	case frontend.ExprArrayLength:
 		array, err := f.lowerExpr(expr.Object)
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ArrayLengthOp{Array: array}), nil
+		element, err := f.arrayElementKind(expr.Object.Type)
+		if err != nil { return 0, err }
+		return f.emit(expr.Type, hir.ArrayLengthOp{Array: array, Element: element}), nil
 	case frontend.ExprIndex:
 		array, err := f.lowerExpr(expr.Object)
 		if err != nil {
@@ -101,7 +123,9 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.ArrayGetOp{Array: array, Index: index}), nil
+		element, err := f.arrayElementKind(expr.Object.Type)
+		if err != nil { return 0, err }
+		return f.emit(expr.Type, hir.ArrayGetOp{Array: array, Index: index, Element: element}), nil
 	case frontend.ExprObject:
 		if int(expr.Type) >= len(f.module.source.Types) {
 			return 0, fmt.Errorf("object expression has invalid type t%d", expr.Type)

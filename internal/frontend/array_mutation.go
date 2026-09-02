@@ -31,14 +31,18 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 		return Statement{}, true, fmt.Errorf("array assignment has invalid receiver type t%d", array.Type)
 	}
 	arrayType := e.result.Types[array.Type]
-	if arrayType.Kind != TypeArray || int(arrayType.Element) >= len(e.result.Types) || e.result.Types[arrayType.Element].Kind != TypeNumber {
-		return Statement{}, true, fmt.Errorf("native indexed assignment currently requires number[]")
+	if arrayType.Kind != TypeArray || int(arrayType.Element) >= len(e.result.Types) {
+		return Statement{}, true, fmt.Errorf("native indexed assignment requires a concrete array type")
+	}
+	elementKind := e.result.Types[arrayType.Element].Kind
+	if elementKind != TypeNumber && elementKind != TypeString {
+		return Statement{}, true, fmt.Errorf("native indexed assignment currently supports number[] and string[]")
 	}
 	if int(index.Type) >= len(e.result.Types) || e.result.Types[index.Type].Kind != TypeNumber {
 		return Statement{}, true, fmt.Errorf("native array index must be number")
 	}
-	if int(value.Type) >= len(e.result.Types) || e.result.Types[value.Type].Kind != TypeNumber {
-		return Statement{}, true, fmt.Errorf("native number[] assignment requires number value")
+	if int(value.Type) >= len(e.result.Types) || e.result.Types[value.Type].Kind != elementKind {
+		return Statement{}, true, fmt.Errorf("native array assignment requires %s value", e.result.Types[arrayType.Element].Name)
 	}
 	return Statement{
 		Kind: StmtArrayAssign, Span: e.span(node), Type: value.Type,

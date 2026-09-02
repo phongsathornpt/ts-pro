@@ -264,11 +264,37 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case ArrayNewRef:
+				if inst.Repr != ReprArrayRef {
+					return fmt.Errorf("reference array v%d must produce arrayref", inst.Result)
+				}
+				for _, element := range op.Elements {
+					if err := checkValue(element); err != nil {
+						return err
+					}
+				}
 			case ArrayLengthF64:
 				if err := checkValue(op.Array); err != nil {
 					return err
 				}
+			case ArrayLengthRef:
+				if inst.Repr != ReprF64 {
+					return fmt.Errorf("reference array length v%d must produce f64", inst.Result)
+				}
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
 			case ArrayGetF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+			case ArrayGetRef:
+				if inst.Repr != ReprStringRef && inst.Repr != ReprObjectRef && inst.Repr != ReprArrayRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
+					return fmt.Errorf("reference array get v%d has non-reference repr %d", inst.Result, inst.Repr)
+				}
 				if err := checkValue(op.Array); err != nil {
 					return err
 				}
@@ -287,6 +313,19 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				}
 				if inst.Repr != ReprF64 {
 					return fmt.Errorf("array set v%d must return f64 assigned value", inst.Result)
+				}
+			case ArraySetRef:
+				if inst.Repr != ReprStringRef && inst.Repr != ReprObjectRef && inst.Repr != ReprArrayRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
+					return fmt.Errorf("reference array set v%d has non-reference repr %d", inst.Result, inst.Repr)
+				}
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
 				}
 			case ObjectNew:
 				shape, ok := shapes[op.Shape]

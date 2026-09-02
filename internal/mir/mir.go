@@ -248,6 +248,10 @@ type ArrayNewF64 struct{ Elements []ValueID }
 type ArrayLengthF64 struct{ Array ValueID }
 type ArrayGetF64 struct{ Array, Index ValueID }
 type ArraySetF64 struct{ Array, Index, Value ValueID }
+type ArrayNewRef struct{ Elements []ValueID }
+type ArrayLengthRef struct{ Array ValueID }
+type ArrayGetRef struct{ Array, Index ValueID }
+type ArraySetRef struct{ Array, Index, Value ValueID }
 type ObjectNew struct {
 	Shape  ShapeID
 	Fields []ValueID
@@ -345,6 +349,10 @@ func (ArrayNewF64) isOperation()          {}
 func (ArrayLengthF64) isOperation()       {}
 func (ArrayGetF64) isOperation()          {}
 func (ArraySetF64) isOperation()          {}
+func (ArrayNewRef) isOperation()          {}
+func (ArrayLengthRef) isOperation()       {}
+func (ArrayGetRef) isOperation()          {}
+func (ArraySetRef) isOperation()          {}
 func (ObjectNew) isOperation()            {}
 func (ObjectAlloc) isOperation()          {}
 func (FieldSet) isOperation()             {}

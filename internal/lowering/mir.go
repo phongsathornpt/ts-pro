@@ -219,13 +219,41 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		for i, value := range op.Elements {
 			elements[i] = mir.ValueID(value)
 		}
-		result.Op = mir.ArrayNewF64{Elements: elements}
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayNewF64{Elements: elements}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayNewRef{Elements: elements}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
 	case hir.ArrayLengthOp:
-		result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayLengthRef{Array: mir.ValueID(op.Array)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
 	case hir.ArrayGetOp:
-		result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayGetRef{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
 	case hir.ArraySetOp:
-		result.Op = mir.ArraySetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArraySetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArraySetRef{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
 	case hir.ObjectNewOp:
 		fields := make([]mir.ValueID, len(op.Fields))
 		for i, value := range op.Fields {

@@ -296,7 +296,9 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if err != nil {
 			return err
 		}
-		f.emit(stmt.Type, hir.ArraySetOp{Array: array, Index: index, Value: value})
+		element, err := f.arrayElementKind(stmt.Object.Type)
+		if err != nil { return err }
+		f.emit(stmt.Type, hir.ArraySetOp{Array: array, Index: index, Value: value, Element: element})
 		return nil
 	case frontend.StmtDynamicFieldAssign:
 		if stmt.Object == nil || stmt.Value == nil {
