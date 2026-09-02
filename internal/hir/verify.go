@@ -168,6 +168,9 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if op.Kind == BoxInvalid {
 					add(fmt.Sprintf("box v%d has invalid kind", instruction.Result))
 				}
+				if op.Kind == BoxObject && int(op.Shape) >= len(m.Shapes) {
+					add(fmt.Sprintf("object box v%d references unknown shape s%d", instruction.Result, op.Shape))
+				}
 				checkValue(op.Value)
 			case UnboxOp:
 				if op.Kind == UnboxInvalid {

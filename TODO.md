@@ -253,6 +253,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Checked JSValue unboxing to native number/string/boolean/number[] with distinct array tagging, MIR/LLVM/runtime ABI coverage, and differential native tests.
     - [~] Dynamic object/property get/set and calls, plus object/function ToPrimitive coercion.
       - [x] Add default native `ToPrimitive` fallback for boxed plain objects, F64 arrays, and function references. Object addition/string comparison uses `[object Object]`, F64 arrays stringify with comma-joined JS number text, numeric coercion flows through the primitive fallback, and loose equality no longer aborts on object/array/function operands.
+      - [x] Preserve closed object shape identity through JSValue boxing. Object boxes encode `shapeID+1` in the existing non-GC metadata word, LLVM passes the semantic shape on every object box, MIR/HIR verification rejects unknown shapes, and GC stress verifies metadata/payload survival without growing JSValue.
+      - [ ] Use boxed shape identity for dynamic named property get/set dispatch with compiler-generated field offset/repr descriptors.
       - [ ] Carry object shape/property metadata across JSValue boxing, then add dynamic named get/set and dynamic callable dispatch without unsafe offset guessing.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.

@@ -138,6 +138,11 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if op.Kind != BoxJSNumber && op.Kind != BoxJSString && op.Kind != BoxJSBoolean && op.Kind != BoxJSObject && op.Kind != BoxJSArray && op.Kind != BoxJSFunction {
 					return fmt.Errorf("JSValue box v%d has invalid kind %d", inst.Result, op.Kind)
 				}
+				if op.Kind == BoxJSObject {
+					if _, ok := shapes[op.Shape]; !ok {
+						return fmt.Errorf("JSValue object box v%d references unknown shape s%d", inst.Result, op.Shape)
+					}
+				}
 				if inst.Repr != ReprJSValue {
 					return fmt.Errorf("JSValue box v%d must produce JSValue representation", inst.Result)
 				}

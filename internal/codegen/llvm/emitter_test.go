@@ -1236,3 +1236,21 @@ func TestEmitMutableDiamondPhiIncludesZeroIncoming(t *testing.T) {
 		t.Fatalf("mutable diamond missing zero incoming phi:\n%s", text)
 	}
 }
+
+func TestEmitObjectBoxCarriesShapeMetadata(t *testing.T) {
+	module := mir.Module{Name: "box-shape", Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprF64}}}}, Functions: []mir.Function{{
+		ID: 0, Name: "box", ReturnRepr: mir.ReprJSValue, Entry: 0,
+		Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0}}},
+			{Result: 2, Repr: mir.ReprJSValue, Op: mir.BoxJSValue{Kind: mir.BoxJSObject, Value: 1, Shape: 0}},
+		}, Terminator: mir.Return{Value: valueIDPtr(2)}}},
+	}}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "call ptr @tsnative_jsvalue_box_object_shape(ptr %v1, i32 0)") {
+		t.Fatalf("object box did not carry shape metadata:\n%s", text)
+	}
+}

@@ -148,6 +148,7 @@ const (
 type BoxJSValue struct {
 	Kind  BoxJSKind
 	Value ValueID
+	Shape ShapeID
 }
 
 type UnboxJSKind uint8

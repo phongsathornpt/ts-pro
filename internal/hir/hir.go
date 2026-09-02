@@ -68,6 +68,7 @@ const (
 type BoxOp struct {
 	Kind  BoxKind
 	Value ValueID
+	Shape ShapeID
 }
 
 type UnboxKind uint8

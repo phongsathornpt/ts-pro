@@ -172,3 +172,27 @@ func TestJSValueObjectArrayFunctionNumericCoercion(t *testing.T) {
 		t.Fatalf("function * 2 = %v, want NaN", got)
 	}
 }
+
+func TestNativeJSValueObjectShapeMetadataSurvivesGC(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	object := tsnative_heap_alloc_atomic(16)
+	boxed := tsnative_jsvalue_box_object_shape(object, 7)
+	if got := uint32(tsnative_jsvalue_object_shape(boxed)); got != 7 {
+		t.Fatalf("boxed object shape = %d, want 7", got)
+	}
+	rootSlot := boxed
+	root := tsnative_gc_root_register(unsafe.Pointer(&rootSlot))
+	if root == nil {
+		t.Fatal("object shape JSValue root registration failed")
+	}
+	tsnative_gc_collect()
+	if got := uint32(tsnative_jsvalue_object_shape(boxed)); got != 7 {
+		t.Fatalf("boxed object shape after GC = %d, want 7", got)
+	}
+	if !nativeHeapContains(object) {
+		t.Fatal("shape-tagged boxed object lost payload during GC")
+	}
+	tsnative_gc_root_unregister(root)
+}

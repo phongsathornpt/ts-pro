@@ -25,6 +25,7 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 			return value, nil
 		}
 		kind := hir.BoxInvalid
+		shape := hir.ShapeID(0)
 		switch sourceKind {
 		case frontend.TypeNumber:
 			kind = hir.BoxNumber
@@ -34,6 +35,7 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 			kind = hir.BoxBoolean
 		case frontend.TypeObject:
 			kind = hir.BoxObject
+			shape = hir.NewShapeID(uint32(f.module.source.Types[expr.Type].Shape))
 		case frontend.TypeArray:
 			kind = hir.BoxArray
 		case frontend.TypeFunction:
@@ -41,7 +43,7 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 		default:
 			return 0, fmt.Errorf("cannot box semantic type %q into dynamic value", f.module.source.Types[expr.Type].Name)
 		}
-		return f.emit(target, hir.BoxOp{Kind: kind, Value: value}), nil
+		return f.emit(target, hir.BoxOp{Kind: kind, Value: value, Shape: shape}), nil
 	}
 
 	if !sourceDynamic {

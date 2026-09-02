@@ -89,9 +89,24 @@ func tsnative_jsvalue_box_bool(raw C.uint8_t) unsafe.Pointer {
 
 //export tsnative_jsvalue_box_object
 func tsnative_jsvalue_box_object(raw unsafe.Pointer) unsafe.Pointer {
+	return tsnative_jsvalue_box_object_shape(raw, 0)
+}
+
+//export tsnative_jsvalue_box_object_shape
+func tsnative_jsvalue_box_object_shape(raw unsafe.Pointer, shape C.uint32_t) unsafe.Pointer {
 	value := newNativeJSValue(nativeJSTagObject)
+	value.reserved = uint32(shape) + 1
 	nativeJSSetRef(value, raw)
 	return unsafe.Pointer(value)
+}
+
+//export tsnative_jsvalue_object_shape
+func tsnative_jsvalue_object_shape(raw unsafe.Pointer) C.uint32_t {
+	value := (*nativeJSValue)(raw)
+	if value == nil || value.tag != nativeJSTagObject || value.reserved == 0 {
+		return C.uint32_t(^uint32(0))
+	}
+	return C.uint32_t(value.reserved - 1)
 }
 
 //export tsnative_jsvalue_box_function
