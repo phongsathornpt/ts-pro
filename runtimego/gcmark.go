@@ -12,11 +12,17 @@ const (
 )
 
 type nativeGCMarkWorkerRole uint8
+type nativeGCMarkScope uint8
 
 const (
 	nativeGCMarkWorkerCollector nativeGCMarkWorkerRole = iota
 	nativeGCMarkWorkerHelper
 	nativeGCMarkWorkerSchedulerDonor
+)
+
+const (
+	nativeGCMarkAll nativeGCMarkScope = iota
+	nativeGCMarkNursery
 )
 
 type nativeGCMarkPage struct {
@@ -31,6 +37,7 @@ type nativeGCMarkState struct {
 
 	cond           *sync.Cond
 	collectorOwner int
+	scope          nativeGCMarkScope
 	pages          map[uintptr]*nativeGCMarkPage
 	ownerQueues    map[int][]uintptr
 	ownerOrder     []int
@@ -44,9 +51,10 @@ type nativeGCMarkState struct {
 	idleAssistPages uint64
 }
 
-func newNativeGCMarkState(owner int) *nativeGCMarkState {
+func newNativeGCMarkState(owner int, scope nativeGCMarkScope) *nativeGCMarkState {
 	state := &nativeGCMarkState{
 		collectorOwner: owner,
+		scope:          scope,
 		pages:          make(map[uintptr]*nativeGCMarkPage),
 		ownerQueues:    make(map[int][]uintptr),
 		ownerSeen:      make(map[int]bool),
@@ -126,7 +134,8 @@ func (state *nativeGCMarkState) enqueue(candidate uintptr) {
 	}
 	state.mu.Lock()
 	block := resolveNativeHeapBlockLocked(candidate)
-	if block == nil || block.marked {
+	if block == nil || block.marked ||
+		(state.scope == nativeGCMarkNursery && block.generation != nativeHeapGenerationNursery) {
 		state.mu.Unlock()
 		return
 	}
@@ -239,8 +248,18 @@ func (state *nativeGCMarkState) worker(role nativeGCMarkWorkerRole, preferredOwn
 	}
 }
 
-func markNativeHeapRootsLocked() {
-	state := newNativeGCMarkState(nativeAllocatorOwner())
+func scanNativeHeapBlockPointers(block *nativeHeapBlock, visit func(uintptr)) {
+	if block == nil || visit == nil {
+		return
+	}
+	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
+	count := block.size / wordSize
+	for i := uintptr(0); i < count; i++ {
+		visit(*(*uintptr)(unsafe.Add(block.raw, i*wordSize)))
+	}
+}
+
+func seedNativeGCRootsLocked(state *nativeGCMarkState) {
 	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
 	nativeRoots.rangeFrames(func(frame *nativeRootFrame) {
 		for i := uintptr(0); i < frame.count; i++ {
@@ -248,8 +267,10 @@ func markNativeHeapRootsLocked() {
 			state.enqueue(*(*uintptr)(slotAddr))
 		}
 	})
+}
 
-	workerCount := configuredNativeGCMarkWorkers(nativeBlocks.count())
+func runNativeGCMarkStateLocked(state *nativeGCMarkState, population int) {
+	workerCount := configuredNativeGCMarkWorkers(population)
 	state.mu.Lock()
 	hasWork := len(state.pages) != 0
 	state.mu.Unlock()
@@ -291,6 +312,34 @@ func markNativeHeapRootsLocked() {
 	nativeHeap.markQueueSwitches += state.queueSwitches
 	nativeHeap.markAssistPages += state.assistPages
 	nativeHeap.markIdleAssistPages += state.idleAssistPages
+}
+
+func markNativeHeapRootsLocked() {
+	state := newNativeGCMarkState(nativeAllocatorOwner(), nativeGCMarkAll)
+	seedNativeGCRootsLocked(state)
+	runNativeGCMarkStateLocked(state, nativeBlocks.count())
+}
+
+func markNativeNurseryRootsLocked() {
+	state := newNativeGCMarkState(nativeAllocatorOwner(), nativeGCMarkNursery)
+	seedNativeGCRootsLocked(state)
+
+	oldBlocks := make([]*nativeHeapBlock, 0)
+	nurseryPopulation := 0
+	nativeBlocks.rangeBlocks(func(_ uintptr, block *nativeHeapBlock) {
+		if block.generation == nativeHeapGenerationNursery {
+			nurseryPopulation++
+			return
+		}
+		oldBlocks = append(oldBlocks, block)
+	})
+	for _, block := range oldBlocks {
+		scanNativeHeapBlockPointers(block, state.enqueue)
+	}
+	if len(oldBlocks) != 0 {
+		nativeGCMinorOldScans.Add(uint64(len(oldBlocks)))
+	}
+	runNativeGCMarkStateLocked(state, nurseryPopulation)
 }
 
 func nativeGCMarkWork() (uint64, uint64) {

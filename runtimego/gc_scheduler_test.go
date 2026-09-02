@@ -331,6 +331,135 @@ func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	tsnative_gc_root_unregister(token)
 }
 
+func TestMinorGCReclaimsUnrootedNursery(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	raw := tsnative_heap_alloc(1024)
+	if raw == nil || !nativeGCMinorRequested.Load() {
+		t.Fatal("nursery threshold did not request minor GC")
+	}
+	tsnative_gc_safepoint()
+	if nativeHeapContains(raw) {
+		t.Fatal("unrooted nursery allocation survived minor GC")
+	}
+	if nativeGCMinorCollections.Load() != 1 || nativeGCMajorCollections.Load() != 0 {
+		t.Fatalf("collections minor=%d major=%d, want 1/0", nativeGCMinorCollections.Load(), nativeGCMajorCollections.Load())
+	}
+	if got := nativeNurseryLiveBytes(); got != 0 {
+		t.Fatalf("nursery bytes = %d, want 0 after minor GC", got)
+	}
+}
+
+func TestMinorGCPromotesRootedNurseryObject(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	raw := tsnative_heap_alloc(1024)
+	root := tsnative_gc_root_register(unsafe.Pointer(&raw))
+	tsnative_gc_safepoint()
+	block := nativeBlocks.get(uintptr(raw))
+	if block == nil || block.generation != nativeHeapGenerationOld {
+		t.Fatalf("rooted nursery block = %+v, want promoted old block", block)
+	}
+	if nativeGCPromotedBlocks.Load() != 1 {
+		t.Fatalf("promoted blocks = %d, want 1", nativeGCPromotedBlocks.Load())
+	}
+	tsnative_gc_root_unregister(root)
+	tsnative_gc_collect()
+	if nativeHeapContains(raw) {
+		t.Fatal("promoted object survived major GC after root release")
+	}
+}
+
+func TestMinorGCConservativelyScansOldToYoungReferences(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "1024")
+
+	parent := tsnative_heap_alloc(16)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	parentBlock := nativeBlocks.get(uintptr(parent))
+	if parentBlock == nil || parentBlock.generation != nativeHeapGenerationOld {
+		t.Fatal("parent was not old after major GC")
+	}
+
+	child := tsnative_heap_alloc(1024)
+	*(*unsafe.Pointer)(parent) = child
+	tsnative_gc_safepoint()
+	childBlock := nativeBlocks.get(uintptr(child))
+	if childBlock == nil || childBlock.generation != nativeHeapGenerationOld {
+		t.Fatalf("old-to-young child = %+v, want preserved and promoted", childBlock)
+	}
+	if nativeGCMinorOldScans.Load() == 0 {
+		t.Fatal("minor GC did not scan old blocks")
+	}
+
+	tsnative_gc_root_unregister(root)
+	tsnative_gc_collect()
+	if nativeHeapContains(parent) || nativeHeapContains(child) {
+		t.Fatal("old-to-young graph survived major GC after root release")
+	}
+}
+
+func TestNurseryThresholdIsBoundedPerWorker(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
+
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(32768)
+	schedulerSetThread(1, 0)
+	_ = tsnative_heap_alloc(32768)
+	if nativeGCMinorRequested.Load() {
+		t.Fatal("separate worker nurseries incorrectly shared their threshold")
+	}
+	schedulerSetThread(0, 0)
+	_ = tsnative_heap_alloc(32768)
+	if !nativeGCMinorRequested.Load() {
+		t.Fatal("worker-local nursery did not request minor GC at its bound")
+	}
+	schedulerSetThread(-1, 0)
+}
+
+func TestAutomaticNurseryCollectionsDelayMajorGC(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	t.Setenv("TSNATIVE_GC_NURSERY_BYTES", "65536")
+
+	roots := make([]unsafe.Pointer, 8)
+	frame := tsnative_gc_enter(unsafe.Pointer(&roots[0]), uintptr(len(roots)))
+	for i := range roots {
+		roots[i] = tsnative_heap_alloc(65536)
+		if !nativeGCMinorRequested.Load() {
+			t.Fatalf("cycle %d did not request minor GC", i)
+		}
+		tsnative_gc_safepoint()
+		if got := nativeGCMinorCollections.Load(); got != uint64(i+1) {
+			t.Fatalf("minor collections after cycle %d = %d, want %d", i, got, i+1)
+		}
+		if got := nativeGCMajorCollections.Load(); got != 0 {
+			t.Fatalf("major collections before 1 MiB threshold = %d, want 0", got)
+		}
+	}
+	if got := nativeHeapBytes.Load(); got != 8*65536 {
+		t.Fatalf("live bytes after nursery cycles = %d, want %d", got, 8*65536)
+	}
+	tsnative_gc_leave(frame)
+	tsnative_gc_collect()
+	if nativeGCMajorCollections.Load() != 1 || nativeHeapAllocations.Load() != 0 {
+		t.Fatalf("final major collections=%d live=%d, want 1/0", nativeGCMajorCollections.Load(), nativeHeapAllocations.Load())
+	}
+	runtime.KeepAlive(roots)
+}
+
 func TestHeapThresholdRequestsDeferredGC(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

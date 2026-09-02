@@ -83,7 +83,7 @@ Worker
 ├─ scheduler counters
 ├─ local allocation cache
 ├─ local GC work queue
-└─ later: local nursery
+└─ bounded local nursery trigger
 ```
 
 Fast paths should avoid global locks. Cross-worker operations use stealing, an injection queue, and targeted wakeups.
@@ -208,7 +208,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Shard root frames, per-thread root stacks, and token pools 16 ways while using the GC world barrier as the collection snapshot boundary; opaque token page addresses route unregister operations back to the owning shard across worker migration.
     - [x] The 8-worker/80k-root-operation stress case reduces cumulative root-lock wait from roughly 224-236 ms to 0-0.115 ms in a five-run sample, with deterministic cross-shard and cross-OS-thread regressions.
     - [x] Profile GC world-barrier and live-block-shard contention: steady-state world reads have zero contention, while GC/allocation overlap makes the world barrier the dominant remaining synchronization cost. 64/128/256 block shards were compared; 128 is retained because it roughly halves write contention versus 64 without the near-2x empty-GC fixed cost of 256.
-    - [ ] Add a bounded per-worker nursery/minor collector to reduce full-GC frequency, then measure promotion and major-GC cost before expanding the generational policy.
+    - [x] Add bounded per-worker nursery accounting (`TSNATIVE_GC_NURSERY_BYTES`, 64 KiB default), young-only minor tracing/sweep, survivor promotion, and a 1 MiB initial major-GC threshold. Until write barriers are complete, minor GC conservatively scans old blocks for old→young references; this preserves correctness across direct LLVM pointer stores and task-state mutation.
+    - [ ] Add compiler/runtime write barriers plus remembered-set/dirty-card tracking for every reference store, then stop scanning the full old generation during minor GC and tune promotion/major cadence from measured data.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
@@ -240,6 +241,7 @@ TSNATIVE_WORKERS
 TSNATIVE_MAX_TASKS
 TSNATIVE_BLOCKING_WORKERS
 TSNATIVE_GC_MARK_WORKERS
+TSNATIVE_GC_NURSERY_BYTES
 TSNATIVE_SCHED_TRACE
 ```
 

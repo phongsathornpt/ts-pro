@@ -161,7 +161,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Use native stress measurements to move worker-local active-span allocation off the global heap mutex behind a GC world RW barrier, a 64-shard live-block index, and atomic live-byte/allocation counters. An 8-worker/40k-allocation stress regression drops heap-lock acquisitions from 40,000 to 24 and cumulative heap-lock wait from roughly 241-279 ms to roughly 0.28-1.34 ms.
     - [x] Reduce root/token lock contention with 16 independent root shards selected by thread/token page, shard-local token pools, and the GC world barrier as the stable snapshot boundary. Persistent tokens remain valid across worker migration; the same 80,000-root-operation stress case drops cumulative root-lock wait from roughly 224-236 ms to 0-0.115 ms in a five-run sample.
     - [x] Profile GC world-barrier and live-block-shard contention: steady-state world reads show zero contention; 128 live-block shards are the measured sweet spot between allocation-write contention and full-GC scan overhead (64/128/256 compared).
-    - [ ] Add a bounded per-worker nursery/minor-collection policy to reduce full-GC world-barrier frequency, then re-profile promotion/major-GC behavior before broader generational tuning.
+    - [x] Add a bounded per-worker nursery trigger (`TSNATIVE_GC_NURSERY_BYTES`, 64 KiB default) and conservative minor collector: trace young roots, scan old blocks for old→young references, sweep only nursery blocks, and promote survivors without requiring an incomplete compiler write barrier. Eight rooted 64 KiB nursery cycles complete as minors without a major before the 1 MiB major threshold; a 1,024-old-object sample measures roughly 151-168 µs/minor versus 303-523 µs/full major.
+    - [ ] Add compiler/runtime remembered-set write barriers for every reference store, then replace conservative old-heap scans with dirty-card/remembered-set minor tracing and re-profile promotion/major-GC behavior.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.
@@ -207,7 +208,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Migrate typed F64 channels to Go state/queues while preserving the existing C ABI, scheduler park/wake hooks, buffered/unbuffered behavior, cooperative fallback, and GC-owned handle lifetime.
     - [x] Migrate the bounded blocking-call pool to Go worker goroutines with opaque C job handles, scheduler park/wake hooks, bounded active jobs, metrics, and deterministic shutdown.
   - [x] Remove legacy C headers/runtime tests and the native C compilation path; ABI tests compile against the generated Go `c-archive` header.
-- [ ] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and eventually generational collection.
+- [~] Improve memory optimization with precise object metadata/root maps, escape analysis, stack allocation, scalar replacement, arenas, and generational collection.
+  - [x] Add the first conservative nursery generation with per-worker bounds, minor collection, survivor promotion, and native ABI metrics.
+  - [ ] Add complete remembered-set/write-barrier coverage before calling the collector fully generational; then tune promotion age/nursery sizing from benchmarks.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -237,7 +240,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Current critical path
 
 1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
-2. Add a bounded per-worker nursery/minor collector to reduce measured full-GC world-barrier stalls, then re-profile promotion and major-GC behavior before broader generational tuning.
+2. Add complete compiler/runtime remembered-set write barriers for reference stores, replace conservative old-heap nursery scans with remembered-set tracing, then re-profile promotion age and major-GC cadence.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
