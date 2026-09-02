@@ -146,7 +146,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
             - [~] Replace single-owner TaskRef completion with Promise-safe ownership and waiter fan-out.
               - [x] Add retain/release reference counting so consuming joins/awaits release ownership instead of unconditionally destroying task storage.
               - [x] Replace the single completion waiter slot with a cgo-safe external waiter table and fan out settlement to multiple parked tasks.
-              - [ ] Make compiled Promise awaits non-consuming while Promise aliases exist, retaining settled result/failure roots until the final handle release.
+              - [x] Make compiled Promise awaits non-consuming for owned function-scope Promise locals, retaining settled result/failure roots until deterministic final local release; repeated numeric/reference awaits pass under worker=1 + 1 KiB nursery. Promise copy/reassignment remains blocked until retain-on-copy lands.
             - [ ] Add `Promise.resolve(existingPromise)` adoption and repeated-await coverage.
             - [ ] Add thenable assimilation after dynamic method/`this` call semantics are sufficient.
             - [ ] Add homogeneous `Promise.all` / `Promise.race`, then heterogeneous tuple results after tuple semantics land.

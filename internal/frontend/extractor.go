@@ -914,6 +914,7 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("await at %d currently requires a native Promise/Task", node.Pos())
 		}
 		expr.Kind = ExprTaskJoin
+		expr.TaskShared = e.result.Types[inner.Type].Kind == TypePromise
 		expr.Args = []*Expr{inner}
 		return expr, nil
 	case tsast.KindParenthesizedExpression:

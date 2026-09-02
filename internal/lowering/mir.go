@@ -278,7 +278,7 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		}
 		result.Op = mir.TaskSpawn{Callee: mir.FunctionID(op.Callee), Captures: captures, Group: group}
 	case hir.TaskJoinOp:
-		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task)}
+		result.Op = mir.TaskJoin{Task: mir.ValueID(op.Task), Shared: op.Shared}
 	case hir.TaskWaitOp:
 		result.Op = mir.TaskWait{Task: mir.ValueID(op.Task)}
 	case hir.TaskFailureOp:

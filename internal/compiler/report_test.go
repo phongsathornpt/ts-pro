@@ -20,8 +20,8 @@ func TestCountRuntimeCallsIncludesClosureAllocation(t *testing.T) {
 	if got := countRuntimeCalls(module); got != 5 {
 		t.Fatalf("runtime calls = %d, want 5", got)
 	}
-	spawns, joins, yields := countTaskOps(module)
-	if spawns != 1 || joins != 1 || yields != 1 {
+	spawns, joins, releases, yields := countTaskOps(module)
+	if spawns != 1 || joins != 1 || releases != 0 || yields != 1 {
 		t.Fatalf("task ops = %d/%d/%d, want 1/1/1", spawns, joins, yields)
 	}
 }

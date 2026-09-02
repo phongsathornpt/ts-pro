@@ -1259,6 +1259,36 @@ func TestBuildNativeImmediatePromiseSemanticsSingleWorker(t *testing.T) {
 	}
 }
 
+func TestBuildNativeRepeatedPromiseAwaitSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "promise-repeated-await")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/promise_repeated_await.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 2 || result.Metrics.TaskJoins != 6 || result.Metrics.TaskReleases != 2 {
+		t.Fatalf("repeated Promise task metrics = spawns:%d joins:%d releases:%d; want 2/6/2", result.Metrics.TaskSpawns, result.Metrics.TaskJoins, result.Metrics.TaskReleases)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1", "TSNATIVE_GC_NURSERY_BYTES=1024")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run repeated Promise awaits: %v: %s", err, got)
+	}
+	want := "42\nrepeat-root:repeat-root"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
 func TestBuildNativeAsyncFinallySingleWorker(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not installed")

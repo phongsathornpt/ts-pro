@@ -294,7 +294,10 @@ type PromiseReject struct {
 	Reason ValueID
 	Result Repr
 }
-type TaskJoin struct{ Task ValueID }
+type TaskJoin struct {
+	Task   ValueID
+	Shared bool
+}
 type TaskWait struct{ Task ValueID }
 type TaskFailure struct{ Task ValueID }
 type TaskRelease struct{ Task ValueID }

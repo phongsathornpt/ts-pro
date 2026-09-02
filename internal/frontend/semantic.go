@@ -105,6 +105,7 @@ type Expr struct {
 	Dispatch      []DispatchTarget
 	ConcreteType  TypeID
 	ConcreteKnown bool
+	TaskShared    bool
 	Span          Span
 }
 

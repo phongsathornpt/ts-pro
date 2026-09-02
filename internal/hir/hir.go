@@ -194,7 +194,10 @@ type PromiseRejectOp struct {
 	Reason ValueID
 	Result TaskResultKind
 }
-type TaskJoinOp struct{ Task ValueID }
+type TaskJoinOp struct {
+	Task   ValueID
+	Shared bool
+}
 type TaskWaitOp struct{ Task ValueID }
 type TaskFailureOp struct{ Task ValueID }
 type TaskReleaseOp struct{ Task ValueID }

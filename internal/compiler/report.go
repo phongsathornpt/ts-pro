@@ -36,6 +36,7 @@ type BuildMetrics struct {
 	I64FastOps             int
 	TaskSpawns             int
 	TaskJoins              int
+	TaskReleases           int
 	TaskYields             int
 	ChannelCreates         int
 	ChannelTrySends        int
@@ -95,7 +96,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes esc
 	metrics.I32FastOps, metrics.I64FastOps = countIntegerFastOps(mirModule)
 	metrics.BoxingSites = countBoxingSites(mirModule)
 	metrics.DynamicDispatch = countDynamicDispatch(mirModule)
-	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskYields = countTaskOps(mirModule)
+	metrics.TaskSpawns, metrics.TaskJoins, metrics.TaskReleases, metrics.TaskYields = countTaskOps(mirModule)
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.Sleeps = countSleepOps(mirModule)
 	stackObjects := escapeanalysis.StackObjects(mirModule, escapes)
@@ -197,7 +198,7 @@ func countDynamicDispatch(module mir.Module) int {
 	return count
 }
 
-func countTaskOps(module mir.Module) (spawns, joins, yields int) {
+func countTaskOps(module mir.Module) (spawns, joins, releases, yields int) {
 	for _, fn := range module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
@@ -206,13 +207,15 @@ func countTaskOps(module mir.Module) (spawns, joins, yields int) {
 					spawns++
 				case mir.TaskJoin:
 					joins++
+				case mir.TaskRelease:
+					releases++
 				case mir.TaskYield:
 					yields++
 				}
 			}
 		}
 	}
-	return spawns, joins, yields
+	return spawns, joins, releases, yields
 }
 
 func countChannelOps(module mir.Module) (creates, trySends, tryRecvs, sends, recvs int) {

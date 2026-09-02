@@ -21,6 +21,8 @@ type functionLowerer struct {
 	returnFinalizers []finalizerFrame
 	throwFinalizers  []finalizerFrame
 	nextFinalizer    uint32
+	scopeDepth       int
+	ownedPromises    map[frontend.SymbolID]hir.ValueID
 }
 
 type localState struct {
@@ -54,7 +56,8 @@ func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, e
 			ID: hir.NewFunctionID(uint32(source.ID)), Name: source.Name,
 			ReturnType: l.types[source.ReturnType], Entry: hir.NewBlockID(0),
 		},
-		nextBlock: 1,
+		nextBlock:     1,
+		ownedPromises: map[frontend.SymbolID]hir.ValueID{},
 	}
 	for _, param := range source.Params {
 		value := hir.NewValueID(fl.nextValue)
@@ -70,6 +73,9 @@ func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, e
 	}
 	if !fl.terminated {
 		if int(source.ReturnType) < len(l.source.Types) && l.source.Types[source.ReturnType].Kind == frontend.TypeVoid {
+			if err := fl.releaseOwnedPromises(); err != nil {
+				return hir.Function{}, err
+			}
 			if err := fl.terminate(hir.ReturnTerm{}); err != nil {
 				return hir.Function{}, err
 			}
@@ -113,6 +119,8 @@ func (f *functionLowerer) terminate(term hir.Terminator) error {
 }
 
 func (f *functionLowerer) lowerStatements(statements []frontend.Statement) error {
+	f.scopeDepth++
+	defer func() { f.scopeDepth-- }()
 	for _, stmt := range statements {
 		if f.terminated {
 			break
@@ -122,6 +130,37 @@ func (f *functionLowerer) lowerStatements(statements []frontend.Statement) error
 		}
 	}
 	return nil
+}
+
+func (f *functionLowerer) releaseOwnedPromises() error {
+	if len(f.ownedPromises) == 0 {
+		return nil
+	}
+	voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+	if !ok {
+		return fmt.Errorf("Promise local cleanup requires void semantic type")
+	}
+	keys := make([]frontend.SymbolID, 0, len(f.ownedPromises))
+	for symbol := range f.ownedPromises {
+		keys = append(keys, symbol)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for _, symbol := range keys {
+		f.emit(voidType, hir.TaskReleaseOp{Task: f.ownedPromises[symbol]})
+	}
+	return nil
+}
+
+func isOwnedPromiseProducer(expr *frontend.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr.Kind {
+	case frontend.ExprTaskSpawn, frontend.ExprPromiseResolve, frontend.ExprPromiseReject:
+		return true
+	default:
+		return false
+	}
 }
 
 func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
@@ -146,6 +185,9 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			f.handlers[index].incoming = append(f.handlers[index].incoming, hir.PhiIncoming{Block: pred, Value: value})
 			return f.terminate(hir.JumpTerm{Target: f.handlers[index].block})
 		}
+		if err := f.releaseOwnedPromises(); err != nil {
+			return err
+		}
 		return f.terminate(hir.ThrowTerm{Value: value})
 	case frontend.StmtTry:
 		return f.lowerTryCatch(stmt)
@@ -156,6 +198,9 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			}
 			if f.terminated {
 				return nil
+			}
+			if err := f.releaseOwnedPromises(); err != nil {
+				return err
 			}
 			return f.terminate(hir.ReturnTerm{})
 		}
@@ -168,6 +213,9 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		}
 		if f.terminated {
 			return nil
+		}
+		if err := f.releaseOwnedPromises(); err != nil {
+			return err
 		}
 		return f.terminate(hir.ReturnTerm{Value: &value})
 	case frontend.StmtIf:
@@ -184,11 +232,26 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if stmt.Value == nil {
 			return fmt.Errorf("variable %q has no value", stmt.Name)
 		}
+		isPromise := int(stmt.Type) < len(f.module.source.Types) && f.module.source.Types[stmt.Type].Kind == frontend.TypePromise
+		if isPromise && stmt.Kind == frontend.StmtAssign {
+			return fmt.Errorf("Promise local reassignment is not supported until retain-on-copy ownership is implemented")
+		}
+		if isPromise {
+			if f.scopeDepth != 1 {
+				return fmt.Errorf("Promise locals in nested control-flow scopes are not supported until lexical TaskRef cleanup is implemented")
+			}
+			if !isOwnedPromiseProducer(stmt.Value) {
+				return fmt.Errorf("Promise local %q must own a newly created native Promise; Promise aliases require retain-on-copy", stmt.Name)
+			}
+		}
 		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
 		if err != nil {
 			return err
 		}
 		f.locals[stmt.Symbol] = value
+		if isPromise {
+			f.ownedPromises[stmt.Symbol] = value
+		}
 		return nil
 	case frontend.StmtWhile:
 		return f.lowerLoop(stmt.Expr, stmt.Then, nil)

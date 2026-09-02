@@ -604,6 +604,11 @@ func tsnative_task_await_task(raw unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, -1, nil, false, false)
 }
 
+//export tsnative_task_await_task_consume
+func tsnative_task_await_task_consume(raw unsafe.Pointer) int32 {
+	return awaitNativeTask(raw, -1, nil, false, true)
+}
+
 //export tsnative_task_await_status_task
 func tsnative_task_await_status_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, -1, out, true, false)
@@ -614,14 +619,29 @@ func tsnative_task_await_f64_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultF64, out, false, true)
 }
 
+//export tsnative_task_await_f64_shared
+func tsnative_task_await_f64_shared(raw, out unsafe.Pointer) int32 {
+	return awaitNativeTask(raw, nativeTaskResultF64, out, false, false)
+}
+
 //export tsnative_task_await_bool_task
 func tsnative_task_await_bool_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultBool, out, false, true)
 }
 
+//export tsnative_task_await_bool_shared
+func tsnative_task_await_bool_shared(raw, out unsafe.Pointer) int32 {
+	return awaitNativeTask(raw, nativeTaskResultBool, out, false, false)
+}
+
 //export tsnative_task_await_ref_task
 func tsnative_task_await_ref_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultRef, out, false, true)
+}
+
+//export tsnative_task_await_ref_shared
+func tsnative_task_await_ref_shared(raw, out unsafe.Pointer) int32 {
+	return awaitNativeTask(raw, nativeTaskResultRef, out, false, false)
 }
 
 //export tsnative_task_retain
@@ -648,6 +668,42 @@ func abortNativeTaskFailure(task *nativeTask) {
 		tsnative_console_log_jsvalue(task.failureRef)
 	}
 	nativeAbortSignal()
+}
+
+//export tsnative_task_join_f64
+func tsnative_task_join_f64(raw unsafe.Pointer) float64 {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultF64 {
+		nativeAbort("invalid f64 task join")
+	}
+	if tsnative_scheduler_wait(raw) != 0 {
+		abortNativeTaskFailure(task)
+	}
+	return task.resultF64
+}
+
+//export tsnative_task_join_bool
+func tsnative_task_join_bool(raw unsafe.Pointer) uint8 {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultBool {
+		nativeAbort("invalid bool task join")
+	}
+	if tsnative_scheduler_wait(raw) != 0 {
+		abortNativeTaskFailure(task)
+	}
+	return task.resultBool
+}
+
+//export tsnative_task_join_ref
+func tsnative_task_join_ref(raw unsafe.Pointer) unsafe.Pointer {
+	task := lookupNativeTask(uintptr(raw))
+	if task == nil || task.kind != nativeTaskResultRef {
+		nativeAbort("invalid ref task join")
+	}
+	if tsnative_scheduler_wait(raw) != 0 {
+		abortNativeTaskFailure(task)
+	}
+	return task.resultRef
 }
 
 //export tsnative_task_join_release

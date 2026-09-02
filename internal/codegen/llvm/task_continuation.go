@@ -57,6 +57,7 @@ type taskSuspendStep struct {
 	Then     mir.BlockID
 	Else     mir.BlockID
 	HasValue bool
+	Shared   bool
 	Block    mir.BlockID
 }
 
@@ -340,8 +341,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				hasSuspend = true
 				if inst.Repr == mir.ReprVoid {
-					cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendJoinVoid, Task: op.Task})
-					cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepTaskRelease, Task: op.Task})
+					cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskSuspendJoinVoid, Task: op.Task, Shared: op.Shared})
 					continue
 				}
 				kind := taskSuspendKind(0)
@@ -357,7 +357,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
 				available[inst.Result] = true
-				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Task: op.Task, Result: inst.Result})
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: kind, Task: op.Task, Result: inst.Result, Shared: op.Shared})
 			case mir.ChannelSendF64:
 				if !available[op.Channel] || !available[op.Value] {
 					return nil
@@ -938,7 +938,11 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			if repr != mir.ReprTaskRef {
 				return fmt.Errorf("task continuation join requires TaskRef")
 			}
-			fmt.Fprintf(b, "  %%status%d = call i32 @tsnative_task_await_task(ptr %s)\n", i, task)
+			awaitName := "tsnative_task_await_task_consume"
+			if step.Shared {
+				awaitName = "tsnative_task_await_task"
+			}
+			fmt.Fprintf(b, "  %%status%d = call i32 @%s(ptr %s)\n", i, awaitName, task)
 		case taskSuspendAwaitF64, taskSuspendAwaitBool, taskSuspendAwaitRef:
 			task, repr, err := continuationOperand(b, fn, descriptor, step.Task, fmt.Sprintf("await%d", i))
 			if err != nil {
@@ -949,10 +953,19 @@ func (e *emitter) emitContinuationTaskWrapper(b *strings.Builder, descriptor tas
 			}
 			slot := cont.SpillSlots[step.Result]
 			awaitName := "tsnative_task_await_f64_task"
+			if step.Shared {
+				awaitName = "tsnative_task_await_f64_shared"
+			}
 			if step.Kind == taskSuspendAwaitBool {
 				awaitName = "tsnative_task_await_bool_task"
+				if step.Shared {
+					awaitName = "tsnative_task_await_bool_shared"
+				}
 			} else if step.Kind == taskSuspendAwaitRef {
 				awaitName = "tsnative_task_await_ref_task"
+				if step.Shared {
+					awaitName = "tsnative_task_await_ref_shared"
+				}
 			}
 			fmt.Fprintf(b, "  %%status%d = call i32 @%s(ptr %s, ptr %%spill%d.ptr)\n", i, awaitName, task, slot.Index)
 		default:

@@ -219,7 +219,7 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		if err != nil {
 			return 0, err
 		}
-		return f.emit(expr.Type, hir.TaskJoinOp{Task: task}), nil
+		return f.emit(expr.Type, hir.TaskJoinOp{Task: task, Shared: expr.TaskShared}), nil
 	case frontend.ExprTaskYield:
 		return f.emit(expr.Type, hir.TaskYieldOp{}), nil
 	case frontend.ExprTaskCancel:
@@ -543,7 +543,9 @@ func (f *functionLowerer) lowerCaughtTaskJoin(expr *frontend.Expr) (hir.ValueID,
 	}
 	f.startBlock(failureID)
 	failure := f.emit(anyType, hir.TaskFailureOp{Task: task})
-	f.emit(voidType, hir.TaskReleaseOp{Task: task})
+	if !expr.TaskShared {
+		f.emit(voidType, hir.TaskReleaseOp{Task: task})
+	}
 	index := len(f.handlers) - 1
 	pred := f.block().ID
 	f.handlers[index].incoming = append(f.handlers[index].incoming, hir.PhiIncoming{Block: pred, Value: failure})
@@ -551,5 +553,5 @@ func (f *functionLowerer) lowerCaughtTaskJoin(expr *frontend.Expr) (hir.ValueID,
 		return 0, err
 	}
 	f.startBlock(successID)
-	return f.emit(expr.Type, hir.TaskJoinOp{Task: task}), nil
+	return f.emit(expr.Type, hir.TaskJoinOp{Task: task, Shared: expr.TaskShared}), nil
 }

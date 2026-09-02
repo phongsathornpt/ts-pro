@@ -1180,8 +1180,7 @@ func TestEmitStacklessDelayedTaskJoinUsesSpilledHandle(t *testing.T) {
 		"%tsnative_task_env_f1 = type { i32, ptr }",
 		"store ptr %v0, ptr %spill0.ptr",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",
-		"call i32 @tsnative_task_await_task(ptr %spill.0.join2)",
-		"call void @tsnative_task_release(ptr %spill.0.release3)",
+		"call i32 @tsnative_task_await_task_consume(ptr %spill.0.join2)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
