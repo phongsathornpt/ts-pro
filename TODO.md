@@ -159,7 +159,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Split root/token/thread-stack/handoff metadata onto its own mutex so root lifecycle operations no longer serialize with heap allocation; collection keeps `heap -> roots` lock order across mark/sweep.
     - [x] Instrument heap/root mutex acquisitions, contentions, and cumulative wait nanoseconds through the generated native ABI, with deterministic contention regressions.
     - [x] Use native stress measurements to move worker-local active-span allocation off the global heap mutex behind a GC world RW barrier, a 64-shard live-block index, and atomic live-byte/allocation counters. An 8-worker/40k-allocation stress regression drops heap-lock acquisitions from 40,000 to 24 and cumulative heap-lock wait from roughly 241-279 ms to roughly 0.28-1.34 ms.
-    - [ ] Reduce the now-dominant root/token lock contention while preserving per-thread root-stack discipline and the collector's stable root snapshot; the same stress case exposes roughly 224-236 ms cumulative root-lock wait across 80,000 root operations.
+    - [x] Reduce root/token lock contention with 16 independent root shards selected by thread/token page, shard-local token pools, and the GC world barrier as the stable snapshot boundary. Persistent tokens remain valid across worker migration; the same 80,000-root-operation stress case drops cumulative root-lock wait from roughly 224-236 ms to 0-0.115 ms in a five-run sample.
+    - [ ] Profile GC world-barrier and live-block-shard contention before adding nursery/generational policy; synchronization changes must continue to be measurement-driven.
 - [~] Add cooperative execution budgets/preemption polling after scheduler correctness is stable.
   - [x] Add true logical task yield/requeue as the scheduler suspension primitive.
   - [x] Inject bounded execution-budget polls at proven loop backedges and requeue when the budget expires; worker=1 fairness regression verifies CPU-heavy tasks yield to runnable peers.
@@ -235,7 +236,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Current critical path
 
 1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
-2. Reduce measured root/token contention after the worker-local allocation fast path removed the dominant heap mutex bottleneck, then add nursery/generational policy only after profiling.
+2. Profile the GC world barrier and live-block shards after removing the heap/root mutex bottlenecks, then add nursery/generational policy only where measurements justify it.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

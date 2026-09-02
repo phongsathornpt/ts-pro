@@ -18,30 +18,31 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	slot := uintptr(rooted)
 	foreignTID := syscall.Gettid() + 1_000_000
 
-	nativeHeap.Lock()
-	nativeRoots.Lock()
-	tokenPtr := allocRootTokenLocked()
+	nativeHeapWorld.RLock()
+	index := nativeRootShardIndexForThread(foreignTID)
+	shard, tokenPtr := nativeRoots.lockShardWithToken(index)
 	token := uintptr(tokenPtr)
-	nativeRoots.roots[token] = &nativeRootFrame{
+	shard.roots[token] = &nativeRootFrame{
 		token: tokenPtr, slots: unsafe.Pointer(&slot), count: 1, tid: foreignTID,
 	}
-	nativeRoots.threadStacks[foreignTID] = []uintptr{token}
+	shard.threadStacks[foreignTID] = []uintptr{token}
 	before := nativeHeapCollections.Load()
-	nativeRoots.Unlock()
-	nativeHeap.Unlock()
+	shard.Unlock()
+	nativeHeapWorld.RUnlock()
 
 	tsnative_gc_collect()
 
-	nativeHeap.Lock()
-	nativeRoots.Lock()
 	after := nativeHeapCollections.Load()
 	garbageLive := nativeBlocks.get(uintptr(garbage)) != nil
-	frame := nativeRoots.roots[token]
-	delete(nativeRoots.roots, token)
-	delete(nativeRoots.threadStacks, foreignTID)
-	freeRootTokenLocked(frame.token)
-	nativeRoots.Unlock()
-	nativeHeap.Unlock()
+	nativeHeapWorld.RLock()
+	shard = nativeRoots.shardForToken(tokenPtr)
+	shard.Lock()
+	frame := shard.roots[token]
+	delete(shard.roots, token)
+	delete(shard.threadStacks, foreignTID)
+	nativeRoots.freeTokenLocked(shard, frame.token)
+	shard.Unlock()
+	nativeHeapWorld.RUnlock()
 
 	if after != before {
 		t.Fatalf("collection ran with foreign active root stack: before=%d after=%d", before, after)
@@ -91,13 +92,14 @@ func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
 	}
 
 	nativeRoots.resetMetrics()
-	nativeRoots.Lock()
+	rootShard := &nativeRoots.shards[0]
+	rootShard.Lock()
 	rootStarted := make(chan struct{})
 	rootDone := make(chan struct{})
 	go func() {
 		close(rootStarted)
-		nativeRoots.Lock()
-		nativeRoots.Unlock()
+		rootShard.Lock()
+		rootShard.Unlock()
 		close(rootDone)
 	}()
 	<-rootStarted
@@ -106,14 +108,64 @@ func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
 		runtime.Gosched()
 	}
 	if nativeRootLockMetrics().contended == 0 {
-		nativeRoots.Unlock()
+		rootShard.Unlock()
 		t.Fatal("root lock contention was not observed")
 	}
-	nativeRoots.Unlock()
+	rootShard.Unlock()
 	<-rootDone
 	rootMetrics := nativeRootLockMetrics()
 	if rootMetrics.acquisitions < 2 || rootMetrics.waitNanos == 0 {
 		t.Fatalf("root lock metrics = %+v, want acquisitions >= 2 and wait > 0", rootMetrics)
+	}
+}
+
+func TestIndependentRootShardsDoNotSerialize(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	first := &nativeRoots.shards[0]
+	second := &nativeRoots.shards[1]
+	first.Lock()
+	done := make(chan struct{})
+	go func() {
+		second.Lock()
+		second.Unlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		first.Unlock()
+		t.Fatal("independent root shard blocked on another shard")
+	}
+	first.Unlock()
+}
+
+func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	slot := tsnative_heap_alloc(16)
+	registeredTID := syscall.Gettid()
+	token := tsnative_gc_root_register(unsafe.Pointer(&slot))
+	if token == nil {
+		t.Fatal("persistent root registration failed")
+	}
+	unregisteredTID := make(chan int, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		tid := syscall.Gettid()
+		tsnative_gc_root_unregister(token)
+		unregisteredTID <- tid
+	}()
+	if tid := <-unregisteredTID; tid == registeredTID {
+		t.Fatalf("persistent root test reused registration OS thread %d", tid)
+	}
+	if count := nativeRoots.rootCount(); count != 0 {
+		t.Fatalf("persistent roots after cross-thread unregister = %d, want 0", count)
 	}
 }
 
@@ -178,7 +230,8 @@ func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()
 
-	nativeRoots.Lock()
+	rootShard := &nativeRoots.shards[0]
+	rootShard.Lock()
 	allocationDone := make(chan unsafe.Pointer, 1)
 	go func() {
 		allocationDone <- tsnative_heap_alloc(16)
@@ -187,10 +240,10 @@ func TestRootMetadataAndHeapAllocationUseIndependentLocks(t *testing.T) {
 	select {
 	case allocated = <-allocationDone:
 	case <-time.After(250 * time.Millisecond):
-		nativeRoots.Unlock()
+		rootShard.Unlock()
 		t.Fatal("heap allocation blocked on root metadata lock")
 	}
-	nativeRoots.Unlock()
+	rootShard.Unlock()
 	if allocated == nil {
 		t.Fatal("heap allocation failed while root lock was held")
 	}
@@ -432,9 +485,7 @@ func TestHeapShutdownFinalizesBufferedReferenceChannelRoots(t *testing.T) {
 	if lookupNativeRefChannel(channel) != nil {
 		t.Fatal("reference channel state survived heap shutdown")
 	}
-	nativeRoots.Lock()
-	rootCount := len(nativeRoots.roots)
-	nativeRoots.Unlock()
+	rootCount := nativeRoots.rootCount()
 	nativeHeap.Lock()
 	spanCount := len(nativeHeap.spans)
 	nativeHeap.Unlock()

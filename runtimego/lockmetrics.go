@@ -53,7 +53,7 @@ func (m *nativeMeasuredMutex) resetMetrics() {
 }
 
 func nativeHeapLockMetrics() nativeLockMetrics { return nativeHeap.nativeMeasuredMutex.snapshot() }
-func nativeRootLockMetrics() nativeLockMetrics { return nativeRoots.nativeMeasuredMutex.snapshot() }
+func nativeRootLockMetrics() nativeLockMetrics { return nativeRoots.metrics() }
 
 //export tsnative_heap_lock_acquisitions
 func tsnative_heap_lock_acquisitions() C.uint64_t {

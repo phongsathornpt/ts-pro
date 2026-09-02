@@ -242,12 +242,12 @@ func (state *nativeGCMarkState) worker(role nativeGCMarkWorkerRole, preferredOwn
 func markNativeHeapRootsLocked() {
 	state := newNativeGCMarkState(nativeAllocatorOwner())
 	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
-	for _, frame := range nativeRoots.roots {
+	nativeRoots.rangeFrames(func(frame *nativeRootFrame) {
 		for i := uintptr(0); i < frame.count; i++ {
 			slotAddr := unsafe.Add(frame.slots, i*wordSize)
 			state.enqueue(*(*uintptr)(slotAddr))
 		}
-	}
+	})
 
 	workerCount := configuredNativeGCMarkWorkers(nativeBlocks.count())
 	state.mu.Lock()

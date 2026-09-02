@@ -205,7 +205,9 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Separate root lifecycle metadata from heap/allocator locking while preserving `heap -> roots` collection lock order.
     - [x] Export heap/root lock acquisition, contention, and wait-time telemetry through the generated C ABI.
     - [x] Use native stress measurements to reduce block-index/allocator lock scope only where the data supports it; worker-local active-span allocation now bypasses the global heap mutex while GC retains a world write barrier.
-    - [ ] Reduce root/token lock contention without weakening per-thread root-stack discipline or collection snapshot semantics.
+    - [x] Shard root frames, per-thread root stacks, and token pools 16 ways while using the GC world barrier as the collection snapshot boundary; opaque token page addresses route unregister operations back to the owning shard across worker migration.
+    - [x] The 8-worker/80k-root-operation stress case reduces cumulative root-lock wait from roughly 224-236 ms to 0-0.115 ms in a five-run sample, with deterministic cross-shard and cross-OS-thread regressions.
+    - [ ] Profile GC world-barrier and live-block-shard contention before introducing nursery/generational policy.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

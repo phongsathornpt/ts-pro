@@ -27,26 +27,6 @@ type nativeHeapBlock struct {
 	finalizer func()
 }
 
-type nativeRootFrame struct {
-	token      unsafe.Pointer
-	slots      unsafe.Pointer
-	count      uintptr
-	persistent bool
-	tid        int
-}
-
-var nativeRoots = struct {
-	nativeMeasuredMutex
-	roots        map[uintptr]*nativeRootFrame
-	threadStacks map[int][]uintptr
-	tokenPages   [][]byte
-	tokenFree    []unsafe.Pointer
-	handoffs     uintptr
-}{
-	roots:        map[uintptr]*nativeRootFrame{},
-	threadStacks: map[int][]uintptr{},
-}
-
 var nativeHeap = struct {
 	nativeMeasuredMutex
 	spans                 map[*nativeHeapSpan]struct{}
@@ -125,30 +105,6 @@ func registerNativeHeapFinalizer(raw unsafe.Pointer, finalizer func()) {
 	}
 }
 
-const nativeRootTokenSize = uintptr(unsafe.Sizeof(uintptr(0)))
-
-func allocRootTokenLocked() unsafe.Pointer {
-	if count := len(nativeRoots.tokenFree); count != 0 {
-		token := nativeRoots.tokenFree[count-1]
-		nativeRoots.tokenFree[count-1] = nil
-		nativeRoots.tokenFree = nativeRoots.tokenFree[:count-1]
-		return token
-	}
-	_, page := nativeMap(uintptr(os.Getpagesize()))
-	base := unsafe.Pointer(&page[0])
-	for offset := nativeRootTokenSize; offset+nativeRootTokenSize <= uintptr(len(page)); offset += nativeRootTokenSize {
-		nativeRoots.tokenFree = append(nativeRoots.tokenFree, unsafe.Add(base, offset))
-	}
-	nativeRoots.tokenPages = append(nativeRoots.tokenPages, page)
-	return base
-}
-
-func freeRootTokenLocked(token unsafe.Pointer) {
-	if token != nil {
-		nativeRoots.tokenFree = append(nativeRoots.tokenFree, token)
-	}
-}
-
 //export tsnative_heap_alloc
 func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	nativeHeapWorld.RLock()
@@ -164,103 +120,8 @@ func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	return block.raw
 }
 
-//export tsnative_gc_enter
-func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
-	tid := syscall.Gettid()
-	nativeRoots.Lock()
-	token := allocRootTokenLocked()
-	key := uintptr(token)
-	frame := &nativeRootFrame{token: token, slots: slots, count: count, tid: tid}
-	nativeRoots.roots[key] = frame
-	nativeRoots.threadStacks[tid] = append(nativeRoots.threadStacks[tid], key)
-	nativeRoots.Unlock()
-	return token
-}
-
-//export tsnative_gc_leave
-func tsnative_gc_leave(raw unsafe.Pointer) {
-	token := uintptr(raw)
-	tid := syscall.Gettid()
-	nativeRoots.Lock()
-	frame := nativeRoots.roots[token]
-	stack := nativeRoots.threadStacks[tid]
-	if frame == nil || frame.persistent || len(stack) == 0 || stack[len(stack)-1] != token {
-		nativeRoots.Unlock()
-		nativeAbort("invalid GC root frame discipline")
-		return
-	}
-	delete(nativeRoots.roots, token)
-	freeRootTokenLocked(frame.token)
-	stack = stack[:len(stack)-1]
-	if len(stack) == 0 {
-		delete(nativeRoots.threadStacks, tid)
-	} else {
-		nativeRoots.threadStacks[tid] = stack
-	}
-	nativeRoots.Unlock()
-}
-
-//export tsnative_gc_root_register
-func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
-	if slot == nil {
-		return nil
-	}
-	nativeRoots.Lock()
-	token := allocRootTokenLocked()
-	nativeRoots.roots[uintptr(token)] = &nativeRootFrame{token: token, slots: slot, count: 1, persistent: true}
-	nativeRoots.Unlock()
-	return token
-}
-
-//export tsnative_gc_root_unregister
-func tsnative_gc_root_unregister(raw unsafe.Pointer) {
-	if raw == nil {
-		return
-	}
-	token := uintptr(raw)
-	nativeRoots.Lock()
-	frame := nativeRoots.roots[token]
-	if frame == nil || !frame.persistent {
-		nativeRoots.Unlock()
-		nativeAbort("invalid persistent GC root")
-		return
-	}
-	delete(nativeRoots.roots, token)
-	freeRootTokenLocked(frame.token)
-	nativeRoots.Unlock()
-}
-
-//export tsnative_gc_handoff_begin
-func tsnative_gc_handoff_begin() {
-	nativeRoots.Lock()
-	nativeRoots.handoffs++
-	nativeRoots.Unlock()
-}
-
-//export tsnative_gc_handoff_end
-func tsnative_gc_handoff_end() {
-	nativeRoots.Lock()
-	if nativeRoots.handoffs == 0 {
-		nativeRoots.Unlock()
-		nativeAbort("invalid GC handoff discipline")
-		return
-	}
-	nativeRoots.handoffs--
-	nativeRoots.Unlock()
-}
-
 func gcCanCollectLocked(tid int) bool {
-	if nativeRoots.handoffs != 0 {
-		return false
-	}
-	if len(nativeRoots.threadStacks) == 0 {
-		return true
-	}
-	if len(nativeRoots.threadStacks) != 1 {
-		return false
-	}
-	_, ownsActiveStack := nativeRoots.threadStacks[tid]
-	return ownsActiveStack
+	return nativeRoots.canCollect(tid)
 }
 
 func collectIfSafeLocked(tid int, force bool) []*nativeHeapBlock {
@@ -344,9 +205,7 @@ func tsnative_gc_collect() {
 	tid := syscall.Gettid()
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
-	nativeRoots.Lock()
 	blocks := collectIfSafeLocked(tid, true)
-	nativeRoots.Unlock()
 	nativeHeap.Unlock()
 	nativeHeapWorld.Unlock()
 	finalizeCollectedNativeHeapBlocks(blocks)
@@ -360,9 +219,7 @@ func tsnative_gc_safepoint() {
 	tid := syscall.Gettid()
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
-	nativeRoots.Lock()
 	blocks := collectIfSafeLocked(tid, false)
-	nativeRoots.Unlock()
 	nativeHeap.Unlock()
 	nativeHeapWorld.Unlock()
 	finalizeCollectedNativeHeapBlocks(blocks)
@@ -385,14 +242,7 @@ func tsnative_heap_shutdown() {
 	finalizeShutdownNativeHeapBlocks(blocks)
 
 	nativeHeapWorld.Lock()
-	nativeRoots.Lock()
-	nativeRoots.roots = map[uintptr]*nativeRootFrame{}
-	nativeRoots.threadStacks = map[int][]uintptr{}
-	nativeRoots.handoffs = 0
-	tokenPages := nativeRoots.tokenPages
-	nativeRoots.tokenPages = nil
-	nativeRoots.tokenFree = nil
-	nativeRoots.Unlock()
+	tokenPages := nativeRoots.shutdown()
 
 	nativeHeap.Lock()
 	resetNativeWorkerAllocatorsLocked()
