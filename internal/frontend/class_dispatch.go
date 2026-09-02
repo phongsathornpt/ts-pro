@@ -96,3 +96,21 @@ func (e *extractor) dispatchTargets(base *classInfo, name string) []DispatchTarg
 	sort.Slice(result, func(i, j int) bool { return result[i].ClassTag < result[j].ClassTag })
 	return result
 }
+func (e *extractor) dynamicMethodTargets(name string) []DispatchTarget {
+	seen := map[*classInfo]struct{}{}
+	var result []DispatchTarget
+	for _, candidate := range e.classesByType {
+		if _, duplicate := seen[candidate]; duplicate {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		target, ok := e.findClassMethod(candidate, name)
+		if !ok {
+			continue
+		}
+		tag := e.result.Shapes[candidate.Shape].ClassTag
+		result = append(result, DispatchTarget{ClassTag: tag, Function: target})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ClassTag < result[j].ClassTag })
+	return result
+}

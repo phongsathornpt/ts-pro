@@ -13,6 +13,7 @@ const (
 	ExprBinary
 	ExprCall
 	ExprDynamicCall
+	ExprDynamicMethodCall
 	ExprArray
 	ExprIndex
 	ExprArrayLength

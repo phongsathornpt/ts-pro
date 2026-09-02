@@ -221,6 +221,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case DynamicMethodCall:
+				if inst.Repr != ReprJSValue || len(op.Cases) == 0 {
+					return fmt.Errorf("dynamic method call v%d must produce JSValue with targets", inst.Result)
+				}
+				if err := checkValue(op.Receiver); err != nil {
+					return err
+				}
+				for _, arg := range op.Args {
+					if err := checkValue(arg); err != nil {
+						return err
+					}
+				}
+				for _, target := range op.Cases {
+					if _, ok := functions[target.Callee]; !ok {
+						return fmt.Errorf("dynamic method call references unknown callee f%d", target.Callee)
+					}
+				}
 			case Call:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("unknown callee f%d", op.Callee)

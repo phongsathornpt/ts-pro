@@ -191,6 +191,19 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
+			case DynamicMethodCallOp:
+				checkValue(op.Receiver)
+				if len(op.Cases) == 0 {
+					add(fmt.Sprintf("dynamic method call v%d has no targets", instruction.Result))
+				}
+				for _, arg := range op.Args {
+					checkValue(arg)
+				}
+				for _, target := range op.Cases {
+					if _, exists := functionIDs[target.Callee]; !exists {
+						add(fmt.Sprintf("dynamic method call references unknown function f%d", target.Callee))
+					}
+				}
 			case CallOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("calls unknown function f%d", op.Callee))

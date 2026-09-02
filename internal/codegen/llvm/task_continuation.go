@@ -132,6 +132,9 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	case mir.DynamicCall:
 		values := []mir.ValueID{op.Callee}
 		return append(values, op.Args...), true
+	case mir.DynamicMethodCall:
+		values := []mir.ValueID{op.Receiver}
+		return append(values, op.Args...), true
 	case mir.Call:
 		return append([]mir.ValueID(nil), op.Args...), true
 	case mir.DispatchCall:
@@ -328,6 +331,18 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				}
 				for _, operand := range operands {
 					if !available[operand] {
+						return nil
+					}
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.DynamicMethodCall:
+				if !available[op.Receiver] || inst.Repr != mir.ReprJSValue {
+					return nil
+				}
+				for _, arg := range op.Args {
+					if !available[arg] {
 						return nil
 					}
 				}
@@ -690,6 +705,16 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 			return err
 		}
 		values[op.Value] = value
+	case mir.DynamicMethodCall:
+		valuesToLoad := []mir.ValueID{op.Receiver}
+		valuesToLoad = append(valuesToLoad, op.Args...)
+		for _, valueID := range valuesToLoad {
+			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)
+			if err != nil {
+				return err
+			}
+			values[valueID] = value
+		}
 	case mir.DynamicCall:
 		valuesToLoad := []mir.ValueID{op.Callee}
 		valuesToLoad = append(valuesToLoad, op.Args...)

@@ -104,6 +104,11 @@ type DynamicCallOp struct {
 	Callee ValueID
 	Args   []ValueID
 }
+type DynamicMethodCallOp struct {
+	Receiver ValueID
+	Args     []ValueID
+	Cases    []DispatchCase
+}
 
 type DispatchCase struct {
 	ClassTag uint32
@@ -272,58 +277,59 @@ type ChannelRecvOp struct {
 }
 type SleepOp struct{ Duration ValueID }
 
-func (ConstOp) isOperation()            {}
-func (UnaryExpr) isOperation()          {}
-func (BinaryExpr) isOperation()         {}
-func (BoxOp) isOperation()              {}
-func (UnboxOp) isOperation()            {}
-func (DynamicBinaryOp) isOperation()    {}
-func (CallOp) isOperation()             {}
-func (DynamicCallOp) isOperation()      {}
-func (DispatchCallOp) isOperation()     {}
-func (IntrinsicCallOp) isOperation()    {}
-func (PhiOp) isOperation()              {}
-func (ArrayNewOp) isOperation()         {}
-func (ArrayLengthOp) isOperation()      {}
-func (ArrayGetOp) isOperation()         {}
-func (ArraySetOp) isOperation()         {}
-func (ObjectNewOp) isOperation()        {}
-func (ObjectAllocOp) isOperation()      {}
-func (FieldSetOp) isOperation()         {}
-func (FieldGetOp) isOperation()         {}
-func (DynamicFieldGetOp) isOperation()  {}
-func (DynamicFieldSetOp) isOperation()  {}
-func (ClosureNewOp) isOperation()       {}
-func (ClosureCallOp) isOperation()      {}
-func (TaskSpawnOp) isOperation()        {}
-func (PromiseResolveOp) isOperation()   {}
-func (PromiseAdoptOp) isOperation()     {}
-func (PromiseRejectOp) isOperation()    {}
-func (PromiseAllF64Op) isOperation()    {}
-func (PromiseRaceF64Op) isOperation()   {}
-func (PromiseAllBoolOp) isOperation()   {}
-func (PromiseRaceBoolOp) isOperation()  {}
-func (PromiseAllRefOp) isOperation()    {}
-func (PromiseRaceRefOp) isOperation()   {}
-func (TaskJoinOp) isOperation()         {}
-func (TaskWaitOp) isOperation()         {}
-func (TaskFailureOp) isOperation()      {}
-func (TaskRetainOp) isOperation()       {}
-func (TaskReleaseOp) isOperation()      {}
-func (TaskYieldOp) isOperation()        {}
-func (TaskCancelOp) isOperation()       {}
-func (TaskCancelledOp) isOperation()    {}
-func (TaskGroupNewOp) isOperation()     {}
-func (TaskGroupJoinOp) isOperation()    {}
-func (TaskGroupCancelOp) isOperation()  {}
-func (TaskContextSetOp) isOperation()   {}
-func (TaskContextGetOp) isOperation()   {}
-func (ChannelNewOp) isOperation()       {}
-func (ChannelTrySendOp) isOperation()   {}
-func (ChannelTryRecvOrOp) isOperation() {}
-func (ChannelSendOp) isOperation()      {}
-func (ChannelRecvOp) isOperation()      {}
-func (SleepOp) isOperation()            {}
+func (ConstOp) isOperation()             {}
+func (UnaryExpr) isOperation()           {}
+func (BinaryExpr) isOperation()          {}
+func (BoxOp) isOperation()               {}
+func (UnboxOp) isOperation()             {}
+func (DynamicBinaryOp) isOperation()     {}
+func (CallOp) isOperation()              {}
+func (DynamicCallOp) isOperation()       {}
+func (DynamicMethodCallOp) isOperation() {}
+func (DispatchCallOp) isOperation()      {}
+func (IntrinsicCallOp) isOperation()     {}
+func (PhiOp) isOperation()               {}
+func (ArrayNewOp) isOperation()          {}
+func (ArrayLengthOp) isOperation()       {}
+func (ArrayGetOp) isOperation()          {}
+func (ArraySetOp) isOperation()          {}
+func (ObjectNewOp) isOperation()         {}
+func (ObjectAllocOp) isOperation()       {}
+func (FieldSetOp) isOperation()          {}
+func (FieldGetOp) isOperation()          {}
+func (DynamicFieldGetOp) isOperation()   {}
+func (DynamicFieldSetOp) isOperation()   {}
+func (ClosureNewOp) isOperation()        {}
+func (ClosureCallOp) isOperation()       {}
+func (TaskSpawnOp) isOperation()         {}
+func (PromiseResolveOp) isOperation()    {}
+func (PromiseAdoptOp) isOperation()      {}
+func (PromiseRejectOp) isOperation()     {}
+func (PromiseAllF64Op) isOperation()     {}
+func (PromiseRaceF64Op) isOperation()    {}
+func (PromiseAllBoolOp) isOperation()    {}
+func (PromiseRaceBoolOp) isOperation()   {}
+func (PromiseAllRefOp) isOperation()     {}
+func (PromiseRaceRefOp) isOperation()    {}
+func (TaskJoinOp) isOperation()          {}
+func (TaskWaitOp) isOperation()          {}
+func (TaskFailureOp) isOperation()       {}
+func (TaskRetainOp) isOperation()        {}
+func (TaskReleaseOp) isOperation()       {}
+func (TaskYieldOp) isOperation()         {}
+func (TaskCancelOp) isOperation()        {}
+func (TaskCancelledOp) isOperation()     {}
+func (TaskGroupNewOp) isOperation()      {}
+func (TaskGroupJoinOp) isOperation()     {}
+func (TaskGroupCancelOp) isOperation()   {}
+func (TaskContextSetOp) isOperation()    {}
+func (TaskContextGetOp) isOperation()    {}
+func (ChannelNewOp) isOperation()        {}
+func (ChannelTrySendOp) isOperation()    {}
+func (ChannelTryRecvOrOp) isOperation()  {}
+func (ChannelSendOp) isOperation()       {}
+func (ChannelRecvOp) isOperation()       {}
+func (SleepOp) isOperation()             {}
 
 type LiteralKind uint8
 

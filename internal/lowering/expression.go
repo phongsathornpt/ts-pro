@@ -104,6 +104,8 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		return f.lowerCall(expr)
 	case frontend.ExprDynamicCall:
 		return f.lowerDynamicCall(expr)
+	case frontend.ExprDynamicMethodCall:
+		return f.lowerDynamicMethodCall(expr)
 	case frontend.ExprArray:
 		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypeArray {
 			return 0, fmt.Errorf("array expression has invalid semantic type")
@@ -637,6 +639,33 @@ func (f *functionLowerer) lowerDynamicCall(expr *frontend.Expr) (hir.ValueID, er
 		args = append(args, value)
 	}
 	return f.emit(expr.Type, hir.DynamicCallOp{Callee: callee, Args: args}), nil
+}
+
+func (f *functionLowerer) lowerDynamicMethodCall(expr *frontend.Expr) (hir.ValueID, error) {
+	if expr.Object == nil || len(expr.Dispatch) == 0 {
+		return 0, fmt.Errorf("dynamic method call requires receiver and dispatch targets")
+	}
+	anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
+	if !ok {
+		return 0, fmt.Errorf("dynamic method call requires any semantic type")
+	}
+	receiver, err := f.lowerExprAs(expr.Object, anyType)
+	if err != nil {
+		return 0, err
+	}
+	args := make([]hir.ValueID, 0, len(expr.Args))
+	for _, arg := range expr.Args {
+		value, err := f.lowerExprAs(arg, anyType)
+		if err != nil {
+			return 0, err
+		}
+		args = append(args, value)
+	}
+	cases := make([]hir.DispatchCase, 0, len(expr.Dispatch))
+	for _, target := range expr.Dispatch {
+		cases = append(cases, hir.DispatchCase{ClassTag: target.ClassTag, Callee: hir.NewFunctionID(uint32(target.Function))})
+	}
+	return f.emit(expr.Type, hir.DynamicMethodCallOp{Receiver: receiver, Args: args, Cases: cases}), nil
 }
 
 func (f *functionLowerer) lowerCaughtTaskJoin(expr *frontend.Expr) (hir.ValueID, error) {

@@ -168,6 +168,9 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	if err := e.emitDynamicCallHelpers(&b); err != nil {
 		return "", err
 	}
+	if err := e.emitDynamicMethodCallHelpers(&b); err != nil {
+		return "", err
+	}
 	for _, global := range e.collectStringGlobals() {
 		fmt.Fprintf(&b, "%s = private unnamed_addr constant [%d x i8] c\"%s\", align 1\n", global.name, len(global.value), escapeLLVMBytes(global.value))
 	}
@@ -1329,6 +1332,27 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		fmt.Fprintf(b, "  %s = fcmp %s double %s, %s\n", name, predicate, left, right)
+		values[inst.Result] = name
+		return nil
+	case mir.DynamicMethodCall:
+		receiver, err := operand(values, op.Receiver)
+		if err != nil {
+			return err
+		}
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			value, err := operand(values, arg)
+			if err != nil {
+				return err
+			}
+			args[i] = value
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s", name, dynamicMethodCallHelperName(op), receiver)
+		for _, arg := range args {
+			fmt.Fprintf(b, ", ptr %s", arg)
+		}
+		b.WriteString(")\n")
 		values[inst.Result] = name
 		return nil
 	case mir.DynamicCall:

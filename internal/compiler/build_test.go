@@ -1789,3 +1789,29 @@ func TestBuildDynamicPropertySetSurvivesGCStress(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+func TestBuildNativeDynamicMethodPreservesThis(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-method-this")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_method_this.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.DynamicDispatch != 2 {
+		t.Fatalf("dynamic dispatch = %d; want 2", result.Metrics.DynamicDispatch)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic method: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42\n50" {
+		t.Fatalf("output = %q", got)
+	}
+}

@@ -213,6 +213,11 @@ type DynamicCall struct {
 	Callee ValueID
 	Args   []ValueID
 }
+type DynamicMethodCall struct {
+	Receiver ValueID
+	Args     []ValueID
+	Cases    []DispatchCase
+}
 
 type DispatchCase struct {
 	ClassTag uint32
@@ -355,6 +360,7 @@ func (ProvenIntBinary) isOperation()      {}
 func (FloatCompare) isOperation()         {}
 func (Call) isOperation()                 {}
 func (DynamicCall) isOperation()          {}
+func (DynamicMethodCall) isOperation()    {}
 func (DispatchCall) isOperation()         {}
 func (IntrinsicCall) isOperation()        {}
 func (Phi) isOperation()                  {}

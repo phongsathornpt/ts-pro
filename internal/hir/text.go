@@ -88,6 +88,12 @@ func formatOperation(op Operation) string {
 			args[i] = fmt.Sprintf("v%d", arg)
 		}
 		return fmt.Sprintf("dynamic.call v%d(%s)", op.Callee, strings.Join(args, ", "))
+	case DynamicMethodCallOp:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = fmt.Sprintf("v%d", arg)
+		}
+		return fmt.Sprintf("dynamic.method v%d(%s)", op.Receiver, strings.Join(args, ", "))
 	case CallOp:
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {

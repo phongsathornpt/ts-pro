@@ -190,7 +190,8 @@ func countDynamicDispatch(module mir.Module) int {
 	for _, fn := range module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				if _, ok := inst.Op.(mir.DispatchCall); ok {
+				switch inst.Op.(type) {
+				case mir.DispatchCall, mir.DynamicMethodCall:
 					count++
 				}
 			}
@@ -282,7 +283,7 @@ func countRuntimeCallsWithLocalObjects(module mir.Module, stackObjects escapeana
 					count++
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
 					mir.ArrayGetF64, mir.ArraySetF64, mir.ArrayNewBool, mir.ArrayLengthBool, mir.ArrayGetBool, mir.ArraySetBool, mir.ArrayNewRef, mir.ArrayLengthRef, mir.ArrayGetRef, mir.ArraySetRef,
-					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicFieldGet, mir.DynamicFieldSet, mir.DynamicCall, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
+					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicFieldGet, mir.DynamicFieldSet, mir.DynamicCall, mir.DynamicMethodCall, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
 					mir.PromiseResolve, mir.PromiseAdopt, mir.PromiseReject, mir.PromiseAllF64, mir.PromiseRaceF64, mir.PromiseAllBool, mir.PromiseRaceBool, mir.PromiseAllRef, mir.PromiseRaceRef, mir.TaskSpawn, mir.TaskRetain, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.TaskGroupNew, mir.TaskGroupJoin, mir.TaskGroupCancel, mir.TaskContextSet, mir.TaskContextGet, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 					count++
 				}

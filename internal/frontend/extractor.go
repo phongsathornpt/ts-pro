@@ -1083,6 +1083,19 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
+		name, _ := nameNode.Text()
+		if int(receiver.Type) < len(e.result.Types) {
+			kind := e.result.Types[receiver.Type].Kind
+			if kind == TypeAny || kind == TypeUnion {
+				if targets := e.dynamicMethodTargets(name); len(targets) != 0 {
+					expr.Kind = ExprDynamicMethodCall
+					expr.Object = receiver
+					expr.Field = name
+					expr.Dispatch = targets
+					break
+				}
+			}
+		}
 		method, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
 		if err != nil {
 			return nil, err
@@ -1108,7 +1121,6 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		if !targetOK {
 			return nil, fmt.Errorf("method %s is not a native target", method.Name)
 		}
-		name, _ := nameNode.Text()
 		expr.Callee = &Expr{Kind: ExprIdentifier, Name: name, Span: e.span(calleeNode)}
 		if len(expr.Dispatch) == 0 {
 			targetCopy := target
@@ -1136,6 +1148,9 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	}
 	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
+	}
+	if expr.Kind == ExprDynamicMethodCall {
+		return expr, nil
 	}
 	if expr.CallTarget != nil {
 		target := e.result.Functions[*expr.CallTarget]

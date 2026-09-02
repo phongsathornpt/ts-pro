@@ -202,6 +202,16 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			args[i] = mir.ValueID(arg)
 		}
 		result.Op = mir.DynamicCall{Callee: mir.ValueID(op.Callee), Args: args}
+	case hir.DynamicMethodCallOp:
+		args := make([]mir.ValueID, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = mir.ValueID(arg)
+		}
+		cases := make([]mir.DispatchCase, len(op.Cases))
+		for i, c := range op.Cases {
+			cases[i] = mir.DispatchCase{ClassTag: c.ClassTag, Callee: mir.FunctionID(c.Callee)}
+		}
+		result.Op = mir.DynamicMethodCall{Receiver: mir.ValueID(op.Receiver), Args: args, Cases: cases}
 	case hir.CallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {
