@@ -164,7 +164,7 @@ func TestEmitSingleBlockMutableNumericObjectIsScalarReplaced(t *testing.T) {
 	}
 }
 
-func TestEmitCrossBlockMutableNumericObjectUsesStackStorage(t *testing.T) {
+func TestEmitLinearCrossBlockMutableNumericObjectScalarReplaced(t *testing.T) {
 	ret := mir.ValueID(4)
 	module := mir.Module{
 		Name:   "cross-block-mutable-object",
@@ -182,11 +182,47 @@ func TestEmitCrossBlockMutableNumericObjectUsesStackStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") {
-		t.Fatalf("cross-block mutable object did not retain stack storage:\n%s", text)
+	if !strings.Contains(text, "ret double 7.000000e+00") {
+		t.Fatalf("linear mutable scalar did not preserve value:\n%s", text)
 	}
-	if strings.Contains(text, "call ptr @tsnative_object_alloc_atomic(i64 %v0.size)") {
-		t.Fatalf("cross-block mutable local object unexpectedly used heap allocation:\n%s", text)
+	for _, forbidden := range []string{"%v0 = alloca %tsnative_shape_s0", "call ptr @tsnative_object_alloc_atomic", "getelementptr %tsnative_shape_s0"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("linear mutable scalar retained %q:\n%s", forbidden, text)
+		}
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "linear.ll"), filepath.Join(dir, "linear.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile linear scalar LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
+func TestEmitMutableObjectAcrossMergeUsesStackStorage(t *testing.T) {
+	ret := mir.ValueID(6)
+	module := mir.Module{
+		Name: "merge-mutable-object", Shapes: []mir.Shape{{ID: 0, Name: "Counter", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Name: "counter", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}, {Result: 1, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}}}, Terminator: mir.Branch{Condition: 1, Then: 1, Else: 2}},
+			{ID: 1, Instructions: []mir.Instruction{{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}}, {Result: 3, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 2}}}, Terminator: mir.Jump{Target: 3}},
+			{ID: 2, Instructions: []mir.Instruction{{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 8}}, {Result: 5, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 4}}}, Terminator: mir.Jump{Target: 3}},
+			{ID: 3, Instructions: []mir.Instruction{{Result: 6, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 0, Shape: 0, Field: 0}}}, Terminator: mir.Return{Value: &ret}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") {
+		t.Fatalf("merge mutable object did not retain stack storage:\n%s", text)
 	}
 }
 

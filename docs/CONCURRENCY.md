@@ -220,8 +220,9 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Add conservative MIR escape analysis with Phi/containment propagation and explicit escape reasons for returns, stores, calls, tasks, channels, boxing, and suspension; compiler performance reports expose stack-eligible versus escaping allocation candidates.
     - [x] Stack-allocate proven non-escaping numeric-only object shapes only in acyclic CFG blocks and reject objects embedded into heap containers or closure captures. The stack-placement filter is intentionally stricter than lifetime escape analysis, and stack objects no longer consume GC root slots or heap-allocation runtime calls.
     - [x] Scalar-replace immutable stack-local `ObjectNew` sites with no aliases or field mutations. LLVM emission removes the object allocation and all field memory traffic; `FieldGet` reuses the original SSA field operand.
-    - [x] Scalar-replace mutable numeric objects when allocation and every field access stay in one basic block. `ObjectAlloc` field state begins at typed zero values, `FieldSet` updates SSA state, and `FieldGet` resolves the latest value without memory traffic; cross-block mutation deliberately falls back to `alloca`.
-    - [ ] Extend mutable scalar field SSA across single-predecessor CFG chains and then explicit branch merges before considering reference-bearing stack objects/closures with precise root and interior-pointer handling.
+    - [x] Scalar-replace mutable numeric objects when allocation and every field access stay in one basic block. `ObjectAlloc` field state begins at typed zero values, `FieldSet` updates SSA state, and `FieldGet` resolves the latest value without memory traffic.
+    - [x] Carry mutable scalar field state across acyclic single-predecessor jump chains. The planner records each `FieldGet` source as a MIR value or typed zero before LLVM emission, avoiding dependence on block output order; branch merges deliberately keep the stack-storage fallback.
+    - [ ] Add explicit per-field Phi dataflow for acyclic branch merges before considering reference-bearing stack objects/closures with precise root and interior-pointer handling.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

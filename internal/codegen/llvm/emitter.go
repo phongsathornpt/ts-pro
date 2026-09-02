@@ -19,7 +19,6 @@ type emitter struct {
 	escapes       escapeanalysis.Result
 	stackObjects  escapeanalysis.StackObjectResult
 	scalarObjects escapeanalysis.ScalarObjectResult
-	scalarState   map[mir.FunctionID]map[mir.ValueID][]string
 }
 
 func Emit(module mir.Module) (string, error) {
@@ -40,7 +39,6 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 		module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{},
 		stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: stackObjects,
 		scalarObjects: escapeanalysis.ScalarObjects(module, stackObjects),
-		scalarState:   make(map[mir.FunctionID]map[mir.ValueID][]string),
 	}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
@@ -170,7 +168,6 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 }
 
 func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
-	e.scalarState[fn.ID] = make(map[mir.ValueID][]string)
 	returnType, err := llvmType(fn.ReturnRepr)
 	if err != nil {
 		return fmt.Errorf("function %s return: %w", fn.Name, err)
@@ -321,18 +318,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		typeName := shapeTypeName(op.Shape)
-		if scalar, ok := e.scalarObjects.Get(fn.ID, inst.Result); ok {
-			if scalar.Mutable {
-				fields := make([]string, len(op.Fields))
-				for i, field := range op.Fields {
-					value, err := operand(values, field)
-					if err != nil {
-						return err
-					}
-					fields[i] = value
-				}
-				e.scalarState[fn.ID][inst.Result] = fields
-			}
+		if _, ok := e.scalarObjects.Get(fn.ID, inst.Result); ok {
 			return nil
 		}
 		if e.isStackObject(fn.ID, inst.Result) {
@@ -367,18 +353,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		typeName := shapeTypeName(op.Shape)
-		if scalar, ok := e.scalarObjects.Get(fn.ID, inst.Result); ok {
-			if scalar.Mutable {
-				fields := make([]string, len(shape.Fields))
-				for i, field := range shape.Fields {
-					zero, err := llvmZero(field.Repr)
-					if err != nil {
-						return err
-					}
-					fields[i] = zero
-				}
-				e.scalarState[fn.ID][inst.Result] = fields
-			}
+		if _, ok := e.scalarObjects.Get(fn.ID, inst.Result); ok {
 			return nil
 		}
 		if e.isStackObject(fn.ID, inst.Result) {
@@ -419,11 +394,6 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			if err != nil {
 				return err
 			}
-			fields := e.scalarState[fn.ID][op.Object]
-			if int(op.Field) >= len(fields) {
-				return fmt.Errorf("mutable scalar object v%d missing field %d", op.Object, op.Field)
-			}
-			fields[op.Field] = value
 			values[inst.Result] = value
 			return nil
 		}
@@ -745,11 +715,23 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		if scalar, ok := e.scalarObjects.Get(fn.ID, op.Object); ok {
 			var value string
 			if scalar.Mutable {
-				fields := e.scalarState[fn.ID][op.Object]
-				if int(op.Field) >= len(fields) {
-					return fmt.Errorf("mutable scalar object v%d missing field %d", op.Object, op.Field)
+				read, ok := scalar.Reads[inst.Result]
+				if !ok {
+					return fmt.Errorf("mutable scalar object v%d missing read plan for v%d", op.Object, inst.Result)
 				}
-				value = fields[op.Field]
+				if read.Zero {
+					zero, err := llvmZero(shape.Fields[op.Field].Repr)
+					if err != nil {
+						return err
+					}
+					value = zero
+				} else {
+					var err error
+					value, err = operand(values, read.Value)
+					if err != nil {
+						return err
+					}
+				}
 			} else if scalar.ZeroInitialized {
 				zero, err := llvmZero(shape.Fields[op.Field].Repr)
 				if err != nil {
