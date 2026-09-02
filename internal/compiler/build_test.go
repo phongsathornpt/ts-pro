@@ -1524,3 +1524,37 @@ func TestBuildEscapingClosureRemainsHeapAllocated(t *testing.T) {
 		t.Fatalf("closure-escape output = %q", got)
 	}
 }
+
+func TestBuildReferenceBearingStackObjectSurvivesGCStress(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "stack-reference-object")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/stack_reference_object.ts", Output: output, Optimization: "-O2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.AllocationCandidates != 1 || result.Metrics.NonEscapingAllocations != 1 || result.Metrics.EscapingAllocations != 0 {
+		t.Fatalf("escape metrics = %d/%d/%d, want 1/1/0", result.Metrics.AllocationCandidates, result.Metrics.NonEscapingAllocations, result.Metrics.EscapingAllocations)
+	}
+	if result.Metrics.ScalarObjectAllocs != 0 || result.Metrics.StackObjectAllocs != 1 {
+		t.Fatalf("object storage scalar/stack = %d/%d, want 0/1", result.Metrics.ScalarObjectAllocs, result.Metrics.StackObjectAllocs)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_GC_NURSERY_BYTES=1024")
+	nativeOutput, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run stack-reference-object binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "kept" {
+		t.Fatalf("stack-reference-object output = %q", got)
+	}
+}
