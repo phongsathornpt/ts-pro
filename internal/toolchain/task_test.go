@@ -604,3 +604,85 @@ int main(void) {
 		t.Fatalf("run task failure inspection: %v: %s", err, output)
 	}
 }
+func TestNativeTaskCompletionFansOutToMultipleWaiters(t *testing.T) {
+	clang, err := DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	goRuntime := buildGoRuntimeArchiveForTest(t, ctx, root, clang)
+	header := goRuntimeHeaderForTest(t, goRuntime)
+	source := filepath.Join(dir, "task_multi_waiter_test.c")
+	program := fmt.Sprintf(`#include %q
+#include <assert.h>
+#include <stdatomic.h>
+#include <sched.h>
+typedef void tsnative_task;
+typedef struct { int phase; } waiter_state;
+static tsnative_task *child_task;
+static atomic_int child_parked;
+static atomic_int registered_waiters;
+static atomic_int resumed_waiters;
+static void child(void *state, void *result) {
+  (void)state; (void)result;
+  if (atomic_load(&child_parked) == 0) {
+    atomic_store(&child_parked, 1);
+    assert(tsnative_scheduler_prepare_park() == 0);
+    return;
+  }
+}
+static void waiter(void *raw, void *result) {
+  (void)result;
+  waiter_state *state = raw;
+  if (state->phase == 0) {
+    state->phase = 1;
+    assert(tsnative_task_await_task(child_task) == 0);
+    atomic_fetch_add(&registered_waiters, 1);
+    return;
+  }
+  assert(state->phase == 1);
+  state->phase = 2;
+  atomic_fetch_add(&resumed_waiters, 1);
+}
+int main(void) {
+  waiter_state one = {0}, two = {0};
+  child_task = tsnative_task_spawn(child, 0); assert(child_task);
+  while (atomic_load(&child_parked) == 0) sched_yield();
+  tsnative_task *first = tsnative_task_spawn(waiter, &one); assert(first);
+  tsnative_task *second = tsnative_task_spawn(waiter, &two); assert(second);
+  while (atomic_load(&registered_waiters) != 2) sched_yield();
+  assert(tsnative_scheduler_wake(child_task) == 0);
+  assert(tsnative_task_join(first) == 0);
+  assert(tsnative_task_join(second) == 0);
+  assert(tsnative_task_join(child_task) == 0);
+  assert(atomic_load(&resumed_waiters) == 2);
+  assert(one.phase == 2 && two.phase == 2);
+  tsnative_task_release(first);
+  tsnative_task_release(second);
+  tsnative_task_release(child_task);
+  tsnative_scheduler_shutdown();
+  return 0;
+}`, header)
+	if err := os.WriteFile(source, []byte(program), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obj := filepath.Join(dir, "test.o")
+	binary := filepath.Join(dir, "task_multi_waiter_test")
+	if err := clang.CompileC(ctx, source, obj, "-O2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clang.Link(ctx, []string{obj, goRuntime}, binary); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run multi-waiter completion test: %v: %s", err, output)
+	}
+}

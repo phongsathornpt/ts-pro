@@ -34,6 +34,13 @@ const (
 
 const nativeTaskInitialBudget = 256
 
+type nativeTaskCompletionWaiter struct {
+	task       uintptr
+	out        unsafe.Pointer
+	consume    bool
+	statusOnly bool
+}
+
 type nativeTask struct {
 	handle unsafe.Pointer
 	entry  unsafe.Pointer
@@ -60,18 +67,44 @@ type nativeTask struct {
 	budgetRemaining  atomic.Uint32
 	refs             atomic.Int32
 
-	completionMu         sync.Mutex
-	completionWaiter     uintptr
-	completionOut        unsafe.Pointer
-	completionConsume    bool
-	completionStatusOnly bool
-	completionHandoff    bool
+	completionMu sync.Mutex
 }
 
 var nativeTasks = struct {
 	sync.RWMutex
 	byID map[uintptr]*nativeTask
 }{byID: map[uintptr]*nativeTask{}}
+
+var nativeTaskCompletions = struct {
+	sync.Mutex
+	byTask map[uintptr][]nativeTaskCompletionWaiter
+}{byTask: map[uintptr][]nativeTaskCompletionWaiter{}}
+
+func appendNativeTaskCompletion(task uintptr, completion nativeTaskCompletionWaiter) bool {
+	nativeTaskCompletions.Lock()
+	defer nativeTaskCompletions.Unlock()
+	for _, existing := range nativeTaskCompletions.byTask[task] {
+		if existing.task == completion.task {
+			return false
+		}
+	}
+	nativeTaskCompletions.byTask[task] = append(nativeTaskCompletions.byTask[task], completion)
+	return true
+}
+
+func takeNativeTaskCompletions(task uintptr) []nativeTaskCompletionWaiter {
+	nativeTaskCompletions.Lock()
+	defer nativeTaskCompletions.Unlock()
+	items := nativeTaskCompletions.byTask[task]
+	delete(nativeTaskCompletions.byTask, task)
+	return items
+}
+
+func clearNativeTaskCompletions(task uintptr) {
+	nativeTaskCompletions.Lock()
+	delete(nativeTaskCompletions.byTask, task)
+	nativeTaskCompletions.Unlock()
+}
 
 func newNativeTaskHandle() unsafe.Pointer {
 	return allocNativeHandle()
@@ -204,6 +237,7 @@ func destroyNativeTaskStorage(task *nativeTask) {
 	if task == nil {
 		return
 	}
+	clearNativeTaskCompletions(nativeTaskKey(task))
 	unregisterNativeTask(task.handle)
 	task.handle = nil
 	if task.stateRoot != nil {
@@ -221,10 +255,6 @@ func destroyNativeTaskStorage(task *nativeTask) {
 	if task.failureRoot != nil {
 		tsnative_gc_root_unregister(task.failureRoot)
 		task.failureRoot = nil
-	}
-	if task.completionHandoff {
-		task.completionHandoff = false
-		tsnative_gc_handoff_end()
 	}
 }
 
@@ -379,9 +409,9 @@ func nativeTaskWake(task *nativeTask) int {
 }
 
 type nativeTaskExecution struct {
-	kind              int
-	completionWaiter  uintptr
-	completionConsume bool
+	kind               int
+	completionWaiters  []uintptr
+	completionConsumes int
 }
 
 const (
@@ -402,7 +432,7 @@ func transferNativeTaskResult(task *nativeTask, out unsafe.Pointer) {
 	case nativeTaskResultRef:
 		tsnative_gc_handoff_begin()
 		nativeGCStoreRefSlot(out, task.resultRef)
-		task.completionHandoff = true
+		tsnative_gc_handoff_end()
 	}
 }
 
@@ -435,26 +465,27 @@ func executeNativeTaskOnce(task *nativeTask) nativeTaskExecution {
 	} else {
 		task.status.Store(nativeTaskDone)
 	}
-	execution.completionWaiter = task.completionWaiter
-	execution.completionConsume = task.completionConsume
-	completionOut := task.completionOut
-	statusOnly := task.completionStatusOnly
-	task.completionWaiter = 0
-	task.completionOut = nil
-	task.completionConsume = false
-	task.completionStatusOnly = false
-	if waiter := lookupNativeTask(execution.completionWaiter); waiter != nil {
-		if statusOnly && completionOut != nil {
+	completions := takeNativeTaskCompletions(nativeTaskKey(task))
+	for _, completion := range completions {
+		waiter := lookupNativeTask(completion.task)
+		if waiter == nil {
+			continue
+		}
+		execution.completionWaiters = append(execution.completionWaiters, completion.task)
+		if completion.consume {
+			execution.completionConsumes++
+		}
+		if completion.statusOnly && completion.out != nil {
 			if failed {
-				*(*uint8)(completionOut) = 0
+				*(*uint8)(completion.out) = 0
 			} else {
-				*(*uint8)(completionOut) = 1
+				*(*uint8)(completion.out) = 1
 			}
 		} else if failed {
 			waiter.failureRef = task.failureRef
 			waiter.failureRequested.Store(1)
-		} else if completionOut != nil {
-			transferNativeTaskResult(task, completionOut)
+		} else if completion.out != nil {
+			transferNativeTaskResult(task, completion.out)
 		}
 	}
 	task.completionMu.Unlock()
@@ -552,14 +583,18 @@ func awaitNativeTask(raw unsafe.Pointer, kind int32, out unsafe.Pointer, statusO
 		}
 		return -1
 	}
-	if task.completionWaiter != 0 || tsnative_scheduler_prepare_park() != 0 {
+	waiterKey := nativeTaskKey(waiter)
+	if tsnative_scheduler_prepare_park() != 0 {
 		task.completionMu.Unlock()
 		return -1
 	}
-	task.completionWaiter = nativeTaskKey(waiter)
-	task.completionOut = out
-	task.completionConsume = consume
-	task.completionStatusOnly = statusOnly
+	if !appendNativeTaskCompletion(nativeTaskKey(task), nativeTaskCompletionWaiter{
+		task: waiterKey, out: out, consume: consume, statusOnly: statusOnly,
+	}) {
+		tsnative_scheduler_cancel_park()
+		task.completionMu.Unlock()
+		return -1
+	}
 	task.completionMu.Unlock()
 	return 0
 }

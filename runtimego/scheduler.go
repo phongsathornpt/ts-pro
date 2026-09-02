@@ -358,11 +358,11 @@ func schedulerExecuteTask(handle uintptr) {
 
 	if execution.kind == nativeTaskExecTerminal {
 		taskGroupDetach(handle)
-		if execution.completionWaiter != 0 {
-			_ = schedulerWakeTask(execution.completionWaiter)
+		for _, waiter := range execution.completionWaiters {
+			_ = schedulerWakeTask(waiter)
 		}
-		if execution.completionConsume {
-			destroyNativeTaskStorage(task)
+		for i := 0; i < execution.completionConsumes; i++ {
+			releaseNativeTaskRef(task)
 		}
 	}
 }

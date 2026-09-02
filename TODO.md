@@ -145,7 +145,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
           - [~] Add Promise adoption/thenable assimilation plus selected aggregate combinators (`Promise.all` / `Promise.race`).
             - [~] Replace single-owner TaskRef completion with Promise-safe ownership and waiter fan-out.
               - [x] Add retain/release reference counting so consuming joins/awaits release ownership instead of unconditionally destroying task storage.
-              - [ ] Replace the single completion waiter slot with a waiter list and fan out settlement safely.
+              - [x] Replace the single completion waiter slot with a cgo-safe external waiter table and fan out settlement to multiple parked tasks.
               - [ ] Make compiled Promise awaits non-consuming while Promise aliases exist, retaining settled result/failure roots until the final handle release.
             - [ ] Add `Promise.resolve(existingPromise)` adoption and repeated-await coverage.
             - [ ] Add thenable assimilation after dynamic method/`this` call semantics are sufficient.
