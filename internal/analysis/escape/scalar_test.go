@@ -60,19 +60,33 @@ func TestScalarObjectsSelectsLinearCrossBlockMutableObject(t *testing.T) {
 	}
 }
 
-func TestScalarObjectsRejectsMutableMerge(t *testing.T) {
+func TestScalarObjectsPlansMutableDiamondPhi(t *testing.T) {
 	module := mir.Module{
 		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "n", Repr: mir.ReprF64}}}},
 		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{
-			{ID: 0, Instructions: []mir.Instruction{{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Branch{Condition: 9, Then: 1, Else: 2}},
-			{ID: 1, Instructions: []mir.Instruction{{Result: 2, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 7}}}, Terminator: mir.Jump{Target: 3}},
-			{ID: 2, Terminator: mir.Jump{Target: 3}},
-			{ID: 3, Instructions: []mir.Instruction{{Result: 4, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 1, Shape: 0, Field: 0}}}, Terminator: mir.Return{}},
+			{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}},
+				{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+			}, Terminator: mir.Branch{Condition: 0, Then: 1, Else: 2}},
+			{ID: 1, Instructions: []mir.Instruction{
+				{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}},
+				{Result: 3, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 2}},
+			}, Terminator: mir.Jump{Target: 3}},
+			{ID: 2, Instructions: []mir.Instruction{
+				{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 8}},
+				{Result: 5, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 4}},
+			}, Terminator: mir.Jump{Target: 3}},
+			{ID: 3, Instructions: []mir.Instruction{{Result: 6, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 1, Shape: 0, Field: 0}}}, Terminator: mir.Return{}},
 		}}},
 	}
 	stack := StackObjects(module, Analyze(module))
-	if _, ok := ScalarObjects(module, stack).Get(0, 1); ok {
-		t.Fatal("mutable object crossing a CFG merge was selected for scalar replacement")
+	object, ok := ScalarObjects(module, stack).Get(0, 1)
+	if !ok || !object.Mutable {
+		t.Fatalf("diamond scalar object = %+v, ok=%v", object, ok)
+	}
+	read := object.Reads[6]
+	if len(read.Incoming) != 2 || read.Incoming[0].Block != 1 || read.Incoming[0].Value != 2 || read.Incoming[1].Block != 2 || read.Incoming[1].Value != 4 {
+		t.Fatalf("diamond field phi plan = %+v", read)
 	}
 }
 
@@ -88,5 +102,23 @@ func TestScalarObjectsRejectsAliasedObject(t *testing.T) {
 	stack := StackObjects(module, Analyze(module))
 	if _, ok := ScalarObjects(module, stack).Get(0, 1); ok {
 		t.Fatal("aliased object was selected for scalar replacement")
+	}
+}
+
+func TestScalarObjectsRejectsNestedMutableBranch(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "n", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}}, {Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Branch{Condition: 0, Then: 1, Else: 2}},
+			{ID: 1, Terminator: mir.Branch{Condition: 0, Then: 3, Else: 4}},
+			{ID: 2, Terminator: mir.Jump{Target: 5}},
+			{ID: 3, Instructions: []mir.Instruction{{Result: 2, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 9}}}, Terminator: mir.Jump{Target: 5}},
+			{ID: 4, Terminator: mir.Jump{Target: 5}},
+			{ID: 5, Instructions: []mir.Instruction{{Result: 3, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 1, Shape: 0, Field: 0}}}, Terminator: mir.Return{}},
+		}}},
+	}
+	stack := StackObjects(module, Analyze(module))
+	if _, ok := ScalarObjects(module, stack).Get(0, 1); ok {
+		t.Fatal("nested mutable branch was selected for scalar replacement")
 	}
 }

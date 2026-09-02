@@ -206,6 +206,9 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 			phiRoots = append(phiRoots, inst)
 			index++
 		}
+		if err := e.emitScalarPhis(b, fn, block, values); err != nil {
+			return fmt.Errorf("function %s block b%d scalar phi: %w", fn.Name, block.ID, err)
+		}
 		for _, inst := range phiRoots {
 			if err := gc.emitStore(b, inst, values); err != nil {
 				return fmt.Errorf("function %s root v%d: %w", fn.Name, inst.Result, err)
@@ -228,6 +231,50 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		}
 	}
 	b.WriteString("}\n\n")
+	return nil
+}
+
+func (e *emitter) emitScalarPhis(b *strings.Builder, fn mir.Function, block mir.Block, values map[mir.ValueID]string) error {
+	for _, inst := range block.Instructions {
+		fieldGet, ok := inst.Op.(mir.FieldGet)
+		if !ok {
+			continue
+		}
+		scalar, ok := e.scalarObjects.Get(fn.ID, fieldGet.Object)
+		if !ok || !scalar.Mutable {
+			continue
+		}
+		read, ok := scalar.Reads[inst.Result]
+		if !ok || len(read.Incoming) == 0 {
+			continue
+		}
+		shape, ok := e.shapes[fieldGet.Shape]
+		if !ok || int(fieldGet.Field) >= len(shape.Fields) {
+			return fmt.Errorf("invalid scalar phi field s%d.%d", fieldGet.Shape, fieldGet.Field)
+		}
+		typ, err := llvmType(shape.Fields[fieldGet.Field].Repr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = phi %s ", valueName(inst.Result), typ)
+		for i, incoming := range read.Incoming {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			var value string
+			if incoming.Zero {
+				value, err = llvmZero(shape.Fields[fieldGet.Field].Repr)
+			} else {
+				value, err = operand(values, incoming.Value)
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "[ %s, %%b%d ]", value, incoming.Block)
+		}
+		b.WriteString("\n")
+		values[inst.Result] = valueName(inst.Result)
+	}
 	return nil
 }
 
@@ -718,6 +765,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 				read, ok := scalar.Reads[inst.Result]
 				if !ok {
 					return fmt.Errorf("mutable scalar object v%d missing read plan for v%d", op.Object, inst.Result)
+				}
+				if len(read.Incoming) != 0 {
+					values[inst.Result] = valueName(inst.Result)
+					return nil
 				}
 				if read.Zero {
 					zero, err := llvmZero(shape.Fields[op.Field].Repr)

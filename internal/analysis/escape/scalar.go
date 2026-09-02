@@ -2,9 +2,16 @@ package escape
 
 import "github.com/projectthorn/tsv7-bin/internal/mir"
 
-type ScalarFieldValue struct {
+type ScalarFieldIncoming struct {
+	Block mir.BlockID
 	Value mir.ValueID
 	Zero  bool
+}
+
+type ScalarFieldValue struct {
+	Value    mir.ValueID
+	Zero     bool
+	Incoming []ScalarFieldIncoming
 }
 
 type ScalarObject struct {
@@ -40,12 +47,10 @@ func ScalarObjects(module mir.Module, stack StackObjectResult) ScalarObjectResul
 
 func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shapes map[mir.ShapeID]mir.Shape) map[mir.ValueID]ScalarObject {
 	prov := make(provenance)
-	allocationBlocks := make(map[mir.ValueID]mir.BlockID)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			if stack[inst.Result] {
 				prov[inst.Result] = valueSet{inst.Result: {}}
-				allocationBlocks[inst.Result] = block.ID
 			}
 		}
 	}
@@ -91,9 +96,6 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shape
 				continue
 			}
 			isMutable := mutated[inst.Result]
-			if isMutable && !fieldUsesFollowLinearChain(fn, block.ID, fieldUseBlocks[inst.Result]) {
-				continue
-			}
 			var scalar ScalarObject
 			switch object := inst.Op.(type) {
 			case mir.ObjectNew:
@@ -108,12 +110,23 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shape
 				if scalar.ZeroInitialized {
 					fieldCount = len(shapes[scalar.Shape].Fields)
 				}
-				scalar.Reads = buildMutableScalarReads(fn, inst.Result, scalar, fieldUseBlocks[inst.Result], fieldCount)
+				reads, ok := planMutableScalarReads(fn, inst.Result, scalar, fieldUseBlocks[inst.Result], fieldCount)
+				if !ok {
+					continue
+				}
+				scalar.Reads = reads
 			}
 			result[inst.Result] = scalar
 		}
 	}
 	return result
+}
+
+func planMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarObject, uses map[mir.BlockID]struct{}, fieldCount int) (map[mir.ValueID]ScalarFieldValue, bool) {
+	if fieldUsesFollowLinearChain(fn, scalar.Block, uses) {
+		return buildLinearMutableScalarReads(fn, origin, scalar, uses, fieldCount), true
+	}
+	return buildDiamondMutableScalarReads(fn, origin, scalar, uses, fieldCount)
 }
 
 func fieldUsesFollowLinearChain(fn mir.Function, allocation mir.BlockID, uses map[mir.BlockID]struct{}) bool {
@@ -126,18 +139,7 @@ func fieldUsesFollowLinearChain(fn mir.Function, allocation mir.BlockID, uses ma
 	if len(remaining) == 0 {
 		return true
 	}
-	blocks := make(map[mir.BlockID]mir.Block, len(fn.Blocks))
-	predecessors := make(map[mir.BlockID][]mir.BlockID)
-	for _, block := range fn.Blocks {
-		blocks[block.ID] = block
-		switch term := block.Terminator.(type) {
-		case mir.Jump:
-			predecessors[term.Target] = append(predecessors[term.Target], block.ID)
-		case mir.Branch:
-			predecessors[term.Then] = append(predecessors[term.Then], block.ID)
-			predecessors[term.Else] = append(predecessors[term.Else], block.ID)
-		}
-	}
+	blocks, predecessors := scalarCFG(fn)
 	current := allocation
 	seen := map[mir.BlockID]bool{current: true}
 	for len(remaining) != 0 {
@@ -156,22 +158,10 @@ func fieldUsesFollowLinearChain(fn mir.Function, allocation mir.BlockID, uses ma
 	return true
 }
 
-func buildMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarObject, uses map[mir.BlockID]struct{}, fieldCount int) map[mir.ValueID]ScalarFieldValue {
+func buildLinearMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarObject, uses map[mir.BlockID]struct{}, fieldCount int) map[mir.ValueID]ScalarFieldValue {
 	reads := make(map[mir.ValueID]ScalarFieldValue)
-	fields := make([]ScalarFieldValue, fieldCount)
-	if scalar.ZeroInitialized {
-		for i := range fields {
-			fields[i].Zero = true
-		}
-	} else {
-		for i, value := range scalar.Fields {
-			fields[i].Value = value
-		}
-	}
-	blocks := make(map[mir.BlockID]mir.Block, len(fn.Blocks))
-	for _, block := range fn.Blocks {
-		blocks[block.ID] = block
-	}
+	fields := initialScalarFields(scalar, fieldCount)
+	blocks, _ := scalarCFG(fn)
 	current := scalar.Block
 	seen := make(map[mir.BlockID]bool)
 	for {
@@ -180,18 +170,7 @@ func buildMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarO
 		}
 		seen[current] = true
 		block := blocks[current]
-		for _, inst := range block.Instructions {
-			switch op := inst.Op.(type) {
-			case mir.FieldSet:
-				if op.Object == origin && int(op.Field) < len(fields) {
-					fields[op.Field] = ScalarFieldValue{Value: op.Value}
-				}
-			case mir.FieldGet:
-				if op.Object == origin && int(op.Field) < len(fields) {
-					reads[inst.Result] = fields[op.Field]
-				}
-			}
-		}
+		applyScalarBlock(block, origin, fields, reads)
 		remaining := false
 		for useBlock := range uses {
 			if !seen[useBlock] {
@@ -209,4 +188,126 @@ func buildMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarO
 		current = jump.Target
 	}
 	return reads
+}
+
+func buildDiamondMutableScalarReads(fn mir.Function, origin mir.ValueID, scalar ScalarObject, uses map[mir.BlockID]struct{}, fieldCount int) (map[mir.ValueID]ScalarFieldValue, bool) {
+	blocks, predecessors := scalarCFG(fn)
+	allocation, ok := blocks[scalar.Block]
+	if !ok {
+		return nil, false
+	}
+	branch, ok := allocation.Terminator.(mir.Branch)
+	if !ok || branch.Then == branch.Else {
+		return nil, false
+	}
+	thenBlock, thenOK := blocks[branch.Then]
+	elseBlock, elseOK := blocks[branch.Else]
+	if !thenOK || !elseOK {
+		return nil, false
+	}
+	thenJump, thenOK := thenBlock.Terminator.(mir.Jump)
+	elseJump, elseOK := elseBlock.Terminator.(mir.Jump)
+	if !thenOK || !elseOK || thenJump.Target != elseJump.Target {
+		return nil, false
+	}
+	mergeID := thenJump.Target
+	mergeBlock, mergeOK := blocks[mergeID]
+	if !mergeOK {
+		return nil, false
+	}
+	preds := predecessors[mergeID]
+	if len(preds) != 2 || !containsBlock(preds, branch.Then) || !containsBlock(preds, branch.Else) {
+		return nil, false
+	}
+	allowed := map[mir.BlockID]bool{scalar.Block: true, branch.Then: true, branch.Else: true, mergeID: true}
+	for useBlock := range uses {
+		if !allowed[useBlock] {
+			return nil, false
+		}
+	}
+
+	reads := make(map[mir.ValueID]ScalarFieldValue)
+	base := initialScalarFields(scalar, fieldCount)
+	applyScalarBlock(allocation, origin, base, reads)
+	thenState := cloneScalarFields(base)
+	elseState := cloneScalarFields(base)
+	applyScalarBlock(thenBlock, origin, thenState, reads)
+	applyScalarBlock(elseBlock, origin, elseState, reads)
+	merged := make([]ScalarFieldValue, fieldCount)
+	for i := range merged {
+		if sameScalarFieldValue(thenState[i], elseState[i]) {
+			merged[i] = thenState[i]
+			continue
+		}
+		merged[i] = ScalarFieldValue{Incoming: []ScalarFieldIncoming{
+			{Block: branch.Then, Value: thenState[i].Value, Zero: thenState[i].Zero},
+			{Block: branch.Else, Value: elseState[i].Value, Zero: elseState[i].Zero},
+		}}
+	}
+	applyScalarBlock(mergeBlock, origin, merged, reads)
+	return reads, true
+}
+
+func scalarCFG(fn mir.Function) (map[mir.BlockID]mir.Block, map[mir.BlockID][]mir.BlockID) {
+	blocks := make(map[mir.BlockID]mir.Block, len(fn.Blocks))
+	predecessors := make(map[mir.BlockID][]mir.BlockID)
+	for _, block := range fn.Blocks {
+		blocks[block.ID] = block
+		switch term := block.Terminator.(type) {
+		case mir.Jump:
+			predecessors[term.Target] = append(predecessors[term.Target], block.ID)
+		case mir.Branch:
+			predecessors[term.Then] = append(predecessors[term.Then], block.ID)
+			predecessors[term.Else] = append(predecessors[term.Else], block.ID)
+		}
+	}
+	return blocks, predecessors
+}
+
+func initialScalarFields(scalar ScalarObject, fieldCount int) []ScalarFieldValue {
+	fields := make([]ScalarFieldValue, fieldCount)
+	if scalar.ZeroInitialized {
+		for i := range fields {
+			fields[i].Zero = true
+		}
+		return fields
+	}
+	for i, value := range scalar.Fields {
+		fields[i].Value = value
+	}
+	return fields
+}
+
+func cloneScalarFields(source []ScalarFieldValue) []ScalarFieldValue {
+	result := make([]ScalarFieldValue, len(source))
+	copy(result, source)
+	return result
+}
+
+func applyScalarBlock(block mir.Block, origin mir.ValueID, fields []ScalarFieldValue, reads map[mir.ValueID]ScalarFieldValue) {
+	for _, inst := range block.Instructions {
+		switch op := inst.Op.(type) {
+		case mir.FieldSet:
+			if op.Object == origin && int(op.Field) < len(fields) {
+				fields[op.Field] = ScalarFieldValue{Value: op.Value}
+			}
+		case mir.FieldGet:
+			if op.Object == origin && int(op.Field) < len(fields) {
+				reads[inst.Result] = fields[op.Field]
+			}
+		}
+	}
+}
+
+func sameScalarFieldValue(left, right ScalarFieldValue) bool {
+	return left.Zero == right.Zero && left.Value == right.Value && len(left.Incoming) == 0 && len(right.Incoming) == 0
+}
+
+func containsBlock(blocks []mir.BlockID, target mir.BlockID) bool {
+	for _, block := range blocks {
+		if block == target {
+			return true
+		}
+	}
+	return false
 }
