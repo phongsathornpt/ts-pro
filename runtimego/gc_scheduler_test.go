@@ -91,6 +91,32 @@ func TestSettledReferencePromiseRootsResultUntilRelease(t *testing.T) {
 	}
 }
 
+func TestSettledPromiseRetainKeepsReferenceResultAlive(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	value := tsnative_heap_alloc_atomic(32)
+	promise := tsnative_promise_resolve_ref(value)
+	if tsnative_task_retain(promise) != 0 {
+		t.Fatal("retain settled Promise.resolve failed")
+	}
+	value = nil
+	tsnative_task_release(promise)
+	tsnative_gc_collect()
+	task := lookupNativeTask(uintptr(promise))
+	if task == nil || task.refs.Load() != 1 || task.resultRef == nil || !nativeHeapContains(task.resultRef) {
+		t.Fatal("retained Promise.resolve did not preserve task/result lifetime")
+	}
+	tsnative_task_release(promise)
+	tsnative_gc_collect()
+	if lookupNativeTask(uintptr(promise)) != nil {
+		t.Fatal("final Promise.resolve release did not destroy task storage")
+	}
+	if tsnative_heap_live_allocations() != 0 {
+		t.Fatalf("final retained Promise.resolve release left %d heap allocations", tsnative_heap_live_allocations())
+	}
+}
+
 func TestSettledRejectedPromiseRootsFailureUntilRelease(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

@@ -58,6 +58,7 @@ type nativeTask struct {
 	cancelRequested  atomic.Int32
 	failureRequested atomic.Int32
 	budgetRemaining  atomic.Uint32
+	refs             atomic.Int32
 
 	completionMu         sync.Mutex
 	completionWaiter     uintptr
@@ -127,6 +128,7 @@ func allocateNativeTask(state unsafe.Pointer, kind int32) *nativeTask {
 	}
 	task.status.Store(nativeTaskRunnable)
 	task.budgetRemaining.Store(nativeTaskInitialBudget)
+	task.refs.Store(1)
 	if parent := lookupNativeTask(schedulerCurrentTaskPtr()); parent != nil {
 		task.context = parent.context
 	}
@@ -157,6 +159,34 @@ func allocateNativeTask(state unsafe.Pointer, kind int32) *nativeTask {
 		return nil
 	}
 	return task
+}
+
+func retainNativeTaskRef(task *nativeTask) bool {
+	if task == nil {
+		return false
+	}
+	for {
+		refs := task.refs.Load()
+		if refs <= 0 {
+			return false
+		}
+		if task.refs.CompareAndSwap(refs, refs+1) {
+			return true
+		}
+	}
+}
+
+func releaseNativeTaskRef(task *nativeTask) {
+	if task == nil {
+		return
+	}
+	refs := task.refs.Add(-1)
+	if refs < 0 {
+		nativeAbort("task handle reference count underflow")
+	}
+	if refs == 0 {
+		destroyNativeTaskStorage(task)
+	}
 }
 
 func createNativeTask(entry, state unsafe.Pointer, kind int32) *nativeTask {
@@ -559,6 +589,15 @@ func tsnative_task_await_ref_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultRef, out, false, true)
 }
 
+//export tsnative_task_retain
+func tsnative_task_retain(raw unsafe.Pointer) int32 {
+	task := lookupNativeTask(uintptr(raw))
+	if !retainNativeTaskRef(task) {
+		return -1
+	}
+	return 0
+}
+
 //export tsnative_task_release
 func tsnative_task_release(raw unsafe.Pointer) {
 	task := lookupNativeTask(uintptr(raw))
@@ -566,7 +605,7 @@ func tsnative_task_release(raw unsafe.Pointer) {
 		return
 	}
 	_ = tsnative_scheduler_wait(raw)
-	destroyNativeTaskStorage(task)
+	releaseNativeTaskRef(task)
 }
 
 func abortNativeTaskFailure(task *nativeTask) {
@@ -585,7 +624,7 @@ func tsnative_task_join_release(raw unsafe.Pointer) {
 	if tsnative_scheduler_wait(raw) != 0 {
 		abortNativeTaskFailure(task)
 	}
-	destroyNativeTaskStorage(task)
+	releaseNativeTaskRef(task)
 }
 
 //export tsnative_task_join_f64_release
@@ -598,7 +637,7 @@ func tsnative_task_join_f64_release(raw unsafe.Pointer) float64 {
 		abortNativeTaskFailure(task)
 	}
 	result := task.resultF64
-	destroyNativeTaskStorage(task)
+	releaseNativeTaskRef(task)
 	return result
 }
 
@@ -612,7 +651,7 @@ func tsnative_task_join_bool_release(raw unsafe.Pointer) uint8 {
 		abortNativeTaskFailure(task)
 	}
 	result := task.resultBool
-	destroyNativeTaskStorage(task)
+	releaseNativeTaskRef(task)
 	return result
 }
 
@@ -626,7 +665,7 @@ func tsnative_task_join_ref_release(raw unsafe.Pointer) unsafe.Pointer {
 		abortNativeTaskFailure(task)
 	}
 	result := task.resultRef
-	destroyNativeTaskStorage(task)
+	releaseNativeTaskRef(task)
 	return result
 }
 

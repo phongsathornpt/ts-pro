@@ -142,7 +142,14 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [~] Add broader nested recovery tests and selected Promise combinators.
           - [x] Cover nested awaited rejection -> catch rethrow -> inner finally -> outer catch/finally recovery on a single scheduler worker.
           - [x] Add immediate native `Promise.resolve(value)` and `Promise.reject<T>(reason)` settlement without scheduler work; number/bool/reference results use typed TaskRef slots and rejected reasons retain persistent GC roots until handle release.
-          - [ ] Add Promise adoption/thenable assimilation plus selected aggregate combinators (`Promise.all` / `Promise.race`) after array/heterogeneous tuple semantics are sufficient.
+          - [~] Add Promise adoption/thenable assimilation plus selected aggregate combinators (`Promise.all` / `Promise.race`).
+            - [~] Replace single-owner TaskRef completion with Promise-safe ownership and waiter fan-out.
+              - [x] Add retain/release reference counting so consuming joins/awaits release ownership instead of unconditionally destroying task storage.
+              - [ ] Replace the single completion waiter slot with a waiter list and fan out settlement safely.
+              - [ ] Make compiled Promise awaits non-consuming while Promise aliases exist, retaining settled result/failure roots until the final handle release.
+            - [ ] Add `Promise.resolve(existingPromise)` adoption and repeated-await coverage.
+            - [ ] Add thenable assimilation after dynamic method/`this` call semantics are sufficient.
+            - [ ] Add homogeneous `Promise.all` / `Promise.race`, then heterogeneous tuple results after tuple semantics land.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
   - [x] Add native task groups with group-owned child tracking, group join/close, cancellation propagation, compiler intrinsics, and worker=1 structured-concurrency regressions.
