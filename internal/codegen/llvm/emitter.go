@@ -18,6 +18,7 @@ type emitter struct {
 	closures      map[mir.FunctionID]closureDescriptor
 	escapes       escapeanalysis.Result
 	stackObjects  escapeanalysis.StackObjectResult
+	stackAliases  map[mir.FunctionID]map[mir.ValueID]mir.ValueID
 	scalarObjects escapeanalysis.ScalarObjectResult
 }
 
@@ -38,6 +39,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	e := &emitter{
 		module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{},
 		stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: stackObjects,
+		stackAliases:  escapeanalysis.StackObjectAliases(module, stackObjects),
 		scalarObjects: escapeanalysis.ScalarObjectsWithEscapeAnalysis(module, stackObjects, escapes),
 	}
 	for _, fn := range module.Functions {
@@ -187,7 +189,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
-	gc := buildGCRootLayout(fn, e.shapes, e.stackObjects[fn.ID], e.scalarObjects[fn.ID])
+	gc := buildGCRootLayout(fn, e.shapes, e.stackObjects[fn.ID], e.stackAliases[fn.ID], e.scalarObjects[fn.ID])
 	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
@@ -1003,8 +1005,17 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 	}
 }
 
+func (e *emitter) stackObjectOrigin(fn mir.FunctionID, value mir.ValueID) (mir.ValueID, bool) {
+	if e.stackObjects.Contains(fn, value) {
+		return value, true
+	}
+	origin, ok := e.stackAliases[fn][value]
+	return origin, ok
+}
+
 func (e *emitter) isStackObject(fn mir.FunctionID, value mir.ValueID) bool {
-	return e.stackObjects.Contains(fn, value)
+	_, ok := e.stackObjectOrigin(fn, value)
+	return ok
 }
 
 func (e *emitter) isHeapAllocationElided(fn mir.FunctionID, value mir.ValueID) bool {

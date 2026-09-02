@@ -14,13 +14,14 @@ type stackFieldRoot struct {
 }
 
 type gcRootLayout struct {
-	slots       map[mir.ValueID]int
-	stackFields map[stackFieldRoot]int
-	count       int
+	slots        map[mir.ValueID]int
+	stackFields  map[stackFieldRoot]int
+	stackAliases map[mir.ValueID]mir.ValueID
+	count        int
 }
 
-func buildGCRootLayout(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, stackObjects map[mir.ValueID]bool, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
-	layout := gcRootLayout{slots: map[mir.ValueID]int{}, stackFields: map[stackFieldRoot]int{}}
+func buildGCRootLayout(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, stackObjects map[mir.ValueID]bool, stackAliases map[mir.ValueID]mir.ValueID, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
+	layout := gcRootLayout{slots: map[mir.ValueID]int{}, stackFields: map[stackFieldRoot]int{}, stackAliases: stackAliases}
 	add := func(value mir.ValueID, repr mir.Repr) {
 		if !isGCReference(repr) {
 			return
@@ -139,7 +140,11 @@ func (layout gcRootLayout) emitStackFieldSync(b *strings.Builder, inst mir.Instr
 			fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
 		}
 	case mir.FieldSet:
-		slot, ok := layout.stackFields[stackFieldRoot{object: op.Object, field: op.Field}]
+		object := op.Object
+		if origin, ok := layout.stackAliases[object]; ok {
+			object = origin
+		}
+		slot, ok := layout.stackFields[stackFieldRoot{object: object, field: op.Field}]
 		if !ok {
 			return nil
 		}

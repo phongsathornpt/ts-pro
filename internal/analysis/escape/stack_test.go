@@ -55,7 +55,7 @@ func TestStackObjectsAcceptsReferenceShape(t *testing.T) {
 	}
 }
 
-func TestStackObjectsRejectsAliasedReferenceObject(t *testing.T) {
+func TestStackObjectsAcceptsSingleOriginAliasedReferenceObject(t *testing.T) {
 	module := mir.Module{
 		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},
 		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
@@ -63,8 +63,25 @@ func TestStackObjectsRejectsAliasedReferenceObject(t *testing.T) {
 			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 0}}}},
 		}, Terminator: mir.Return{}}}}},
 	}
+	stack := StackObjects(module, Analyze(module))
+	if !stack.Contains(0, 0) {
+		t.Fatal("single-origin aliased reference-bearing object was not selected for stack allocation")
+	}
+	if origin, ok := StackObjectAliases(module, stack)[0][1]; !ok || origin != 0 {
+		t.Fatalf("stack alias v1 origin = v%d, ok=%v; want v0", origin, ok)
+	}
+}
+
+func TestStackObjectsRejectsUnknownMixedAlias(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},
+		Functions: []mir.Function{{ID: 0, Params: []mir.Param{{Value: 9, Repr: mir.ReprObjectRef}}, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			objectAlloc(0),
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 0}, {Block: 0, Value: 9}}}},
+		}, Terminator: mir.Return{}}}}},
+	}
 	if StackObjects(module, Analyze(module)).Contains(0, 0) {
-		t.Fatal("aliased reference-bearing object was selected for stack allocation")
+		t.Fatal("object participating in an unknown/mixed alias was selected for stack allocation")
 	}
 }
 func TestStackObjectsRejectsCyclicAllocationBlock(t *testing.T) {

@@ -229,7 +229,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Synchronize reference field roots after `ObjectNew` initialization and every stack-object `FieldSet`; stack stores bypass the heap remembered-set barrier.
     - [x] Conservatively reject stack placement when allocation provenance gains an object alias; alias/interior-pointer support remains a later extension.
     - [x] Add native GC-stress coverage proving stack-held reference fields survive repeated collection with a 1 KiB nursery; `examples/stack_reference_object.ts` stays physical (`scalar=0`, `stack=1`) and preserves its field through sustained string churn.
-    - [ ] Extend stack placement to safe aliases/interior pointers with explicit provenance/root synchronization.
+    - [~] Extend stack placement to safe aliases/interior pointers with explicit provenance/root synchronization. Single-origin Phi aliases are now resolved back to their stack allocation and share field-root synchronization; mixed/unknown aliases remain heap-backed. True interior-pointer/address-taking support is still pending because MIR does not expose those operations yet.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 

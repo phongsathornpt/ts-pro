@@ -437,6 +437,50 @@ func TestEmitReferenceStackObjectSynchronizesFieldRoots(t *testing.T) {
 	}
 }
 
+func TestEmitSingleOriginStackAliasSynchronizesReferenceFieldRoot(t *testing.T) {
+	module := mir.Module{
+		Name:   "stack-ref-alias",
+		Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, Name: "alias", Params: []mir.Param{{Value: 9, Name: "flag", Repr: mir.ReprBool}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Branch{Condition: 9, Then: 1, Else: 2}},
+			{ID: 1, Terminator: mir.Jump{Target: 3}},
+			{ID: 2, Terminator: mir.Jump{Target: 3}},
+			{ID: 3, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 1, Value: 0}, {Block: 2, Value: 0}}}},
+				{Result: 2, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "alias"}},
+				{Result: 3, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 2}},
+			}, Terminator: mir.Return{}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") {
+		t.Fatalf("single-origin aliased object was not stack allocated:\n%s", text)
+	}
+	if strings.Contains(text, "call void @tsnative_gc_store_ref(ptr %v1") {
+		t.Fatalf("stack alias incorrectly used heap write barrier:\n%s", text)
+	}
+	if strings.Count(text, "store ptr %v2, ptr %gc.slot.") < 2 {
+		t.Fatalf("stack alias FieldSet did not synchronize field root:\n%s", text)
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "stack-ref-alias.ll"), filepath.Join(dir, "stack-ref-alias.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile stack alias LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
 func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
 	result := mir.ValueID(0)
 	module := mir.Module{
