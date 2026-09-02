@@ -32,6 +32,10 @@ func stackObjectsForFunction(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, 
 			if blocked[inst.Result] || !escapes.CanStackAllocate(inst.Result) {
 				continue
 			}
+			if _, ok := inst.Op.(mir.ClosureNew); ok {
+				result[inst.Result] = true
+				continue
+			}
 			shapeID, ok := stackObjectShape(inst.Op)
 			if !ok {
 				continue

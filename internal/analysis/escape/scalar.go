@@ -137,8 +137,15 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, escap
 
 func scalarObjectCandidates(fn mir.Function, stack map[mir.ValueID]bool, escapes FunctionResult, shapes map[mir.ShapeID]mir.Shape) map[mir.ValueID]bool {
 	result := make(map[mir.ValueID]bool, len(stack))
-	for value := range stack {
-		result[value] = true
+	for _, block := range fn.Blocks {
+		for _, inst := range block.Instructions {
+			if !stack[inst.Result] {
+				continue
+			}
+			if _, ok := stackObjectShape(inst.Op); ok {
+				result[inst.Result] = true
+			}
+		}
 	}
 	cyclic := cyclicBlocks(fn)
 	blocked := stackBlockedValues(fn)

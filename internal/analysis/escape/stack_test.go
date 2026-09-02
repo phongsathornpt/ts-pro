@@ -19,6 +19,32 @@ func TestStackObjectsAcceptsLocalAtomicObject(t *testing.T) {
 	}
 }
 
+func TestStackObjectsAcceptsLocalClosure(t *testing.T) {
+	module := mir.Module{Functions: []mir.Function{
+		{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprFunctionRef, Op: mir.ClosureNew{Callee: 1}},
+			{Result: 1, Repr: mir.ReprVoid, Op: mir.ClosureCall{Closure: 0}},
+		}, Terminator: mir.Return{}}}},
+		{ID: 1, Entry: 0, Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{}}}},
+	}}
+	if !StackObjects(module, Analyze(module)).Contains(0, 0) {
+		t.Fatal("local non-escaping closure was not selected for stack allocation")
+	}
+}
+
+func TestStackObjectsRejectsReturnedClosure(t *testing.T) {
+	ret := mir.ValueID(0)
+	module := mir.Module{Functions: []mir.Function{
+		{ID: 0, ReturnRepr: mir.ReprFunctionRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprFunctionRef, Op: mir.ClosureNew{Callee: 1}},
+		}, Terminator: mir.Return{Value: &ret}}}},
+		{ID: 1, Entry: 0, Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{}}}},
+	}}
+	if StackObjects(module, Analyze(module)).Contains(0, 0) {
+		t.Fatal("returned closure was selected for stack allocation")
+	}
+}
+
 func TestStackObjectsRejectsReferenceShape(t *testing.T) {
 	module := mir.Module{
 		Shapes:    []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},

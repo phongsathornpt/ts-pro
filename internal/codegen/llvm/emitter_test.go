@@ -477,17 +477,20 @@ func TestEmitNativeTaskIntrinsics(t *testing.T) {
 
 func TestEmitClosureHeapReferenceLayouts(t *testing.T) {
 	captured := mir.ValueID(0)
+	ret := mir.ValueID(1)
 	module := mir.Module{Name: "closure-layout", Functions: []mir.Function{
-		{ID: 0, Name: "target", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0,
-			Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{Value: &captured}}}},
-		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0,
+		{
+			ID: 0, Name: "target", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{Value: &captured}}},
+		},
+		{
+			ID: 1, Name: "entry", ReturnRepr: mir.ReprFunctionRef, Entry: 0,
 			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
 				{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "captured"}},
 				{Result: 1, Repr: mir.ReprFunctionRef, Op: mir.ClosureNew{Callee: 0, Captures: []mir.ValueID{0}}},
-			}, Terminator: mir.Return{}}}},
+			}, Terminator: mir.Return{Value: &ret}}},
+		},
 	}}
-	entry := mir.FunctionID(1)
-	module.Entry = &entry
 	text, err := llvmcodegen.Emit(module)
 	if err != nil {
 		t.Fatal(err)
@@ -502,6 +505,62 @@ func TestEmitClosureHeapReferenceLayouts(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("closure LLVM IR missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestEmitLocalClosureUsesStackStorage(t *testing.T) {
+	ret := mir.ValueID(2)
+	captured := mir.ValueID(0)
+	module := mir.Module{Name: "closure-stack", Functions: []mir.Function{
+		{
+			ID: 0, Name: "target", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{Value: &captured}}},
+		},
+		{
+			ID: 1, Name: "entry", ReturnRepr: mir.ReprStringRef, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "captured"}},
+				{Result: 1, Repr: mir.ReprFunctionRef, Op: mir.ClosureNew{Callee: 0, Captures: []mir.ValueID{0}}},
+				{Result: 2, Repr: mir.ReprStringRef, Op: mir.ClosureCall{Closure: 1}},
+			}, Terminator: mir.Return{Value: &ret}}},
+		},
+	}}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%v1.env = alloca %tsnative_env_f0",
+		"%v1 = alloca %tsnative_closure",
+		"store ptr %v0, ptr %v1.env.c0",
+		"ret ptr %v2",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("stack closure LLVM missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{
+		"call ptr @tsnative_object_alloc_refs(i64 %v1.env.size",
+		"call ptr @tsnative_object_alloc_refs(i64 %v1.size",
+		"store ptr %v1, ptr %gc.slot.",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("stack closure retained heap path %q:\n%s", forbidden, text)
+		}
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "closure-stack.ll"), filepath.Join(dir, "closure-stack.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile stack closure LLVM: %v\nIR:\n%s", err, text)
 	}
 }
 

@@ -216,7 +216,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		}
 		for ; index < len(block.Instructions); index++ {
 			inst := block.Instructions[index]
-			if emitsGCAllocation(inst.Op) && !e.isElidedObject(fn.ID, inst.Result) {
+			if emitsGCAllocation(inst.Op) && !e.isHeapAllocationElided(fn.ID, inst.Result) {
 				b.WriteString("  call void @tsnative_gc_safepoint()\n")
 			}
 			if err := e.emitInstruction(b, fn, inst, values); err != nil {
@@ -763,7 +763,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  call void @tsnative_sleep_cooperative(double %s)\n", duration)
 		return nil
 	case mir.ClosureNew:
-		return e.emitClosureNew(b, inst, op, values)
+		return e.emitClosureNew(b, fn.ID, inst, op, values)
 	case mir.ClosureCall:
 		return e.emitClosureCall(b, fn, inst, op, values)
 	case mir.FieldGet:
@@ -1004,7 +1004,7 @@ func (e *emitter) isStackObject(fn mir.FunctionID, value mir.ValueID) bool {
 	return e.stackObjects.Contains(fn, value)
 }
 
-func (e *emitter) isElidedObject(fn mir.FunctionID, value mir.ValueID) bool {
+func (e *emitter) isHeapAllocationElided(fn mir.FunctionID, value mir.ValueID) bool {
 	if e.isStackObject(fn, value) {
 		return true
 	}
