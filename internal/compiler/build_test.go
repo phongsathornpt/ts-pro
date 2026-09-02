@@ -1349,6 +1349,36 @@ func TestBuildNativePromiseReassignmentSingleWorker(t *testing.T) {
 	}
 }
 
+func TestBuildNativePromiseControlFlowOwnershipSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "promise-control-flow")
+	result, err := Build(ctx, BuildOptions{Root: root, Input: "examples/promise_control_flow.ts", Output: output, Optimization: "-O2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.TaskSpawns != 3 || result.Metrics.TaskJoins != 6 || result.Metrics.TaskRetains != 0 || result.Metrics.TaskReleases != 9 {
+		t.Fatalf("Promise control-flow metrics = spawns:%d joins:%d retains:%d releases:%d; want 3/6/0/9", result.Metrics.TaskSpawns, result.Metrics.TaskJoins, result.Metrics.TaskRetains, result.Metrics.TaskReleases)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1", "TSNATIVE_GC_NURSERY_BYTES=1024")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run Promise control-flow ownership: %v: %s", err, got)
+	}
+	want := "2\n6\n3"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
 func TestBuildNativeAsyncFinallySingleWorker(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not installed")

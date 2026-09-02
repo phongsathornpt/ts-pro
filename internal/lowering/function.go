@@ -9,20 +9,21 @@ import (
 )
 
 type functionLowerer struct {
-	module           *moduleLowerer
-	source           frontend.Function
-	result           hir.Function
-	locals           map[frontend.SymbolID]hir.ValueID
-	nextValue        uint32
-	nextBlock        uint32
-	current          int
-	terminated       bool
-	handlers         []exceptionHandler
-	returnFinalizers []finalizerFrame
-	throwFinalizers  []finalizerFrame
-	nextFinalizer    uint32
-	scopeDepth       int
-	ownedPromises    map[frontend.SymbolID]hir.ValueID
+	module                 *moduleLowerer
+	source                 frontend.Function
+	result                 hir.Function
+	locals                 map[frontend.SymbolID]hir.ValueID
+	nextValue              uint32
+	nextBlock              uint32
+	current                int
+	terminated             bool
+	handlers               []exceptionHandler
+	returnFinalizers       []finalizerFrame
+	throwFinalizers        []finalizerFrame
+	nextFinalizer          uint32
+	scopeDepth             int
+	promiseOwnershipMerges int
+	ownedPromises          map[frontend.SymbolID]hir.ValueID
 }
 
 type localState struct {
@@ -233,8 +234,11 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 			return fmt.Errorf("variable %q has no value", stmt.Name)
 		}
 		isPromise := int(stmt.Type) < len(f.module.source.Types) && f.module.source.Types[stmt.Type].Kind == frontend.TypePromise
-		if isPromise && f.scopeDepth != 1 {
-			return fmt.Errorf("Promise locals and reassignments in nested control-flow scopes are not supported until lexical TaskRef ownership merging is implemented")
+		if isPromise && stmt.Kind == frontend.StmtVar && f.scopeDepth != 1 {
+			return fmt.Errorf("Promise declarations in nested control-flow scopes are not supported until lexical TaskRef cleanup is implemented")
+		}
+		if isPromise && stmt.Kind == frontend.StmtAssign && f.scopeDepth != 1 && f.promiseOwnershipMerges == 0 {
+			return fmt.Errorf("Promise reassignment in this control-flow scope is not supported until TaskRef ownership merging is implemented")
 		}
 		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
 		if err != nil {
@@ -362,6 +366,9 @@ func (f *functionLowerer) lowerCompletionFinalizers(finalizers []finalizerFrame)
 }
 
 func (f *functionLowerer) lowerTryCatch(stmt frontend.Statement) error {
+	savedPromiseMerges := f.promiseOwnershipMerges
+	f.promiseOwnershipMerges = 0
+	defer func() { f.promiseOwnershipMerges = savedPromiseMerges }()
 	before := cloneLocals(f.locals)
 	catchID := f.newBlockID()
 	continueID := f.newBlockID()
@@ -441,6 +448,7 @@ func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
 	}
 	origin := f.block().ID
 	before := cloneLocals(f.locals)
+	beforeOwned := cloneLocals(f.ownedPromises)
 
 	thenID := f.newBlockID()
 	continueID := f.newBlockID()
@@ -454,8 +462,12 @@ func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
 
 	states := make([]localState, 0, 2)
 	f.locals = cloneLocals(before)
+	f.ownedPromises = cloneLocals(beforeOwned)
 	f.startBlock(thenID)
-	if err := f.lowerStatements(stmt.Then); err != nil {
+	f.promiseOwnershipMerges++
+	err = f.lowerStatements(stmt.Then)
+	f.promiseOwnershipMerges--
+	if err != nil {
 		return err
 	}
 	if !f.terminated {
@@ -469,8 +481,12 @@ func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
 
 	if len(stmt.Else) != 0 {
 		f.locals = cloneLocals(before)
+		f.ownedPromises = cloneLocals(beforeOwned)
 		f.startBlock(elseID)
-		if err := f.lowerStatements(stmt.Else); err != nil {
+		f.promiseOwnershipMerges++
+		err = f.lowerStatements(stmt.Else)
+		f.promiseOwnershipMerges--
+		if err != nil {
 			return err
 		}
 		if !f.terminated {
@@ -487,11 +503,16 @@ func (f *functionLowerer) lowerIf(stmt frontend.Statement) error {
 
 	if len(states) == 0 {
 		f.locals = cloneLocals(before)
+		f.ownedPromises = cloneLocals(beforeOwned)
 		f.terminated = true
 		return nil
 	}
 	f.startBlock(continueID)
-	return f.mergeLocals(states)
+	if err := f.mergeLocals(states); err != nil {
+		return err
+	}
+	f.syncOwnedPromises(beforeOwned)
+	return nil
 }
 
 func (f *functionLowerer) mergeLocals(states []localState) error {
@@ -542,6 +563,7 @@ func (f *functionLowerer) lowerLoop(condition *frontend.Expr, body, update []fro
 	}
 	preheader := f.block().ID
 	before := cloneLocals(f.locals)
+	beforeOwned := cloneLocals(f.ownedPromises)
 	mutated := map[frontend.SymbolID]struct{}{}
 	collectAssigned(body, mutated)
 	collectAssigned(update, mutated)
@@ -575,6 +597,8 @@ func (f *functionLowerer) lowerLoop(condition *frontend.Expr, body, update []fro
 		phis = append(phis, loopPhi{symbol: symbol, instIndex: len(f.block().Instructions) - 1})
 	}
 	headerLocals := cloneLocals(f.locals)
+	f.ownedPromises = cloneLocals(beforeOwned)
+	f.syncOwnedPromises(beforeOwned)
 	conditionValue, err := f.lowerExpr(condition)
 	if err != nil {
 		return err
@@ -584,12 +608,19 @@ func (f *functionLowerer) lowerLoop(condition *frontend.Expr, body, update []fro
 	}
 
 	f.locals = cloneLocals(headerLocals)
+	f.syncOwnedPromises(beforeOwned)
 	f.startBlock(bodyID)
-	if err := f.lowerStatements(body); err != nil {
+	f.promiseOwnershipMerges++
+	err = f.lowerStatements(body)
+	f.promiseOwnershipMerges--
+	if err != nil {
 		return err
 	}
 	if !f.terminated {
-		if err := f.lowerStatements(update); err != nil {
+		f.promiseOwnershipMerges++
+		err = f.lowerStatements(update)
+		f.promiseOwnershipMerges--
+		if err != nil {
 			return err
 		}
 		backPred := f.block().ID
@@ -610,6 +641,7 @@ func (f *functionLowerer) lowerLoop(condition *frontend.Expr, body, update []fro
 	}
 
 	f.locals = cloneLocals(headerLocals)
+	f.syncOwnedPromises(beforeOwned)
 	f.startBlock(exitID)
 	return nil
 }
@@ -619,6 +651,16 @@ func (f *functionLowerer) symbolType(symbol frontend.SymbolID) (frontend.TypeID,
 		return 0, fmt.Errorf("symbol s%d is out of range", symbol)
 	}
 	return f.module.source.Symbols[symbol].Type, nil
+}
+
+func (f *functionLowerer) syncOwnedPromises(previous map[frontend.SymbolID]hir.ValueID) {
+	merged := make(map[frontend.SymbolID]hir.ValueID, len(previous))
+	for symbol := range previous {
+		if value, ok := f.locals[symbol]; ok {
+			merged[symbol] = value
+		}
+	}
+	f.ownedPromises = merged
 }
 
 func cloneLocals(source map[frontend.SymbolID]hir.ValueID) map[frontend.SymbolID]hir.ValueID {
