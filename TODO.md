@@ -221,7 +221,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Scalar-replace mutable numeric stack-local objects when allocation and all field reads/writes remain in one basic block. `ObjectAlloc` starts from typed zero values, `FieldSet` updates compile-time field SSA state, and `FieldGet` reuses the latest value; `examples/scalar_mutable_object.ts` verifies one candidate becomes one scalar replacement and emits only the console runtime call.
   - [x] Carry mutable scalar field state across acyclic linear CFG chains connected by single-predecessor unconditional jumps. Field-read sources are planned as MIR values/typed zeroes before LLVM emission, so correctness does not depend on block emission order; merge points still retain the `alloca` fallback and clang acceptance covers the eliminated cross-block object.
   - [x] Scalar-replace direct acyclic diamond branches with explicit per-field Phi plans. Differing branch states emit LLVM `phi` values at the merge head, equal states reuse one source, and unmodified `ObjectAlloc` fields contribute typed-zero incoming values; nested branches still keep the `alloca` fallback.
-  - [ ] Generalize mutable scalar dataflow to nested acyclic branch trees/merges with a CFG worklist before evaluating reference-bearing stack objects/closures; loop-carried field state remains conservative.
+  - [x] Generalize mutable scalar dataflow to nested acyclic branch trees/merges with a deterministic CFG worklist. Per-field state now builds reusable/chained synthetic Phi plans across multiple merge levels, preserves typed zero incoming values, and keeps cyclic/loop-carried field state conservative.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -250,10 +250,9 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Generalize mutable scalar replacement from direct diamonds to nested acyclic branch trees/merges using CFG dataflow; keep loop-carried field state and object identity semantics conservative.
-2. Evaluate reference-bearing stack objects and closure stack allocation only after precise stack-root/interior-pointer handling is covered; task environments remain heap-backed when their lifetime crosses scheduler ownership.
-3. Finish nested rejection recovery and selected Promise combinators.
-4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
-5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
-6. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
-7. Port compiler-owned semantic/HIR/MIR/LLVM/build orchestration to TypeScript 7 and retire transitional compile-time Go packages.
+1. Evaluate reference-bearing stack objects and closure stack allocation only after precise stack-root/interior-pointer handling is covered; task environments remain heap-backed when their lifetime crosses scheduler ownership.
+2. Finish nested rejection recovery and selected Promise combinators.
+3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
+4. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
+5. Finish multi-module compilation/linking and cross-module dispatch/specialization, then ThinLTO, PGO, and cross-compilation.
+6. Port compiler-owned semantic/HIR/MIR/LLVM/build orchestration to TypeScript 7 and retire transitional compile-time Go packages.

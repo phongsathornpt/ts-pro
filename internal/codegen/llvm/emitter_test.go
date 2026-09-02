@@ -221,7 +221,7 @@ func TestEmitMutableDiamondScalarUsesFieldPhi(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(text, "%v6 = phi double [ 7.000000e+00, %b1 ], [ 8.000000e+00, %b2 ]") {
+	if !strings.Contains(text, "%scalar.phi.v0.f0.b3 = phi double [ 7.000000e+00, %b1 ], [ 8.000000e+00, %b2 ]") {
 		t.Fatalf("mutable diamond missing field phi:\n%s", text)
 	}
 	for _, forbidden := range []string{"%v0 = alloca %tsnative_shape_s0", "call ptr @tsnative_object_alloc_atomic", "getelementptr %tsnative_shape_s0"} {
@@ -242,6 +242,54 @@ func TestEmitMutableDiamondScalarUsesFieldPhi(t *testing.T) {
 	defer cancel()
 	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
 		t.Fatalf("compile diamond scalar LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
+func TestEmitNestedMutableScalarUsesPhiDataflow(t *testing.T) {
+	ret := mir.ValueID(8)
+	module := mir.Module{
+		Name: "nested-mutable-object", Shapes: []mir.Shape{{ID: 0, Name: "Counter", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Name: "counter", ReturnRepr: mir.ReprF64, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}, {Result: 1, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}}}, Terminator: mir.Branch{Condition: 1, Then: 1, Else: 2}},
+			{ID: 1, Terminator: mir.Branch{Condition: 1, Then: 3, Else: 4}},
+			{ID: 2, Instructions: []mir.Instruction{{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 9}}, {Result: 3, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 2}}}, Terminator: mir.Jump{Target: 7}},
+			{ID: 3, Instructions: []mir.Instruction{{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 7}}, {Result: 5, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 4}}}, Terminator: mir.Jump{Target: 5}},
+			{ID: 4, Instructions: []mir.Instruction{{Result: 6, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 8}}, {Result: 7, Repr: mir.ReprF64, Op: mir.FieldSet{Object: 0, Shape: 0, Field: 0, Value: 6}}}, Terminator: mir.Jump{Target: 5}},
+			{ID: 5, Terminator: mir.Jump{Target: 7}},
+			{ID: 7, Instructions: []mir.Instruction{{Result: 8, Repr: mir.ReprF64, Op: mir.FieldGet{Object: 0, Shape: 0, Field: 0}}}, Terminator: mir.Return{Value: &ret}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%scalar.phi.v0.f0.b5 = phi double [ 7.000000e+00, %b3 ], [ 8.000000e+00, %b4 ]",
+		"%scalar.phi.v0.f0.b7 = phi double [ 9.000000e+00, %b2 ], [ %scalar.phi.v0.f0.b5, %b5 ]",
+		"ret double %scalar.phi.v0.f0.b7",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("nested mutable scalar LLVM missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"%v0 = alloca %tsnative_shape_s0", "call ptr @tsnative_object_alloc_atomic", "getelementptr %tsnative_shape_s0"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("nested mutable scalar retained %q:\n%s", forbidden, text)
+		}
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "nested-scalar.ll"), filepath.Join(dir, "nested-scalar.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile nested scalar LLVM: %v\nIR:\n%s", err, text)
 	}
 }
 
@@ -977,7 +1025,7 @@ func TestEmitMutableDiamondPhiIncludesZeroIncoming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(text, "%v5 = phi double [ 7.000000e+00, %b1 ], [ 0.000000e+00, %b2 ]") {
+	if !strings.Contains(text, "%scalar.phi.v0.f0.b3 = phi double [ 7.000000e+00, %b1 ], [ 0.000000e+00, %b2 ]") {
 		t.Fatalf("mutable diamond missing zero incoming phi:\n%s", text)
 	}
 }

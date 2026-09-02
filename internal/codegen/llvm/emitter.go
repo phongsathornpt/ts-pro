@@ -235,47 +235,62 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 }
 
 func (e *emitter) emitScalarPhis(b *strings.Builder, fn mir.Function, block mir.Block, values map[mir.ValueID]string) error {
-	for _, inst := range block.Instructions {
-		fieldGet, ok := inst.Op.(mir.FieldGet)
+	objects := e.scalarObjects[fn.ID]
+	origins := make([]mir.ValueID, 0, len(objects))
+	for origin := range objects {
+		origins = append(origins, origin)
+	}
+	sort.Slice(origins, func(i, j int) bool { return origins[i] < origins[j] })
+	for _, origin := range origins {
+		scalar := objects[origin]
+		if !scalar.Mutable || len(scalar.Phis) == 0 {
+			continue
+		}
+		shape, ok := e.shapes[scalar.Shape]
 		if !ok {
-			continue
+			return fmt.Errorf("unknown scalar phi shape s%d", scalar.Shape)
 		}
-		scalar, ok := e.scalarObjects.Get(fn.ID, fieldGet.Object)
-		if !ok || !scalar.Mutable {
-			continue
-		}
-		read, ok := scalar.Reads[inst.Result]
-		if !ok || len(read.Incoming) == 0 {
-			continue
-		}
-		shape, ok := e.shapes[fieldGet.Shape]
-		if !ok || int(fieldGet.Field) >= len(shape.Fields) {
-			return fmt.Errorf("invalid scalar phi field s%d.%d", fieldGet.Shape, fieldGet.Field)
-		}
-		typ, err := llvmType(shape.Fields[fieldGet.Field].Repr)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(b, "  %s = phi %s ", valueName(inst.Result), typ)
-		for i, incoming := range read.Incoming {
-			if i != 0 {
-				b.WriteString(", ")
+		phis := make([]escapeanalysis.ScalarPhi, 0)
+		for _, phi := range scalar.Phis {
+			if phi.Block == block.ID {
+				phis = append(phis, phi)
 			}
-			var value string
-			if incoming.Zero {
-				value, err = llvmZero(shape.Fields[fieldGet.Field].Repr)
-			} else {
-				value, err = operand(values, incoming.Value)
+		}
+		sort.Slice(phis, func(i, j int) bool { return phis[i].Name < phis[j].Name })
+		for _, phi := range phis {
+			if int(phi.Field) >= len(shape.Fields) {
+				return fmt.Errorf("invalid scalar phi field s%d.%d", scalar.Shape, phi.Field)
 			}
+			repr := shape.Fields[phi.Field].Repr
+			typ, err := llvmType(repr)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(b, "[ %s, %%b%d ]", value, incoming.Block)
+			fmt.Fprintf(b, "  %%%s = phi %s ", phi.Name, typ)
+			for i, incoming := range phi.Incoming {
+				if i != 0 {
+					b.WriteString(", ")
+				}
+				value, err := scalarFieldOperand(values, incoming.Source, repr)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "[ %s, %%b%d ]", value, incoming.Block)
+			}
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
-		values[inst.Result] = valueName(inst.Result)
 	}
 	return nil
+}
+
+func scalarFieldOperand(values map[mir.ValueID]string, source escapeanalysis.ScalarFieldValue, repr mir.Repr) (string, error) {
+	if source.Zero {
+		return llvmZero(repr)
+	}
+	if source.Phi != "" {
+		return "%" + source.Phi, nil
+	}
+	return operand(values, source.Value)
 }
 
 func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.Instruction, values map[mir.ValueID]string) error {
@@ -766,8 +781,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 				if !ok {
 					return fmt.Errorf("mutable scalar object v%d missing read plan for v%d", op.Object, inst.Result)
 				}
-				if len(read.Incoming) != 0 {
-					values[inst.Result] = valueName(inst.Result)
+				if read.Phi != "" {
+					values[inst.Result] = "%" + read.Phi
 					return nil
 				}
 				if read.Zero {
