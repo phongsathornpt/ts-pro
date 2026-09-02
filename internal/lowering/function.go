@@ -157,7 +157,7 @@ func isFreshPromiseProducer(expr *frontend.Expr) bool {
 		return false
 	}
 	switch expr.Kind {
-	case frontend.ExprTaskSpawn, frontend.ExprPromiseResolve, frontend.ExprPromiseReject:
+	case frontend.ExprTaskSpawn, frontend.ExprPromiseResolve, frontend.ExprPromiseReject, frontend.ExprPromiseAll, frontend.ExprPromiseRace:
 		return true
 	default:
 		return false

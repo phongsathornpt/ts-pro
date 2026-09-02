@@ -296,6 +296,14 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				if op.Result == TaskResultInvalid {
 					add("Promise.reject has invalid task result kind")
 				}
+			case PromiseAllF64Op:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
+			case PromiseRaceF64Op:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
 			case TaskSpawnOp:
 				if _, exists := functionIDs[op.Callee]; !exists {
 					add(fmt.Sprintf("task spawn references unknown function f%d", op.Callee))

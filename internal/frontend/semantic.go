@@ -25,6 +25,8 @@ const (
 	ExprPromiseResolve
 	ExprPromiseAdopt
 	ExprPromiseReject
+	ExprPromiseAll
+	ExprPromiseRace
 	ExprTaskJoin
 	ExprTaskYield
 	ExprTaskCancel

@@ -796,7 +796,7 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		elementKind := e.result.Types[arrayType.Element].Kind
 		switch elementKind {
-		case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+		case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
 		default:
 			return nil, fmt.Errorf("native array at %d does not support %s elements yet", node.Pos(), e.result.Types[arrayType.Element].Name)
 		}
@@ -1070,7 +1070,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		if receiverNode.Kind() == tsast.KindIdentifier && nameOK && nameNode.Kind() == tsast.KindIdentifier {
 			receiverName, _ := receiverNode.Text()
 			methodName, _ := nameNode.Text()
-			if receiverName == "Promise" && (methodName == "resolve" || methodName == "reject") {
+			if receiverName == "Promise" && (methodName == "resolve" || methodName == "reject" || methodName == "all" || methodName == "race") {
 				calleeIdentifier = "Promise." + methodName
 				expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeIdentifier, Span: e.span(calleeNode)}
 				break
@@ -1131,7 +1131,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
-	if calleeIdentifier == "Promise.resolve" || calleeIdentifier == "Promise.reject" {
+	if calleeIdentifier == "Promise.resolve" || calleeIdentifier == "Promise.reject" || calleeIdentifier == "Promise.all" || calleeIdentifier == "Promise.race" {
 		return e.extractPromiseStaticCall(node, expr, calleeIdentifier)
 	}
 	if isConcurrencyIntrinsic(calleeIdentifier) {
@@ -1299,7 +1299,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 				return 0, elementErr
 			}
 			switch e.result.Types[elementID].Kind {
-			case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+			case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
 				typ.Element = elementID
 			default:
 				return 0, fmt.Errorf("native array element type %q is not supported", e.result.Types[elementID].Name)

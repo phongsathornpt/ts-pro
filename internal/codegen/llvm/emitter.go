@@ -102,6 +102,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\n")
+	b.WriteString("declare ptr @tsnative_promise_all_f64(ptr, i64)\ndeclare ptr @tsnative_promise_race_f64(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
@@ -596,6 +597,44 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			return err
 		}
 		values[inst.Result] = promise
+		return nil
+	case mir.PromiseAllF64:
+		name := valueName(inst.Result)
+		if len(op.Promises) == 0 {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_all_f64(ptr null, i64 0)\n", name)
+		} else {
+			fmt.Fprintf(b, "  %s.args = alloca [%d x ptr]\n", name, len(op.Promises))
+			for i, promiseID := range op.Promises {
+				promise, err := operand(values, promiseID)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  %s.arg%d = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 %d\n", name, i, len(op.Promises), name, i)
+				fmt.Fprintf(b, "  store ptr %s, ptr %s.arg%d\n", promise, name, i)
+			}
+			fmt.Fprintf(b, "  %s.base = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 0\n", name, len(op.Promises), name)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_all_f64(ptr %s.base, i64 %d)\n", name, name, len(op.Promises))
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.PromiseRaceF64:
+		name := valueName(inst.Result)
+		if len(op.Promises) == 0 {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_race_f64(ptr null, i64 0)\n", name)
+		} else {
+			fmt.Fprintf(b, "  %s.args = alloca [%d x ptr]\n", name, len(op.Promises))
+			for i, promiseID := range op.Promises {
+				promise, err := operand(values, promiseID)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  %s.arg%d = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 %d\n", name, i, len(op.Promises), name, i)
+				fmt.Fprintf(b, "  store ptr %s, ptr %s.arg%d\n", promise, name, i)
+			}
+			fmt.Fprintf(b, "  %s.base = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 0\n", name, len(op.Promises), name)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_race_f64(ptr %s.base, i64 %d)\n", name, name, len(op.Promises))
+		}
+		values[inst.Result] = name
 		return nil
 	case mir.PromiseReject:
 		reason, err := operand(values, op.Reason)

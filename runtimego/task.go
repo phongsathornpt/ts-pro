@@ -659,8 +659,21 @@ func tsnative_task_release(raw unsafe.Pointer) {
 	if task == nil {
 		return
 	}
-	_ = tsnative_scheduler_wait(raw)
-	releaseNativeTaskRef(task)
+	for {
+		refs := task.refs.Load()
+		if refs <= 0 {
+			return
+		}
+		if refs > 1 {
+			if task.refs.CompareAndSwap(refs, refs-1) {
+				return
+			}
+			continue
+		}
+		_ = tsnative_scheduler_wait(raw)
+		releaseNativeTaskRef(task)
+		return
+	}
 }
 
 func abortNativeTaskFailure(task *nativeTask) {

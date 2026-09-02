@@ -38,9 +38,56 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 		}
 		e.ensureSemanticType(TypeAny, "any")
 		expr.Kind = ExprPromiseReject
+	case "Promise.all", "Promise.race":
+		return e.extractPromiseAggregateStaticCall(node, expr, name)
 	default:
 		return nil, fmt.Errorf("unsupported Promise static call %q", name)
 	}
+	expr.Callee = nil
+	return expr, nil
+}
+
+func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Expr, name string) (*Expr, error) {
+	if len(expr.Args) != 1 || expr.Args[0].Kind != ExprArray {
+		return nil, fmt.Errorf("%s at %d currently requires one array literal", name, node.Pos())
+	}
+	input := expr.Args[0]
+	if int(input.Type) >= len(e.result.Types) || e.result.Types[input.Type].Kind != TypeArray {
+		return nil, fmt.Errorf("%s at %d requires a Promise array", name, node.Pos())
+	}
+	arrayType := e.result.Types[input.Type]
+	if int(arrayType.Element) >= len(e.result.Types) || e.result.Types[arrayType.Element].Kind != TypePromise {
+		return nil, fmt.Errorf("%s at %d requires homogeneous Promise<number> inputs", name, node.Pos())
+	}
+	inputPromise := e.result.Types[arrayType.Element]
+	if int(inputPromise.ReturnType) >= len(e.result.Types) || e.result.Types[inputPromise.ReturnType].Kind != TypeNumber {
+		return nil, fmt.Errorf("%s at %d currently supports Promise<number> inputs only", name, node.Pos())
+	}
+	outputPromise := e.result.Types[expr.Type]
+	output := e.result.Types[outputPromise.ReturnType]
+	if name == "Promise.race" && len(input.Elements) == 0 {
+		return nil, fmt.Errorf("Promise.race at %d does not support an empty input until pending-forever Promise cleanup is modeled", node.Pos())
+	}
+	if name == "Promise.race" && len(input.Elements) == 0 {
+		return nil, fmt.Errorf("empty Promise.race is not supported yet")
+	}
+	if name == "Promise.all" {
+		if output.Kind != TypeArray || int(output.Element) >= len(e.result.Types) || e.result.Types[output.Element].Kind != TypeNumber {
+			return nil, fmt.Errorf("Promise.all at %d currently requires Promise<number[]> result", node.Pos())
+		}
+		expr.Kind = ExprPromiseAll
+	} else {
+		if output.Kind != TypeNumber {
+			return nil, fmt.Errorf("Promise.race at %d currently requires Promise<number> result", node.Pos())
+		}
+		expr.Kind = ExprPromiseRace
+	}
+	for _, item := range input.Elements {
+		if int(item.Type) >= len(e.result.Types) || e.result.Types[item.Type].Kind != TypePromise || !e.compatibleTaskResult(e.result.Types[item.Type].ReturnType, inputPromise.ReturnType) {
+			return nil, fmt.Errorf("%s at %d requires homogeneous Promise<number> inputs", name, node.Pos())
+		}
+	}
+	expr.Args = append(expr.Args[:0], input.Elements...)
 	expr.Callee = nil
 	return expr, nil
 }

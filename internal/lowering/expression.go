@@ -208,6 +208,35 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.PromiseAdoptOp{Promise: promise}), nil
+	case frontend.ExprPromiseAll, frontend.ExprPromiseRace:
+		promises := make([]hir.ValueID, 0, len(expr.Args))
+		fresh := make([]hir.ValueID, 0, len(expr.Args))
+		for _, arg := range expr.Args {
+			value, err := f.lowerExpr(arg)
+			if err != nil {
+				return 0, err
+			}
+			promises = append(promises, value)
+			if isFreshPromiseProducer(arg) {
+				fresh = append(fresh, value)
+			}
+		}
+		var aggregate hir.ValueID
+		if expr.Kind == frontend.ExprPromiseAll {
+			aggregate = f.emit(expr.Type, hir.PromiseAllF64Op{Promises: promises})
+		} else {
+			aggregate = f.emit(expr.Type, hir.PromiseRaceF64Op{Promises: promises})
+		}
+		if len(fresh) != 0 {
+			voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+			if !ok {
+				return 0, fmt.Errorf("Promise aggregate temporary cleanup requires void semantic type")
+			}
+			for _, promise := range fresh {
+				f.emit(voidType, hir.TaskReleaseOp{Task: promise})
+			}
+		}
+		return aggregate, nil
 	case frontend.ExprPromiseReject:
 		_, resultKind, err := f.promiseResultKind(expr.Type)
 		if err != nil {

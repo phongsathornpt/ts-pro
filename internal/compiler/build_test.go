@@ -1259,6 +1259,32 @@ func TestBuildNativeImmediatePromiseSemanticsSingleWorker(t *testing.T) {
 	}
 }
 
+func TestBuildNativePromiseAggregatesSingleWorker(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "promise-aggregates")
+	if _, err := Build(ctx, BuildOptions{Root: root, Input: "examples/concurrency_promise_aggregate.ts", Output: output, Optimization: "-O2"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, output)
+	cmd.Env = append(os.Environ(), "TSNATIVE_WORKERS=1", "TSNATIVE_GC_NURSERY_BYTES=1024")
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run Promise aggregates: %v: %s", err, got)
+	}
+	want := "345\n7\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
 func TestBuildNativeRepeatedPromiseAwaitSingleWorker(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not installed")

@@ -434,6 +434,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Reason); err != nil {
 					return err
 				}
+			case PromiseAllF64:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("Promise.all v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
+			case PromiseRaceF64:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("Promise.race v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
 			case TaskSpawn:
 				if _, ok := functions[op.Callee]; !ok {
 					return fmt.Errorf("task spawn v%d references unknown callee f%d", inst.Result, op.Callee)
