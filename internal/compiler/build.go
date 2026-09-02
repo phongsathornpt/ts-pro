@@ -93,7 +93,7 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 	timings.Escape = time.Since(escapeStart)
 	metrics := collectBuildMetrics(hirModule, mirModule, escapes)
 	llvmStart := time.Now()
-	llvmIR, err := llvmcodegen.Emit(mirModule)
+	llvmIR, err := llvmcodegen.EmitWithEscapeAnalysis(mirModule, escapes)
 	if err != nil {
 		return BuildResult{}, err
 	}

@@ -218,7 +218,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Add precise heap layout/reference maps: LLVM emits reference-offset descriptors for object shapes, task environments, closure environments, and closure objects; strings/F64 arrays and non-reference JSValue boxes are atomic, while reference JSValue boxes trace only the payload slot. Unknown ABI allocations remain conservative for compatibility.
     - [x] Measure trace-word reduction. A 2 MiB live-heap full-GC benchmark (1,024 × 2 KiB blocks) drops from roughly 1.60-1.68 ms under conservative scanning to 0.956-1.004 ms for atomic layouts; ABI counters expose traced words and atomic/precise/conservative block counts.
     - [x] Add conservative MIR escape analysis with Phi/containment propagation and explicit escape reasons for returns, stores, calls, tasks, channels, boxing, and suspension; compiler performance reports expose stack-eligible versus escaping allocation candidates.
-    - [ ] Stack-allocate only proven non-escaping numeric-only object shapes first, then add reference-bearing stack objects/closures only with precise root and interior-pointer handling.
+    - [x] Stack-allocate proven non-escaping numeric-only object shapes only in acyclic CFG blocks and reject objects embedded into heap containers or closure captures. The stack-placement filter is intentionally stricter than lifetime escape analysis, and stack objects no longer consume GC root slots or heap-allocation runtime calls.
+    - [ ] Add scalar replacement for those stack-local numeric objects before considering reference-bearing stack objects/closures with precise root and interior-pointer handling.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

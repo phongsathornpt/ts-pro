@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
@@ -15,9 +16,16 @@ type emitter struct {
 	shapes        map[mir.ShapeID]mir.Shape
 	stringGlobals map[string]string
 	closures      map[mir.FunctionID]closureDescriptor
+	escapes       escapeanalysis.Result
+	stackObjects  escapeanalysis.StackObjectResult
 }
 
 func Emit(module mir.Module) (string, error) {
+	escapes := escapeanalysis.Analyze(module)
+	return EmitWithEscapeAnalysis(module, escapes)
+}
+
+func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (string, error) {
 	if err := module.Verify(); err != nil {
 		return "", fmt.Errorf("verify MIR before LLVM emission: %w", err)
 	}
@@ -25,7 +33,7 @@ func Emit(module mir.Module) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}, closures: closures}
+	e := &emitter{module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{}, stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: escapeanalysis.StackObjects(module, escapes)}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
 	}
@@ -173,7 +181,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
-	gc := buildGCRootLayout(fn)
+	gc := buildGCRootLayout(fn, e.stackObjects[fn.ID])
 	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
@@ -199,7 +207,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		}
 		for ; index < len(block.Instructions); index++ {
 			inst := block.Instructions[index]
-			if emitsGCAllocation(inst.Op) {
+			if emitsGCAllocation(inst.Op) && !e.isStackObject(fn.ID, inst.Result) {
 				b.WriteString("  call void @tsnative_gc_safepoint()\n")
 			}
 			if err := e.emitInstruction(b, fn, inst, values); err != nil {
@@ -304,10 +312,14 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		typeName := shapeTypeName(op.Shape)
-		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
-		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
-		shapeRefs := shapeRefFields(shape)
-		emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
+		if e.isStackObject(fn.ID, inst.Result) {
+			fmt.Fprintf(b, "  %s = alloca %s\n", name, typeName)
+		} else {
+			fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
+			fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
+			shapeRefs := shapeRefFields(shape)
+			emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
+		}
 		if shape.ClassTag != 0 {
 			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
 			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)
@@ -332,10 +344,14 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		}
 		name := valueName(inst.Result)
 		typeName := shapeTypeName(op.Shape)
-		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
-		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
-		shapeRefs := shapeRefFields(shape)
-		emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
+		if e.isStackObject(fn.ID, inst.Result) {
+			fmt.Fprintf(b, "  %s = alloca %s\n", name, typeName)
+		} else {
+			fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
+			fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
+			shapeRefs := shapeRefFields(shape)
+			emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
+		}
 		if shape.ClassTag != 0 {
 			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
 			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)
@@ -854,6 +870,10 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 	default:
 		return fmt.Errorf("unsupported MIR operation %T", inst.Op)
 	}
+}
+
+func (e *emitter) isStackObject(fn mir.FunctionID, value mir.ValueID) bool {
+	return e.stackObjects.Contains(fn, value)
 }
 
 func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Call, values map[mir.ValueID]string) error {

@@ -12,7 +12,7 @@ type gcRootLayout struct {
 	count int
 }
 
-func buildGCRootLayout(fn mir.Function) gcRootLayout {
+func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool) gcRootLayout {
 	layout := gcRootLayout{slots: map[mir.ValueID]int{}}
 	add := func(value mir.ValueID, repr mir.Repr) {
 		if !isGCReference(repr) {
@@ -29,6 +29,9 @@ func buildGCRootLayout(fn mir.Function) gcRootLayout {
 	}
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
+			if stackObjects[inst.Result] {
+				continue
+			}
 			add(inst.Result, inst.Repr)
 		}
 	}

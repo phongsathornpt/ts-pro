@@ -30,8 +30,8 @@ func TestCountEscapeAllocations(t *testing.T) {
 	result := escapeanalysis.Result{
 		0: {0: {Kind: escapeanalysis.AllocationObject}, 1: {Kind: escapeanalysis.AllocationClosure, Escapes: true, Reasons: escapeanalysis.ReasonReturn}},
 	}
-	candidates, stack, escaping := countEscapeAllocations(result)
-	if candidates != 2 || stack != 1 || escaping != 1 {
-		t.Fatalf("escape counts = %d/%d/%d, want 2/1/1", candidates, stack, escaping)
+	candidates, nonEscaping, escaping := countEscapeAllocations(result)
+	if candidates != 2 || nonEscaping != 1 || escaping != 1 {
+		t.Fatalf("escape counts = %d/%d/%d, want 2/1/1", candidates, nonEscaping, escaping)
 	}
 }

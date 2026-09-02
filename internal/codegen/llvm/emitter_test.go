@@ -126,10 +126,53 @@ func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_shape_s0 = type { double, double }", "call ptr @tsnative_object_alloc_atomic", "getelementptr %tsnative_shape_s0", "load double"} {
+	for _, want := range []string{"%tsnative_shape_s0 = type { double, double }", "%v2 = alloca %tsnative_shape_s0", "getelementptr %tsnative_shape_s0", "load double"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "call ptr @tsnative_object_alloc_atomic(i64 %v2.size)") {
+		t.Fatalf("local numeric object unexpectedly used heap allocation:\n%s", text)
+	}
+}
+
+func TestEmitReturnedNumericObjectRemainsHeapAllocated(t *testing.T) {
+	ret := mir.ValueID(1)
+	module := mir.Module{
+		Name:   "escaping-object",
+		Shapes: []mir.Shape{{ID: 0, Name: "Point", Fields: []mir.ShapeField{{Name: "x", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Name: "makePoint", ReturnRepr: mir.ReprObjectRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 3}},
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0}}},
+		}, Terminator: mir.Return{Value: &ret}}}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "call ptr @tsnative_object_alloc_atomic(i64 %v1.size)") {
+		t.Fatalf("returned object did not remain heap allocated:\n%s", text)
+	}
+	if strings.Contains(text, "%v1 = alloca %tsnative_shape_s0") {
+		t.Fatalf("returned object was stack allocated:\n%s", text)
+	}
+}
+
+func TestEmitLoopNumericObjectRemainsHeapAllocated(t *testing.T) {
+	module := mir.Module{
+		Name:   "loop-object",
+		Shapes: []mir.Shape{{ID: 0, Name: "Point", Fields: []mir.ShapeField{{Name: "x", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Name: "loop", ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Terminator: mir.Jump{Target: 1}},
+			{ID: 1, Instructions: []mir.Instruction{{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}}}, Terminator: mir.Jump{Target: 1}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "call ptr @tsnative_object_alloc_atomic(i64 %v0.size)") {
+		t.Fatalf("loop object did not remain heap allocated:\n%s", text)
 	}
 }
 

@@ -134,3 +134,19 @@ func TestThrownObjectEscapes(t *testing.T) {
 		t.Fatalf("thrown object escape = %+v", info)
 	}
 }
+
+func TestReturnedFieldGetEscapesContainedObject(t *testing.T) {
+	ret := mir.ValueID(2)
+	fn := mir.Function{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+		objectAlloc(0),
+		{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 1, Fields: []mir.ValueID{0}}},
+		{Result: 2, Repr: mir.ReprObjectRef, Op: mir.FieldGet{Object: 1, Shape: 1, Field: 0}},
+	}, Terminator: mir.Return{Value: &ret}}}}
+	result := analyzeSingle(fn)
+	if !result[0].Escapes || result[0].Reasons&ReasonReturn == 0 {
+		t.Fatalf("returned contained object escape = %+v", result[0])
+	}
+	if result[1].Escapes {
+		t.Fatalf("container itself unexpectedly escaped: %+v", result[1])
+	}
+}

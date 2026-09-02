@@ -83,26 +83,55 @@ func allocationKind(op mir.Operation) AllocationKind {
 		return AllocationInvalid
 	}
 }
+
+type fieldProvenanceKey struct {
+	container mir.ValueID
+	field     uint32
+}
+
 func propagateAliases(fn mir.Function, prov provenance) {
+	fields := make(map[fieldProvenanceKey]valueSet)
+	mergeField := func(key fieldProvenanceKey, origins valueSet) bool {
+		if len(origins) == 0 {
+			return false
+		}
+		if fields[key] == nil {
+			fields[key] = make(valueSet)
+		}
+		changed := false
+		for origin := range origins {
+			if _, ok := fields[key][origin]; !ok {
+				fields[key][origin] = struct{}{}
+				changed = true
+			}
+		}
+		return changed
+	}
+
 	changed := true
 	for changed {
 		changed = false
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				var sources []mir.ValueID
 				switch op := inst.Op.(type) {
 				case mir.Phi:
 					for _, incoming := range op.Incoming {
-						sources = append(sources, incoming.Value)
+						changed = mergeOrigins(prov, inst.Result, prov[incoming.Value]) || changed
+					}
+				case mir.ObjectNew:
+					for container := range prov[inst.Result] {
+						for field, value := range op.Fields {
+							changed = mergeField(fieldProvenanceKey{container: container, field: uint32(field)}, prov[value]) || changed
+						}
 					}
 				case mir.FieldSet:
-					sources = append(sources, op.Value)
-				default:
-					continue
-				}
-				for _, source := range sources {
-					if mergeOrigins(prov, inst.Result, prov[source]) {
-						changed = true
+					changed = mergeOrigins(prov, inst.Result, prov[op.Value]) || changed
+					for container := range prov[op.Object] {
+						changed = mergeField(fieldProvenanceKey{container: container, field: op.Field}, prov[op.Value]) || changed
+					}
+				case mir.FieldGet:
+					for container := range prov[op.Object] {
+						changed = mergeOrigins(prov, inst.Result, fields[fieldProvenanceKey{container: container, field: op.Field}]) || changed
 					}
 				}
 			}

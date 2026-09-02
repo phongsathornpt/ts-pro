@@ -216,7 +216,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Add precise heap object/layout metadata: compiler-generated shape/task/closure allocations carry LLVM-derived reference-offset descriptors, runtime strings/F64 arrays and non-reference JSValue boxes are atomic, reference JSValue boxes trace only their payload slot, and unknown ABI allocations retain conservative fallback tracing.
   - [x] Measure trace work by layout kind through native ABI counters. A 2 MiB live-heap major-GC benchmark (1,024 × 2 KiB blocks) measures roughly 1.60-1.68 ms with conservative word scanning versus 0.956-1.004 ms for atomic layouts, while exact regression coverage verifies only declared reference words are visited.
   - [x] Add conservative MIR escape analysis for object/closure allocations with Phi provenance, containment propagation, and escape seeds for return/throw, unknown heap stores, calls, tasks, channels, JSValue boxing, and suspension boundaries. `--report-performance` now exposes allocation candidates, stack-eligible values, escaping values, and escape-analysis timing.
-  - [ ] Stack-allocate proven non-escaping numeric-only object shapes first; keep reference-bearing objects, closures, and scheduler-owned task state heap-backed until stack-root/interior-reference handling is proven.
+  - [x] Stack-allocate proven non-escaping numeric-only object shapes when the allocation block is acyclic and the object is not embedded into another object or closure capture. Stack objects are removed from GC root slots and runtime-call metrics; `examples/stack_object.ts` verifies one candidate becomes one stack allocation with zero heap-object runtime calls.
+  - [ ] Add scalar replacement for stack-local numeric object fields, then evaluate reference-bearing stack objects/closures only after precise stack-root/interior-reference handling is proven.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -245,8 +246,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Lower proven non-escaping numeric-only object allocations to stack storage, then extend stack eligibility only after reference-root/interior-pointer handling is covered.
-2. Add scalar replacement for stack-local object fields and evaluate closure stack allocation separately; task environments remain heap-backed when their lifetime crosses scheduler ownership.
+1. Add scalar replacement for stack-local numeric object fields so eligible objects can disappear entirely instead of merely moving from heap to stack.
+2. Evaluate reference-bearing stack objects and closure stack allocation only after precise stack-root/interior-pointer handling is covered; task environments remain heap-backed when their lifetime crosses scheduler ownership.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
