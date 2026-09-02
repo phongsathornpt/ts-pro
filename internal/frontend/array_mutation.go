@@ -14,6 +14,22 @@ func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
 		return false
 	}
 	want, got := e.result.Types[expected], e.result.Types[actual]
+	if want.Kind == TypeAny {
+		switch got.Kind {
+		case TypeNumber, TypeString, TypeBoolean, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
+			return true
+		default:
+			return false
+		}
+	}
+	if want.Kind == TypeUnion {
+		for _, member := range want.Members {
+			if e.compatibleArrayElement(member, actual) {
+				return true
+			}
+		}
+		return false
+	}
 	if want.Kind != got.Kind {
 		return false
 	}
@@ -46,15 +62,6 @@ func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
 			}
 		}
 		return e.compatibleArrayElement(want.ReturnType, got.ReturnType)
-	case TypeAny:
-		return true
-	case TypeUnion:
-		for _, member := range want.Members {
-			if e.compatibleArrayElement(member, actual) {
-				return true
-			}
-		}
-		return false
 	default:
 		return false
 	}
@@ -101,7 +108,7 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 		return Statement{}, true, fmt.Errorf("native array assignment requires %s value", e.result.Types[arrayType.Element].Name)
 	}
 	return Statement{
-		Kind: StmtArrayAssign, Span: e.span(node), Type: value.Type,
+		Kind: StmtArrayAssign, Span: e.span(node), Type: arrayType.Element,
 		Object: array, Index: index, Value: value,
 	}, true, nil
 }

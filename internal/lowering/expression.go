@@ -95,9 +95,13 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 	case frontend.ExprDynamicCall:
 		return f.lowerDynamicCall(expr)
 	case frontend.ExprArray:
+		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypeArray {
+			return 0, fmt.Errorf("array expression has invalid semantic type")
+		}
+		targetElement := f.module.source.Types[expr.Type].Element
 		elements := make([]hir.ValueID, 0, len(expr.Elements))
 		for _, element := range expr.Elements {
-			value, err := f.lowerExpr(element)
+			value, err := f.lowerExprAs(element, targetElement)
 			if err != nil {
 				return 0, err
 			}

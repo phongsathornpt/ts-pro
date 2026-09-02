@@ -292,12 +292,18 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		if err != nil {
 			return err
 		}
-		value, err := f.lowerExpr(stmt.Value)
+		if int(stmt.Object.Type) >= len(f.module.source.Types) || f.module.source.Types[stmt.Object.Type].Kind != frontend.TypeArray {
+			return fmt.Errorf("array assignment has invalid semantic receiver type")
+		}
+		targetElement := f.module.source.Types[stmt.Object.Type].Element
+		value, err := f.lowerExprAs(stmt.Value, targetElement)
 		if err != nil {
 			return err
 		}
 		element, err := f.arrayElementKind(stmt.Object.Type)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		f.emit(stmt.Type, hir.ArraySetOp{Array: array, Index: index, Value: value, Element: element})
 		return nil
 	case frontend.StmtDynamicFieldAssign:
