@@ -10,13 +10,14 @@ type Module struct {
 }
 
 type Function struct {
-	ID         FunctionID
-	Name       string
-	Params     []Param
-	ReturnType TypeID
-	ReturnRepr Repr
-	Entry      BlockID
-	Blocks     []Block
+	ID              FunctionID
+	Name            string
+	Params          []Param
+	ReturnType      TypeID
+	ReturnRepr      Repr
+	HasExplicitThis bool
+	Entry           BlockID
+	Blocks          []Block
 }
 
 type Param struct {
@@ -101,8 +102,10 @@ type CallOp struct {
 	Args   []ValueID
 }
 type DynamicCallOp struct {
-	Callee ValueID
-	Args   []ValueID
+	Callee      ValueID
+	Receiver    ValueID
+	HasReceiver bool
+	Args        []ValueID
 }
 type DynamicMethodCallOp struct {
 	Receiver ValueID

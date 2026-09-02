@@ -22,17 +22,35 @@ func (e *extractor) extractLocalClosure(name string, variable *tsls.APISymbol, n
 
 	parameterAPISymbols := map[uint64]struct{}{}
 	var explicit []Parameter
+	var localThis *SymbolID
 	if params, ok := node.NamedChild("parameters"); ok && params.IsList() {
 		for _, paramNode := range params.ListElements() {
+			nameNode, ok := paramNode.NamedChild("name")
+			if !ok {
+				return closureInfo{}, fmt.Errorf("closure parameter at %d has no name", paramNode.Pos())
+			}
+			nameText, _ := nameNode.Text()
+			if nameNode.Kind() == tsast.KindThisKeyword || nameText == "this" {
+				typeNode, ok := paramNode.NamedChild("type")
+				if !ok {
+					return closureInfo{}, fmt.Errorf("explicit this parameter at %d requires a type", paramNode.Pos())
+				}
+				typeID, err := e.typeAt(typeNode)
+				if err != nil {
+					return closureInfo{}, err
+				}
+				symbolID := SymbolID(len(e.result.Symbols))
+				e.result.Symbols = append(e.result.Symbols, Symbol{ID: symbolID, Name: "this", Kind: SymbolParameter, Type: typeID, Decl: e.span(paramNode)})
+				explicit = append(explicit, Parameter{Symbol: symbolID, Name: "this", Type: typeID, Span: e.span(paramNode)})
+				thisCopy := symbolID
+				localThis = &thisCopy
+				continue
+			}
 			param, err := e.extractParameter(paramNode)
 			if err != nil {
 				return closureInfo{}, err
 			}
 			explicit = append(explicit, param)
-			nameNode, ok := paramNode.NamedChild("name")
-			if !ok {
-				return closureInfo{}, fmt.Errorf("closure parameter at %d has no name", paramNode.Pos())
-			}
 			symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
 			if err != nil {
 				return closureInfo{}, err
@@ -55,7 +73,12 @@ func (e *extractor) extractLocalClosure(name string, variable *tsls.APISymbol, n
 	if !ok {
 		return closureInfo{}, fmt.Errorf("closure %s has no body", name)
 	}
+	outerThis := e.currentThis
+	if localThis != nil {
+		e.currentThis = nil
+	}
 	captures, err := e.collectClosureCaptures(bodyNode, parameterAPISymbols)
+	e.currentThis = outerThis
 	if err != nil {
 		return closureInfo{}, err
 	}
@@ -64,9 +87,14 @@ func (e *extractor) extractLocalClosure(name string, variable *tsls.APISymbol, n
 		fn.Params = append(fn.Params, Parameter{Symbol: symbolID, Name: symbol.Name, Type: symbol.Type, Span: symbol.Decl})
 	}
 	fn.Params = append(fn.Params, explicit...)
+	fn.HasExplicitThis = localThis != nil
 	e.result.Functions = append(e.result.Functions, fn)
 
 	var body []Statement
+	bodyThis := e.currentThis
+	if localThis != nil {
+		e.currentThis = localThis
+	}
 	if bodyNode.Kind() == tsast.KindBlock {
 		body, err = e.extractBlock(bodyNode)
 	} else {
@@ -77,6 +105,7 @@ func (e *extractor) extractLocalClosure(name string, variable *tsls.APISymbol, n
 			body = []Statement{{Kind: StmtReturn, Span: e.span(bodyNode), Return: value}}
 		}
 	}
+	e.currentThis = bodyThis
 	if err != nil {
 		return closureInfo{}, err
 	}

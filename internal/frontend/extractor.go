@@ -1092,8 +1092,12 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 					expr.Object = receiver
 					expr.Field = name
 					expr.Dispatch = targets
-					break
+				} else {
+					expr.Kind = ExprDynamicCall
+					expr.Object = receiver
+					expr.Field = name
 				}
+				break
 			}
 		}
 		method, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
@@ -1149,7 +1153,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
 	}
-	if expr.Kind == ExprDynamicMethodCall {
+	if expr.Kind == ExprDynamicMethodCall || (expr.Kind == ExprDynamicCall && expr.Object != nil && expr.Field != "") {
 		return expr, nil
 	}
 	if expr.CallTarget != nil {
@@ -1494,6 +1498,9 @@ func classifyType(text string) TypeKind {
 	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
 	if strings.HasPrefix(arrayText, "Array<") && strings.HasSuffix(arrayText, ">") {
 		return TypeArray
+	}
+	if strings.HasPrefix(strings.TrimSpace(text), "{") && strings.HasSuffix(strings.TrimSpace(text), "}") {
+		return TypeObject
 	}
 	if strings.Contains(text, "=>") {
 		if strings.HasSuffix(arrayText, "[]") {

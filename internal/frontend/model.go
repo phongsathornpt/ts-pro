@@ -103,17 +103,18 @@ type Parameter struct {
 }
 
 type Function struct {
-	ID         FunctionID
-	Symbol     SymbolID
-	Name       string
-	Source     SourceID
-	Span       Span
-	Params     []Parameter
-	ReturnType TypeID
-	Async      bool
-	Generator  bool
-	Exported   bool
-	Body       []Statement
+	ID              FunctionID
+	Symbol          SymbolID
+	Name            string
+	Source          SourceID
+	Span            Span
+	Params          []Parameter
+	ReturnType      TypeID
+	Async           bool
+	Generator       bool
+	Exported        bool
+	HasExplicitThis bool
+	Body            []Statement
 }
 
 type Snapshot struct {

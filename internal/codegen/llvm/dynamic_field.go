@@ -113,7 +113,10 @@ func emitDynamicFieldBox(b *strings.Builder, shapeID mir.ShapeID, field mir.Shap
 		}
 		fmt.Fprintf(b, "  ret ptr %s.box\n", prefix)
 	case mir.ReprFunctionRef:
-		fmt.Fprintf(b, "  %s = load ptr, ptr %s\n  %s.box = call ptr @tsnative_jsvalue_box_function(ptr %s)\n  ret ptr %s.box\n", prefix, slot, prefix, prefix, prefix)
+		fmt.Fprintf(b, "  %s = load ptr, ptr %s\n", prefix, slot)
+		fmt.Fprintf(b, "  %s.targetptr = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 2\n", prefix, prefix)
+		fmt.Fprintf(b, "  %s.target = load i32, ptr %s.targetptr\n", prefix, prefix)
+		fmt.Fprintf(b, "  %s.box = call ptr @tsnative_jsvalue_box_function_target(ptr %s, i32 %s.target)\n  ret ptr %s.box\n", prefix, prefix, prefix, prefix)
 	case mir.ReprJSValue:
 		fmt.Fprintf(b, "  %s = load ptr, ptr %s\n  ret ptr %s\n", prefix, slot, prefix)
 	default:

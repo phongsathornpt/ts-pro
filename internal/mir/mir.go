@@ -53,6 +53,7 @@ type Function struct {
 	ReturnRepr           Repr
 	ReturnObjectShape    ShapeID
 	HasReturnObjectShape bool
+	HasExplicitThis      bool
 	Entry                BlockID
 	Blocks               []Block
 }
@@ -210,8 +211,10 @@ type Call struct {
 	Args   []ValueID
 }
 type DynamicCall struct {
-	Callee ValueID
-	Args   []ValueID
+	Callee      ValueID
+	Receiver    ValueID
+	HasReceiver bool
+	Args        []ValueID
 }
 type DynamicMethodCall struct {
 	Receiver ValueID

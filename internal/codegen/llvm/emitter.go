@@ -1369,7 +1369,14 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			args[i] = value
 		}
 		name := valueName(inst.Result)
-		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s", name, dynamicCallHelperName(len(args)), callee)
+		fmt.Fprintf(b, "  %s = call ptr @%s(ptr %s", name, dynamicCallHelperName(len(args), op.HasReceiver), callee)
+		if op.HasReceiver {
+			receiver, err := operand(values, op.Receiver)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, ", ptr %s", receiver)
+		}
 		for _, arg := range args {
 			fmt.Fprintf(b, ", ptr %s", arg)
 		}

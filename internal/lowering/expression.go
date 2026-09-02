@@ -619,16 +619,28 @@ func (f *functionLowerer) lowerCall(expr *frontend.Expr) (hir.ValueID, error) {
 }
 
 func (f *functionLowerer) lowerDynamicCall(expr *frontend.Expr) (hir.ValueID, error) {
-	if expr.Callee == nil {
-		return 0, fmt.Errorf("dynamic call has no callee")
-	}
 	anyType, ok := findFrontendType(f.module.source, frontend.TypeAny)
 	if !ok {
 		return 0, fmt.Errorf("dynamic call requires any semantic type")
 	}
-	callee, err := f.lowerExprAs(expr.Callee, anyType)
-	if err != nil {
-		return 0, err
+	var receiver hir.ValueID
+	var callee hir.ValueID
+	var err error
+	hasReceiver := expr.Object != nil && expr.Field != ""
+	if hasReceiver {
+		receiver, err = f.lowerExprAs(expr.Object, anyType)
+		if err != nil {
+			return 0, err
+		}
+		callee = f.emit(anyType, hir.DynamicFieldGetOp{Object: receiver, Field: expr.Field})
+	} else {
+		if expr.Callee == nil {
+			return 0, fmt.Errorf("dynamic call has no callee")
+		}
+		callee, err = f.lowerExprAs(expr.Callee, anyType)
+		if err != nil {
+			return 0, err
+		}
 	}
 	args := make([]hir.ValueID, 0, len(expr.Args))
 	for _, arg := range expr.Args {
@@ -638,7 +650,7 @@ func (f *functionLowerer) lowerDynamicCall(expr *frontend.Expr) (hir.ValueID, er
 		}
 		args = append(args, value)
 	}
-	return f.emit(expr.Type, hir.DynamicCallOp{Callee: callee, Args: args}), nil
+	return f.emit(expr.Type, hir.DynamicCallOp{Callee: callee, Receiver: receiver, HasReceiver: hasReceiver, Args: args}), nil
 }
 
 func (f *functionLowerer) lowerDynamicMethodCall(expr *frontend.Expr) (hir.ValueID, error) {

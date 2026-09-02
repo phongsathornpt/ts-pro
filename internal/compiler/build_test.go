@@ -1815,3 +1815,25 @@ func TestBuildNativeDynamicMethodPreservesThis(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+func TestBuildNativeDynamicStructuralMethodPreservesThis(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "dynamic-structural-this")
+	if _, err := Build(ctx, BuildOptions{Root: root, Input: "examples/dynamic_structural_this.ts", Output: output, Optimization: "-O2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run dynamic structural method: %v: %s", err, got)
+	}
+	if strings.TrimSpace(string(got)) != "42\n42" {
+		t.Fatalf("output = %q", got)
+	}
+}

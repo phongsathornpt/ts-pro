@@ -55,7 +55,7 @@ func (l *moduleLowerer) lowerFunction(source frontend.Function) (hir.Function, e
 		locals: map[frontend.SymbolID]hir.ValueID{},
 		result: hir.Function{
 			ID: hir.NewFunctionID(uint32(source.ID)), Name: source.Name,
-			ReturnType: l.types[source.ReturnType], Entry: hir.NewBlockID(0),
+			ReturnType: l.types[source.ReturnType], HasExplicitThis: source.HasExplicitThis, Entry: hir.NewBlockID(0),
 		},
 		nextBlock:     1,
 		ownedPromises: map[frontend.SymbolID]hir.ValueID{},

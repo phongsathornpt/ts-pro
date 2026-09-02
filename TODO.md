@@ -291,9 +291,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
         - [x] Dynamic named property reads generate deterministic LLVM helpers keyed by property name. The helper switches on boxed shape identity, performs exact typed GEP/load/boxing, preserves nested object shape metadata, and returns `undefined` for missing/non-object properties.
         - [x] Dynamic named property writes use the same boxed-shape dispatch, checked JSValue unboxing for scalar/reference representations, nested-object shape validation, and `tsnative_gc_store_ref` remembered-set barriers for reference fields. Missing fields on closed shapes fail explicitly instead of corrupting layout. A 1 KiB nursery regression promotes the holder, stores a young string through `any`, forces further minors, and verifies the typed alias still observes the live value.
       - [x] Dynamic callable dispatch preserves native closure target identity through JSValue boxing and closure cells, checked-unboxes arguments against each target ABI (including object-shape validation), invokes the existing closure wrapper ABI, and boxes native results back to JSValue. `any`/union callees stay dynamic even when their symbol refers to a known function, and contextually-`any` captured closures are explicitly boxed instead of leaking raw closure pointers across the dynamic boundary.
-      - [~] Preserve receiver `this` for dynamic method calls; this is the prerequisite for structural thenable/`PromiseLike` assimilation.
+      - [x] Preserve receiver `this` for dynamic method calls.
         - [x] Closed-world native class methods on `any`/union receivers dispatch by hidden class tag and pass the original object as hidden `this`, including mutating-method differential coverage.
-        - [ ] Extend receiver-preserving calls to function-valued dynamic properties/structural objects, then use that path for PromiseLike/thenable assimilation.
+        - [x] Function-valued dynamic properties preserve the receiver, retain closure target metadata through property boxing, support explicit TypeScript `this:` parameters as hidden native parameters, and keep ordinary non-`this` function properties callable.
+        - [x] Fix object-type classification so structural objects containing function-valued properties are not misclassified as callable solely because their printed type contains `=>`.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.
@@ -303,7 +304,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Extend receiver-preserving dynamic calls from native class methods to function-valued structural properties, then use that path to implement structural `PromiseLike`/thenable assimilation.
+1. Implement structural `PromiseLike`/thenable assimilation on top of the now receiver-correct dynamic method/property call path.
 2. Finish selected Promise combinators: non-literal iterable inputs and heterogeneous tuple results after tuple/container ownership semantics land.
 3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths, including optional/dynamic/computed properties and shape transitions.
 4. Finish advanced generics, integer SSA across calls/loops, array growth/mutators, tuples/destructuring/rest-spread/optional chaining/nullish/switch/for-of/templates/default params/enums, and selected standard-library APIs.

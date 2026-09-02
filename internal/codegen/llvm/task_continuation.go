@@ -131,6 +131,9 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 		return append(result, op.Args...), true
 	case mir.DynamicCall:
 		values := []mir.ValueID{op.Callee}
+		if op.HasReceiver {
+			values = append(values, op.Receiver)
+		}
 		return append(values, op.Args...), true
 	case mir.DynamicMethodCall:
 		values := []mir.ValueID{op.Receiver}
@@ -350,7 +353,7 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.DynamicCall:
-				if !available[op.Callee] || inst.Repr != mir.ReprJSValue {
+				if !available[op.Callee] || (op.HasReceiver && !available[op.Receiver]) || inst.Repr != mir.ReprJSValue {
 					return nil
 				}
 				for _, arg := range op.Args {
@@ -717,6 +720,9 @@ func (e *emitter) emitPureContinuationStep(b *strings.Builder, descriptor taskDe
 		}
 	case mir.DynamicCall:
 		valuesToLoad := []mir.ValueID{op.Callee}
+		if op.HasReceiver {
+			valuesToLoad = append(valuesToLoad, op.Receiver)
+		}
 		valuesToLoad = append(valuesToLoad, op.Args...)
 		for _, valueID := range valuesToLoad {
 			value, _, err := continuationOperand(b, fn, descriptor, valueID, suffix)

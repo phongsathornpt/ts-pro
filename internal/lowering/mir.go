@@ -54,7 +54,7 @@ func lowerMIRFunction(source hir.Function, ranges rangeanalysis.FunctionResult, 
 	}
 	result := mir.Function{
 		ID: mir.FunctionID(source.ID), Name: source.Name,
-		ReturnRepr: returnRepr, Entry: mir.BlockID(source.Entry),
+		ReturnRepr: returnRepr, HasExplicitThis: source.HasExplicitThis, Entry: mir.BlockID(source.Entry),
 	}
 	if int(source.ReturnType) < len(types) && types[source.ReturnType].Kind == hir.TypeObject {
 		result.ReturnObjectShape = mir.ShapeID(types[source.ReturnType].Shape)
@@ -201,7 +201,7 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		for i, arg := range op.Args {
 			args[i] = mir.ValueID(arg)
 		}
-		result.Op = mir.DynamicCall{Callee: mir.ValueID(op.Callee), Args: args}
+		result.Op = mir.DynamicCall{Callee: mir.ValueID(op.Callee), Receiver: mir.ValueID(op.Receiver), HasReceiver: op.HasReceiver, Args: args}
 	case hir.DynamicMethodCallOp:
 		args := make([]mir.ValueID, len(op.Args))
 		for i, arg := range op.Args {

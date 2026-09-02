@@ -216,6 +216,11 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Callee); err != nil {
 					return err
 				}
+				if op.HasReceiver {
+					if err := checkValue(op.Receiver); err != nil {
+						return err
+					}
+				}
 				for _, arg := range op.Args {
 					if err := checkValue(arg); err != nil {
 						return err

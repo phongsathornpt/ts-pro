@@ -8,40 +8,58 @@ import (
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
-func dynamicCallHelperName(arity int) string { return fmt.Sprintf("tsnative_dynamic_call_%d", arity) }
+type dynamicCallShape struct {
+	arity       int
+	hasReceiver bool
+}
 
-func (e *emitter) dynamicCallArities() []int {
-	set := map[int]struct{}{}
+func dynamicCallHelperName(arity int, hasReceiver bool) string {
+	if hasReceiver {
+		return fmt.Sprintf("tsnative_dynamic_method_value_%d", arity)
+	}
+	return fmt.Sprintf("tsnative_dynamic_call_%d", arity)
+}
+
+func (e *emitter) dynamicCallShapes() []dynamicCallShape {
+	set := map[dynamicCallShape]struct{}{}
 	for _, fn := range e.module.Functions {
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
 				if op, ok := inst.Op.(mir.DynamicCall); ok {
-					set[len(op.Args)] = struct{}{}
+					set[dynamicCallShape{arity: len(op.Args), hasReceiver: op.HasReceiver}] = struct{}{}
 				}
 			}
 		}
 	}
-	result := make([]int, 0, len(set))
-	for arity := range set {
-		result = append(result, arity)
+	result := make([]dynamicCallShape, 0, len(set))
+	for shape := range set {
+		result = append(result, shape)
 	}
-	sort.Ints(result)
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].arity != result[j].arity {
+			return result[i].arity < result[j].arity
+		}
+		return !result[i].hasReceiver && result[j].hasReceiver
+	})
 	return result
 }
 
 func (e *emitter) emitDynamicCallHelpers(b *strings.Builder) error {
-	for _, arity := range e.dynamicCallArities() {
-		if err := e.emitDynamicCallHelper(b, arity); err != nil {
+	for _, shape := range e.dynamicCallShapes() {
+		if err := e.emitDynamicCallHelper(b, shape); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (e *emitter) emitDynamicCallHelper(b *strings.Builder, arity int) error {
-	name := dynamicCallHelperName(arity)
+func (e *emitter) emitDynamicCallHelper(b *strings.Builder, shape dynamicCallShape) error {
+	name := dynamicCallHelperName(shape.arity, shape.hasReceiver)
 	fmt.Fprintf(b, "define ptr @%s(ptr %%boxed", name)
-	for i := 0; i < arity; i++ {
+	if shape.hasReceiver {
+		b.WriteString(", ptr %receiver")
+	}
+	for i := 0; i < shape.arity; i++ {
 		fmt.Fprintf(b, ", ptr %%arg%d", i)
 	}
 	b.WriteString(") {\nentry:\n")
@@ -50,14 +68,21 @@ func (e *emitter) emitDynamicCallHelper(b *strings.Builder, arity int) error {
 	candidates := make([]closureDescriptor, 0)
 	for _, descriptor := range sortedClosureDescriptors(e.closures) {
 		fn := e.functions[descriptor.Callee]
-		if len(fn.Params)-descriptor.CaptureCount == arity {
+		want := shape.arity
+		if shape.hasReceiver && fn.HasExplicitThis {
+			want++
+		}
+		if len(fn.Params)-descriptor.CaptureCount == want {
+			if shape.hasReceiver && fn.HasExplicitThis && fn.Params[descriptor.CaptureCount].Repr != mir.ReprObjectRef {
+				continue
+			}
 			candidates = append(candidates, descriptor)
 			fmt.Fprintf(b, " i32 %d, label %%f%d", descriptor.Callee, descriptor.Callee)
 		}
 	}
 	b.WriteString(" ]\n")
 	for _, descriptor := range candidates {
-		if err := e.emitDynamicCallCase(b, descriptor); err != nil {
+		if err := e.emitDynamicCallCase(b, descriptor, shape.hasReceiver); err != nil {
 			return err
 		}
 	}
@@ -65,7 +90,7 @@ func (e *emitter) emitDynamicCallHelper(b *strings.Builder, arity int) error {
 	return nil
 }
 
-func (e *emitter) emitDynamicCallCase(b *strings.Builder, descriptor closureDescriptor) error {
+func (e *emitter) emitDynamicCallCase(b *strings.Builder, descriptor closureDescriptor, hasReceiver bool) error {
 	fn := e.functions[descriptor.Callee]
 	fmt.Fprintf(b, "f%d:\n", descriptor.Callee)
 	fmt.Fprintf(b, "  %%closure.f%d = call ptr @tsnative_jsvalue_unbox_function(ptr %%boxed)\n", descriptor.Callee)
@@ -73,10 +98,15 @@ func (e *emitter) emitDynamicCallCase(b *strings.Builder, descriptor closureDesc
 	fmt.Fprintf(b, "  %%code.f%d = load ptr, ptr %%codeptr.f%d\n", descriptor.Callee, descriptor.Callee)
 	fmt.Fprintf(b, "  %%envptr.f%d = getelementptr %%tsnative_closure, ptr %%closure.f%d, i32 0, i32 1\n", descriptor.Callee, descriptor.Callee)
 	fmt.Fprintf(b, "  %%env.f%d = load ptr, ptr %%envptr.f%d\n", descriptor.Callee, descriptor.Callee)
-
-	args := make([]string, 0, len(fn.Params)-descriptor.CaptureCount)
-	for i := descriptor.CaptureCount; i < len(fn.Params); i++ {
-		argIndex := i - descriptor.CaptureCount
+	first := descriptor.CaptureCount
+	injectReceiver := hasReceiver && fn.HasExplicitThis
+	if injectReceiver {
+		fmt.Fprintf(b, "  %%this.f%d = call ptr @tsnative_jsvalue_unbox_object(ptr %%receiver)\n", descriptor.Callee)
+		first++
+	}
+	args := make([]string, 0, len(fn.Params)-first)
+	for i := first; i < len(fn.Params); i++ {
+		argIndex := i - first
 		value, err := emitDynamicCallUnbox(b, descriptor.Callee, argIndex, fn.Params[i])
 		if err != nil {
 			return fmt.Errorf("dynamic call f%d arg %d: %w", descriptor.Callee, argIndex, err)
@@ -92,8 +122,11 @@ func (e *emitter) emitDynamicCallCase(b *strings.Builder, descriptor closureDesc
 		prefix = "  "
 	}
 	fmt.Fprintf(b, "%scall %s %%code.f%d(ptr %%env.f%d", prefix, retType, descriptor.Callee, descriptor.Callee)
+	if injectReceiver {
+		fmt.Fprintf(b, ", ptr %%this.f%d", descriptor.Callee)
+	}
 	for i, arg := range args {
-		param := fn.Params[descriptor.CaptureCount+i]
+		param := fn.Params[first+i]
 		typ, err := llvmType(param.Repr)
 		if err != nil {
 			return err

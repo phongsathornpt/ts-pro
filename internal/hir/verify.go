@@ -188,6 +188,9 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				checkValue(op.Right)
 			case DynamicCallOp:
 				checkValue(op.Callee)
+				if op.HasReceiver {
+					checkValue(op.Receiver)
+				}
 				for _, arg := range op.Args {
 					checkValue(arg)
 				}
