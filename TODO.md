@@ -213,7 +213,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Add remembered-set/write-barrier coverage for current mutable native-heap reference stores and remembered-parent minor tracing; negative sensitivity coverage proves raw old-to-young stores are not silently rescued by a conservative old scan.
   - [x] Add a per-owner append-only nursery membership index so minor reset/count/sweep touches young blocks only; major GC and shutdown clear the index, and native ABI metrics expose current nursery membership plus scanned candidates. With 1,024 old blocks, the 64 KiB nursery sample drops to roughly 14.4-14.9 µs/minor with no remembered parent and 17.8-18.0 µs with one remembered parent.
   - [x] Profile survivor age, nursery sizing, and major cadence. Major pressure now uses old-generation bytes rather than total live bytes, preventing aggregate young traffic from forcing premature full collections; in the 8-worker/256 KiB profile this changes 0 minor / 15 major collections to 8-9 minor / 0 major. Retain the 64 KiB per-worker default and promote-after-one-minor policy: 64-512 KiB gives nearly flat fixed-byte throughput, while sampled 64B-object median minor pause grows from ~0.69 ms at 64 KiB to ~5.48 ms at 512 KiB; synthetic 0-10% one-minor survival causes no majors over 64 cycles and even 50-100% survival adds only 2-4 majors.
-  - [ ] Add precise heap object/layout metadata so GC traces only actual reference fields instead of conservatively scanning every machine word; use compiler shape/task/closure layouts and runtime-known string/array/JSValue layouts as the source of truth.
+  - [x] Add precise heap object/layout metadata: compiler-generated shape/task/closure allocations carry LLVM-derived reference-offset descriptors, runtime strings/F64 arrays and non-reference JSValue boxes are atomic, reference JSValue boxes trace only their payload slot, and unknown ABI allocations retain conservative fallback tracing.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -225,7 +225,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Boolean, null/undefined, object/function, and tagged-union JSValue variants.
     - [x] Boolean JSValue tag/boxing, logging, and primitive `+` coercion with numbers/strings.
     - [x] Null/undefined JSValue literals/tags with console output and primitive `+` coercion (`null -> 0`, `undefined -> NaN`, string conversion).
-    - [x] Object/array/function reference JSValue tags and explicit native boxing, with conservative GC payload tracing and differential/compiler regression coverage.
+    - [x] Object/array/function reference JSValue tags and explicit native boxing, with precise payload-slot GC tracing and differential/compiler regression coverage.
     - [x] Tagged unions lower to JSValue only when every constituent has a supported dynamic representation; TS7 constituent metadata is preserved and unsupported members fail representation analysis.
 - [~] Add checked conversions and dynamic operator/property slow paths.
   - [x] Dynamic `+` for number/string JSValue operands and `console.log(any)`.
@@ -242,8 +242,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Integrate task/channel/timer state with precise GC metadata and scheduler safepoints.
-2. Add precise heap object/layout metadata and reference maps so major/minor tracing stops conservatively scanning non-reference words; start with compiler shapes/task/closure layouts plus runtime-known strings, F64 arrays, and JSValue boxes.
+1. Measure precise-layout trace-word reduction and extend metadata to any remaining heap-backed runtime types that still require conservative fallback.
+2. Add escape analysis and stack allocation for non-escaping object/closure/task-environment candidates, preserving explicit GC roots only where heap lifetime is required.
 3. Finish nested rejection recovery and selected Promise combinators.
 4. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 5. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.

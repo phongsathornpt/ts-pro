@@ -9,6 +9,45 @@ import (
 	"unsafe"
 )
 
+func TestAtomicHeapLayoutDoesNotTracePointerLikePayload(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	child := tsnative_heap_alloc_atomic(16)
+	parent := tsnative_heap_alloc_atomic(unsafe.Sizeof(uintptr(0)))
+	*(*uintptr)(parent) = uintptr(child)
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	if !nativeHeapContains(parent) {
+		t.Fatal("rooted atomic parent was reclaimed")
+	}
+	if nativeHeapContains(child) {
+		t.Fatal("atomic pointer-like payload incorrectly retained child")
+	}
+	tsnative_gc_root_unregister(root)
+}
+
+func TestReferenceOffsetHeapLayoutTracesDeclaredSlot(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+
+	child := tsnative_heap_alloc_atomic(16)
+	offset := uintptr(unsafe.Sizeof(uintptr(0)))
+	parent := tsnative_heap_alloc_refs(2*unsafe.Sizeof(uintptr(0)), unsafe.Pointer(&offset), 1)
+	*(*uintptr)(parent) = uintptr(0xdeadbeef)
+	*(*unsafe.Pointer)(unsafe.Add(parent, offset)) = child
+	root := tsnative_gc_root_register(unsafe.Pointer(&parent))
+	tsnative_gc_collect()
+	if !nativeHeapContains(parent) || !nativeHeapContains(child) {
+		t.Fatal("declared reference slot did not retain child")
+	}
+	tsnative_gc_root_unregister(root)
+	tsnative_gc_collect()
+	if nativeHeapContains(parent) || nativeHeapContains(child) {
+		t.Fatal("reference-layout graph survived after root removal")
+	}
+}
+
 func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	tsnative_heap_shutdown()
 	defer tsnative_heap_shutdown()

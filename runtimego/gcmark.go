@@ -223,10 +223,20 @@ func (state *nativeGCMarkState) drainPage(page *nativeGCMarkPage) {
 		state.work++
 		state.mu.Unlock()
 
-		count := block.size / wordSize
-		for i := uintptr(0); i < count; i++ {
-			word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
-			state.enqueue(word)
+		switch block.traceKind {
+		case nativeHeapTraceAtomic:
+			continue
+		case nativeHeapTraceOffsets:
+			for _, offset := range block.refOffsets {
+				word := *(*uintptr)(unsafe.Add(block.raw, offset))
+				state.enqueue(word)
+			}
+		default:
+			count := block.size / wordSize
+			for i := uintptr(0); i < count; i++ {
+				word := *(*uintptr)(unsafe.Add(block.raw, i*wordSize))
+				state.enqueue(word)
+			}
 		}
 	}
 }

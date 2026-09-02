@@ -30,7 +30,7 @@ func nativeStringBytes(raw unsafe.Pointer) []byte {
 //export tsnative_string_new
 func tsnative_string_new(data unsafe.Pointer, length C.uint64_t) unsafe.Pointer {
 	n := uintptr(length)
-	raw := tsnative_heap_alloc(nativeStringHeaderSize + n)
+	raw := tsnative_heap_alloc_atomic(nativeStringHeaderSize + n)
 	*(*uint64)(raw) = uint64(length)
 	if n != 0 && data != nil {
 		dst := unsafe.Slice((*byte)(unsafe.Add(raw, nativeStringHeaderSize)), int(n))

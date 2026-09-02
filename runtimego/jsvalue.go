@@ -33,7 +33,15 @@ type nativeJSValue struct {
 }
 
 func newNativeJSValue(tag uint32) *nativeJSValue {
-	raw := tsnative_heap_alloc(unsafe.Sizeof(nativeJSValue{}))
+	size := unsafe.Sizeof(nativeJSValue{})
+	var raw unsafe.Pointer
+	switch tag {
+	case nativeJSTagString, nativeJSTagObject, nativeJSTagFunction, nativeJSTagArray:
+		offset := unsafe.Offsetof(nativeJSValue{}.payload)
+		raw = tsnative_heap_alloc_refs(size, unsafe.Pointer(&offset), 1)
+	default:
+		raw = tsnative_heap_alloc_atomic(size)
+	}
 	value := (*nativeJSValue)(raw)
 	value.tag = tag
 	value.reserved = 0

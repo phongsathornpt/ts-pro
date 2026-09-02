@@ -194,7 +194,8 @@ func (e *emitter) emitTaskSpawn(b *strings.Builder, inst mir.Instruction, op mir
 		state = name + ".state"
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", state, taskEnvTypeName(op.Callee))
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", state, state)
-		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", state, state)
+		stateRefs := taskEnvRefFields(fn, descriptor)
+		emitHeapObjectAlloc(b, state, state+".size", taskEnvRefDescriptorName(op.Callee), len(stateRefs))
 		for i, capture := range op.Captures {
 			value, err := operand(values, capture)
 			if err != nil {

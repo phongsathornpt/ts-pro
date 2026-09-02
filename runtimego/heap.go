@@ -18,6 +18,14 @@ const (
 	initialMajorGCThreshold = 1024 * 1024
 )
 
+type nativeHeapTraceKind uint8
+
+const (
+	nativeHeapTraceConservative nativeHeapTraceKind = iota
+	nativeHeapTraceAtomic
+	nativeHeapTraceOffsets
+)
+
 type nativeHeapBlock struct {
 	ptr          uintptr
 	raw          unsafe.Pointer
@@ -28,6 +36,8 @@ type nativeHeapBlock struct {
 	marked       bool
 	generation   nativeHeapGeneration
 	nurseryOwner int
+	traceKind    nativeHeapTraceKind
+	refOffsets   []uintptr
 	finalizer    func()
 }
 
@@ -112,14 +122,14 @@ func registerNativeHeapFinalizer(raw unsafe.Pointer, finalizer func()) {
 	}
 }
 
-//export tsnative_heap_alloc
-func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
+func allocateNativeHeapBlock(size uintptr, traceKind nativeHeapTraceKind, refOffsets []uintptr) unsafe.Pointer {
 	nativeHeapWorld.RLock()
 	owner := nativeAllocatorOwner()
 	raw, data, span, slot := allocateNativeHeapStorage(size)
 	block := &nativeHeapBlock{
 		ptr: uintptr(raw), raw: raw, size: size, data: data, span: span, slot: slot,
 		generation: nativeHeapGenerationNursery, nurseryOwner: owner,
+		traceKind: traceKind, refOffsets: refOffsets,
 	}
 	nativeBlocks.set(block.ptr, block)
 	nativeNurseryTrack(owner, block)
@@ -135,6 +145,36 @@ func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	}
 	nativeHeapWorld.RUnlock()
 	return block.raw
+}
+
+//export tsnative_heap_alloc
+func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
+	return allocateNativeHeapBlock(size, nativeHeapTraceConservative, nil)
+}
+
+//export tsnative_heap_alloc_atomic
+func tsnative_heap_alloc_atomic(size uintptr) unsafe.Pointer {
+	return allocateNativeHeapBlock(size, nativeHeapTraceAtomic, nil)
+}
+
+//export tsnative_heap_alloc_refs
+func tsnative_heap_alloc_refs(size uintptr, offsets unsafe.Pointer, count uintptr) unsafe.Pointer {
+	if count == 0 {
+		return tsnative_heap_alloc_atomic(size)
+	}
+	wordSize := uintptr(unsafe.Sizeof(uintptr(0)))
+	if offsets == nil || count > size/wordSize {
+		nativeAbort("invalid heap reference layout")
+	}
+	source := unsafe.Slice((*uintptr)(offsets), int(count))
+	refs := make([]uintptr, count)
+	copy(refs, source)
+	for _, offset := range refs {
+		if offset%wordSize != 0 || offset > size || size-offset < wordSize {
+			nativeAbort("heap reference offset outside allocation")
+		}
+	}
+	return allocateNativeHeapBlock(size, nativeHeapTraceOffsets, refs)
 }
 
 func gcCanCollectLocked(tid int) bool {

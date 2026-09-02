@@ -78,6 +78,31 @@ int main(void) {
   tsnative_gc_collect();
   assert(tsnative_heap_live_allocations() == 0);
   assert(tsnative_gc_old_bytes() == 0);
+
+  void *atomic_child = tsnative_heap_alloc_atomic(16);
+  void *atomic_parent = tsnative_heap_alloc_atomic(sizeof(void *));
+  ((void **)atomic_parent)[0] = atomic_child;
+  void *atomic_slots[1] = {atomic_parent};
+  void *atomic_frame = tsnative_gc_enter(atomic_slots, 1);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 1);
+  tsnative_gc_leave(atomic_frame);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
+
+  size_t ref_offsets[1] = {sizeof(void *)};
+  void *precise_child = tsnative_heap_alloc_atomic(16);
+  void *precise_parent = tsnative_heap_alloc_refs(2 * sizeof(void *), ref_offsets, 1);
+  ((void **)precise_parent)[0] = (void *)0xdeadbeef;
+  ((void **)precise_parent)[1] = precise_child;
+  void *precise_slots[1] = {precise_parent};
+  void *precise_frame = tsnative_gc_enter(precise_slots, 1);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 2);
+  tsnative_gc_leave(precise_frame);
+  tsnative_gc_collect();
+  assert(tsnative_heap_live_allocations() == 0);
+
   tsnative_heap_shutdown();
   return 0;
 }

@@ -126,7 +126,7 @@ func TestEmitClosedObjectUsesFixedShapeOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"%tsnative_shape_s0 = type { double, double }", "@tsnative_object_alloc", "getelementptr %tsnative_shape_s0", "load double"} {
+	for _, want := range []string{"%tsnative_shape_s0 = type { double, double }", "call ptr @tsnative_object_alloc_atomic", "getelementptr %tsnative_shape_s0", "load double"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("LLVM IR missing %q:\n%s", want, text)
 		}
@@ -155,6 +155,14 @@ func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
 	}
 	if strings.Contains(text, "store ptr %v1, ptr %v2.ptr") {
 		t.Fatalf("reference field store bypassed GC write barrier:\n%s", text)
+	}
+	for _, want := range []string{
+		"@tsnative_refs_shape_s0 = private constant [1 x i64]",
+		"call ptr @tsnative_object_alloc_refs(i64 %v0.size, ptr @tsnative_refs_shape_s0, i64 1)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("reference shape LLVM IR missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -209,6 +217,36 @@ func TestEmitNativeTaskIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEmitClosureHeapReferenceLayouts(t *testing.T) {
+	captured := mir.ValueID(0)
+	module := mir.Module{Name: "closure-layout", Functions: []mir.Function{
+		{ID: 0, Name: "target", Params: []mir.Param{{Value: 0, Name: "value", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprStringRef, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Terminator: mir.Return{Value: &captured}}}},
+		{ID: 1, Name: "entry", ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "captured"}},
+				{Result: 1, Repr: mir.ReprFunctionRef, Op: mir.ClosureNew{Callee: 0, Captures: []mir.ValueID{0}}},
+			}, Terminator: mir.Return{}}}},
+	}}
+	entry := mir.FunctionID(1)
+	module.Entry = &entry
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%tsnative_env_f0 = type { ptr }",
+		"@tsnative_refs_env_f0 = private constant [1 x i64]",
+		"@tsnative_refs_closure = private constant [1 x i64]",
+		"call ptr @tsnative_object_alloc_refs(i64 %v1.env.size, ptr @tsnative_refs_env_f0, i64 1)",
+		"call ptr @tsnative_object_alloc_refs(i64 %v1.size, ptr @tsnative_refs_closure, i64 1)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("closure LLVM IR missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestEmitCapturedTaskState(t *testing.T) {
 	module := mir.Module{Name: "captured-task", Functions: []mir.Function{
 		{ID: 0, Name: "worker", Params: []mir.Param{{Value: 0, Name: "message", Repr: mir.ReprStringRef}}, ReturnRepr: mir.ReprVoid, Entry: 0,
@@ -229,7 +267,8 @@ func TestEmitCapturedTaskState(t *testing.T) {
 	}
 	for _, want := range []string{
 		"%tsnative_task_env_f0 = type { ptr }",
-		"call ptr @tsnative_object_alloc",
+		"@tsnative_refs_task_f0 = private constant [1 x i64]",
+		"call ptr @tsnative_object_alloc_refs(i64 %v1.state.size, ptr @tsnative_refs_task_f0, i64 1)",
 		"store ptr %v0",
 		"call ptr @tsnative_task_spawn_or_abort(ptr @tsnative_task_entry_f0, ptr %v1.state)",
 		"load ptr, ptr %capture0.ptr",
@@ -701,7 +740,7 @@ func TestEmitStacklessNativeObjectArrayCallContinuation(t *testing.T) {
 	}
 	for _, want := range []string{
 		"call ptr @tsnative_array_f64_new(i64 2)",
-		"call ptr @tsnative_object_alloc(i64",
+		"call ptr @tsnative_object_alloc_atomic(i64",
 		"call double @tsnative_f0(double",
 		"call void @tsnative_array_f64_set_checked(ptr",
 		"call i32 @tsnative_sleep_task(double 1.000000e+00)",

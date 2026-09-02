@@ -76,7 +76,7 @@ func Emit(module mir.Module) (string, error) {
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
-	b.WriteString("declare ptr @tsnative_object_alloc(i64)\n")
+	b.WriteString("declare ptr @tsnative_object_alloc(i64)\ndeclare ptr @tsnative_object_alloc_atomic(i64)\ndeclare ptr @tsnative_object_alloc_refs(i64, ptr, i64)\n")
 	b.WriteString("declare void @tsnative_heap_shutdown()\n")
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
@@ -124,6 +124,9 @@ func Emit(module mir.Module) (string, error) {
 	}
 	if len(shapes) != 0 {
 		b.WriteString("\n")
+	}
+	if err := e.emitHeapTraceDescriptors(&b); err != nil {
+		return "", err
 	}
 	for _, global := range e.collectStringGlobals() {
 		fmt.Fprintf(&b, "%s = private unnamed_addr constant [%d x i8] c\"%s\", align 1\n", global.name, len(global.value), escapeLLVMBytes(global.value))
@@ -303,7 +306,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		typeName := shapeTypeName(op.Shape)
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
-		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		shapeRefs := shapeRefFields(shape)
+		emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
 		if shape.ClassTag != 0 {
 			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
 			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)
@@ -330,7 +334,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		typeName := shapeTypeName(op.Shape)
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", name, typeName)
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
-		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+		shapeRefs := shapeRefFields(shape)
+		emitHeapObjectAlloc(b, name, name+".size", shapeRefDescriptorName(op.Shape), len(shapeRefs))
 		if shape.ClassTag != 0 {
 			fmt.Fprintf(b, "  %s.tag = getelementptr %s, ptr %s, i32 0, i32 0\n", name, typeName, name)
 			fmt.Fprintf(b, "  store i32 %d, ptr %s.tag\n", shape.ClassTag, name)

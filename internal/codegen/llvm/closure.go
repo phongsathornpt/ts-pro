@@ -151,7 +151,8 @@ func (e *emitter) emitClosureNew(b *strings.Builder, inst mir.Instruction, op mi
 		env = name + ".env"
 		fmt.Fprintf(b, "  %s.sizeptr = getelementptr %s, ptr null, i32 1\n", env, closureEnvTypeName(op.Callee))
 		fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", env, env)
-		fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", env, env)
+		envRefs := closureEnvRefFields(fn, descriptor.CaptureCount)
+		emitHeapObjectAlloc(b, env, env+".size", closureEnvRefDescriptorName(op.Callee), len(envRefs))
 		for i, capture := range op.Captures {
 			value, err := operand(values, capture)
 			if err != nil {
@@ -167,7 +168,7 @@ func (e *emitter) emitClosureNew(b *strings.Builder, inst mir.Instruction, op mi
 	}
 	fmt.Fprintf(b, "  %s.sizeptr = getelementptr %%tsnative_closure, ptr null, i32 1\n", name)
 	fmt.Fprintf(b, "  %s.size = ptrtoint ptr %s.sizeptr to i64\n", name, name)
-	fmt.Fprintf(b, "  %s = call ptr @tsnative_object_alloc(i64 %s.size)\n", name, name)
+	emitHeapObjectAlloc(b, name, name+".size", closureRefDescriptorName, 1)
 	fmt.Fprintf(b, "  %s.codeptr = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 0\n", name, name)
 	fmt.Fprintf(b, "  store ptr @%s, ptr %s.codeptr\n", closureWrapperName(op.Callee), name)
 	fmt.Fprintf(b, "  %s.envptr = getelementptr %%tsnative_closure, ptr %s, i32 0, i32 1\n", name, name)
