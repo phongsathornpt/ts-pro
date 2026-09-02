@@ -9,7 +9,13 @@ function scalarReferenceValue(flag: boolean): string {
   } else {
     holder.value = "beta";
   }
-  return holder.value;
+
+  const selected = holder.value;
+  let churn = "";
+  for (let i: number = 0; i < 512; i++) {
+    churn = churn + "0123456789abcdef";
+  }
+  return selected;
 }
 
 console.log(scalarReferenceValue(false));

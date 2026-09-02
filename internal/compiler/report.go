@@ -48,6 +48,7 @@ type BuildMetrics struct {
 	NonEscapingAllocations int
 	EscapingAllocations    int
 	StackObjectAllocs      int
+	StackClosureAllocs     int
 	ScalarObjectAllocs     int
 	CacheHits              int
 	CacheMisses            int
@@ -102,7 +103,7 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes esc
 	metrics.RuntimeCalls = countRuntimeCallsWithLocalObjects(mirModule, stackObjects, scalarObjects)
 	metrics.AllocationCandidates, metrics.NonEscapingAllocations, metrics.EscapingAllocations = countEscapeAllocations(escapes)
 	metrics.ScalarObjectAllocs = countScalarObjects(scalarObjects)
-	metrics.StackObjectAllocs = countPhysicalStackObjects(stackObjects, scalarObjects)
+	metrics.StackObjectAllocs, metrics.StackClosureAllocs = countPhysicalStackAllocations(mirModule, stackObjects, scalarObjects)
 	return metrics
 }
 
@@ -120,24 +121,25 @@ func countEscapeAllocations(result escapeanalysis.Result) (candidates, nonEscapi
 	return candidates, nonEscaping, escaping
 }
 
-func countStackObjects(result escapeanalysis.StackObjectResult) int {
-	count := 0
-	for _, fn := range result {
-		count += len(fn)
-	}
-	return count
-}
-
-func countPhysicalStackObjects(stack escapeanalysis.StackObjectResult, scalar escapeanalysis.ScalarObjectResult) int {
-	count := 0
-	for fn, values := range stack {
-		for value := range values {
-			if _, elided := scalar.Get(fn, value); !elided {
-				count++
+func countPhysicalStackAllocations(module mir.Module, stack escapeanalysis.StackObjectResult, scalar escapeanalysis.ScalarObjectResult) (objects, closures int) {
+	for _, fn := range module.Functions {
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				if !stack.Contains(fn.ID, inst.Result) {
+					continue
+				}
+				switch inst.Op.(type) {
+				case mir.ObjectNew, mir.ObjectAlloc:
+					if _, elided := scalar.Get(fn.ID, inst.Result); !elided {
+						objects++
+					}
+				case mir.ClosureNew:
+					closures++
+				}
 			}
 		}
 	}
-	return count
+	return objects, closures
 }
 
 func countScalarObjects(result escapeanalysis.ScalarObjectResult) int {
@@ -253,10 +255,6 @@ func countRuntimeCalls(module mir.Module) int {
 	return countRuntimeCallsWithLocalObjects(module, nil, nil)
 }
 
-func countRuntimeCallsWithStackObjects(module mir.Module, stackObjects escapeanalysis.StackObjectResult) int {
-	return countRuntimeCallsWithLocalObjects(module, stackObjects, nil)
-}
-
 func countRuntimeCallsWithLocalObjects(module mir.Module, stackObjects escapeanalysis.StackObjectResult, scalarObjects escapeanalysis.ScalarObjectResult) int {
 	count := 0
 	for _, fn := range module.Functions {
@@ -271,8 +269,13 @@ func countRuntimeCallsWithLocalObjects(module mir.Module, stackObjects escapeana
 						continue
 					}
 					count++
+				case mir.ClosureNew:
+					if stackObjects.Contains(fn.ID, inst.Result) {
+						continue
+					}
+					count++
 				case mir.ConstString, mir.StringConcat, mir.ArrayNewF64, mir.ArrayLengthF64,
-					mir.ArrayGetF64, mir.ArraySetF64, mir.ClosureNew,
+					mir.ArrayGetF64, mir.ArraySetF64,
 					mir.BoxJSValue, mir.UnboxJSValue, mir.DynamicAddJSValue, mir.DynamicBinaryJSValue, mir.IntrinsicCall,
 					mir.TaskSpawn, mir.TaskJoin, mir.TaskYield, mir.TaskCancel, mir.TaskCancelled, mir.TaskGroupNew, mir.TaskGroupJoin, mir.TaskGroupCancel, mir.TaskContextSet, mir.TaskContextGet, mir.ChannelNewF64, mir.ChannelTrySendF64, mir.ChannelTryRecvOrF64, mir.ChannelSendF64, mir.ChannelRecvF64, mir.ChannelNewBool, mir.ChannelTrySendBool, mir.ChannelTryRecvOrBool, mir.ChannelSendBool, mir.ChannelRecvBool, mir.ChannelNewRef, mir.ChannelTrySendRef, mir.ChannelTryRecvOrRef, mir.ChannelSendRef, mir.ChannelRecvRef, mir.Sleep:
 					count++

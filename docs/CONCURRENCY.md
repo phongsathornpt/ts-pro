@@ -224,6 +224,7 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Carry mutable scalar field state across acyclic single-predecessor jump chains. The planner records each `FieldGet` source as a MIR value or typed zero before LLVM emission, avoiding dependence on block output order.
     - [x] Add explicit per-field Phi dataflow for direct acyclic diamond branches. Differing then/else field states become LLVM `phi` values at the merge head, typed zeroes participate correctly, and equal states avoid redundant merges.
     - [x] Generalize scalar field dataflow to nested acyclic branch trees/merges with a deterministic topological CFG worklist. Synthetic per-field Phi sources can feed later synthetic Phis, source-level native acceptance eliminates the object allocation, and loops remain conservative.
+    - [x] Scalar-elide proven non-escaping reference-bearing objects when identity is unobserved. Existing typed SSA GC roots keep reference fields live, pointer-valued scalar Phis compose through acyclic merges, and eliminated objects contribute no object root, allocation safepoint, or heap runtime call; aliased/non-scalarizable reference objects remain heap-backed.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.
