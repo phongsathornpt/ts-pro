@@ -1474,10 +1474,19 @@ func classifyType(text string) TypeKind {
 	if len(text) >= 2 && ((strings.HasPrefix(text, "\"") && strings.HasSuffix(text, "\"")) || (strings.HasPrefix(text, "'") && strings.HasSuffix(text, "'"))) {
 		return TypeString
 	}
+	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
+	if strings.HasPrefix(arrayText, "Array<") && strings.HasSuffix(arrayText, ">") {
+		return TypeArray
+	}
 	if strings.Contains(text, "=>") {
+		if strings.HasSuffix(arrayText, "[]") {
+			elementText := strings.TrimSpace(strings.TrimSuffix(arrayText, "[]"))
+			if strings.HasPrefix(elementText, "(") && strings.HasSuffix(elementText, ")") {
+				return TypeArray
+			}
+		}
 		return TypeFunction
 	}
-	arrayText := strings.TrimSpace(strings.TrimPrefix(text, "readonly "))
 	if strings.HasSuffix(arrayText, "[]") {
 		return TypeArray
 	}
