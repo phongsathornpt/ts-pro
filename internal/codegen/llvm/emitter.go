@@ -38,7 +38,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	e := &emitter{
 		module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{},
 		stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: stackObjects,
-		scalarObjects: escapeanalysis.ScalarObjects(module, stackObjects),
+		scalarObjects: escapeanalysis.ScalarObjectsWithEscapeAnalysis(module, stackObjects, escapes),
 	}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
@@ -187,7 +187,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
-	gc := buildGCRootLayout(fn, e.stackObjects[fn.ID])
+	gc := buildGCRootLayout(fn, e.stackObjects[fn.ID], e.scalarObjects[fn.ID])
 	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
@@ -216,7 +216,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		}
 		for ; index < len(block.Instructions); index++ {
 			inst := block.Instructions[index]
-			if emitsGCAllocation(inst.Op) && !e.isStackObject(fn.ID, inst.Result) {
+			if emitsGCAllocation(inst.Op) && !e.isElidedObject(fn.ID, inst.Result) {
 				b.WriteString("  call void @tsnative_gc_safepoint()\n")
 			}
 			if err := e.emitInstruction(b, fn, inst, values); err != nil {
@@ -1002,6 +1002,14 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 
 func (e *emitter) isStackObject(fn mir.FunctionID, value mir.ValueID) bool {
 	return e.stackObjects.Contains(fn, value)
+}
+
+func (e *emitter) isElidedObject(fn mir.FunctionID, value mir.ValueID) bool {
+	if e.isStackObject(fn, value) {
+		return true
+	}
+	_, ok := e.scalarObjects.Get(fn, value)
+	return ok
 }
 
 func (e *emitter) emitCall(b *strings.Builder, inst mir.Instruction, call mir.Call, values map[mir.ValueID]string) error {

@@ -46,25 +46,26 @@ func (result ScalarObjectResult) Get(fn mir.FunctionID, value mir.ValueID) (Scal
 }
 
 func ScalarObjects(module mir.Module, stack StackObjectResult) ScalarObjectResult {
+	return ScalarObjectsWithEscapeAnalysis(module, stack, Analyze(module))
+}
+
+func ScalarObjectsWithEscapeAnalysis(module mir.Module, stack StackObjectResult, escapes Result) ScalarObjectResult {
 	result := make(ScalarObjectResult, len(module.Functions))
 	shapes := make(map[mir.ShapeID]mir.Shape, len(module.Shapes))
 	for _, shape := range module.Shapes {
 		shapes[shape.ID] = shape
 	}
 	for _, fn := range module.Functions {
-		result[fn.ID] = scalarObjectsForFunction(fn, stack[fn.ID], shapes)
+		result[fn.ID] = scalarObjectsForFunction(fn, stack[fn.ID], escapes[fn.ID], shapes)
 	}
 	return result
 }
 
-func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shapes map[mir.ShapeID]mir.Shape) map[mir.ValueID]ScalarObject {
+func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, escapes FunctionResult, shapes map[mir.ShapeID]mir.Shape) map[mir.ValueID]ScalarObject {
+	candidates := scalarObjectCandidates(fn, stack, escapes, shapes)
 	prov := make(provenance)
-	for _, block := range fn.Blocks {
-		for _, inst := range block.Instructions {
-			if stack[inst.Result] {
-				prov[inst.Result] = valueSet{inst.Result: {}}
-			}
-		}
+	for value := range candidates {
+		prov[value] = valueSet{value: {}}
 	}
 	propagateAliases(fn, prov)
 	aliased := make(map[mir.ValueID]bool)
@@ -104,7 +105,7 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shape
 	result := make(map[mir.ValueID]ScalarObject)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
-			if !stack[inst.Result] || aliased[inst.Result] {
+			if !candidates[inst.Result] || aliased[inst.Result] {
 				continue
 			}
 			isMutable := mutated[inst.Result]
@@ -129,6 +130,34 @@ func scalarObjectsForFunction(fn mir.Function, stack map[mir.ValueID]bool, shape
 				scalar.Reads, scalar.Phis = reads, phis
 			}
 			result[inst.Result] = scalar
+		}
+	}
+	return result
+}
+
+func scalarObjectCandidates(fn mir.Function, stack map[mir.ValueID]bool, escapes FunctionResult, shapes map[mir.ShapeID]mir.Shape) map[mir.ValueID]bool {
+	result := make(map[mir.ValueID]bool, len(stack))
+	for value := range stack {
+		result[value] = true
+	}
+	cyclic := cyclicBlocks(fn)
+	blocked := stackBlockedValues(fn)
+	for _, block := range fn.Blocks {
+		if cyclic[block.ID] {
+			continue
+		}
+		for _, inst := range block.Instructions {
+			if result[inst.Result] || blocked[inst.Result] || !escapes.CanStackAllocate(inst.Result) {
+				continue
+			}
+			shapeID, ok := stackObjectShape(inst.Op)
+			if !ok {
+				continue
+			}
+			if _, ok := shapes[shapeID]; !ok {
+				continue
+			}
+			result[inst.Result] = true
 		}
 	}
 	return result

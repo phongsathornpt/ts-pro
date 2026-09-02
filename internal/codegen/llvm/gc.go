@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
 	"github.com/projectthorn/tsv7-bin/internal/mir"
 )
 
@@ -12,7 +13,7 @@ type gcRootLayout struct {
 	count int
 }
 
-func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool) gcRootLayout {
+func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
 	layout := gcRootLayout{slots: map[mir.ValueID]int{}}
 	add := func(value mir.ValueID, repr mir.Repr) {
 		if !isGCReference(repr) {
@@ -30,6 +31,9 @@ func buildGCRootLayout(fn mir.Function, stackObjects map[mir.ValueID]bool) gcRoo
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
 			if stackObjects[inst.Result] {
+				continue
+			}
+			if _, ok := scalarObjects[inst.Result]; ok {
 				continue
 			}
 			add(inst.Result, inst.Repr)

@@ -1428,3 +1428,35 @@ func TestBuildNestedMutableScalarObjectNativeExecutable(t *testing.T) {
 		t.Fatalf("scalar-nested-object output = %q", got)
 	}
 }
+
+func TestBuildReferenceBearingScalarObjectNativeExecutable(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not installed")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "scalar-reference-object")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/scalar_reference_object.ts", Output: output, Optimization: "-O2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.AllocationCandidates != 1 || result.Metrics.NonEscapingAllocations != 1 || result.Metrics.EscapingAllocations != 0 {
+		t.Fatalf("escape metrics = %d/%d/%d, want 1/1/0", result.Metrics.AllocationCandidates, result.Metrics.NonEscapingAllocations, result.Metrics.EscapingAllocations)
+	}
+	if result.Metrics.ScalarObjectAllocs != 1 || result.Metrics.StackObjectAllocs != 0 {
+		t.Fatalf("object storage scalar/stack = %d/%d, want 1/0", result.Metrics.ScalarObjectAllocs, result.Metrics.StackObjectAllocs)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run scalar-reference-object binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "beta" {
+		t.Fatalf("scalar-reference-object output = %q", got)
+	}
+}

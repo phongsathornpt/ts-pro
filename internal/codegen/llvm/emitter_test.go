@@ -293,6 +293,64 @@ func TestEmitNestedMutableScalarUsesPhiDataflow(t *testing.T) {
 	}
 }
 
+func TestEmitReferenceBearingMutableObjectIsScalarReplaced(t *testing.T) {
+	ret := mir.ValueID(7)
+	module := mir.Module{
+		Name: "reference-scalar", Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, Name: "select", ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "start"}},
+				{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0}}},
+				{Result: 2, Repr: mir.ReprBool, Op: mir.ConstBool{Value: true}},
+			}, Terminator: mir.Branch{Condition: 2, Then: 1, Else: 2}},
+			{ID: 1, Instructions: []mir.Instruction{
+				{Result: 3, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "left"}},
+				{Result: 4, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 3}},
+			}, Terminator: mir.Jump{Target: 3}},
+			{ID: 2, Instructions: []mir.Instruction{
+				{Result: 5, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "right"}},
+				{Result: 6, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 5}},
+			}, Terminator: mir.Jump{Target: 3}},
+			{ID: 3, Instructions: []mir.Instruction{{Result: 7, Repr: mir.ReprStringRef, Op: mir.FieldGet{Object: 1, Shape: 0, Field: 0}}}, Terminator: mir.Return{Value: &ret}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"%scalar.phi.v1.f0.b3 = phi ptr [ %v3, %b1 ], [ %v5, %b2 ]",
+		"ret ptr %scalar.phi.v1.f0.b3",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("reference scalar LLVM missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{
+		"call ptr @tsnative_object_alloc_refs",
+		"call void @tsnative_gc_store_ref(ptr %v1",
+		"store ptr %v1, ptr %gc.slot.",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("reference scalar retained physical object path %q:\n%s", forbidden, text)
+		}
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "reference-scalar.ll"), filepath.Join(dir, "reference-scalar.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile reference scalar LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
 func TestEmitReturnedNumericObjectRemainsHeapAllocated(t *testing.T) {
 	ret := mir.ValueID(1)
 	module := mir.Module{
@@ -334,11 +392,11 @@ func TestEmitLoopNumericObjectRemainsHeapAllocated(t *testing.T) {
 }
 
 func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
-	result := mir.ValueID(2)
+	result := mir.ValueID(0)
 	module := mir.Module{
 		Name:   "object-ref-store",
 		Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
-		Functions: []mir.Function{{ID: 0, Name: "set", ReturnRepr: mir.ReprStringRef, Entry: 0,
+		Functions: []mir.Function{{ID: 0, Name: "set", ReturnRepr: mir.ReprObjectRef, Entry: 0,
 			Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
 				{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
 				{Result: 1, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},

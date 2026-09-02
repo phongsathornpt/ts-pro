@@ -55,7 +55,7 @@
 - [x] Closed object shapes with fixed offsets, including class reuse/inheritance support.
 - [x] Closures and function values.
 - [~] Monomorphized generics and direct-call specialization; initial scalar/string call-site specialization is complete, advanced/cross-module cases remain.
-- [~] Escape analysis and scalar replacement; numeric-only non-escaping objects now support stack allocation and mutable scalar replacement across nested acyclic CFG merges, while reference-bearing stack objects/closures remain pending precise root handling.
+- [~] Escape analysis and scalar replacement; numeric-only non-escaping objects support stack allocation and mutable scalar replacement across nested acyclic CFG merges, and fully scalarizable reference-bearing objects can now be eliminated while their field values remain GC-rooted. Physical reference-bearing stack objects/closures still require precise stack-root/interior-pointer handling.
 
 ## Milestone 6 — Dynamic boundary and scale
 

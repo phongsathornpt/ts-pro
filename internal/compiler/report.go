@@ -98,11 +98,11 @@ func collectBuildMetrics(hirModule hir.Module, mirModule mir.Module, escapes esc
 	metrics.ChannelCreates, metrics.ChannelTrySends, metrics.ChannelTryRecvs, metrics.ChannelSends, metrics.ChannelRecvs = countChannelOps(mirModule)
 	metrics.Sleeps = countSleepOps(mirModule)
 	stackObjects := escapeanalysis.StackObjects(mirModule, escapes)
-	scalarObjects := escapeanalysis.ScalarObjects(mirModule, stackObjects)
-	metrics.RuntimeCalls = countRuntimeCallsWithStackObjects(mirModule, stackObjects)
+	scalarObjects := escapeanalysis.ScalarObjectsWithEscapeAnalysis(mirModule, stackObjects, escapes)
+	metrics.RuntimeCalls = countRuntimeCallsWithLocalObjects(mirModule, stackObjects, scalarObjects)
 	metrics.AllocationCandidates, metrics.NonEscapingAllocations, metrics.EscapingAllocations = countEscapeAllocations(escapes)
 	metrics.ScalarObjectAllocs = countScalarObjects(scalarObjects)
-	metrics.StackObjectAllocs = countStackObjects(stackObjects) - metrics.ScalarObjectAllocs
+	metrics.StackObjectAllocs = countPhysicalStackObjects(stackObjects, scalarObjects)
 	return metrics
 }
 
@@ -124,6 +124,18 @@ func countStackObjects(result escapeanalysis.StackObjectResult) int {
 	count := 0
 	for _, fn := range result {
 		count += len(fn)
+	}
+	return count
+}
+
+func countPhysicalStackObjects(stack escapeanalysis.StackObjectResult, scalar escapeanalysis.ScalarObjectResult) int {
+	count := 0
+	for fn, values := range stack {
+		for value := range values {
+			if _, elided := scalar.Get(fn, value); !elided {
+				count++
+			}
+		}
 	}
 	return count
 }
@@ -238,10 +250,14 @@ func countSleepOps(module mir.Module) int {
 }
 
 func countRuntimeCalls(module mir.Module) int {
-	return countRuntimeCallsWithStackObjects(module, nil)
+	return countRuntimeCallsWithLocalObjects(module, nil, nil)
 }
 
 func countRuntimeCallsWithStackObjects(module mir.Module, stackObjects escapeanalysis.StackObjectResult) int {
+	return countRuntimeCallsWithLocalObjects(module, stackObjects, nil)
+}
+
+func countRuntimeCallsWithLocalObjects(module mir.Module, stackObjects escapeanalysis.StackObjectResult, scalarObjects escapeanalysis.ScalarObjectResult) int {
 	count := 0
 	for _, fn := range module.Functions {
 		for _, block := range fn.Blocks {
@@ -249,6 +265,9 @@ func countRuntimeCallsWithStackObjects(module mir.Module, stackObjects escapeana
 				switch inst.Op.(type) {
 				case mir.ObjectNew, mir.ObjectAlloc:
 					if stackObjects.Contains(fn.ID, inst.Result) {
+						continue
+					}
+					if _, ok := scalarObjects.Get(fn.ID, inst.Result); ok {
 						continue
 					}
 					count++

@@ -94,6 +94,26 @@ func TestScalarObjectsPlansMutableDiamondPhi(t *testing.T) {
 	}
 }
 
+func TestScalarObjectsSelectsReferenceBearingObjectWithoutStackAllocation(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, ReturnRepr: mir.ReprStringRef, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			{Result: 0, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "value"}},
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.ObjectNew{Shape: 0, Fields: []mir.ValueID{0}}},
+			{Result: 2, Repr: mir.ReprStringRef, Op: mir.FieldGet{Object: 1, Shape: 0, Field: 0}},
+		}, Terminator: mir.Return{}}}}},
+	}
+	escapes := Analyze(module)
+	stack := StackObjects(module, escapes)
+	if stack.Contains(0, 1) {
+		t.Fatal("reference-bearing object was selected for physical stack allocation")
+	}
+	object, ok := ScalarObjectsWithEscapeAnalysis(module, stack, escapes).Get(0, 1)
+	if !ok || object.Mutable || len(object.Fields) != 1 || object.Fields[0] != 0 {
+		t.Fatalf("reference-bearing scalar object = %+v, ok=%v", object, ok)
+	}
+}
+
 func TestScalarObjectsRejectsAliasedObject(t *testing.T) {
 	module := mir.Module{
 		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "n", Repr: mir.ReprF64}}}},

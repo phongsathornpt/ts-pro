@@ -222,6 +222,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Carry mutable scalar field state across acyclic linear CFG chains connected by single-predecessor unconditional jumps. Field-read sources are planned as MIR values/typed zeroes before LLVM emission, so correctness does not depend on block emission order; merge points still retain the `alloca` fallback and clang acceptance covers the eliminated cross-block object.
   - [x] Scalar-replace direct acyclic diamond branches with explicit per-field Phi plans. Differing branch states emit LLVM `phi` values at the merge head, equal states reuse one source, and unmodified `ObjectAlloc` fields contribute typed-zero incoming values; nested branches still keep the `alloca` fallback.
   - [x] Generalize mutable scalar dataflow to nested acyclic branch trees/merges with a deterministic CFG worklist. Per-field state now builds reusable/chained synthetic Phi plans across multiple merge levels, preserves typed zero incoming values, and keeps cyclic/loop-carried field state conservative.
+  - [x] Scalar-elide proven non-escaping reference-bearing objects without placing the object itself on the native stack. String/object/array/function/JSValue field values keep their existing GC shadow roots, scalar field Phis remain typed pointer values, eliminated object roots/safepoints/runtime-call metrics are removed, and heap-escaping reference objects still retain precise-layout allocation plus write barriers. `examples/scalar_reference_object.ts` verifies native mutable string-field elimination.
 - [x] Make `go vet ./...` clean across native ABI boundaries without suppressing `unsafeptr`: exported opaque task/group handles use mmap-backed pointer tokens, real native pointer fields stay `unsafe.Pointer`, and `uintptr` remains only for internal numeric lookup/queue keys.
 - [~] Add parallel LLVM module compilation and deterministic object cache (deterministic LLVM/runtime object cache and parallel runtime compilation implemented; multi-module LLVM scheduling pending).
 
@@ -250,7 +251,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Current critical path
 
-1. Evaluate reference-bearing stack objects and closure stack allocation only after precise stack-root/interior-pointer handling is covered; task environments remain heap-backed when their lifetime crosses scheduler ownership.
+1. Finish physical stack allocation for non-scalarizable reference-bearing objects and closures only after precise stack-root/interior-pointer handling is covered. Reference-bearing objects that can be fully scalar-elided no longer require a physical object; task environments remain heap-backed when their lifetime crosses scheduler ownership.
 2. Finish nested rejection recovery and selected Promise combinators.
 3. Complete remaining dynamic object/property/call semantics and selected JavaScript coercion slow paths.
 4. Finish advanced generics, integer SSA across calls/loops, remaining array/object semantics, and broader TypeScript syntax/standard-library coverage.
