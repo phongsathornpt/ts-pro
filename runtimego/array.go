@@ -159,3 +159,76 @@ func tsnative_array_ref_set_checked(raw unsafe.Pointer, index C.double, value un
 	slot := unsafe.Pointer(nativeRefArrayElement(raw, i))
 	tsnative_gc_store_ref(raw, slot, value)
 }
+
+const nativeBoolArrayHeaderSize = uintptr(8)
+
+func nativeBoolArrayLen(raw unsafe.Pointer) uint64 {
+	if raw == nil {
+		return 0
+	}
+	return *(*uint64)(raw)
+}
+
+func nativeBoolArrayElement(raw unsafe.Pointer, index uint64) *uint8 {
+	return (*uint8)(unsafe.Add(raw, nativeBoolArrayHeaderSize+uintptr(index)))
+}
+
+func validBoolArrayIndex(raw unsafe.Pointer, index float64) (uint64, bool) {
+	if raw == nil || math.IsNaN(index) || math.IsInf(index, 0) || index < 0 || math.Trunc(index) != index || index >= math.Exp2(64) {
+		return 0, false
+	}
+	i := uint64(index)
+	return i, i < nativeBoolArrayLen(raw)
+}
+
+//export tsnative_array_bool_new
+func tsnative_array_bool_new(length C.uint64_t) unsafe.Pointer {
+	n := uint64(length)
+	maxUintptr := ^uintptr(0)
+	if n > uint64(maxUintptr-nativeBoolArrayHeaderSize) {
+		nativeAbort("boolean array allocation overflow")
+	}
+	raw := tsnative_heap_alloc_atomic(nativeBoolArrayHeaderSize + uintptr(n))
+	*(*uint64)(raw) = n
+	return raw
+}
+
+//export tsnative_array_bool_set
+func tsnative_array_bool_set(raw unsafe.Pointer, index C.uint64_t, value C.uint8_t) {
+	i := uint64(index)
+	if raw == nil || i >= nativeBoolArrayLen(raw) {
+		C.abort()
+	}
+	if value != 0 {
+		*nativeBoolArrayElement(raw, i) = 1
+	} else {
+		*nativeBoolArrayElement(raw, i) = 0
+	}
+}
+
+//export tsnative_array_bool_len
+func tsnative_array_bool_len(raw unsafe.Pointer) C.double {
+	return C.double(float64(nativeBoolArrayLen(raw)))
+}
+
+//export tsnative_array_bool_get
+func tsnative_array_bool_get(raw unsafe.Pointer, index C.double) C.uint8_t {
+	i, ok := validBoolArrayIndex(raw, float64(index))
+	if !ok {
+		return 0
+	}
+	return C.uint8_t(*nativeBoolArrayElement(raw, i))
+}
+
+//export tsnative_array_bool_set_checked
+func tsnative_array_bool_set_checked(raw unsafe.Pointer, index C.double, value C.uint8_t) {
+	i, ok := validBoolArrayIndex(raw, float64(index))
+	if !ok {
+		C.abort()
+	}
+	if value != 0 {
+		*nativeBoolArrayElement(raw, i) = 1
+	} else {
+		*nativeBoolArrayElement(raw, i) = 0
+	}
+}

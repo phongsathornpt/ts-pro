@@ -304,6 +304,14 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				for _, promise := range op.Promises {
 					checkValue(promise)
 				}
+			case PromiseAllBoolOp:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
+			case PromiseRaceBoolOp:
+				for _, promise := range op.Promises {
+					checkValue(promise)
+				}
 			case PromiseAllRefOp:
 				for _, promise := range op.Promises {
 					checkValue(promise)

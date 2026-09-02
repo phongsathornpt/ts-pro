@@ -1279,7 +1279,7 @@ func TestBuildNativePromiseAggregatesSingleWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run Promise aggregates: %v: %s", err, got)
 	}
-	want := "345\n7\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root"
+	want := "345\n7\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root\n101\n0\n1\nbool-reject\n44"
 	if strings.TrimSpace(string(got)) != want {
 		t.Fatalf("output = %q; want %q", got, want)
 	}

@@ -94,10 +94,18 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	switch op := op.(type) {
 	case mir.ArrayNewF64:
 		return append([]mir.ValueID(nil), op.Elements...), true
+	case mir.ArrayNewBool:
+		return append([]mir.ValueID(nil), op.Elements...), true
 	case mir.ArrayNewRef:
 		return append([]mir.ValueID(nil), op.Elements...), true
 	case mir.ArraySetF64:
 		return []mir.ValueID{op.Array, op.Index, op.Value}, true
+	case mir.ArraySetBool:
+		return []mir.ValueID{op.Array, op.Index, op.Value}, true
+	case mir.ArrayLengthBool:
+		return []mir.ValueID{op.Array}, true
+	case mir.ArrayGetBool:
+		return []mir.ValueID{op.Array, op.Index}, true
 	case mir.ArraySetRef:
 		return []mir.ValueID{op.Array, op.Index, op.Value}, true
 	case mir.ArrayLengthRef:
@@ -161,6 +169,10 @@ func continuationNativeOperands(op mir.Operation) ([]mir.ValueID, bool) {
 	case mir.PromiseAllF64:
 		return append([]mir.ValueID(nil), op.Promises...), true
 	case mir.PromiseRaceF64:
+		return append([]mir.ValueID(nil), op.Promises...), true
+	case mir.PromiseAllBool:
+		return append([]mir.ValueID(nil), op.Promises...), true
+	case mir.PromiseRaceBool:
 		return append([]mir.ValueID(nil), op.Promises...), true
 	case mir.PromiseAllRef:
 		return append([]mir.ValueID(nil), op.Promises...), true
@@ -309,6 +321,19 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepArrayGetF64, Result: inst.Result, Inst: inst})
+			case mir.ArrayLengthBool, mir.ArrayGetBool, mir.ArraySetBool, mir.ArrayNewBool:
+				operands, ok := continuationNativeOperands(op)
+				if !ok {
+					return nil
+				}
+				for _, operand := range operands {
+					if !available[operand] {
+						return nil
+					}
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: inst.Repr}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.DynamicCall:
 				if !available[op.Callee] || inst.Repr != mir.ReprJSValue {
 					return nil
@@ -355,6 +380,30 @@ func analyzeTaskContinuation(fn mir.Function) *taskContinuation {
 				available[inst.Result] = true
 				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
 			case mir.PromiseRaceF64:
+				for _, promise := range op.Promises {
+					if !available[promise] {
+						return nil
+					}
+				}
+				if inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseAllBool:
+				for _, promise := range op.Promises {
+					if !available[promise] {
+						return nil
+					}
+				}
+				if inst.Repr != mir.ReprTaskRef {
+					return nil
+				}
+				cont.SpillSlots[inst.Result] = taskSpillSlot{Index: len(cont.SpillSlots), Repr: mir.ReprTaskRef}
+				available[inst.Result] = true
+				cont.Steps = append(cont.Steps, taskSuspendStep{Kind: taskStepNativeOp, Result: inst.Result, Inst: inst})
+			case mir.PromiseRaceBool:
 				for _, promise := range op.Promises {
 					if !available[promise] {
 						return nil

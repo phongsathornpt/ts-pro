@@ -39,6 +39,8 @@ func (f *functionLowerer) arrayElementKind(arrayType frontend.TypeID) (hir.Array
 	switch f.module.source.Types[typ.Element].Kind {
 	case frontend.TypeNumber:
 		return hir.ArrayElementF64, nil
+	case frontend.TypeBoolean:
+		return hir.ArrayElementBool, nil
 	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion:
 		return hir.ArrayElementRef, nil
 	default:
@@ -238,6 +240,10 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			aggregate = f.emit(expr.Type, hir.PromiseAllF64Op{Promises: promises})
 		case expr.Kind == frontend.ExprPromiseRace && resultKind == hir.TaskResultF64:
 			aggregate = f.emit(expr.Type, hir.PromiseRaceF64Op{Promises: promises})
+		case expr.Kind == frontend.ExprPromiseAll && resultKind == hir.TaskResultBool:
+			aggregate = f.emit(expr.Type, hir.PromiseAllBoolOp{Promises: promises})
+		case expr.Kind == frontend.ExprPromiseRace && resultKind == hir.TaskResultBool:
+			aggregate = f.emit(expr.Type, hir.PromiseRaceBoolOp{Promises: promises})
 		case expr.Kind == frontend.ExprPromiseAll && resultKind == hir.TaskResultRef:
 			aggregate = f.emit(expr.Type, hir.PromiseAllRefOp{Promises: promises})
 		case expr.Kind == frontend.ExprPromiseRace && resultKind == hir.TaskResultRef:

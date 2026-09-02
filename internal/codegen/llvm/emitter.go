@@ -64,6 +64,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare ptr @tsnative_string_new(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_string_concat(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_array_f64_new(i64)\n")
+	b.WriteString("declare ptr @tsnative_array_bool_new(i64)\n")
 	b.WriteString("declare ptr @tsnative_array_ref_new(i64)\n")
 	b.WriteString("declare ptr @tsnative_channel_f64_new_checked(double)\n")
 	b.WriteString("declare i32 @tsnative_channel_f64_try_send(ptr, double)\n")
@@ -93,6 +94,10 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_array_f64_set_checked(ptr, double, double)\n")
 	b.WriteString("declare double @tsnative_array_f64_len(ptr)\n")
 	b.WriteString("declare double @tsnative_array_f64_get(ptr, double)\n")
+	b.WriteString("declare void @tsnative_array_bool_set(ptr, i64, i8)\n")
+	b.WriteString("declare void @tsnative_array_bool_set_checked(ptr, double, i8)\n")
+	b.WriteString("declare double @tsnative_array_bool_len(ptr)\n")
+	b.WriteString("declare i8 @tsnative_array_bool_get(ptr, double)\n")
 	b.WriteString("declare void @tsnative_array_ref_set(ptr, i64, ptr)\n")
 	b.WriteString("declare void @tsnative_array_ref_set_checked(ptr, double, ptr)\n")
 	b.WriteString("declare double @tsnative_array_ref_len(ptr)\n")
@@ -102,7 +107,7 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 	b.WriteString("declare void @tsnative_scheduler_shutdown()\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_promise_resolve_f64(double)\ndeclare ptr @tsnative_promise_resolve_bool(i8)\ndeclare ptr @tsnative_promise_resolve_ref(ptr)\ndeclare ptr @tsnative_promise_reject(ptr, i32)\n")
-	b.WriteString("declare ptr @tsnative_promise_all_f64(ptr, i64)\ndeclare ptr @tsnative_promise_race_f64(ptr, i64)\ndeclare ptr @tsnative_promise_all_ref(ptr, i64)\ndeclare ptr @tsnative_promise_race_ref(ptr, i64)\n")
+	b.WriteString("declare ptr @tsnative_promise_all_f64(ptr, i64)\ndeclare ptr @tsnative_promise_race_f64(ptr, i64)\ndeclare ptr @tsnative_promise_all_bool(ptr, i64)\ndeclare ptr @tsnative_promise_race_bool(ptr, i64)\ndeclare ptr @tsnative_promise_all_ref(ptr, i64)\ndeclare ptr @tsnative_promise_race_ref(ptr, i64)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_f64_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_bool_or_abort(ptr, ptr)\n")
 	b.WriteString("declare ptr @tsnative_task_spawn_ref_or_abort(ptr, ptr)\ndeclare ptr @tsnative_task_group_new()\ndeclare ptr @tsnative_task_group_spawn_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_f64_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_bool_or_abort(ptr, ptr, ptr)\ndeclare ptr @tsnative_task_group_spawn_ref_or_abort(ptr, ptr, ptr)\ndeclare i32 @tsnative_task_group_cancel(ptr)\ndeclare i32 @tsnative_task_group_join_release(ptr)\n")
@@ -358,6 +363,21 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			fmt.Fprintf(b, "  call void @tsnative_array_f64_set(ptr %s, i64 %d, double %s)\n", name, i, value)
 		}
 		return nil
+	case mir.ArrayNewBool:
+		if inst.Repr != mir.ReprArrayRef {
+			return fmt.Errorf("array.new.bool requires arrayref result")
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s = call ptr @tsnative_array_bool_new(i64 %d)\n", name, len(op.Elements))
+		for i, element := range op.Elements {
+			value, err := operand(values, element)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  %s.e%d = zext i1 %s to i8\n", name, i, value)
+			fmt.Fprintf(b, "  call void @tsnative_array_bool_set(ptr %s, i64 %d, i8 %s.e%d)\n", name, i, name, i)
+		}
+		return nil
 	case mir.ArrayNewRef:
 		if inst.Repr != mir.ReprArrayRef {
 			return fmt.Errorf("array.new.ref requires arrayref result")
@@ -406,6 +426,44 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			return err
 		}
 		fmt.Fprintf(b, "  call void @tsnative_array_f64_set_checked(ptr %s, double %s, double %s)\n", array, index, value)
+		values[inst.Result] = value
+		return nil
+	case mir.ArrayLengthBool:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = call double @tsnative_array_bool_len(ptr %s)\n", valueName(inst.Result), array)
+		return nil
+	case mir.ArrayGetBool:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = call i8 @tsnative_array_bool_get(ptr %s, double %s)\n", name, array, index)
+		fmt.Fprintf(b, "  %s = icmp ne i8 %s.raw, 0\n", name, name)
+		return nil
+	case mir.ArraySetBool:
+		array, err := operand(values, op.Array)
+		if err != nil {
+			return err
+		}
+		index, err := operand(values, op.Index)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		fmt.Fprintf(b, "  %s.raw = zext i1 %s to i8\n", name, value)
+		fmt.Fprintf(b, "  call void @tsnative_array_bool_set_checked(ptr %s, double %s, i8 %s.raw)\n", array, index, name)
 		values[inst.Result] = value
 		return nil
 	case mir.ArrayLengthRef:
@@ -633,6 +691,44 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			}
 			fmt.Fprintf(b, "  %s.base = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 0\n", name, len(op.Promises), name)
 			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_race_f64(ptr %s.base, i64 %d)\n", name, name, len(op.Promises))
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.PromiseAllBool:
+		name := valueName(inst.Result)
+		if len(op.Promises) == 0 {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_all_bool(ptr null, i64 0)\n", name)
+		} else {
+			fmt.Fprintf(b, "  %s.args = alloca [%d x ptr]\n", name, len(op.Promises))
+			for i, promiseID := range op.Promises {
+				promise, err := operand(values, promiseID)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  %s.arg%d = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 %d\n", name, i, len(op.Promises), name, i)
+				fmt.Fprintf(b, "  store ptr %s, ptr %s.arg%d\n", promise, name, i)
+			}
+			fmt.Fprintf(b, "  %s.base = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 0\n", name, len(op.Promises), name)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_all_bool(ptr %s.base, i64 %d)\n", name, name, len(op.Promises))
+		}
+		values[inst.Result] = name
+		return nil
+	case mir.PromiseRaceBool:
+		name := valueName(inst.Result)
+		if len(op.Promises) == 0 {
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_race_bool(ptr null, i64 0)\n", name)
+		} else {
+			fmt.Fprintf(b, "  %s.args = alloca [%d x ptr]\n", name, len(op.Promises))
+			for i, promiseID := range op.Promises {
+				promise, err := operand(values, promiseID)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(b, "  %s.arg%d = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 %d\n", name, i, len(op.Promises), name, i)
+				fmt.Fprintf(b, "  store ptr %s, ptr %s.arg%d\n", promise, name, i)
+			}
+			fmt.Fprintf(b, "  %s.base = getelementptr [%d x ptr], ptr %s.args, i32 0, i32 0\n", name, len(op.Promises), name)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_promise_race_bool(ptr %s.base, i64 %d)\n", name, name, len(op.Promises))
 		}
 		values[inst.Result] = name
 		return nil

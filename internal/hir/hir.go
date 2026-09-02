@@ -140,6 +140,7 @@ type ArrayElementKind uint8
 const (
 	ArrayElementInvalid ArrayElementKind = iota
 	ArrayElementF64
+	ArrayElementBool
 	ArrayElementRef
 )
 
@@ -217,6 +218,8 @@ type PromiseRejectOp struct {
 }
 type PromiseAllF64Op struct{ Promises []ValueID }
 type PromiseRaceF64Op struct{ Promises []ValueID }
+type PromiseAllBoolOp struct{ Promises []ValueID }
+type PromiseRaceBoolOp struct{ Promises []ValueID }
 type PromiseAllRefOp struct{ Promises []ValueID }
 type PromiseRaceRefOp struct{ Promises []ValueID }
 type TaskJoinOp struct {
@@ -295,6 +298,8 @@ func (PromiseAdoptOp) isOperation()     {}
 func (PromiseRejectOp) isOperation()    {}
 func (PromiseAllF64Op) isOperation()    {}
 func (PromiseRaceF64Op) isOperation()   {}
+func (PromiseAllBoolOp) isOperation()   {}
+func (PromiseRaceBoolOp) isOperation()  {}
 func (PromiseAllRefOp) isOperation()    {}
 func (PromiseRaceRefOp) isOperation()   {}
 func (TaskJoinOp) isOperation()         {}

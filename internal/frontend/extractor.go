@@ -796,7 +796,7 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		elementKind := e.result.Types[arrayType.Element].Kind
 		switch elementKind {
-		case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
+		case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
 		default:
 			return nil, fmt.Errorf("native array at %d does not support %s elements yet", node.Pos(), e.result.Types[arrayType.Element].Name)
 		}
@@ -1299,7 +1299,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 				return 0, elementErr
 			}
 			switch e.result.Types[elementID].Kind {
-			case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
+			case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
 				typ.Element = elementID
 			default:
 				return 0, fmt.Errorf("native array element type %q is not supported", e.result.Types[elementID].Name)
@@ -1311,6 +1311,8 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 				typ.Element = e.ensureSemanticType(TypeNumber, "number")
 			case "string[]":
 				typ.Element = e.ensureSemanticType(TypeString, "string")
+			case "boolean[]":
+				typ.Element = e.ensureSemanticType(TypeBoolean, "boolean")
 			default:
 				return 0, fmt.Errorf("native array type %q is not supported", text)
 			}

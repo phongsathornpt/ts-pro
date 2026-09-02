@@ -65,9 +65,7 @@ func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Exp
 	}
 	inputResult := e.result.Types[inputPromise.ReturnType]
 	switch inputResult.Kind {
-	case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
-	case TypeBoolean:
-		return nil, fmt.Errorf("%s at %d awaits boolean[] specialization before Promise<boolean> aggregates are supported", name, node.Pos())
+	case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
 	default:
 		return nil, fmt.Errorf("%s at %d does not support Promise result type %q yet", name, node.Pos(), inputResult.Name)
 	}

@@ -222,6 +222,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ArrayElementF64:
 			result.Op = mir.ArrayNewF64{Elements: elements}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayNewBool{Elements: elements}
 		case hir.ArrayElementRef:
 			result.Op = mir.ArrayNewRef{Elements: elements}
 		default:
@@ -231,6 +233,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ArrayElementF64:
 			result.Op = mir.ArrayLengthF64{Array: mir.ValueID(op.Array)}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayLengthBool{Array: mir.ValueID(op.Array)}
 		case hir.ArrayElementRef:
 			result.Op = mir.ArrayLengthRef{Array: mir.ValueID(op.Array)}
 		default:
@@ -240,6 +244,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ArrayElementF64:
 			result.Op = mir.ArrayGetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayGetBool{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
 		case hir.ArrayElementRef:
 			result.Op = mir.ArrayGetRef{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index)}
 		default:
@@ -249,6 +255,8 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		switch op.Element {
 		case hir.ArrayElementF64:
 			result.Op = mir.ArraySetF64{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArraySetBool{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
 		case hir.ArrayElementRef:
 			result.Op = mir.ArraySetRef{Array: mir.ValueID(op.Array), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
 		default:
@@ -302,6 +310,18 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			promises[i] = mir.ValueID(value)
 		}
 		result.Op = mir.PromiseRaceF64{Promises: promises}
+	case hir.PromiseAllBoolOp:
+		promises := make([]mir.ValueID, len(op.Promises))
+		for i, value := range op.Promises {
+			promises[i] = mir.ValueID(value)
+		}
+		result.Op = mir.PromiseAllBool{Promises: promises}
+	case hir.PromiseRaceBoolOp:
+		promises := make([]mir.ValueID, len(op.Promises))
+		for i, value := range op.Promises {
+			promises[i] = mir.ValueID(value)
+		}
+		result.Op = mir.PromiseRaceBool{Promises: promises}
 	case hir.PromiseAllRefOp:
 		promises := make([]mir.ValueID, len(op.Promises))
 		for i, value := range op.Promises {

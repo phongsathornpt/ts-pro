@@ -153,7 +153,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
               - [x] Add non-blocking homogeneous `Promise<number>` aggregate fan-in for array-literal inputs: `Promise.all<number>` preserves input order and returns `number[]`; `Promise.race<number>` preserves deterministic already-settled input order and first pending settlement. Aggregate runtime ownership retains aliased inputs, releases fresh temporaries without blocking non-last owners, propagates rejection, and passes worker=1 + 1 KiB nursery coverage.
               - [~] Extend aggregates to homogeneous reference/bool results, raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
                 - [x] Add homogeneous reference-result aggregates with precise ref-array Promise.all, reference Promise.race, scheduler-owned child settlement watchers, rejection propagation, retained-child lifetime management, and worker=1 + 1 KiB nursery coverage.
-                - [ ] Add homogeneous boolean aggregates after boolean[] native representation lands.
+                - [x] Add homogeneous boolean aggregates on compact boolean[] storage, including ordered Promise.all<boolean>, Promise.race<boolean>, pending settlement, rejection propagation, and single-worker stress coverage.
                 - [ ] Add raw value + PromiseLike inputs, non-literal iterables, and heterogeneous tuple results.
 - [x] Add structured concurrency, task groups, cancellation, and task-local context.
   - [x] Add cooperative task cancellation request/query intrinsics with native runtime flags and worker=1 regression coverage.
@@ -193,6 +193,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
     - [x] Add nested reference-array specialization using the same precise pointer-array layout; `number[][]` differential coverage verifies nested length/index reads.
     - [x] Add function-reference arrays, including `Array<(...) => ...>` classification and indirect closure calls loaded from arrays.
     - [x] Add boxed `any`/union reference arrays with element boxing on construction/assignment and JSValue-tagged indexed reads.
+    - [x] Add compact atomic `boolean[]` allocation/read/write/length specialization with i1/i8 LLVM boundary conversion and differential coverage.
   - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
 - [ ] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
 - [~] Broaden TypeScript syntax coverage: tuples, destructuring, rest/spread, optional chaining, nullish coalescing, switch/for-of, templates, default/optional params, enums, and module linking.

@@ -248,6 +248,10 @@ type ArrayNewF64 struct{ Elements []ValueID }
 type ArrayLengthF64 struct{ Array ValueID }
 type ArrayGetF64 struct{ Array, Index ValueID }
 type ArraySetF64 struct{ Array, Index, Value ValueID }
+type ArrayNewBool struct{ Elements []ValueID }
+type ArrayLengthBool struct{ Array ValueID }
+type ArrayGetBool struct{ Array, Index ValueID }
+type ArraySetBool struct{ Array, Index, Value ValueID }
 type ArrayNewRef struct{ Elements []ValueID }
 type ArrayLengthRef struct{ Array ValueID }
 type ArrayGetRef struct{ Array, Index ValueID }
@@ -301,6 +305,8 @@ type PromiseReject struct {
 }
 type PromiseAllF64 struct{ Promises []ValueID }
 type PromiseRaceF64 struct{ Promises []ValueID }
+type PromiseAllBool struct{ Promises []ValueID }
+type PromiseRaceBool struct{ Promises []ValueID }
 type PromiseAllRef struct{ Promises []ValueID }
 type PromiseRaceRef struct{ Promises []ValueID }
 type TaskJoin struct {
@@ -353,6 +359,10 @@ func (ArrayNewF64) isOperation()          {}
 func (ArrayLengthF64) isOperation()       {}
 func (ArrayGetF64) isOperation()          {}
 func (ArraySetF64) isOperation()          {}
+func (ArrayNewBool) isOperation()         {}
+func (ArrayLengthBool) isOperation()      {}
+func (ArrayGetBool) isOperation()         {}
+func (ArraySetBool) isOperation()         {}
 func (ArrayNewRef) isOperation()          {}
 func (ArrayLengthRef) isOperation()       {}
 func (ArrayGetRef) isOperation()          {}
@@ -371,6 +381,8 @@ func (PromiseAdopt) isOperation()         {}
 func (PromiseReject) isOperation()        {}
 func (PromiseAllF64) isOperation()        {}
 func (PromiseRaceF64) isOperation()       {}
+func (PromiseAllBool) isOperation()       {}
+func (PromiseRaceBool) isOperation()      {}
 func (PromiseAllRef) isOperation()        {}
 func (PromiseRaceRef) isOperation()       {}
 func (TaskJoin) isOperation()             {}

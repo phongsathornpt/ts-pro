@@ -106,3 +106,58 @@ async function aggregateRaceStrings(): Promise<string> {
 
 console.log(join(aggregateAllStrings()));
 console.log(join(aggregateRaceStrings()));
+
+function aggregateBoolScore(value: boolean): number {
+  if (value) return 1;
+  return 0;
+}
+
+async function aggregateAllBooleans(): Promise<number> {
+  const values = await Promise.all<boolean>([
+    Promise.resolve(true),
+    Promise.resolve(false),
+    Promise.resolve(true),
+  ]);
+  return aggregateBoolScore(values[0]!) * 100 + aggregateBoolScore(values[1]!) * 10 + aggregateBoolScore(values[2]!);
+}
+
+async function aggregateRaceBooleans(): Promise<number> {
+  const value = await Promise.race<boolean>([
+    Promise.resolve(false),
+    Promise.resolve(true),
+  ]);
+  return aggregateBoolScore(value);
+}
+
+console.log(join(aggregateAllBooleans()));
+console.log(join(aggregateRaceBooleans()));
+
+async function aggregateDelayedBoolean(milliseconds: number, value: boolean): Promise<boolean> {
+  sleep(milliseconds);
+  return value;
+}
+
+async function aggregatePendingRaceBooleans(): Promise<number> {
+  const value = await Promise.race<boolean>([
+    aggregateDelayedBoolean(8, false),
+    aggregateDelayedBoolean(1, true),
+  ]);
+  return aggregateBoolScore(value);
+}
+
+async function aggregateRejectBooleans(): Promise<number> {
+  try {
+    await Promise.all<boolean>([
+      Promise.resolve(true),
+      Promise.reject<boolean>("bool-reject"),
+      aggregateDelayedBoolean(3, true),
+    ]);
+    return 0;
+  } catch (error: any) {
+    console.log(error);
+    return 44;
+  }
+}
+
+console.log(join(aggregatePendingRaceBooleans()));
+console.log(join(aggregateRejectBooleans()));

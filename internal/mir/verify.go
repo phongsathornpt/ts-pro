@@ -264,6 +264,15 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 						return err
 					}
 				}
+			case ArrayNewBool:
+				if inst.Repr != ReprArrayRef {
+					return fmt.Errorf("boolean array v%d must produce arrayref", inst.Result)
+				}
+				for _, element := range op.Elements {
+					if err := checkValue(element); err != nil {
+						return err
+					}
+				}
 			case ArrayNewRef:
 				if inst.Repr != ReprArrayRef {
 					return fmt.Errorf("reference array v%d must produce arrayref", inst.Result)
@@ -277,6 +286,13 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Array); err != nil {
 					return err
 				}
+			case ArrayLengthBool:
+				if inst.Repr != ReprF64 {
+					return fmt.Errorf("boolean array length v%d must produce f64", inst.Result)
+				}
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
 			case ArrayLengthRef:
 				if inst.Repr != ReprF64 {
 					return fmt.Errorf("reference array length v%d must produce f64", inst.Result)
@@ -285,6 +301,16 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return err
 				}
 			case ArrayGetF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+			case ArrayGetBool:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("boolean array get v%d must produce bool", inst.Result)
+				}
 				if err := checkValue(op.Array); err != nil {
 					return err
 				}
@@ -313,6 +339,19 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				}
 				if inst.Repr != ReprF64 {
 					return fmt.Errorf("array set v%d must return f64 assigned value", inst.Result)
+				}
+			case ArraySetBool:
+				if inst.Repr != ReprBool {
+					return fmt.Errorf("boolean array set v%d must return bool", inst.Result)
+				}
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
 				}
 			case ArraySetRef:
 				if inst.Repr != ReprStringRef && inst.Repr != ReprObjectRef && inst.Repr != ReprArrayRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
@@ -446,6 +485,24 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 			case PromiseRaceF64:
 				if inst.Repr != ReprTaskRef {
 					return fmt.Errorf("Promise.race v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
+			case PromiseAllBool:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("boolean Promise.all v%d must produce TaskRef", inst.Result)
+				}
+				for _, promise := range op.Promises {
+					if err := checkValue(promise); err != nil {
+						return err
+					}
+				}
+			case PromiseRaceBool:
+				if inst.Repr != ReprTaskRef {
+					return fmt.Errorf("boolean Promise.race v%d must produce TaskRef", inst.Result)
 				}
 				for _, promise := range op.Promises {
 					if err := checkValue(promise); err != nil {

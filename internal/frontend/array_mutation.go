@@ -97,7 +97,7 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 	}
 	elementKind := e.result.Types[arrayType.Element].Kind
 	switch elementKind {
-	case TypeNumber, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
+	case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion:
 	default:
 		return Statement{}, true, fmt.Errorf("native indexed assignment does not support %s[] yet", e.result.Types[arrayType.Element].Name)
 	}
