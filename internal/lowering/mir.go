@@ -3,9 +3,9 @@ package lowering
 import (
 	"fmt"
 
-	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
-	"github.com/projectthorn/tsv7-bin/internal/hir"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
+	rangeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/range"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
 
 func LowerMIR(source hir.Module) (mir.Module, error) {

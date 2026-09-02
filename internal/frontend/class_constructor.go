@@ -3,7 +3,7 @@ package frontend
 import (
 	"fmt"
 
-	"github.com/projectthorn/tsv7-bin/internal/tsast"
+	"github.com/phongsathornpt/ts-pro/internal/tsast"
 )
 
 func (e *extractor) finalizeConstructorSignature(info *classInfo) error {

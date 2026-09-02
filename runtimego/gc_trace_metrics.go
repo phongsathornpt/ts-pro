@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 type nativeGCTraceMetrics struct {
 	words        uint64
@@ -24,22 +19,18 @@ func nativeGCTraceStats() nativeGCTraceMetrics {
 	return metrics
 }
 
-//export tsnative_gc_trace_words
-func tsnative_gc_trace_words() C.uint64_t {
-	return C.uint64_t(nativeGCTraceStats().words)
+func tsnative_gc_trace_words() uint64 {
+	return nativeGCTraceStats().words
 }
 
-//export tsnative_gc_trace_atomic_blocks
-func tsnative_gc_trace_atomic_blocks() C.uint64_t {
-	return C.uint64_t(nativeGCTraceStats().atomic)
+func tsnative_gc_trace_atomic_blocks() uint64 {
+	return nativeGCTraceStats().atomic
 }
 
-//export tsnative_gc_trace_precise_blocks
-func tsnative_gc_trace_precise_blocks() C.uint64_t {
-	return C.uint64_t(nativeGCTraceStats().precise)
+func tsnative_gc_trace_precise_blocks() uint64 {
+	return nativeGCTraceStats().precise
 }
 
-//export tsnative_gc_trace_conservative_blocks
-func tsnative_gc_trace_conservative_blocks() C.uint64_t {
-	return C.uint64_t(nativeGCTraceStats().conservative)
+func tsnative_gc_trace_conservative_blocks() uint64 {
+	return nativeGCTraceStats().conservative
 }

@@ -3,8 +3,8 @@ package compiler
 import (
 	"testing"
 
-	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
+	escapeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/escape"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
 
 func TestCountRuntimeCallsIncludesClosureAllocation(t *testing.T) {

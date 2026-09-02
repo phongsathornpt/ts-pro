@@ -3,7 +3,7 @@ package repr
 import (
 	"testing"
 
-	"github.com/projectthorn/tsv7-bin/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
 )
 
 func TestAnalyzeProvesScalarRepresentations(t *testing.T) {

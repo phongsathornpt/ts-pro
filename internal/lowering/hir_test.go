@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/hir"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func TestLowerTypedFibToHIR(t *testing.T) {

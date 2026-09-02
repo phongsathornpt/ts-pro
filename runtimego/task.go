@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"runtime"
@@ -275,27 +270,23 @@ func settledNativePromise(kind int32, status int32, value unsafe.Pointer, f64 fl
 	return task.handle
 }
 
-//export tsnative_promise_resolve_f64
-func tsnative_promise_resolve_f64(value C.double) unsafe.Pointer {
-	return settledNativePromise(nativeTaskResultF64, nativeTaskDone, nil, float64(value), 0)
+func tsnative_promise_resolve_f64(value float64) unsafe.Pointer {
+	return settledNativePromise(nativeTaskResultF64, nativeTaskDone, nil, value, 0)
 }
 
-//export tsnative_promise_resolve_bool
-func tsnative_promise_resolve_bool(value C.uint8_t) unsafe.Pointer {
-	return settledNativePromise(nativeTaskResultBool, nativeTaskDone, nil, 0, uint8(value))
+func tsnative_promise_resolve_bool(value uint8) unsafe.Pointer {
+	return settledNativePromise(nativeTaskResultBool, nativeTaskDone, nil, 0, value)
 }
 
-//export tsnative_promise_resolve_ref
 func tsnative_promise_resolve_ref(value unsafe.Pointer) unsafe.Pointer {
 	return settledNativePromise(nativeTaskResultRef, nativeTaskDone, value, 0, 0)
 }
 
-//export tsnative_promise_thenable_new
-func tsnative_promise_thenable_new(kind C.int) unsafe.Pointer {
-	if int32(kind) < nativeTaskResultF64 || int32(kind) > nativeTaskResultRef {
+func tsnative_promise_thenable_new(kind int32) unsafe.Pointer {
+	if kind < nativeTaskResultF64 || kind > nativeTaskResultRef {
 		nativeAbort("invalid thenable Promise result kind")
 	}
-	task := allocateNativeTask(nil, int32(kind))
+	task := allocateNativeTask(nil, kind)
 	if task == nil {
 		nativeAbort("thenable Promise allocation failed")
 	}
@@ -303,25 +294,22 @@ func tsnative_promise_thenable_new(kind C.int) unsafe.Pointer {
 	return task.handle
 }
 
-//export tsnative_promise_thenable_resolve_f64
-func tsnative_promise_thenable_resolve_f64(raw unsafe.Pointer, value C.double) {
+func tsnative_promise_thenable_resolve_f64(raw unsafe.Pointer, value float64) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultF64 {
 		return
 	}
-	settleNativeAggregate(task, false, nil, float64(value), 0, nil)
+	settleNativeAggregate(task, false, nil, value, 0, nil)
 }
 
-//export tsnative_promise_thenable_resolve_bool
-func tsnative_promise_thenable_resolve_bool(raw unsafe.Pointer, value C.uint8_t) {
+func tsnative_promise_thenable_resolve_bool(raw unsafe.Pointer, value uint8) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultBool {
 		return
 	}
-	settleNativeAggregate(task, false, nil, 0, uint8(value), nil)
+	settleNativeAggregate(task, false, nil, 0, value, nil)
 }
 
-//export tsnative_promise_thenable_resolve_ref
 func tsnative_promise_thenable_resolve_ref(raw, value unsafe.Pointer) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultRef {
@@ -330,7 +318,6 @@ func tsnative_promise_thenable_resolve_ref(raw, value unsafe.Pointer) {
 	settleNativeAggregate(task, false, nil, 0, 0, value)
 }
 
-//export tsnative_promise_thenable_reject
 func tsnative_promise_thenable_reject(raw, reason unsafe.Pointer) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil {
@@ -339,12 +326,11 @@ func tsnative_promise_thenable_reject(raw, reason unsafe.Pointer) {
 	settleNativeAggregate(task, true, reason, 0, 0, nil)
 }
 
-//export tsnative_promise_reject
-func tsnative_promise_reject(reason unsafe.Pointer, kind C.int) unsafe.Pointer {
-	if int32(kind) < nativeTaskResultF64 || int32(kind) > nativeTaskResultRef {
+func tsnative_promise_reject(reason unsafe.Pointer, kind int32) unsafe.Pointer {
+	if kind < nativeTaskResultF64 || kind > nativeTaskResultRef {
 		nativeAbort("invalid Promise.reject result kind")
 	}
-	return settledNativePromise(int32(kind), nativeTaskFailed, reason, 0, 0)
+	return settledNativePromise(kind, nativeTaskFailed, reason, 0, 0)
 }
 
 func spawnNativeTask(kind int32, entry, state unsafe.Pointer) unsafe.Pointer {
@@ -370,42 +356,34 @@ func spawnNativeTaskOrAbort(kind int32, entry, state unsafe.Pointer) unsafe.Poin
 	return task
 }
 
-//export tsnative_task_spawn
 func tsnative_task_spawn(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTask(nativeTaskResultVoid, entry, state)
 }
 
-//export tsnative_task_spawn_f64
 func tsnative_task_spawn_f64(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTask(nativeTaskResultF64, entry, state)
 }
 
-//export tsnative_task_spawn_bool
 func tsnative_task_spawn_bool(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTask(nativeTaskResultBool, entry, state)
 }
 
-//export tsnative_task_spawn_ref
 func tsnative_task_spawn_ref(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTask(nativeTaskResultRef, entry, state)
 }
 
-//export tsnative_task_spawn_or_abort
 func tsnative_task_spawn_or_abort(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTaskOrAbort(nativeTaskResultVoid, entry, state)
 }
 
-//export tsnative_task_spawn_f64_or_abort
 func tsnative_task_spawn_f64_or_abort(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTaskOrAbort(nativeTaskResultF64, entry, state)
 }
 
-//export tsnative_task_spawn_bool_or_abort
 func tsnative_task_spawn_bool_or_abort(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTaskOrAbort(nativeTaskResultBool, entry, state)
 }
 
-//export tsnative_task_spawn_ref_or_abort
 func tsnative_task_spawn_ref_or_abort(entry, state unsafe.Pointer) unsafe.Pointer {
 	return spawnNativeTaskOrAbort(nativeTaskResultRef, entry, state)
 }
@@ -539,7 +517,6 @@ func executeNativeTaskOnce(task *nativeTask) nativeTaskExecution {
 	return execution
 }
 
-//export tsnative_task_join
 func tsnative_task_join(raw unsafe.Pointer) int32 {
 	if raw == nil {
 		return -1
@@ -547,7 +524,6 @@ func tsnative_task_join(raw unsafe.Pointer) int32 {
 	return tsnative_scheduler_wait(raw)
 }
 
-//export tsnative_task_get_failure
 func tsnative_task_get_failure(raw, out unsafe.Pointer) int32 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || out == nil {
@@ -568,12 +544,10 @@ func tsnative_task_get_failure(raw, out unsafe.Pointer) int32 {
 	return -1
 }
 
-//export tsnative_task_get_status
 func tsnative_task_get_status(raw unsafe.Pointer) int32 {
 	return tsnative_scheduler_task_status(raw)
 }
 
-//export tsnative_task_wait_status
 func tsnative_task_wait_status(raw unsafe.Pointer) uint8 {
 	if raw == nil {
 		return 0
@@ -584,7 +558,6 @@ func tsnative_task_wait_status(raw unsafe.Pointer) uint8 {
 	return 0
 }
 
-//export tsnative_task_failure_ref
 func tsnative_task_failure_ref(raw unsafe.Pointer) unsafe.Pointer {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil {
@@ -646,52 +619,42 @@ func awaitNativeTask(raw unsafe.Pointer, kind int32, out unsafe.Pointer, statusO
 	return 0
 }
 
-//export tsnative_task_await_task
 func tsnative_task_await_task(raw unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, -1, nil, false, false)
 }
 
-//export tsnative_task_await_task_consume
 func tsnative_task_await_task_consume(raw unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, -1, nil, false, true)
 }
 
-//export tsnative_task_await_status_task
 func tsnative_task_await_status_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, -1, out, true, false)
 }
 
-//export tsnative_task_await_f64_task
 func tsnative_task_await_f64_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultF64, out, false, true)
 }
 
-//export tsnative_task_await_f64_shared
 func tsnative_task_await_f64_shared(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultF64, out, false, false)
 }
 
-//export tsnative_task_await_bool_task
 func tsnative_task_await_bool_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultBool, out, false, true)
 }
 
-//export tsnative_task_await_bool_shared
 func tsnative_task_await_bool_shared(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultBool, out, false, false)
 }
 
-//export tsnative_task_await_ref_task
 func tsnative_task_await_ref_task(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultRef, out, false, true)
 }
 
-//export tsnative_task_await_ref_shared
 func tsnative_task_await_ref_shared(raw, out unsafe.Pointer) int32 {
 	return awaitNativeTask(raw, nativeTaskResultRef, out, false, false)
 }
 
-//export tsnative_task_retain
 func tsnative_task_retain(raw unsafe.Pointer) int32 {
 	task := lookupNativeTask(uintptr(raw))
 	if !retainNativeTaskRef(task) {
@@ -700,7 +663,6 @@ func tsnative_task_retain(raw unsafe.Pointer) int32 {
 	return 0
 }
 
-//export tsnative_task_release
 func tsnative_task_release(raw unsafe.Pointer) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil {
@@ -734,7 +696,6 @@ func abortNativeTaskFailure(task *nativeTask) {
 	nativeAbortSignal()
 }
 
-//export tsnative_task_join_f64
 func tsnative_task_join_f64(raw unsafe.Pointer) float64 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultF64 {
@@ -746,7 +707,6 @@ func tsnative_task_join_f64(raw unsafe.Pointer) float64 {
 	return task.resultF64
 }
 
-//export tsnative_task_join_bool
 func tsnative_task_join_bool(raw unsafe.Pointer) uint8 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultBool {
@@ -758,7 +718,6 @@ func tsnative_task_join_bool(raw unsafe.Pointer) uint8 {
 	return task.resultBool
 }
 
-//export tsnative_task_join_ref
 func tsnative_task_join_ref(raw unsafe.Pointer) unsafe.Pointer {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultRef {
@@ -770,7 +729,6 @@ func tsnative_task_join_ref(raw unsafe.Pointer) unsafe.Pointer {
 	return task.resultRef
 }
 
-//export tsnative_task_join_release
 func tsnative_task_join_release(raw unsafe.Pointer) {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultVoid {
@@ -782,7 +740,6 @@ func tsnative_task_join_release(raw unsafe.Pointer) {
 	releaseNativeTaskRef(task)
 }
 
-//export tsnative_task_join_f64_release
 func tsnative_task_join_f64_release(raw unsafe.Pointer) float64 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultF64 {
@@ -796,7 +753,6 @@ func tsnative_task_join_f64_release(raw unsafe.Pointer) float64 {
 	return result
 }
 
-//export tsnative_task_join_bool_release
 func tsnative_task_join_bool_release(raw unsafe.Pointer) uint8 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultBool {
@@ -810,7 +766,6 @@ func tsnative_task_join_bool_release(raw unsafe.Pointer) uint8 {
 	return result
 }
 
-//export tsnative_task_join_ref_release
 func tsnative_task_join_ref_release(raw unsafe.Pointer) unsafe.Pointer {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil || task.kind != nativeTaskResultRef {
@@ -824,7 +779,6 @@ func tsnative_task_join_ref_release(raw unsafe.Pointer) unsafe.Pointer {
 	return result
 }
 
-//export tsnative_task_cancel
 func tsnative_task_cancel(raw unsafe.Pointer) int32 {
 	task := lookupNativeTask(uintptr(raw))
 	if task == nil {
@@ -834,7 +788,6 @@ func tsnative_task_cancel(raw unsafe.Pointer) int32 {
 	return 0
 }
 
-//export tsnative_task_is_cancelled
 func tsnative_task_is_cancelled() int32 {
 	task := lookupNativeTask(schedulerCurrentTaskPtr())
 	if task != nil && task.cancelRequested.Load() != 0 {
@@ -843,7 +796,6 @@ func tsnative_task_is_cancelled() int32 {
 	return 0
 }
 
-//export tsnative_task_fail_current
 func tsnative_task_fail_current(errorRef unsafe.Pointer) {
 	task := lookupNativeTask(schedulerCurrentTaskPtr())
 	if task == nil {
@@ -853,7 +805,6 @@ func tsnative_task_fail_current(errorRef unsafe.Pointer) {
 	task.failureRequested.Store(1)
 }
 
-//export tsnative_task_budget_poll_task
 func tsnative_task_budget_poll_task() int32 {
 	tsnative_gc_safepoint()
 	task := lookupNativeTask(schedulerCurrentTaskPtr())
@@ -871,7 +822,6 @@ func tsnative_task_budget_poll_task() int32 {
 	return -1
 }
 
-//export tsnative_task_yield_task
 func tsnative_task_yield_task() int32 {
 	if tsnative_scheduler_prepare_park() != 0 {
 		return -1
@@ -884,7 +834,6 @@ func tsnative_task_yield_task() int32 {
 	return 0
 }
 
-//export tsnative_task_yield
 func tsnative_task_yield() {
 	runtime.Gosched()
 }

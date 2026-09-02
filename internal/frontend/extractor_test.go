@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func TestExtractTypedFibFromTypeScript7(t *testing.T) {

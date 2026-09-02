@@ -1,10 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-#include <stdlib.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"math"
@@ -36,9 +30,8 @@ func validF64ArrayIndex(raw unsafe.Pointer, index float64) (uint64, bool) {
 	return i, i < nativeF64ArrayLen(raw)
 }
 
-//export tsnative_array_f64_new
-func tsnative_array_f64_new(length C.uint64_t) unsafe.Pointer {
-	n := uint64(length)
+func tsnative_array_f64_new(length uint64) unsafe.Pointer {
+	n := length
 	maxUintptr := ^uintptr(0)
 	if n > uint64((maxUintptr-nativeF64ArrayHeaderSize)/unsafe.Sizeof(float64(0))) {
 		nativeAbort("f64 array allocation overflow")
@@ -49,36 +42,32 @@ func tsnative_array_f64_new(length C.uint64_t) unsafe.Pointer {
 	return raw
 }
 
-//export tsnative_array_f64_set
-func tsnative_array_f64_set(raw unsafe.Pointer, index C.uint64_t, value C.double) {
-	i := uint64(index)
+func tsnative_array_f64_set(raw unsafe.Pointer, index uint64, value float64) {
+	i := index
 	if raw == nil || i >= nativeF64ArrayLen(raw) {
-		C.abort()
+		nativeAbort("f64 array index out of bounds")
 	}
-	*nativeF64ArrayElement(raw, i) = float64(value)
+	*nativeF64ArrayElement(raw, i) = value
 }
 
-//export tsnative_array_f64_len
-func tsnative_array_f64_len(raw unsafe.Pointer) C.double {
-	return C.double(float64(nativeF64ArrayLen(raw)))
+func tsnative_array_f64_len(raw unsafe.Pointer) float64 {
+	return float64(nativeF64ArrayLen(raw))
 }
 
-//export tsnative_array_f64_get
-func tsnative_array_f64_get(raw unsafe.Pointer, index C.double) C.double {
-	i, ok := validF64ArrayIndex(raw, float64(index))
+func tsnative_array_f64_get(raw unsafe.Pointer, index float64) float64 {
+	i, ok := validF64ArrayIndex(raw, index)
 	if !ok {
-		return C.double(math.NaN())
+		return math.NaN()
 	}
-	return C.double(*nativeF64ArrayElement(raw, i))
+	return *nativeF64ArrayElement(raw, i)
 }
 
-//export tsnative_array_f64_set_checked
-func tsnative_array_f64_set_checked(raw unsafe.Pointer, index C.double, value C.double) {
-	i, ok := validF64ArrayIndex(raw, float64(index))
+func tsnative_array_f64_set_checked(raw unsafe.Pointer, index float64, value float64) {
+	i, ok := validF64ArrayIndex(raw, index)
 	if !ok {
-		C.abort()
+		nativeAbort("f64 array index invalid")
 	}
-	*nativeF64ArrayElement(raw, i) = float64(value)
+	*nativeF64ArrayElement(raw, i) = value
 }
 
 const nativeRefArrayHeaderSize = uintptr(8)
@@ -103,9 +92,8 @@ func validRefArrayIndex(raw unsafe.Pointer, index float64) (uint64, bool) {
 	return i, i < nativeRefArrayLen(raw)
 }
 
-//export tsnative_array_ref_new
-func tsnative_array_ref_new(length C.uint64_t) unsafe.Pointer {
-	n := uint64(length)
+func tsnative_array_ref_new(length uint64) unsafe.Pointer {
+	n := length
 	word := unsafe.Sizeof(uintptr(0))
 	maxUintptr := ^uintptr(0)
 	if n > uint64((maxUintptr-nativeRefArrayHeaderSize)/word) {
@@ -126,35 +114,31 @@ func tsnative_array_ref_new(length C.uint64_t) unsafe.Pointer {
 	return raw
 }
 
-//export tsnative_array_ref_set
-func tsnative_array_ref_set(raw unsafe.Pointer, index C.uint64_t, value unsafe.Pointer) {
-	i := uint64(index)
+func tsnative_array_ref_set(raw unsafe.Pointer, index uint64, value unsafe.Pointer) {
+	i := index
 	if raw == nil || i >= nativeRefArrayLen(raw) {
-		C.abort()
+		nativeAbort("ref array index out of bounds")
 	}
 	slot := unsafe.Pointer(nativeRefArrayElement(raw, i))
 	tsnative_gc_store_ref(raw, slot, value)
 }
 
-//export tsnative_array_ref_len
-func tsnative_array_ref_len(raw unsafe.Pointer) C.double {
-	return C.double(float64(nativeRefArrayLen(raw)))
+func tsnative_array_ref_len(raw unsafe.Pointer) float64 {
+	return float64(nativeRefArrayLen(raw))
 }
 
-//export tsnative_array_ref_get
-func tsnative_array_ref_get(raw unsafe.Pointer, index C.double) unsafe.Pointer {
-	i, ok := validRefArrayIndex(raw, float64(index))
+func tsnative_array_ref_get(raw unsafe.Pointer, index float64) unsafe.Pointer {
+	i, ok := validRefArrayIndex(raw, index)
 	if !ok {
 		return nil
 	}
 	return *nativeRefArrayElement(raw, i)
 }
 
-//export tsnative_array_ref_set_checked
-func tsnative_array_ref_set_checked(raw unsafe.Pointer, index C.double, value unsafe.Pointer) {
-	i, ok := validRefArrayIndex(raw, float64(index))
+func tsnative_array_ref_set_checked(raw unsafe.Pointer, index float64, value unsafe.Pointer) {
+	i, ok := validRefArrayIndex(raw, index)
 	if !ok {
-		C.abort()
+		nativeAbort("ref array index invalid")
 	}
 	slot := unsafe.Pointer(nativeRefArrayElement(raw, i))
 	tsnative_gc_store_ref(raw, slot, value)
@@ -181,9 +165,8 @@ func validBoolArrayIndex(raw unsafe.Pointer, index float64) (uint64, bool) {
 	return i, i < nativeBoolArrayLen(raw)
 }
 
-//export tsnative_array_bool_new
-func tsnative_array_bool_new(length C.uint64_t) unsafe.Pointer {
-	n := uint64(length)
+func tsnative_array_bool_new(length uint64) unsafe.Pointer {
+	n := length
 	maxUintptr := ^uintptr(0)
 	if n > uint64(maxUintptr-nativeBoolArrayHeaderSize) {
 		nativeAbort("boolean array allocation overflow")
@@ -193,11 +176,10 @@ func tsnative_array_bool_new(length C.uint64_t) unsafe.Pointer {
 	return raw
 }
 
-//export tsnative_array_bool_set
-func tsnative_array_bool_set(raw unsafe.Pointer, index C.uint64_t, value C.uint8_t) {
-	i := uint64(index)
+func tsnative_array_bool_set(raw unsafe.Pointer, index uint64, value uint8) {
+	i := index
 	if raw == nil || i >= nativeBoolArrayLen(raw) {
-		C.abort()
+		nativeAbort("bool array index out of bounds")
 	}
 	if value != 0 {
 		*nativeBoolArrayElement(raw, i) = 1
@@ -206,25 +188,22 @@ func tsnative_array_bool_set(raw unsafe.Pointer, index C.uint64_t, value C.uint8
 	}
 }
 
-//export tsnative_array_bool_len
-func tsnative_array_bool_len(raw unsafe.Pointer) C.double {
-	return C.double(float64(nativeBoolArrayLen(raw)))
+func tsnative_array_bool_len(raw unsafe.Pointer) float64 {
+	return float64(nativeBoolArrayLen(raw))
 }
 
-//export tsnative_array_bool_get
-func tsnative_array_bool_get(raw unsafe.Pointer, index C.double) C.uint8_t {
-	i, ok := validBoolArrayIndex(raw, float64(index))
+func tsnative_array_bool_get(raw unsafe.Pointer, index float64) uint8 {
+	i, ok := validBoolArrayIndex(raw, index)
 	if !ok {
 		return 0
 	}
-	return C.uint8_t(*nativeBoolArrayElement(raw, i))
+	return *nativeBoolArrayElement(raw, i)
 }
 
-//export tsnative_array_bool_set_checked
-func tsnative_array_bool_set_checked(raw unsafe.Pointer, index C.double, value C.uint8_t) {
-	i, ok := validBoolArrayIndex(raw, float64(index))
+func tsnative_array_bool_set_checked(raw unsafe.Pointer, index float64, value uint8) {
+	i, ok := validBoolArrayIndex(raw, index)
 	if !ok {
-		C.abort()
+		nativeAbort("bool array index invalid")
 	}
 	if value != 0 {
 		*nativeBoolArrayElement(raw, i) = 1

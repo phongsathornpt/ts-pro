@@ -1,15 +1,9 @@
-package main
-
-/*
-#include <stddef.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"unsafe"
 )
 
@@ -190,10 +184,9 @@ func (state *nativeRootState) shutdown() [][]byte {
 	return pages
 }
 
-//export tsnative_gc_enter
 func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
 	nativeHeapWorld.RLock()
-	tid := syscall.Gettid()
+	tid := nativeCurrentThreadID()
 	index := nativeRootShardIndexForThread(tid)
 	shard, token := nativeRoots.lockShardWithToken(index)
 	key := uintptr(token)
@@ -204,11 +197,10 @@ func tsnative_gc_enter(slots unsafe.Pointer, count uintptr) unsafe.Pointer {
 	return token
 }
 
-//export tsnative_gc_leave
 func tsnative_gc_leave(raw unsafe.Pointer) {
 	nativeHeapWorld.RLock()
 	token := uintptr(raw)
-	tid := syscall.Gettid()
+	tid := nativeCurrentThreadID()
 	shard := nativeRoots.shardForToken(raw)
 	shard.Lock()
 	frame := shard.roots[token]
@@ -231,13 +223,12 @@ func tsnative_gc_leave(raw unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-//export tsnative_gc_root_register
 func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
 	if slot == nil {
 		return nil
 	}
 	nativeHeapWorld.RLock()
-	index := nativeRootShardIndexForThread(syscall.Gettid())
+	index := nativeRootShardIndexForThread(nativeCurrentThreadID())
 	shard, token := nativeRoots.lockShardWithToken(index)
 	shard.roots[uintptr(token)] = &nativeRootFrame{token: token, slots: slot, count: 1, persistent: true}
 	shard.Unlock()
@@ -245,7 +236,6 @@ func tsnative_gc_root_register(slot unsafe.Pointer) unsafe.Pointer {
 	return token
 }
 
-//export tsnative_gc_root_unregister
 func tsnative_gc_root_unregister(raw unsafe.Pointer) {
 	if raw == nil {
 		return
@@ -267,14 +257,12 @@ func tsnative_gc_root_unregister(raw unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-//export tsnative_gc_handoff_begin
 func tsnative_gc_handoff_begin() {
 	nativeHeapWorld.RLock()
 	nativeRoots.handoffs.Add(1)
 	nativeHeapWorld.RUnlock()
 }
 
-//export tsnative_gc_handoff_end
 func tsnative_gc_handoff_end() {
 	nativeHeapWorld.RLock()
 	for {

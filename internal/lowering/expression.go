@@ -3,8 +3,8 @@ package lowering
 import (
 	"fmt"
 
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
 )
 
 func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (frontend.TypeID, hir.ChannelElementKind, error) {

@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"sync"
@@ -140,47 +135,38 @@ func resetNativeGenerationalMetrics() {
 	nativeGCMinorNurseryScans.Store(0)
 }
 
-//export tsnative_gc_minor_collections
-func tsnative_gc_minor_collections() C.uint64_t {
-	return C.uint64_t(nativeGCMinorCollections.Load())
+func tsnative_gc_minor_collections() uint64 {
+	return nativeGCMinorCollections.Load()
 }
 
-//export tsnative_gc_major_collections
-func tsnative_gc_major_collections() C.uint64_t {
-	return C.uint64_t(nativeGCMajorCollections.Load())
+func tsnative_gc_major_collections() uint64 {
+	return nativeGCMajorCollections.Load()
 }
 
-//export tsnative_gc_promoted_blocks
-func tsnative_gc_promoted_blocks() C.uint64_t {
-	return C.uint64_t(nativeGCPromotedBlocks.Load())
+func tsnative_gc_promoted_blocks() uint64 {
+	return nativeGCPromotedBlocks.Load()
 }
 
-//export tsnative_gc_promoted_bytes
-func tsnative_gc_promoted_bytes() C.uint64_t {
-	return C.uint64_t(nativeGCPromotedBytes.Load())
+func tsnative_gc_promoted_bytes() uint64 {
+	return nativeGCPromotedBytes.Load()
 }
 
-//export tsnative_gc_old_bytes
-func tsnative_gc_old_bytes() C.uint64_t {
-	return C.uint64_t(nativeHeapOldBytes.Load())
+func tsnative_gc_old_bytes() uint64 {
+	return nativeHeapOldBytes.Load()
 }
 
-//export tsnative_gc_minor_old_scans
-func tsnative_gc_minor_old_scans() C.uint64_t {
-	return C.uint64_t(nativeGCMinorOldScans.Load())
+func tsnative_gc_minor_old_scans() uint64 {
+	return nativeGCMinorOldScans.Load()
 }
 
-//export tsnative_gc_nursery_bytes
-func tsnative_gc_nursery_bytes() C.uint64_t {
-	return C.uint64_t(nativeNurseryLiveBytes())
+func tsnative_gc_nursery_bytes() uint64 {
+	return nativeNurseryLiveBytes()
 }
 
-//export tsnative_gc_nursery_blocks
-func tsnative_gc_nursery_blocks() C.uint64_t {
-	return C.uint64_t(nativeNurseryBlockCount())
+func tsnative_gc_nursery_blocks() uint64 {
+	return uint64(nativeNurseryBlockCount())
 }
 
-//export tsnative_gc_minor_nursery_scans
-func tsnative_gc_minor_nursery_scans() C.uint64_t {
-	return C.uint64_t(nativeGCMinorNurseryScans.Load())
+func tsnative_gc_minor_nursery_scans() uint64 {
+	return nativeGCMinorNurseryScans.Load()
 }

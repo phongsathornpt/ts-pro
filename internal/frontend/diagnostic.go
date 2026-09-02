@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 type DiagnosticLevel string

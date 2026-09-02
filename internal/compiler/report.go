@@ -3,10 +3,10 @@ package compiler
 import (
 	"time"
 
-	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
-	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
-	"github.com/projectthorn/tsv7-bin/internal/hir"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
+	escapeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/escape"
+	rangeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/range"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
 
 type BuildTimings struct {

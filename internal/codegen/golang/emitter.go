@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/projectthorn/tsv7-bin/internal/mir"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
 
 // Emit produces a standalone Go program from the currently supported pure-Go
@@ -59,9 +59,14 @@ func Emit(module mir.Module) (string, error) {
 	}
 	body.WriteString("}\n")
 
+	if g.usesJSConvert || g.usesJSAdd {
+		g.usesFmt = true
+		g.usesMath = true
+	}
+
 	var source strings.Builder
 	source.WriteString("package main\n\n")
-	if g.usesFmt || g.usesMath {
+	if g.usesFmt || g.usesMath || g.usesRuntime || g.usesSync {
 		source.WriteString("import (\n")
 		if g.usesFmt {
 			source.WriteString("\t\"fmt\"\n")
@@ -69,7 +74,77 @@ func Emit(module mir.Module) (string, error) {
 		if g.usesMath {
 			source.WriteString("\t\"math\"\n")
 		}
+		if g.usesRuntime {
+			source.WriteString("\t\"runtime\"\n")
+		}
+		if g.usesSync {
+			source.WriteString("\t\"sync\"\n")
+		}
 		source.WriteString(")\n\n")
+	}
+
+	if g.usesTasks {
+		source.WriteString("type tsnativeTask struct {\n\tval any\n\terr any\n\tdone chan struct{}\n}\n\n")
+		source.WriteString("func tsnativeDoneChan() chan struct{} {\n\tc := make(chan struct{})\n\tclose(c)\n\treturn c\n}\n\n")
+	}
+	if g.usesTaskGroups {
+		source.WriteString("type tsnativeTaskGroup struct {\n\twg sync.WaitGroup\n\tmu sync.Mutex\n\tcancelled bool\n}\n\n")
+	}
+	if g.usesJSConvert {
+		source.WriteString(`func tsnativeToF64(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int32:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case bool:
+		if x {
+			return 1
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+func tsnativeToString(v any) string {
+	if v == nil {
+		return "undefined"
+	}
+	return fmt.Sprint(v)
+}
+
+func tsnativeToBool(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case float64:
+		return x != 0 && !math.IsNaN(x)
+	case string:
+		return x != ""
+	default:
+		return v != nil
+	}
+}
+
+`)
+	}
+	if g.usesJSAdd {
+		source.WriteString(`func tsnativeDynamicAdd(left, right any) any {
+	if s, ok := left.(string); ok {
+		return s + tsnativeToString(right)
+	}
+	if s, ok := right.(string); ok {
+		return tsnativeToString(left) + s
+	}
+	return tsnativeToF64(left) + tsnativeToF64(right)
+}
+
+`)
 	}
 	source.WriteString(body.String())
 
@@ -81,11 +156,17 @@ func Emit(module mir.Module) (string, error) {
 }
 
 type generator struct {
-	module    mir.Module
-	functions map[mir.FunctionID]mir.Function
-	shapes    map[mir.ShapeID]mir.Shape
-	usesFmt   bool
-	usesMath  bool
+	module         mir.Module
+	functions      map[mir.FunctionID]mir.Function
+	shapes         map[mir.ShapeID]mir.Shape
+	usesFmt        bool
+	usesMath       bool
+	usesRuntime    bool
+	usesSync       bool
+	usesTasks      bool
+	usesTaskGroups bool
+	usesJSConvert  bool
+	usesJSAdd      bool
 }
 
 func (g *generator) emitFunction(out *strings.Builder, fn mir.Function) error {
@@ -273,11 +354,11 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		}
 		assign("[]float64{" + strings.Join(elements, ", ") + "}")
 	case mir.ArrayLengthF64:
-		assign("float64(len(" + operand(op.Array) + "))")
+		assign("float64(len(" + operand(op.Array) + ".([]float64)))")
 	case mir.ArrayGetF64:
-		assign(fmt.Sprintf("%s[int(%s)]", operand(op.Array), operand(op.Index)))
+		assign(fmt.Sprintf("%s.([]float64)[int(%s)]", operand(op.Array), operand(op.Index)))
 	case mir.ArraySetF64:
-		fmt.Fprintf(out, "\t%s[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
+		fmt.Fprintf(out, "\t%s.([]float64)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
 		assign(operand(op.Value))
 	case mir.ObjectNew:
 		shape, ok := g.shapes[op.Shape]
@@ -333,15 +414,189 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 			return unsupportedInstruction(fn, block, inst, "intrinsic arity")
 		}
 		switch op.Intrinsic {
-		case mir.IntrinsicConsoleLogF64, mir.IntrinsicConsoleLogString:
+		case mir.IntrinsicConsoleLogF64, mir.IntrinsicConsoleLogString, mir.IntrinsicConsoleLogJSValue:
 			g.usesFmt = true
 			fmt.Fprintf(out, "\tfmt.Println(%s)\n", operand(op.Args[0]))
 		default:
 			return unsupportedInstruction(fn, block, inst, "intrinsic")
 		}
-	case mir.ArrayNewBool, mir.ArrayLengthBool, mir.ArrayGetBool, mir.ArraySetBool,
-		mir.ArrayNewRef, mir.ArrayLengthRef, mir.ArrayGetRef, mir.ArraySetRef:
-		return unsupportedInstruction(fn, block, inst, "only numeric arrays are supported")
+	case mir.ArrayNewBool:
+		elements := make([]string, len(op.Elements))
+		for i, element := range op.Elements {
+			elements[i] = operand(element)
+		}
+		assign("[]bool{" + strings.Join(elements, ", ") + "}")
+	case mir.ArrayLengthBool:
+		assign("float64(len(" + operand(op.Array) + ".([]bool)))")
+	case mir.ArrayGetBool:
+		assign(fmt.Sprintf("%s.([]bool)[int(%s)]", operand(op.Array), operand(op.Index)))
+	case mir.ArraySetBool:
+		fmt.Fprintf(out, "\t%s.([]bool)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
+		assign(operand(op.Value))
+	case mir.ArrayNewRef:
+		elements := make([]string, len(op.Elements))
+		for i, element := range op.Elements {
+			elements[i] = operand(element)
+		}
+		assign("[]any{" + strings.Join(elements, ", ") + "}")
+	case mir.ArrayLengthRef:
+		assign("float64(len(" + operand(op.Array) + ".([]any)))")
+	case mir.ArrayGetRef:
+		assign(fmt.Sprintf("%s.([]any)[int(%s)]", operand(op.Array), operand(op.Index)))
+	case mir.ArraySetRef:
+		fmt.Fprintf(out, "\t%s.([]any)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
+		assign(operand(op.Value))
+	case mir.ConstJSValue:
+		assign("nil")
+	case mir.BoxJSValue:
+		assign(operand(op.Value))
+	case mir.UnboxJSValue:
+		switch op.Kind {
+		case mir.UnboxJSNumber:
+			g.usesJSConvert = true
+			assign(fmt.Sprintf("tsnativeToF64(%s)", operand(op.Value)))
+		case mir.UnboxJSString:
+			g.usesJSConvert = true
+			assign(fmt.Sprintf("tsnativeToString(%s)", operand(op.Value)))
+		case mir.UnboxJSBoolean:
+			g.usesJSConvert = true
+			assign(fmt.Sprintf("tsnativeToBool(%s)", operand(op.Value)))
+		default:
+			assign(operand(op.Value))
+		}
+	case mir.DynamicAddJSValue:
+		g.usesJSConvert = true
+		g.usesJSAdd = true
+		assign(fmt.Sprintf("tsnativeDynamicAdd(%s, %s)", operand(op.Left), operand(op.Right)))
+	case mir.DynamicBinaryJSValue:
+		g.usesJSConvert = true
+		switch op.Operator {
+		case mir.DynamicJSSub:
+			assign(fmt.Sprintf("tsnativeToF64(%s) - tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSMul:
+			assign(fmt.Sprintf("tsnativeToF64(%s) * tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSDiv:
+			assign(fmt.Sprintf("tsnativeToF64(%s) / tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSLessThan:
+			assign(fmt.Sprintf("tsnativeToF64(%s) < tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSLessEqual:
+			assign(fmt.Sprintf("tsnativeToF64(%s) <= tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSGreaterThan:
+			assign(fmt.Sprintf("tsnativeToF64(%s) > tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSGreaterEqual:
+			assign(fmt.Sprintf("tsnativeToF64(%s) >= tsnativeToF64(%s)", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSEqual, mir.DynamicJSStrictEqual:
+			assign(fmt.Sprintf("%s == %s", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSNotEqual, mir.DynamicJSStrictNotEqual:
+			assign(fmt.Sprintf("%s != %s", operand(op.Left), operand(op.Right)))
+		default:
+			return unsupportedInstruction(fn, block, inst, "dynamic binary operator")
+		}
+	case mir.ClosureNew:
+		callee, ok := g.functions[op.Callee]
+		if !ok {
+			return unsupportedInstruction(fn, block, inst, fmt.Sprintf("missing callee f%d", op.Callee))
+		}
+		captureCount := len(op.Captures)
+		callParams := make([]string, 0, len(callee.Params))
+		for i := 0; i < captureCount; i++ {
+			callParams = append(callParams, operand(op.Captures[i]))
+		}
+		argNames := make([]string, 0, len(callee.Params)-captureCount)
+		for i := captureCount; i < len(callee.Params); i++ {
+			argName := fmt.Sprintf("a%d", i-captureCount)
+			argType, _ := g.goTypeForValue(callee.Params[i].Repr, callee.Params[i].ObjectShape, callee.Params[i].HasObjectShape)
+			argNames = append(argNames, fmt.Sprintf("%s %s", argName, argType))
+			callParams = append(callParams, argName)
+		}
+		retType, _ := g.goTypeForValue(callee.ReturnRepr, callee.ReturnObjectShape, callee.HasReturnObjectShape)
+		closureSig := fmt.Sprintf("func(%s)", strings.Join(argNames, ", "))
+		if retType != "" {
+			closureSig += " " + retType
+		}
+		retPrefix := ""
+		if retType != "" {
+			retPrefix = "return "
+		}
+		assign(fmt.Sprintf("%s {\n\t\t%s%s(%s)\n\t}", closureSig, retPrefix, goFunctionName(op.Callee), strings.Join(callParams, ", ")))
+	case mir.ClosureCall:
+		args := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			args[i] = operand(arg)
+		}
+		argTypes := make([]string, len(op.Args))
+		for i, arg := range op.Args {
+			argRepr := valueTypes[arg]
+			t, _ := g.goType(argRepr)
+			argTypes[i] = t
+		}
+		retType, _ := g.goType(inst.Repr)
+		sig := fmt.Sprintf("func(%s)", strings.Join(argTypes, ", "))
+		if retType != "" {
+			sig += " " + retType
+		}
+		callStr := fmt.Sprintf("%s.(%s)(%s)", operand(op.Closure), sig, strings.Join(args, ", "))
+		if inst.Repr == mir.ReprVoid {
+			fmt.Fprintf(out, "\t%s\n", callStr)
+		} else {
+			assign(callStr)
+		}
+	case mir.TaskSpawn:
+		g.usesTasks = true
+		callee, ok := g.functions[op.Callee]
+		if !ok {
+			return unsupportedInstruction(fn, block, inst, fmt.Sprintf("missing callee f%d", op.Callee))
+		}
+		args := make([]string, len(op.Captures))
+		for i, cap := range op.Captures {
+			args[i] = operand(cap)
+		}
+		assign("&tsnativeTask{done: make(chan struct{})}")
+		fmt.Fprintf(out, "\tgo func(t *tsnativeTask) {\n\t\tdefer close(t.done)\n")
+		if callee.ReturnRepr != mir.ReprVoid {
+			fmt.Fprintf(out, "\t\tt.val = %s(%s)\n\t}(%s)\n", goFunctionName(op.Callee), strings.Join(args, ", "), result)
+		} else {
+			fmt.Fprintf(out, "\t\t%s(%s)\n\t}(%s)\n", goFunctionName(op.Callee), strings.Join(args, ", "), result)
+		}
+	case mir.TaskJoin:
+		fmt.Fprintf(out, "\t<-%s.done\n", operand(op.Task))
+		if inst.Repr != mir.ReprVoid {
+			targetType, _ := g.goType(inst.Repr)
+			assign(fmt.Sprintf("%s.val.(%s)", operand(op.Task), targetType))
+		}
+	case mir.TaskWait:
+		fmt.Fprintf(out, "\t<-%s.done\n", operand(op.Task))
+	case mir.TaskYield:
+		g.usesRuntime = true
+		fmt.Fprintf(out, "\truntime.Gosched()\n")
+	case mir.TaskCancel:
+		fmt.Fprintf(out, "\t_ = %s\n", operand(op.Task))
+	case mir.TaskCancelled:
+		assign("false")
+	case mir.PromiseResolve:
+		g.usesTasks = true
+		assign(fmt.Sprintf("&tsnativeTask{val: %s, done: tsnativeDoneChan()}", operand(op.Value)))
+	case mir.PromiseReject:
+		g.usesTasks = true
+		assign(fmt.Sprintf("&tsnativeTask{err: %s, done: tsnativeDoneChan()}", operand(op.Reason)))
+	case mir.ChannelNewF64:
+		assign(fmt.Sprintf("make(chan float64, int(%s))", operand(op.Capacity)))
+	case mir.ChannelSendF64:
+		fmt.Fprintf(out, "\t%s <- %s\n", operand(op.Channel), operand(op.Value))
+	case mir.ChannelTrySendF64:
+		fmt.Fprintf(out, "\tselect {\n\tcase %s <- %s:\n\t\t%s = true\n\tdefault:\n\t\t%s = false\n\t}\n",
+			operand(op.Channel), operand(op.Value), result, result)
+	case mir.ChannelTryRecvOrF64:
+		fmt.Fprintf(out, "\tselect {\n\tcase %s = <-%s:\n\tdefault:\n\t\t%s = %s\n\t}\n",
+			result, operand(op.Channel), result, operand(op.Fallback))
+	case mir.ChannelNewBool:
+		assign(fmt.Sprintf("make(chan bool, int(%s))", operand(op.Capacity)))
+	case mir.ChannelSendBool:
+		fmt.Fprintf(out, "\t%s <- %s\n", operand(op.Channel), operand(op.Value))
+	case mir.ChannelNewRef:
+		assign(fmt.Sprintf("make(chan any, int(%s))", operand(op.Capacity)))
+	case mir.ChannelSendRef:
+		fmt.Fprintf(out, "\t%s <- %s\n", operand(op.Channel), operand(op.Value))
 	default:
 		return unsupportedInstruction(fn, block, inst, "operation")
 	}
@@ -449,7 +704,18 @@ func goFunctionName(id mir.FunctionID) string { return fmt.Sprintf("tsnativeGoFu
 
 func goValueName(id mir.ValueID) string { return fmt.Sprintf("v%d", id) }
 
-func goType(repr mir.Repr) (string, error) {
+func goShapeName(id mir.ShapeID) string { return fmt.Sprintf("tsnativeGoShape%d", id) }
+
+func goFieldName(id uint32) string { return fmt.Sprintf("Field%d", id) }
+
+func (g *generator) goTypeForValue(repr mir.Repr, shapeID mir.ShapeID, hasShape bool) (string, error) {
+	if repr == mir.ReprObjectRef && hasShape {
+		return "*" + goShapeName(shapeID), nil
+	}
+	return g.goType(repr)
+}
+
+func (g *generator) goType(repr mir.Repr) (string, error) {
 	switch repr {
 	case mir.ReprVoid:
 		return "", nil
@@ -463,6 +729,23 @@ func goType(repr mir.Repr) (string, error) {
 		return "float64", nil
 	case mir.ReprStringRef:
 		return "string", nil
+	case mir.ReprArrayRef:
+		return "any", nil
+	case mir.ReprObjectRef:
+		return "any", nil
+	case mir.ReprFunctionRef:
+		return "any", nil
+	case mir.ReprTaskRef:
+		g.usesTasks = true
+		return "*tsnativeTask", nil
+	case mir.ReprChannelRef:
+		return "chan any", nil
+	case mir.ReprTaskGroupRef:
+		g.usesSync = true
+		g.usesTaskGroups = true
+		return "*tsnativeTaskGroup", nil
+	case mir.ReprTagged, mir.ReprJSValue:
+		return "any", nil
 	default:
 		return "", fmt.Errorf("representation %d is not supported by the pure-Go backend", repr)
 	}
@@ -480,6 +763,9 @@ func zeroValue(repr mir.Repr) string {
 		return "0"
 	case mir.ReprStringRef:
 		return `""`
+	case mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef,
+		mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprTagged, mir.ReprJSValue:
+		return "nil"
 	default:
 		return "0"
 	}

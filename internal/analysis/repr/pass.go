@@ -3,7 +3,7 @@ package repr
 import (
 	"fmt"
 
-	"github.com/projectthorn/tsv7-bin/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
 )
 
 type Diagnostic struct {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func TestNormalizeDiagnostics(t *testing.T) {

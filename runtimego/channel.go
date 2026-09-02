@@ -1,10 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-#include <stdlib.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"math"
@@ -42,8 +36,7 @@ var nativeChannels = struct {
 	byHandle map[uintptr]*nativeF64Channel
 }{byHandle: map[uintptr]*nativeF64Channel{}}
 
-//export tsnative_channel_bind_scheduler
-func tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
+func tsnative_channel_bind_scheduler(current, prepare, cancel, wake, help uintptr) {}
 
 func lookupNativeF64Channel(raw unsafe.Pointer) *nativeF64Channel {
 	if raw == nil {
@@ -56,7 +49,7 @@ func lookupNativeF64Channel(raw unsafe.Pointer) *nativeF64Channel {
 }
 func newNativeF64Channel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
-		C.abort()
+		nativeAbort("negative channel capacity")
 	}
 	raw := tsnative_heap_alloc(1)
 	channel := &nativeF64Channel{capacity: capacity}
@@ -89,7 +82,7 @@ func deliverNativeChannelValue(waiter *nativeF64ChannelWaiter, value float64) {
 		waiter.value = value
 		return
 	}
-	*(*C.double)(waiter.out) = C.double(value)
+	*(*float64)(waiter.out) = value
 }
 
 func finishNativeChannelWaiter(waiter *nativeF64ChannelWaiter) {
@@ -105,25 +98,22 @@ func finishNativeChannelWaiter(waiter *nativeF64ChannelWaiter) {
 	})
 }
 
-//export tsnative_channel_f64_new
-func tsnative_channel_f64_new(capacity C.size_t) unsafe.Pointer {
+func tsnative_channel_f64_new(capacity uintptr) unsafe.Pointer {
 	if uint64(capacity) > uint64(math.MaxInt) {
-		C.abort()
+		nativeAbort("channel capacity overflow")
 	}
 	return newNativeF64Channel(int(capacity))
 }
 
-//export tsnative_channel_f64_new_checked
-func tsnative_channel_f64_new_checked(capacity C.double) unsafe.Pointer {
-	value := float64(capacity)
+func tsnative_channel_f64_new_checked(capacity float64) unsafe.Pointer {
+	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
-		C.abort()
+		nativeAbort("invalid channel capacity")
 	}
 	return newNativeF64Channel(int(value))
 }
 
-//export tsnative_channel_f64_try_send
-func tsnative_channel_f64_try_send(raw unsafe.Pointer, value C.double) C.int {
+func tsnative_channel_f64_try_send(raw unsafe.Pointer, value float64) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		return -1
@@ -157,15 +147,14 @@ func tsnative_channel_f64_try_send(raw unsafe.Pointer, value C.double) C.int {
 	return 1
 }
 
-//export tsnative_channel_f64_try_recv
-func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) C.int {
+func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil || out == nil {
 		return -1
 	}
 	channel.mu.Lock()
 	if channel.capacity != 0 && channel.count != 0 {
-		*(*C.double)(out) = C.double(channel.buffer[channel.head])
+		*(*float64)(out) = channel.buffer[channel.head]
 		channel.head = (channel.head + 1) % channel.capacity
 		channel.count--
 		sender := popChannelWaiter(&channel.sendQueue)
@@ -180,13 +169,13 @@ func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) C.int {
 		return 1
 	}
 	if sender := popChannelWaiter(&channel.sendQueue); sender != nil {
-		*(*C.double)(out) = C.double(sender.value)
+		*(*float64)(out) = sender.value
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(sender)
 		return 1
 	}
 	if channel.capacity == 0 && channel.hasValue {
-		*(*C.double)(out) = C.double(channel.slot)
+		*(*float64)(out) = channel.slot
 		channel.hasValue = false
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
@@ -196,8 +185,7 @@ func tsnative_channel_f64_try_recv(raw, out unsafe.Pointer) C.int {
 	return 0
 }
 
-//export tsnative_channel_f64_try_recv_or
-func tsnative_channel_f64_try_recv_or(raw unsafe.Pointer, fallback C.double) C.double {
+func tsnative_channel_f64_try_recv_or(raw unsafe.Pointer, fallback float64) float64 {
 	value := fallback
 	if tsnative_channel_f64_try_recv(raw, unsafe.Pointer(&value)) == 1 {
 		return value
@@ -205,15 +193,14 @@ func tsnative_channel_f64_try_recv_or(raw unsafe.Pointer, fallback C.double) C.d
 	return fallback
 }
 
-//export tsnative_channel_f64_send
-func tsnative_channel_f64_send(raw unsafe.Pointer, value C.double) {
+func tsnative_channel_f64_send(raw unsafe.Pointer, value float64) {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("send to nil f64 channel")
 	}
 	channel.mu.Lock()
 	if receiver := popChannelWaiter(&channel.recvQueue); receiver != nil {
-		deliverNativeChannelValue(receiver, float64(value))
+		deliverNativeChannelValue(receiver, value)
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(receiver)
 		return
@@ -223,12 +210,12 @@ func tsnative_channel_f64_send(raw unsafe.Pointer, value C.double) {
 			channel.cond.Wait()
 		}
 		if receiver := popChannelWaiter(&channel.recvQueue); receiver != nil {
-			deliverNativeChannelValue(receiver, float64(value))
+			deliverNativeChannelValue(receiver, value)
 			channel.mu.Unlock()
 			finishNativeChannelWaiter(receiver)
 			return
 		}
-		channel.slot, channel.hasValue = float64(value), true
+		channel.slot, channel.hasValue = value, true
 		channel.cond.Broadcast()
 		for channel.hasValue {
 			channel.cond.Wait()
@@ -240,23 +227,22 @@ func tsnative_channel_f64_send(raw unsafe.Pointer, value C.double) {
 		channel.cond.Wait()
 	}
 	if receiver := popChannelWaiter(&channel.recvQueue); receiver != nil {
-		deliverNativeChannelValue(receiver, float64(value))
+		deliverNativeChannelValue(receiver, value)
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(receiver)
 		return
 	}
-	channel.buffer[channel.tail] = float64(value)
+	channel.buffer[channel.tail] = value
 	channel.tail = (channel.tail + 1) % channel.capacity
 	channel.count++
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 }
 
-//export tsnative_channel_f64_recv
-func tsnative_channel_f64_recv(raw unsafe.Pointer) C.double {
+func tsnative_channel_f64_recv(raw unsafe.Pointer) float64 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("recv from nil f64 channel")
 	}
 	channel.mu.Lock()
 	for {
@@ -273,27 +259,26 @@ func tsnative_channel_f64_recv(raw unsafe.Pointer) C.double {
 			channel.cond.Broadcast()
 			channel.mu.Unlock()
 			finishNativeChannelWaiter(sender)
-			return C.double(value)
+			return value
 		}
 		if sender := popChannelWaiter(&channel.sendQueue); sender != nil {
 			value := sender.value
 			channel.mu.Unlock()
 			finishNativeChannelWaiter(sender)
-			return C.double(value)
+			return value
 		}
 		if channel.capacity == 0 && channel.hasValue {
 			value := channel.slot
 			channel.hasValue = false
 			channel.cond.Broadcast()
 			channel.mu.Unlock()
-			return C.double(value)
+			return value
 		}
 		channel.cond.Wait()
 	}
 }
 
-//export tsnative_channel_f64_send_task
-func tsnative_channel_f64_send_task(raw unsafe.Pointer, value C.double) C.int {
+func tsnative_channel_f64_send_task(raw unsafe.Pointer, value float64) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
 		return -1
@@ -304,13 +289,13 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value C.double) C.int {
 	}
 	channel.mu.Lock()
 	if receiver := popChannelWaiter(&channel.recvQueue); receiver != nil {
-		deliverNativeChannelValue(receiver, float64(value))
+		deliverNativeChannelValue(receiver, value)
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(receiver)
 		return 1
 	}
 	if channel.capacity != 0 && channel.count < channel.capacity {
-		channel.buffer[channel.tail] = float64(value)
+		channel.buffer[channel.tail] = value
 		channel.tail = (channel.tail + 1) % channel.capacity
 		channel.count++
 		channel.cond.Broadcast()
@@ -321,14 +306,13 @@ func tsnative_channel_f64_send_task(raw unsafe.Pointer, value C.double) C.int {
 		channel.mu.Unlock()
 		return -1
 	}
-	channel.sendQueue = append(channel.sendQueue, &nativeF64ChannelWaiter{task: task, value: float64(value)})
+	channel.sendQueue = append(channel.sendQueue, &nativeF64ChannelWaiter{task: task, value: value})
 	channel.cond.Broadcast()
 	channel.mu.Unlock()
 	return 0
 }
 
-//export tsnative_channel_f64_recv_task
-func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
+func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -339,7 +323,7 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
 	}
 	channel.mu.Lock()
 	if channel.capacity != 0 && channel.count != 0 {
-		*(*C.double)(out) = C.double(channel.buffer[channel.head])
+		*(*float64)(out) = channel.buffer[channel.head]
 		channel.head = (channel.head + 1) % channel.capacity
 		channel.count--
 		sender := popChannelWaiter(&channel.sendQueue)
@@ -354,13 +338,13 @@ func tsnative_channel_f64_recv_task(raw, out unsafe.Pointer) C.int {
 		return 1
 	}
 	if sender := popChannelWaiter(&channel.sendQueue); sender != nil {
-		*(*C.double)(out) = C.double(sender.value)
+		*(*float64)(out) = sender.value
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(sender)
 		return 1
 	}
 	if channel.capacity == 0 && channel.hasValue {
-		*(*C.double)(out) = C.double(channel.slot)
+		*(*float64)(out) = channel.slot
 		channel.hasValue = false
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
@@ -395,11 +379,10 @@ func waitNativeChannelCooperatively(waiter *nativeF64ChannelWaiter) {
 	}
 }
 
-//export tsnative_channel_f64_send_cooperative
-func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value C.double) {
+func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value float64) {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("send cooperative to nil f64 channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
@@ -408,13 +391,13 @@ func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value C.double) {
 	}
 	channel.mu.Lock()
 	if receiver := popChannelWaiter(&channel.recvQueue); receiver != nil {
-		deliverNativeChannelValue(receiver, float64(value))
+		deliverNativeChannelValue(receiver, value)
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(receiver)
 		return
 	}
 	if channel.capacity != 0 && channel.count < channel.capacity {
-		channel.buffer[channel.tail] = float64(value)
+		channel.buffer[channel.tail] = value
 		channel.tail = (channel.tail + 1) % channel.capacity
 		channel.count++
 		channel.cond.Broadcast()
@@ -423,18 +406,17 @@ func tsnative_channel_f64_send_cooperative(raw unsafe.Pointer, value C.double) {
 	}
 	waiter := &nativeF64ChannelWaiter{
 		task:  currentTask,
-		value: float64(value), cooperative: true, done: make(chan struct{}),
+		value: value, cooperative: true, done: make(chan struct{}),
 	}
 	channel.sendQueue = append(channel.sendQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeChannelCooperatively(waiter)
 }
 
-//export tsnative_channel_f64_recv_cooperative
-func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
+func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) float64 {
 	channel := lookupNativeF64Channel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("recv cooperative from nil f64 channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
@@ -454,13 +436,13 @@ func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(sender)
-		return C.double(value)
+		return value
 	}
 	if sender := popChannelWaiter(&channel.sendQueue); sender != nil {
 		value := sender.value
 		channel.mu.Unlock()
 		finishNativeChannelWaiter(sender)
-		return C.double(value)
+		return value
 	}
 	waiter := &nativeF64ChannelWaiter{
 		task:        currentTask,
@@ -469,7 +451,7 @@ func tsnative_channel_f64_recv_cooperative(raw unsafe.Pointer) C.double {
 	channel.recvQueue = append(channel.recvQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeChannelCooperatively(waiter)
-	return C.double(waiter.value)
+	return waiter.value
 }
 
 type nativeRefRoot struct {
@@ -478,14 +460,10 @@ type nativeRefRoot struct {
 }
 
 func newNativeRefRoot(value unsafe.Pointer) *nativeRefRoot {
-	slot := C.malloc(C.size_t(unsafe.Sizeof(uintptr(0))))
-	if slot == nil {
-		nativeAbort("reference channel root slot allocation failed")
-	}
+	slot := unsafe.Pointer(new(unsafe.Pointer))
 	*(*unsafe.Pointer)(slot) = value
 	token := tsnative_gc_root_register(slot)
 	if token == nil {
-		C.free(slot)
 		nativeAbort("reference channel root registration failed")
 	}
 	return &nativeRefRoot{slot: slot, token: token}
@@ -506,10 +484,7 @@ func (root *nativeRefRoot) release() {
 		tsnative_gc_root_unregister(root.token)
 		root.token = nil
 	}
-	if root.slot != nil {
-		C.free(root.slot)
-		root.slot = nil
-	}
+	root.slot = nil
 }
 
 type nativeRefChannelWaiter struct {
@@ -577,7 +552,7 @@ func releaseNativeRefChannel(channel *nativeRefChannel) {
 
 func newNativeRefChannel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
-		C.abort()
+		nativeAbort("negative ref channel capacity")
 	}
 	raw := tsnative_heap_alloc(1)
 	channel := &nativeRefChannel{capacity: capacity}
@@ -647,17 +622,15 @@ func dequeueNativeRefRoot(channel *nativeRefChannel) *nativeRefRoot {
 	return root
 }
 
-//export tsnative_channel_ref_new_checked
-func tsnative_channel_ref_new_checked(capacity C.double) unsafe.Pointer {
-	value := float64(capacity)
+func tsnative_channel_ref_new_checked(capacity float64) unsafe.Pointer {
+	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
-		C.abort()
+		nativeAbort("invalid ref channel capacity")
 	}
 	return newNativeRefChannel(int(value))
 }
 
-//export tsnative_channel_ref_try_send
-func tsnative_channel_ref_try_send(raw, value unsafe.Pointer) C.int {
+func tsnative_channel_ref_try_send(raw, value unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		return -1
@@ -734,7 +707,6 @@ func nativeRefTryRecv(raw unsafe.Pointer) (unsafe.Pointer, bool) {
 	return nil, false
 }
 
-//export tsnative_channel_ref_try_recv_or
 func tsnative_channel_ref_try_recv_or(raw, fallback unsafe.Pointer) unsafe.Pointer {
 	if value, ok := nativeRefTryRecv(raw); ok {
 		return value
@@ -745,7 +717,7 @@ func tsnative_channel_ref_try_recv_or(raw, fallback unsafe.Pointer) unsafe.Point
 func nativeRefSend(raw, value unsafe.Pointer) {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("send to nil ref channel")
 	}
 	root := newNativeRefRoot(value)
 	channel.mu.Lock()
@@ -790,7 +762,7 @@ func nativeRefSend(raw, value unsafe.Pointer) {
 func nativeRefRecv(raw unsafe.Pointer) unsafe.Pointer {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("recv from nil ref channel")
 	}
 	channel.mu.Lock()
 	for {
@@ -830,8 +802,7 @@ func nativeRefRecv(raw unsafe.Pointer) unsafe.Pointer {
 	}
 }
 
-//export tsnative_channel_ref_send_task
-func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) C.int {
+func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
 		return -1
@@ -865,8 +836,7 @@ func tsnative_channel_ref_send_task(raw, value unsafe.Pointer) C.int {
 	return 0
 }
 
-//export tsnative_channel_ref_recv_task
-func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) C.int {
+func tsnative_channel_ref_recv_task(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -936,11 +906,10 @@ func waitNativeRefChannelCooperatively(waiter *nativeRefChannelWaiter) {
 	}
 }
 
-//export tsnative_channel_ref_send_cooperative
 func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("send cooperative to nil ref channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
@@ -967,11 +936,10 @@ func tsnative_channel_ref_send_cooperative(raw, value unsafe.Pointer) {
 	waitNativeRefChannelCooperatively(waiter)
 }
 
-//export tsnative_channel_ref_recv_cooperative
 func tsnative_channel_ref_recv_cooperative(raw unsafe.Pointer) unsafe.Pointer {
 	channel := lookupNativeRefChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("recv cooperative from nil ref channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
@@ -1059,7 +1027,7 @@ func lookupNativeBoolChannel(raw unsafe.Pointer) *nativeBoolChannel {
 
 func newNativeBoolChannel(capacity int) unsafe.Pointer {
 	if capacity < 0 {
-		C.abort()
+		nativeAbort("negative bool channel capacity")
 	}
 	raw := tsnative_heap_alloc(1)
 	channel := &nativeBoolChannel{capacity: capacity}
@@ -1093,7 +1061,7 @@ func deliverNativeBoolValue(waiter *nativeBoolChannelWaiter, value uint8) {
 		waiter.value = value
 		return
 	}
-	*(*C.uint8_t)(waiter.out) = C.uint8_t(value)
+	*(*uint8)(waiter.out) = value
 }
 
 func finishNativeBoolWaiter(waiter *nativeBoolChannelWaiter) {
@@ -1109,22 +1077,20 @@ func finishNativeBoolWaiter(waiter *nativeBoolChannelWaiter) {
 	})
 }
 
-//export tsnative_channel_bool_new_checked
-func tsnative_channel_bool_new_checked(capacity C.double) unsafe.Pointer {
-	value := float64(capacity)
+func tsnative_channel_bool_new_checked(capacity float64) unsafe.Pointer {
+	value := capacity
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(math.MaxInt) || math.Trunc(value) != value {
-		C.abort()
+		nativeAbort("invalid bool channel capacity")
 	}
 	return newNativeBoolChannel(int(value))
 }
 
-//export tsnative_channel_bool_try_send
-func tsnative_channel_bool_try_send(raw unsafe.Pointer, value C.uint8_t) C.int {
+func tsnative_channel_bool_try_send(raw unsafe.Pointer, value uint8) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return -1
 	}
-	v := uint8(value)
+	v := value
 	channel.mu.Lock()
 	if receiver := popBoolChannelWaiter(&channel.recvQueue); receiver != nil {
 		deliverNativeBoolValue(receiver, v)
@@ -1154,8 +1120,7 @@ func tsnative_channel_bool_try_send(raw unsafe.Pointer, value C.uint8_t) C.int {
 	return 1
 }
 
-//export tsnative_channel_bool_try_recv_or
-func tsnative_channel_bool_try_recv_or(raw unsafe.Pointer, fallback C.uint8_t) C.uint8_t {
+func tsnative_channel_bool_try_recv_or(raw unsafe.Pointer, fallback uint8) uint8 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return fallback
@@ -1174,27 +1139,26 @@ func tsnative_channel_bool_try_recv_or(raw unsafe.Pointer, fallback C.uint8_t) C
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(sender)
-		return C.uint8_t(value)
+		return value
 	}
 	if sender := popBoolChannelWaiter(&channel.sendQueue); sender != nil {
 		value := sender.value
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(sender)
-		return C.uint8_t(value)
+		return value
 	}
 	if channel.capacity == 0 && channel.hasValue {
 		value := channel.slot
 		channel.hasValue = false
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
-		return C.uint8_t(value)
+		return value
 	}
 	channel.mu.Unlock()
 	return fallback
 }
 
-//export tsnative_channel_bool_send_task
-func tsnative_channel_bool_send_task(raw unsafe.Pointer, value C.uint8_t) C.int {
+func tsnative_channel_bool_send_task(raw unsafe.Pointer, value uint8) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
 		return -1
@@ -1203,7 +1167,7 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value C.uint8_t) C.int 
 	if task == 0 {
 		return -1
 	}
-	v := uint8(value)
+	v := value
 	channel.mu.Lock()
 	if receiver := popBoolChannelWaiter(&channel.recvQueue); receiver != nil {
 		deliverNativeBoolValue(receiver, v)
@@ -1229,8 +1193,7 @@ func tsnative_channel_bool_send_task(raw unsafe.Pointer, value C.uint8_t) C.int 
 	return 0
 }
 
-//export tsnative_channel_bool_recv_task
-func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
+func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) int32 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil || out == nil {
 		return -1
@@ -1241,7 +1204,7 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
 	}
 	channel.mu.Lock()
 	if channel.capacity != 0 && channel.count != 0 {
-		*(*C.uint8_t)(out) = C.uint8_t(channel.buffer[channel.head])
+		*(*uint8)(out) = channel.buffer[channel.head]
 		channel.head = (channel.head + 1) % channel.capacity
 		channel.count--
 		sender := popBoolChannelWaiter(&channel.sendQueue)
@@ -1256,13 +1219,13 @@ func tsnative_channel_bool_recv_task(raw, out unsafe.Pointer) C.int {
 		return 1
 	}
 	if sender := popBoolChannelWaiter(&channel.sendQueue); sender != nil {
-		*(*C.uint8_t)(out) = C.uint8_t(sender.value)
+		*(*uint8)(out) = sender.value
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(sender)
 		return 1
 	}
 	if channel.capacity == 0 && channel.hasValue {
-		*(*C.uint8_t)(out) = C.uint8_t(channel.slot)
+		*(*uint8)(out) = channel.slot
 		channel.hasValue = false
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
@@ -1297,15 +1260,14 @@ func waitNativeBoolChannelCooperatively(waiter *nativeBoolChannelWaiter) {
 	}
 }
 
-//export tsnative_channel_bool_send_cooperative
-func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value C.uint8_t) {
+func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value uint8) {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("send cooperative to nil bool channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
-		v := uint8(value)
+		v := value
 		channel.mu.Lock()
 		if receiver := popBoolChannelWaiter(&channel.recvQueue); receiver != nil {
 			deliverNativeBoolValue(receiver, v)
@@ -1349,30 +1311,29 @@ func tsnative_channel_bool_send_cooperative(raw unsafe.Pointer, value C.uint8_t)
 	}
 	channel.mu.Lock()
 	if receiver := popBoolChannelWaiter(&channel.recvQueue); receiver != nil {
-		deliverNativeBoolValue(receiver, uint8(value))
+		deliverNativeBoolValue(receiver, value)
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(receiver)
 		return
 	}
 	if channel.capacity != 0 && channel.count < channel.capacity {
-		channel.buffer[channel.tail] = uint8(value)
+		channel.buffer[channel.tail] = value
 		channel.tail = (channel.tail + 1) % channel.capacity
 		channel.count++
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
 		return
 	}
-	waiter := &nativeBoolChannelWaiter{value: uint8(value), cooperative: true, done: make(chan struct{})}
+	waiter := &nativeBoolChannelWaiter{value: value, cooperative: true, done: make(chan struct{})}
 	channel.sendQueue = append(channel.sendQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeBoolChannelCooperatively(waiter)
 }
 
-//export tsnative_channel_bool_recv_cooperative
-func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) C.uint8_t {
+func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) uint8 {
 	channel := lookupNativeBoolChannel(raw)
 	if channel == nil {
-		C.abort()
+		nativeAbort("recv cooperative from nil bool channel")
 	}
 	currentTask := schedulerCurrentTaskPtr()
 	if currentTask == 0 {
@@ -1391,20 +1352,20 @@ func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) C.uint8_t {
 				channel.cond.Broadcast()
 				channel.mu.Unlock()
 				finishNativeBoolWaiter(sender)
-				return C.uint8_t(value)
+				return value
 			}
 			if sender := popBoolChannelWaiter(&channel.sendQueue); sender != nil {
 				value := sender.value
 				channel.mu.Unlock()
 				finishNativeBoolWaiter(sender)
-				return C.uint8_t(value)
+				return value
 			}
 			if channel.capacity == 0 && channel.hasValue {
 				value := channel.slot
 				channel.hasValue = false
 				channel.cond.Broadcast()
 				channel.mu.Unlock()
-				return C.uint8_t(value)
+				return value
 			}
 			channel.cond.Wait()
 		}
@@ -1423,17 +1384,17 @@ func tsnative_channel_bool_recv_cooperative(raw unsafe.Pointer) C.uint8_t {
 		channel.cond.Broadcast()
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(sender)
-		return C.uint8_t(value)
+		return value
 	}
 	if sender := popBoolChannelWaiter(&channel.sendQueue); sender != nil {
 		value := sender.value
 		channel.mu.Unlock()
 		finishNativeBoolWaiter(sender)
-		return C.uint8_t(value)
+		return value
 	}
 	waiter := &nativeBoolChannelWaiter{cooperative: true, done: make(chan struct{})}
 	channel.recvQueue = append(channel.recvQueue, waiter)
 	channel.mu.Unlock()
 	waitNativeBoolChannelCooperatively(waiter)
-	return C.uint8_t(waiter.value)
+	return waiter.value
 }

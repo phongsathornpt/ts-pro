@@ -4,7 +4,7 @@ import (
 	"math"
 	"math/big"
 
-	"github.com/projectthorn/tsv7-bin/internal/hir"
+	"github.com/phongsathornpt/ts-pro/internal/hir"
 )
 
 const MaxSafeInteger int64 = 9007199254740991

@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"sync"
@@ -281,23 +276,23 @@ func (state *nativePromiseAggregateState) observe(index int, child *nativeTask) 
 		case action.failed:
 			settleNativeAggregate(aggregate, true, action.failure, 0, 0, nil)
 		case action.allF64 != nil:
-			array := tsnative_array_f64_new(C.uint64_t(len(action.allF64)))
+			array := tsnative_array_f64_new(uint64(len(action.allF64)))
 			for i, value := range action.allF64 {
-				tsnative_array_f64_set(array, C.uint64_t(i), C.double(value))
+				tsnative_array_f64_set(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case action.allBool != nil:
-			array := tsnative_array_bool_new(C.uint64_t(len(action.allBool)))
+			array := tsnative_array_bool_new(uint64(len(action.allBool)))
 			for i, value := range action.allBool {
-				tsnative_array_bool_set(array, C.uint64_t(i), C.uint8_t(value))
+				tsnative_array_bool_set(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case state.kind == nativePromiseAggregateRaceBool:
 			settleNativeAggregate(aggregate, false, nil, 0, action.boolean, nil)
 		case action.allRef != nil:
-			array := tsnative_array_ref_new(C.uint64_t(len(action.allRef)))
+			array := tsnative_array_ref_new(uint64(len(action.allRef)))
 			for i, value := range action.allRef {
-				tsnative_array_ref_set(array, C.uint64_t(i), value)
+				tsnative_array_ref_set(array, uint64(i), value)
 			}
 			settleNativeAggregate(aggregate, false, nil, 0, 0, array)
 		case state.kind == nativePromiseAggregateRaceRef:
@@ -347,9 +342,8 @@ func startNativePromiseAggregate(kind nativePromiseAggregateKind, tasks []*nativ
 	}
 }
 
-//export tsnative_promise_all_f64
-func tsnative_promise_all_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultF64)
+func tsnative_promise_all_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultF64)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
 		for _, task := range tasks {
@@ -362,12 +356,11 @@ func tsnative_promise_all_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Point
 	return aggregate.handle
 }
 
-//export tsnative_promise_race_f64
-func tsnative_promise_race_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
+func tsnative_promise_race_f64(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty Promise.race is not supported yet")
 	}
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultF64)
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultF64)
 	aggregate := allocateNativeTask(nil, nativeTaskResultF64)
 	if aggregate == nil {
 		for _, task := range tasks {
@@ -380,9 +373,8 @@ func tsnative_promise_race_f64(raw unsafe.Pointer, count C.uint64_t) unsafe.Poin
 	return aggregate.handle
 }
 
-//export tsnative_promise_all_ref
-func tsnative_promise_all_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultRef)
+func tsnative_promise_all_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultRef)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
 		for _, task := range tasks {
@@ -395,12 +387,11 @@ func tsnative_promise_all_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Point
 	return aggregate.handle
 }
 
-//export tsnative_promise_race_ref
-func tsnative_promise_race_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
+func tsnative_promise_race_ref(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty reference Promise.race is not supported")
 	}
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultRef)
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultRef)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
 		for _, task := range tasks {
@@ -413,9 +404,8 @@ func tsnative_promise_race_ref(raw unsafe.Pointer, count C.uint64_t) unsafe.Poin
 	return aggregate.handle
 }
 
-//export tsnative_promise_all_bool
-func tsnative_promise_all_bool(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultBool)
+func tsnative_promise_all_bool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultBool)
 	aggregate := allocateNativeTask(nil, nativeTaskResultRef)
 	if aggregate == nil {
 		for _, task := range tasks {
@@ -428,12 +418,11 @@ func tsnative_promise_all_bool(raw unsafe.Pointer, count C.uint64_t) unsafe.Poin
 	return aggregate.handle
 }
 
-//export tsnative_promise_race_bool
-func tsnative_promise_race_bool(raw unsafe.Pointer, count C.uint64_t) unsafe.Pointer {
+func tsnative_promise_race_bool(raw unsafe.Pointer, count uint64) unsafe.Pointer {
 	if count == 0 {
 		nativeAbort("empty boolean Promise.race is not supported")
 	}
-	tasks := retainNativePromiseInputs(raw, uint64(count), nativeTaskResultBool)
+	tasks := retainNativePromiseInputs(raw, count, nativeTaskResultBool)
 	aggregate := allocateNativeTask(nil, nativeTaskResultBool)
 	if aggregate == nil {
 		for _, task := range tasks {

@@ -1,6 +1,6 @@
-# tsv7-bin
+# ts-pro
 
-`tsv7-bin` is an experimental TypeScript 7 to native-binary compiler. TypeScript 7 owns the compiler implementation; Go is reserved for the native runtime and native libraries.
+`ts-pro` is an experimental TypeScript 7 to native-binary compiler. TypeScript 7 owns the compiler implementation; Go is reserved for the native runtime and native libraries.
 
 Goal: compile strongly typed TypeScript 7 programs into native binaries without embedding Node.js, V8, or another JavaScript engine in the normal runtime path.
 

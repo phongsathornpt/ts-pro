@@ -1,9 +1,8 @@
-package main
+package runtimego
 
 import (
 	"runtime"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -143,7 +142,7 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 	rooted := tsnative_heap_alloc(16)
 	garbage := tsnative_heap_alloc(16)
 	slot := uintptr(rooted)
-	foreignTID := syscall.Gettid() + 1_000_000
+	foreignTID := nativeCurrentThreadID() + 1_000_000
 
 	nativeHeapWorld.RLock()
 	index := nativeRootShardIndexForThread(foreignTID)
@@ -275,7 +274,7 @@ func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
 	defer runtime.UnlockOSThread()
 
 	slot := tsnative_heap_alloc(16)
-	registeredTID := syscall.Gettid()
+	registeredTID := nativeCurrentThreadID()
 	token := tsnative_gc_root_register(unsafe.Pointer(&slot))
 	if token == nil {
 		t.Fatal("persistent root registration failed")
@@ -284,7 +283,7 @@ func TestPersistentRootCanUnregisterAcrossOSThreads(t *testing.T) {
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		tid := syscall.Gettid()
+		tid := nativeCurrentThreadID()
 		tsnative_gc_root_unregister(token)
 		unregisteredTID <- tid
 	}()

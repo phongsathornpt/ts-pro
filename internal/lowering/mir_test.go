@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	repranalysis "github.com/phongsathornpt/ts-pro/internal/analysis/repr"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func TestLowerTypedFibToMIR(t *testing.T) {

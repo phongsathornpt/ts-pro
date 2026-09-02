@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/projectthorn/tsv7-bin/internal/compiler"
+	"github.com/phongsathornpt/ts-pro/internal/compiler"
 )
 
 func printBuildReport(result compiler.BuildResult) {

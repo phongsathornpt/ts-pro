@@ -1,10 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-#include <stdlib.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"math"
@@ -26,16 +20,15 @@ var nativeTimers = struct {
 	stopping bool
 }{waiters: map[*nativeTimerWaiter]struct{}{}}
 
-//export tsnative_timer_bind_scheduler
-func tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help C.uintptr_t) {}
+func tsnative_timer_bind_scheduler(current, prepare, cancel, wake, help uintptr) {}
 
 func nativeTimerDuration(milliseconds float64) time.Duration {
 	if math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds < 0 {
-		C.abort()
+		nativeAbort("invalid timer duration")
 	}
 	ns := milliseconds * 1_000_000
 	if ns > float64(math.MaxInt64) {
-		C.abort()
+		nativeAbort("timer duration overflow")
 	}
 	return time.Duration(ns)
 }
@@ -66,9 +59,8 @@ func scheduleNativeTimer(duration time.Duration, task uintptr, cooperative bool)
 	return waiter
 }
 
-//export tsnative_sleep_task
-func tsnative_sleep_task(milliseconds C.double) C.int {
-	duration := nativeTimerDuration(float64(milliseconds))
+func tsnative_sleep_task(milliseconds float64) int32 {
+	duration := nativeTimerDuration(milliseconds)
 	if duration == 0 {
 		return 1
 	}
@@ -83,9 +75,8 @@ func tsnative_sleep_task(milliseconds C.double) C.int {
 	return 0
 }
 
-//export tsnative_sleep_cooperative
-func tsnative_sleep_cooperative(milliseconds C.double) {
-	duration := nativeTimerDuration(float64(milliseconds))
+func tsnative_sleep_cooperative(milliseconds float64) {
+	duration := nativeTimerDuration(milliseconds)
 	if duration == 0 {
 		return
 	}
@@ -95,7 +86,7 @@ func tsnative_sleep_cooperative(milliseconds C.double) {
 	}
 	waiter := scheduleNativeTimer(duration, 0, true)
 	if waiter == nil {
-		C.abort()
+		nativeAbort("failed to schedule timer")
 	}
 	for {
 		select {
@@ -114,7 +105,6 @@ func tsnative_sleep_cooperative(milliseconds C.double) {
 	}
 }
 
-//export tsnative_timer_shutdown
 func tsnative_timer_shutdown() {
 	nativeTimers.Lock()
 	nativeTimers.stopping = true

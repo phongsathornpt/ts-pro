@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"sync"
@@ -123,91 +118,73 @@ func (m *nativeMeasuredRWMutex) resetMetrics() {
 func nativeHeapLockMetrics() nativeLockMetrics { return nativeHeap.nativeMeasuredMutex.snapshot() }
 func nativeRootLockMetrics() nativeLockMetrics { return nativeRoots.metrics() }
 
-//export tsnative_heap_lock_acquisitions
-func tsnative_heap_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeHeapLockMetrics().acquisitions)
+func tsnative_heap_lock_acquisitions() uint64 {
+	return nativeHeapLockMetrics().acquisitions
 }
 
-//export tsnative_heap_lock_contentions
-func tsnative_heap_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeHeapLockMetrics().contended)
+func tsnative_heap_lock_contentions() uint64 {
+	return nativeHeapLockMetrics().contended
 }
 
-//export tsnative_heap_lock_wait_ns
-func tsnative_heap_lock_wait_ns() C.uint64_t { return C.uint64_t(nativeHeapLockMetrics().waitNanos) }
+func tsnative_heap_lock_wait_ns() uint64 { return nativeHeapLockMetrics().waitNanos }
 
-//export tsnative_root_lock_acquisitions
-func tsnative_root_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeRootLockMetrics().acquisitions)
+func tsnative_root_lock_acquisitions() uint64 {
+	return nativeRootLockMetrics().acquisitions
 }
 
-//export tsnative_root_lock_contentions
-func tsnative_root_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeRootLockMetrics().contended)
+func tsnative_root_lock_contentions() uint64 {
+	return nativeRootLockMetrics().contended
 }
 
-//export tsnative_root_lock_wait_ns
-func tsnative_root_lock_wait_ns() C.uint64_t { return C.uint64_t(nativeRootLockMetrics().waitNanos) }
+func tsnative_root_lock_wait_ns() uint64 { return nativeRootLockMetrics().waitNanos }
 
 func nativeWorldLockMetrics() nativeRWLockMetrics { return nativeHeapWorld.snapshot() }
 func nativeBlockLockMetrics() nativeRWLockMetrics { return nativeBlocks.metrics() }
 
-//export tsnative_world_read_lock_acquisitions
-func tsnative_world_read_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().read.acquisitions)
+func tsnative_world_read_lock_acquisitions() uint64 {
+	return nativeWorldLockMetrics().read.acquisitions
 }
 
-//export tsnative_world_read_lock_contentions
-func tsnative_world_read_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().read.contended)
+func tsnative_world_read_lock_contentions() uint64 {
+	return nativeWorldLockMetrics().read.contended
 }
 
-//export tsnative_world_read_lock_wait_ns
-func tsnative_world_read_lock_wait_ns() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().read.waitNanos)
+func tsnative_world_read_lock_wait_ns() uint64 {
+	return nativeWorldLockMetrics().read.waitNanos
 }
 
-//export tsnative_world_write_lock_acquisitions
-func tsnative_world_write_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().write.acquisitions)
+func tsnative_world_write_lock_acquisitions() uint64 {
+	return nativeWorldLockMetrics().write.acquisitions
 }
 
-//export tsnative_world_write_lock_contentions
-func tsnative_world_write_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().write.contended)
+func tsnative_world_write_lock_contentions() uint64 {
+	return nativeWorldLockMetrics().write.contended
 }
 
-//export tsnative_world_write_lock_wait_ns
-func tsnative_world_write_lock_wait_ns() C.uint64_t {
-	return C.uint64_t(nativeWorldLockMetrics().write.waitNanos)
+func tsnative_world_write_lock_wait_ns() uint64 {
+	return nativeWorldLockMetrics().write.waitNanos
 }
 
-//export tsnative_block_read_lock_acquisitions
-func tsnative_block_read_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().read.acquisitions)
+func tsnative_block_read_lock_acquisitions() uint64 {
+	return nativeBlockLockMetrics().read.acquisitions
 }
 
-//export tsnative_block_read_lock_contentions
-func tsnative_block_read_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().read.contended)
+func tsnative_block_read_lock_contentions() uint64 {
+	return nativeBlockLockMetrics().read.contended
 }
 
-//export tsnative_block_read_lock_wait_ns
-func tsnative_block_read_lock_wait_ns() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().read.waitNanos)
+func tsnative_block_read_lock_wait_ns() uint64 {
+	return nativeBlockLockMetrics().read.waitNanos
 }
 
-//export tsnative_block_write_lock_acquisitions
-func tsnative_block_write_lock_acquisitions() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().write.acquisitions)
+func tsnative_block_write_lock_acquisitions() uint64 {
+	return nativeBlockLockMetrics().write.acquisitions
 }
 
-//export tsnative_block_write_lock_contentions
-func tsnative_block_write_lock_contentions() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().write.contended)
+func tsnative_block_write_lock_contentions() uint64 {
+	return nativeBlockLockMetrics().write.contended
 }
 
-//export tsnative_block_write_lock_wait_ns
-func tsnative_block_write_lock_wait_ns() C.uint64_t {
-	return C.uint64_t(nativeBlockLockMetrics().write.waitNanos)
+func tsnative_block_write_lock_wait_ns() uint64 {
+	return nativeBlockLockMetrics().write.waitNanos
 }

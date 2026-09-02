@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/projectthorn/tsv7-bin/internal/tsast"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/tsast"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 type closureInfo struct {

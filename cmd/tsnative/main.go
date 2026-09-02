@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/projectthorn/tsv7-bin/internal/compiler"
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	"github.com/phongsathornpt/ts-pro/internal/compiler"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func main() {
@@ -110,9 +110,9 @@ func buildFile(args []string) error {
 }
 
 func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
-	options := compiler.BuildOptions{Root: ".", Optimization: "-O2"}
+	options := compiler.BuildOptions{Root: ".", Optimization: "-O2", PureGo: true}
 	if len(args) == 0 {
-		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--pure-go] [--report-performance]")
+		return options, fmt.Errorf("usage: tsnative build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--pure-go] [--llvm] [--report-performance]")
 	}
 	options.Input = args[0]
 	for i := 1; i < len(args); i++ {
@@ -133,6 +133,9 @@ func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 			options.Optimization = args[i]
 		case "--pure-go":
 			options.PureGo = true
+		case "--llvm":
+			options.PureGo = false
+			options.DisablePureGo = true
 		case "--report-performance":
 			options.ReportPerformance = true
 		default:
@@ -163,7 +166,7 @@ func usage() {
 	fmt.Println("tsnative <command>")
 	fmt.Println("  doctor        validate Go/TypeScript 7 frontend toolchain")
 	fmt.Println("  check <file>  type-check a TypeScript file through TypeScript-LS")
-	fmt.Println("  build <file>  compile TypeScript 7 to a native executable")
-	fmt.Println("                use --pure-go for the cgo-free Go backend")
+	fmt.Println("  build <file>  compile TypeScript 7 to a native executable (pure-Go default)")
+	fmt.Println("                use --llvm for legacy LLVM backend")
 	fmt.Println("  version       print compiler version")
 }

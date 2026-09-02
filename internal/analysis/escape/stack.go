@@ -1,6 +1,6 @@
 package escape
 
-import "github.com/projectthorn/tsv7-bin/internal/mir"
+import "github.com/phongsathornpt/ts-pro/internal/mir"
 
 type StackObjectResult map[mir.FunctionID]map[mir.ValueID]bool
 

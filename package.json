@@ -1,8 +1,8 @@
 {
-  "name": "tsv7-bin-toolchain",
+  "name": "ts-pro",
   "version": "0.1.0",
   "private": true,
-  "description": "Pinned TypeScript 7 frontend toolchain for tsv7-bin",
+  "description": "Pinned TypeScript 7 frontend toolchain for ts-pro",
   "license": "MIT",
   "scripts": {
     "tsc": "tsc",

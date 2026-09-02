@@ -1,20 +1,22 @@
 GO ?= go
 BIN ?= build/tsnative
 
-.PHONY: fmt test vet build check doctor clean
+.PHONY: fmt test vet build pure-go-build check doctor clean
 
 fmt:
 	$(GO) fmt ./...
 
 test:
-	$(GO) test ./...
+	CGO_ENABLED=0 $(GO) test ./...
 
 vet:
-	$(GO) vet ./...
+	CGO_ENABLED=0 $(GO) vet ./...
 
 build:
 	mkdir -p build
-	$(GO) build -o $(BIN) ./cmd/tsnative
+	CGO_ENABLED=0 $(GO) build -o $(BIN) ./cmd/tsnative
+
+pure-go-build: build
 
 check: fmt vet test build
 

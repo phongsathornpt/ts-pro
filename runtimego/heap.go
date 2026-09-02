@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stddef.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"os"
@@ -151,17 +146,14 @@ func allocateNativeHeapBlock(size uintptr, traceKind nativeHeapTraceKind, refOff
 	return block.raw
 }
 
-//export tsnative_heap_alloc
 func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
 	return allocateNativeHeapBlock(size, nativeHeapTraceConservative, nil)
 }
 
-//export tsnative_heap_alloc_atomic
 func tsnative_heap_alloc_atomic(size uintptr) unsafe.Pointer {
 	return allocateNativeHeapBlock(size, nativeHeapTraceAtomic, nil)
 }
 
-//export tsnative_heap_alloc_refs
 func tsnative_heap_alloc_refs(size uintptr, offsets unsafe.Pointer, count uintptr) unsafe.Pointer {
 	if count == 0 {
 		return tsnative_heap_alloc_atomic(size)
@@ -344,11 +336,10 @@ func finalizeShutdownNativeHeapBlocks(blocks []*nativeHeapBlock) {
 	}
 }
 
-//export tsnative_gc_collect
 func tsnative_gc_collect() {
 	nativeGCMajorRequested.Store(true)
 	nativeGCRequested.Store(true)
-	tid := syscall.Gettid()
+	tid := nativeCurrentThreadID()
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	blocks := collectIfSafeLocked(tid, true)
@@ -357,12 +348,11 @@ func tsnative_gc_collect() {
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
-//export tsnative_gc_safepoint
 func tsnative_gc_safepoint() {
 	if !nativeGCRequested.Load() {
 		return
 	}
-	tid := syscall.Gettid()
+	tid := nativeCurrentThreadID()
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	blocks := collectIfSafeLocked(tid, false)
@@ -371,7 +361,6 @@ func tsnative_gc_safepoint() {
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
-//export tsnative_heap_shutdown
 func tsnative_heap_shutdown() {
 	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
@@ -433,17 +422,14 @@ func tsnative_heap_shutdown() {
 	nativeBlocks.resetMetrics()
 }
 
-//export tsnative_heap_live_bytes
 func tsnative_heap_live_bytes() uintptr {
 	return uintptr(nativeHeapBytes.Load())
 }
 
-//export tsnative_heap_live_allocations
 func tsnative_heap_live_allocations() uintptr {
 	return uintptr(nativeHeapAllocations.Load())
 }
 
-//export tsnative_gc_collections
 func tsnative_gc_collections() uintptr {
 	return uintptr(nativeHeapCollections.Load())
 }

@@ -1,10 +1,4 @@
-package main
-
-/*
-#include <stddef.h>
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"sync"
@@ -134,19 +128,16 @@ func nativeGCStoreRef(parent, slot, child unsafe.Pointer) {
 	nativeHeapWorld.RUnlock()
 }
 
-//export tsnative_gc_store_ref
 func tsnative_gc_store_ref(parent, slot, child unsafe.Pointer) {
 	nativeGCStoreRef(parent, slot, child)
 }
 
-//export tsnative_gc_store_ref_slot
 func tsnative_gc_store_ref_slot(slot, child unsafe.Pointer) {
 	nativeGCStoreRefSlot(slot, child)
 }
 
-//export tsnative_gc_remembered_parents
-func tsnative_gc_remembered_parents() C.size_t {
-	return C.size_t(nativeRemembered.count())
+func tsnative_gc_remembered_parents() uintptr {
+	return uintptr(nativeRemembered.count())
 }
 func resetNativeRememberedState() {
 	nativeRemembered.clear()
@@ -154,12 +145,10 @@ func resetNativeRememberedState() {
 	nativeRemembered.records.Store(0)
 }
 
-//export tsnative_gc_barrier_stores
-func tsnative_gc_barrier_stores() C.uint64_t {
-	return C.uint64_t(nativeRemembered.stores.Load())
+func tsnative_gc_barrier_stores() uint64 {
+	return nativeRemembered.stores.Load()
 }
 
-//export tsnative_gc_remembered_records
-func tsnative_gc_remembered_records() C.uint64_t {
-	return C.uint64_t(nativeRemembered.records.Load())
+func tsnative_gc_remembered_records() uint64 {
+	return nativeRemembered.records.Load()
 }

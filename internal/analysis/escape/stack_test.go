@@ -3,7 +3,7 @@ package escape
 import (
 	"testing"
 
-	"github.com/projectthorn/tsv7-bin/internal/mir"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
 
 func TestStackObjectsAcceptsLocalAtomicObject(t *testing.T) {

@@ -1,4 +1,4 @@
-package main
+package runtimego
 
 const nativeHeapBlockShardCount = 128
 

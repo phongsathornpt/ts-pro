@@ -1,17 +1,9 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"fmt"
 )
 
-//export tsnative_console_log_f64
-func tsnative_console_log_f64(value C.double) {
-	fmt.Printf("%.17g\n", float64(value))
+func tsnative_console_log_f64(value float64) {
+	fmt.Printf("%.17g\n", value)
 }
-
-func main() {}

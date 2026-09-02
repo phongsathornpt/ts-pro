@@ -9,16 +9,16 @@ import (
 	"strings"
 	"time"
 
-	escapeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/escape"
-	rangeanalysis "github.com/projectthorn/tsv7-bin/internal/analysis/range"
-	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
-	golangcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/golang"
-	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/lowering"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
-	"github.com/projectthorn/tsv7-bin/internal/toolchain"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	escapeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/escape"
+	rangeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/range"
+	repranalysis "github.com/phongsathornpt/ts-pro/internal/analysis/repr"
+	golangcodegen "github.com/phongsathornpt/ts-pro/internal/codegen/golang"
+	llvmcodegen "github.com/phongsathornpt/ts-pro/internal/codegen/llvm"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/lowering"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
+	"github.com/phongsathornpt/ts-pro/internal/toolchain"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 type BuildOptions struct {
@@ -28,6 +28,7 @@ type BuildOptions struct {
 	Config            string
 	Optimization      string
 	PureGo            bool
+	DisablePureGo     bool
 	ReportPerformance bool
 }
 
@@ -221,6 +222,9 @@ func normalizeOptions(options BuildOptions) (BuildOptions, error) {
 	}
 	if !validOptimization(options.Optimization) {
 		return options, fmt.Errorf("unsupported optimization %q", options.Optimization)
+	}
+	if !options.DisablePureGo {
+		options.PureGo = true
 	}
 	return options, nil
 }

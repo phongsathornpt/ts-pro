@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <stdint.h>
-*/
-import "C"
+package runtimego
 
 import (
 	"sync"
@@ -95,7 +90,6 @@ func taskGroupSpawn(raw, entry, state unsafe.Pointer, kind int32) unsafe.Pointer
 	return task.handle
 }
 
-//export tsnative_task_group_new
 func tsnative_task_group_new() unsafe.Pointer {
 	handle := allocNativeHandle()
 	if handle == nil {
@@ -115,28 +109,23 @@ func taskGroupSpawnOrAbort(group, entry, state unsafe.Pointer, kind int32) unsaf
 	return task
 }
 
-//export tsnative_task_group_spawn_or_abort
 func tsnative_task_group_spawn_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultVoid)
 }
 
-//export tsnative_task_group_spawn_f64_or_abort
 func tsnative_task_group_spawn_f64_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultF64)
 }
 
-//export tsnative_task_group_spawn_bool_or_abort
 func tsnative_task_group_spawn_bool_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultBool)
 }
 
-//export tsnative_task_group_spawn_ref_or_abort
 func tsnative_task_group_spawn_ref_or_abort(group, entry, state unsafe.Pointer) unsafe.Pointer {
 	return taskGroupSpawnOrAbort(group, entry, state, nativeTaskResultRef)
 }
 
-//export tsnative_task_group_cancel
-func tsnative_task_group_cancel(raw unsafe.Pointer) C.int {
+func tsnative_task_group_cancel(raw unsafe.Pointer) int32 {
 	group, ok := taskGroupState(raw)
 	if !ok {
 		return -1
@@ -155,8 +144,7 @@ func tsnative_task_group_cancel(raw unsafe.Pointer) C.int {
 	return 0
 }
 
-//export tsnative_task_group_join_release
-func tsnative_task_group_join_release(raw unsafe.Pointer) C.int {
+func tsnative_task_group_join_release(raw unsafe.Pointer) int32 {
 	group, ok := taskGroupState(raw)
 	if !ok {
 		return -1

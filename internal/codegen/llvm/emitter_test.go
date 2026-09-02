@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	repranalysis "github.com/projectthorn/tsv7-bin/internal/analysis/repr"
-	llvmcodegen "github.com/projectthorn/tsv7-bin/internal/codegen/llvm"
-	"github.com/projectthorn/tsv7-bin/internal/frontend"
-	"github.com/projectthorn/tsv7-bin/internal/lowering"
-	"github.com/projectthorn/tsv7-bin/internal/mir"
-	"github.com/projectthorn/tsv7-bin/internal/toolchain"
-	"github.com/projectthorn/tsv7-bin/internal/tsls"
+	repranalysis "github.com/phongsathornpt/ts-pro/internal/analysis/repr"
+	llvmcodegen "github.com/phongsathornpt/ts-pro/internal/codegen/llvm"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
+	"github.com/phongsathornpt/ts-pro/internal/lowering"
+	"github.com/phongsathornpt/ts-pro/internal/mir"
+	"github.com/phongsathornpt/ts-pro/internal/toolchain"
+	"github.com/phongsathornpt/ts-pro/internal/tsls"
 )
 
 func TestEmitFibLLVMAndCompileObject(t *testing.T) {
