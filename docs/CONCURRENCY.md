@@ -195,7 +195,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - Already-parked scheduler workers are claimed first as bounded mark donors; fallback goroutines are created only for missing assist slots.
     - Root/token/thread-stack/handoff metadata now has a separate lock from heap allocation; GC still holds `heap -> roots` across mark/sweep to preserve a stable root/heap snapshot.
     - Heap/root mutex acquisitions, contentions, and cumulative wait nanoseconds are now exported through the runtime ABI for measured follow-up.
-    - Remaining heap-lock data must justify any further block-index/allocator lock splitting and nursery/generational policy work.
+    - Native stress data justified a worker-local active-span fast path: allocations run under a GC world read barrier, publish into a 64-shard live-block table, and update atomic live counters; the global allocator mutex is only needed for span refill/reuse/remote-free slow paths.
+    - The 8-worker/40k-allocation regression reduced global heap-lock acquisitions from 40,000 to 24 and cumulative heap-lock wait from roughly 241-279 ms to roughly 0.28-1.34 ms; root/token locking is now the measured synchronization bottleneck.
 
 15. `runtime: add Green-Tea-style local mark-page work` 🟡
     - [x] Owner-local native-page mark queues exist on top of size-class spans and page-to-span metadata.
@@ -203,7 +204,8 @@ Steps 1-13 and 16 are implemented. Steps 14-15 remain active work. Each addition
     - [x] Reuse already-idle scheduler workers for GC donation, with deterministic donor claiming under the scheduler lock and dedicated donor-worker/page metrics.
     - [x] Separate root lifecycle metadata from heap/allocator locking while preserving `heap -> roots` collection lock order.
     - [x] Export heap/root lock acquisition, contention, and wait-time telemetry through the generated C ABI.
-    - [ ] Use native stress measurements to reduce block-index/allocator lock scope only where the data supports it.
+    - [x] Use native stress measurements to reduce block-index/allocator lock scope only where the data supports it; worker-local active-span allocation now bypasses the global heap mutex while GC retains a world write barrier.
+    - [ ] Reduce root/token lock contention without weakening per-thread root-stack discipline or collection snapshot semantics.
 
 16. `runtime: add execution budgets and preemption polling`
     - Cooperative budget first; no arbitrary signal-time stack surgery.

@@ -83,7 +83,7 @@ func resolveNativeHeapBlockLocked(candidate uintptr) *nativeHeapBlock {
 	if candidate == 0 {
 		return nil
 	}
-	if block := nativeHeap.blocks[candidate]; block != nil {
+	if block := nativeBlocks.get(candidate); block != nil {
 		return block
 	}
 	span := nativeHeapSpanForPointerLocked(candidate)
@@ -97,7 +97,7 @@ func resolveNativeHeapBlockLocked(candidate uintptr) *nativeHeapBlock {
 	}
 	offset := candidate - base
 	slotBase := base + (offset/span.classSize)*span.classSize
-	return nativeHeap.blocks[slotBase]
+	return nativeBlocks.get(slotBase)
 }
 
 func nativeGCMarkPageKey(block *nativeHeapBlock) uintptr {
@@ -249,7 +249,7 @@ func markNativeHeapRootsLocked() {
 		}
 	}
 
-	workerCount := configuredNativeGCMarkWorkers(len(nativeHeap.blocks))
+	workerCount := configuredNativeGCMarkWorkers(nativeBlocks.count())
 	state.mu.Lock()
 	hasWork := len(state.pages) != 0
 	state.mu.Unlock()

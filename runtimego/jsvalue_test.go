@@ -6,10 +6,7 @@ import (
 )
 
 func nativeHeapContains(raw unsafe.Pointer) bool {
-	nativeHeap.Lock()
-	_, ok := nativeHeap.blocks[uintptr(raw)]
-	nativeHeap.Unlock()
-	return ok
+	return nativeBlocks.get(uintptr(raw)) != nil
 }
 
 func TestNativeJSValueReferenceBoxesKeepPayloadAlive(t *testing.T) {

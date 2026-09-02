@@ -8,6 +8,7 @@ import "C"
 import (
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -48,8 +49,6 @@ var nativeRoots = struct {
 
 var nativeHeap = struct {
 	nativeMeasuredMutex
-	blocks                map[uintptr]*nativeHeapBlock
-	allocators            map[int]*nativeWorkerAllocator
 	spans                 map[*nativeHeapSpan]struct{}
 	spanPages             map[uintptr]*nativeHeapSpan
 	freeSpans             [nativeSizeClassCount][]*nativeHeapSpan
@@ -62,18 +61,20 @@ var nativeHeap = struct {
 	markAssistPages       uint64
 	markIdleAssistWorkers uint64
 	markIdleAssistPages   uint64
-	bytes                 uintptr
-	allocations           uintptr
-	collections           uintptr
-	threshold             uintptr
 }{
-	blocks:     map[uintptr]*nativeHeapBlock{},
-	allocators: map[int]*nativeWorkerAllocator{},
-	spans:      map[*nativeHeapSpan]struct{}{},
-	spanPages:  map[uintptr]*nativeHeapSpan{},
-	threshold:  initialGCThreshold,
+	spans:     map[*nativeHeapSpan]struct{}{},
+	spanPages: map[uintptr]*nativeHeapSpan{},
 }
 
+var nativeHeapWorld sync.RWMutex
+var nativeHeapBytes atomic.Uint64
+var nativeHeapAllocations atomic.Uint64
+var nativeHeapCollections atomic.Uint64
+var nativeHeapThreshold = func() *atomic.Uint64 {
+	value := &atomic.Uint64{}
+	value.Store(uint64(initialGCThreshold))
+	return value
+}()
 var nativeGCRequested atomic.Bool
 
 func nativeAbortSignal() {
@@ -114,15 +115,14 @@ func registerNativeHeapFinalizer(raw unsafe.Pointer, finalizer func()) {
 	if raw == nil || finalizer == nil {
 		return
 	}
-	nativeHeap.Lock()
-	block := nativeHeap.blocks[uintptr(raw)]
-	if block == nil {
-		nativeHeap.Unlock()
+	nativeHeapWorld.RLock()
+	ok := nativeBlocks.update(uintptr(raw), func(block *nativeHeapBlock) {
+		block.finalizer = finalizer
+	})
+	nativeHeapWorld.RUnlock()
+	if !ok {
 		nativeAbort("native heap finalizer target is not allocated")
-		return
 	}
-	block.finalizer = finalizer
-	nativeHeap.Unlock()
 }
 
 const nativeRootTokenSize = uintptr(unsafe.Sizeof(uintptr(0)))
@@ -151,16 +151,16 @@ func freeRootTokenLocked(token unsafe.Pointer) {
 
 //export tsnative_heap_alloc
 func tsnative_heap_alloc(size uintptr) unsafe.Pointer {
-	nativeHeap.Lock()
-	raw, data, span, slot := allocateNativeHeapStorageLocked(size)
+	nativeHeapWorld.RLock()
+	raw, data, span, slot := allocateNativeHeapStorage(size)
 	block := &nativeHeapBlock{ptr: uintptr(raw), raw: raw, size: size, data: data, span: span, slot: slot}
-	nativeHeap.blocks[block.ptr] = block
-	nativeHeap.bytes += size
-	nativeHeap.allocations++
-	if nativeHeap.bytes >= nativeHeap.threshold {
+	nativeBlocks.set(block.ptr, block)
+	liveBytes := nativeHeapBytes.Add(uint64(size))
+	nativeHeapAllocations.Add(1)
+	if liveBytes >= nativeHeapThreshold.Load() {
 		nativeGCRequested.Store(true)
 	}
-	nativeHeap.Unlock()
+	nativeHeapWorld.RUnlock()
 	return block.raw
 }
 
@@ -276,33 +276,41 @@ func collectIfSafeLocked(tid int, force bool) []*nativeHeapBlock {
 }
 
 func collectLocked() []*nativeHeapBlock {
-	for _, block := range nativeHeap.blocks {
+	nativeBlocks.rangeBlocks(func(_ uintptr, block *nativeHeapBlock) {
 		block.marked = false
-	}
+	})
 	markNativeHeapRootsLocked()
 	blocks := make([]*nativeHeapBlock, 0)
-	for key, block := range nativeHeap.blocks {
+	var reclaimedBytes uint64
+	var reclaimedAllocations uint64
+	nativeBlocks.sweep(func(_ uintptr, block *nativeHeapBlock) bool {
 		if block.marked {
-			continue
+			return false
 		}
-		delete(nativeHeap.blocks, key)
-		nativeHeap.bytes -= block.size
-		nativeHeap.allocations--
+		reclaimedBytes += uint64(block.size)
+		reclaimedAllocations++
 		if block.finalizer != nil {
 			blocks = append(blocks, block)
-			continue
+			return true
 		}
 		if data := releaseNativeHeapBlockStorageLocked(block); len(data) != 0 {
 			block.data = data
 			blocks = append(blocks, block)
 		}
+		return true
+	})
+	if reclaimedBytes != 0 {
+		nativeHeapBytes.Add(^uint64(reclaimedBytes - 1))
 	}
-	nativeHeap.collections++
-	next := nativeHeap.bytes * 2
+	if reclaimedAllocations != 0 {
+		nativeHeapAllocations.Add(^uint64(reclaimedAllocations - 1))
+	}
+	nativeHeapCollections.Add(1)
+	next := nativeHeapBytes.Load() * 2
 	if next < initialGCThreshold {
 		next = initialGCThreshold
 	}
-	nativeHeap.threshold = next
+	nativeHeapThreshold.Store(next)
 	return blocks
 }
 
@@ -334,11 +342,13 @@ func finalizeShutdownNativeHeapBlocks(blocks []*nativeHeapBlock) {
 func tsnative_gc_collect() {
 	nativeGCRequested.Store(true)
 	tid := syscall.Gettid()
+	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	nativeRoots.Lock()
 	blocks := collectIfSafeLocked(tid, true)
 	nativeRoots.Unlock()
 	nativeHeap.Unlock()
+	nativeHeapWorld.Unlock()
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
@@ -348,32 +358,33 @@ func tsnative_gc_safepoint() {
 		return
 	}
 	tid := syscall.Gettid()
+	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	nativeRoots.Lock()
 	blocks := collectIfSafeLocked(tid, false)
 	nativeRoots.Unlock()
 	nativeHeap.Unlock()
+	nativeHeapWorld.Unlock()
 	finalizeCollectedNativeHeapBlocks(blocks)
 }
 
 //export tsnative_heap_shutdown
 func tsnative_heap_shutdown() {
+	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
-	blocks := make([]*nativeHeapBlock, 0, len(nativeHeap.blocks))
-	for key, block := range nativeHeap.blocks {
-		blocks = append(blocks, block)
-		delete(nativeHeap.blocks, key)
-	}
-	nativeHeap.bytes = 0
-	nativeHeap.allocations = 0
-	nativeHeap.threshold = initialGCThreshold
+	blocks := nativeBlocks.drain()
+	nativeHeapBytes.Store(0)
+	nativeHeapAllocations.Store(0)
+	nativeHeapThreshold.Store(uint64(initialGCThreshold))
 	nativeGCRequested.Store(false)
 	nativeHeap.Unlock()
+	nativeHeapWorld.Unlock()
 
 	// Finalizers may own persistent GC roots (for example buffered reference
 	// channels), so keep root/token tables alive until finalization finishes.
 	finalizeShutdownNativeHeapBlocks(blocks)
 
+	nativeHeapWorld.Lock()
 	nativeRoots.Lock()
 	nativeRoots.roots = map[uintptr]*nativeRootFrame{}
 	nativeRoots.threadStacks = map[int][]uintptr{}
@@ -384,7 +395,7 @@ func tsnative_heap_shutdown() {
 	nativeRoots.Unlock()
 
 	nativeHeap.Lock()
-	nativeHeap.allocators = map[int]*nativeWorkerAllocator{}
+	resetNativeWorkerAllocatorsLocked()
 	nativeHeap.remoteFrees = 0
 	nativeHeap.spanTransfers = 0
 	nativeHeap.markWork = 0
@@ -402,6 +413,7 @@ func tsnative_heap_shutdown() {
 	nativeHeap.spanPages = map[uintptr]*nativeHeapSpan{}
 	nativeHeap.freeSpans = [nativeSizeClassCount][]*nativeHeapSpan{}
 	nativeHeap.Unlock()
+	nativeHeapWorld.Unlock()
 
 	for _, span := range spans {
 		nativeUnmap(span.data)
@@ -415,24 +427,15 @@ func tsnative_heap_shutdown() {
 
 //export tsnative_heap_live_bytes
 func tsnative_heap_live_bytes() uintptr {
-	nativeHeap.Lock()
-	value := nativeHeap.bytes
-	nativeHeap.Unlock()
-	return value
+	return uintptr(nativeHeapBytes.Load())
 }
 
 //export tsnative_heap_live_allocations
 func tsnative_heap_live_allocations() uintptr {
-	nativeHeap.Lock()
-	value := nativeHeap.allocations
-	nativeHeap.Unlock()
-	return value
+	return uintptr(nativeHeapAllocations.Load())
 }
 
 //export tsnative_gc_collections
 func tsnative_gc_collections() uintptr {
-	nativeHeap.Lock()
-	value := nativeHeap.collections
-	nativeHeap.Unlock()
-	return value
+	return uintptr(nativeHeapCollections.Load())
 }

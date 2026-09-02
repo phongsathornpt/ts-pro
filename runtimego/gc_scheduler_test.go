@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 		token: tokenPtr, slots: unsafe.Pointer(&slot), count: 1, tid: foreignTID,
 	}
 	nativeRoots.threadStacks[foreignTID] = []uintptr{token}
-	before := nativeHeap.collections
+	before := nativeHeapCollections.Load()
 	nativeRoots.Unlock()
 	nativeHeap.Unlock()
 
@@ -33,8 +34,8 @@ func TestGCDefersForForeignActiveNativeRootStack(t *testing.T) {
 
 	nativeHeap.Lock()
 	nativeRoots.Lock()
-	after := nativeHeap.collections
-	_, garbageLive := nativeHeap.blocks[uintptr(garbage)]
+	after := nativeHeapCollections.Load()
+	garbageLive := nativeBlocks.get(uintptr(garbage)) != nil
 	frame := nativeRoots.roots[token]
 	delete(nativeRoots.roots, token)
 	delete(nativeRoots.threadStacks, foreignTID)
@@ -113,6 +114,63 @@ func TestHeapAndRootLockMetricsRecordContention(t *testing.T) {
 	rootMetrics := nativeRootLockMetrics()
 	if rootMetrics.acquisitions < 2 || rootMetrics.waitNanos == 0 {
 		t.Fatalf("root lock metrics = %+v, want acquisitions >= 2 and wait > 0", rootMetrics)
+	}
+}
+
+func TestWorkerAllocationFastPathAvoidsGlobalHeapLock(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	schedulerSetThread(0, 0)
+	defer schedulerSetThread(-1, 0)
+
+	if raw := tsnative_heap_alloc(32); raw == nil {
+		t.Fatal("warm allocation failed")
+	}
+	nativeHeap.resetMetrics()
+	for i := 0; i < 1000; i++ {
+		if raw := tsnative_heap_alloc(32); raw == nil {
+			t.Fatalf("fast-path allocation %d failed", i)
+		}
+	}
+	if metrics := nativeHeapLockMetrics(); metrics.acquisitions != 0 {
+		t.Fatalf("warm worker fast path used global heap lock: %+v", metrics)
+	}
+}
+
+func TestConcurrentWorkerAllocationFastPathReducesGlobalLockTraffic(t *testing.T) {
+	tsnative_heap_shutdown()
+	defer tsnative_heap_shutdown()
+	nativeHeap.resetMetrics()
+	nativeRoots.resetMetrics()
+
+	const workers = 8
+	const allocationsPerWorker = 5000
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for owner := 0; owner < workers; owner++ {
+		go func(owner int) {
+			defer wg.Done()
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			schedulerSetThread(owner, 0)
+			defer schedulerSetThread(-1, 0)
+			for i := 0; i < allocationsPerWorker; i++ {
+				raw := tsnative_heap_alloc(32)
+				token := tsnative_gc_root_register(unsafe.Pointer(&raw))
+				tsnative_gc_root_unregister(token)
+			}
+		}(owner)
+	}
+	wg.Wait()
+
+	heapMetrics := nativeHeapLockMetrics()
+	rootMetrics := nativeRootLockMetrics()
+	t.Logf("heap lock acquisitions=%d contentions=%d wait_ns=%d", heapMetrics.acquisitions, heapMetrics.contended, heapMetrics.waitNanos)
+	t.Logf("root lock acquisitions=%d contentions=%d wait_ns=%d", rootMetrics.acquisitions, rootMetrics.contended, rootMetrics.waitNanos)
+	if heapMetrics.acquisitions >= 128 {
+		t.Fatalf("global heap lock acquisitions = %d, want < 128 for %d allocations", heapMetrics.acquisitions, workers*allocationsPerWorker)
 	}
 }
 
@@ -252,12 +310,10 @@ func TestHeapReusesWorkerLocalCachedBlocks(t *testing.T) {
 		t.Fatalf("worker-local cache did not reuse block: first=%p second=%p", first, second)
 	}
 
-	nativeHeap.Lock()
-	block := nativeHeap.blocks[uintptr(second)]
+	block := nativeBlocks.get(uintptr(second))
 	if block == nil || block.span == nil || block.span.owner != 0 {
 		t.Fatalf("reused block span = %+v, want worker 0", block)
 	}
-	nativeHeap.Unlock()
 }
 
 func TestHeapShutdownReclaimsCachedBlocks(t *testing.T) {
@@ -271,7 +327,7 @@ func TestHeapShutdownReclaimsCachedBlocks(t *testing.T) {
 	tsnative_gc_collect()
 	nativeHeap.Lock()
 	spanCount := len(nativeHeap.spans)
-	allocator := nativeHeap.allocators[0]
+	allocator := nativeAllocatorForOwner(0)
 	span := allocator.active[1]
 	nativeHeap.Unlock()
 	if spanCount == 0 || span == nil || span.live != 0 || len(span.free) == 0 {
@@ -333,7 +389,7 @@ func TestSmallAllocationsShareWorkerSpan(t *testing.T) {
 	}
 	nativeHeap.Lock()
 	spanCount := len(nativeHeap.spans)
-	allocator := nativeHeap.allocators[0]
+	allocator := nativeAllocatorForOwner(0)
 	span := allocator.active[1]
 	nativeHeap.Unlock()
 	if spanCount != 1 || span == nil || span.live != 1000 {
@@ -354,8 +410,8 @@ func TestWorkerAllocatorsUseDistinctActiveSpans(t *testing.T) {
 	schedulerSetThread(-1, 0)
 
 	nativeHeap.Lock()
-	worker0 := nativeHeap.allocators[0]
-	worker1 := nativeHeap.allocators[1]
+	worker0 := nativeAllocatorForOwner(0)
+	worker1 := nativeAllocatorForOwner(1)
 	span0, span1 := worker0.active[1], worker1.active[1]
 	nativeHeap.Unlock()
 	if span0 == nil || span1 == nil || span0 == span1 || span0.owner != 0 || span1.owner != 1 {

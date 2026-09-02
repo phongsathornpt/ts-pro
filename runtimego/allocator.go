@@ -61,13 +61,23 @@ func nativeAllocatorOwner() int {
 	return -1
 }
 
-func nativeWorkerAllocatorLocked(owner int) *nativeWorkerAllocator {
-	allocator := nativeHeap.allocators[owner]
-	if allocator == nil {
-		allocator = &nativeWorkerAllocator{}
-		nativeHeap.allocators[owner] = allocator
+var nativeWorkerAllocators [nativeSchedulerMaxWorkers]nativeWorkerAllocator
+var nativeExternalAllocator nativeWorkerAllocator
+
+func nativeAllocatorForOwner(owner int) *nativeWorkerAllocator {
+	if owner >= 0 && owner < len(nativeWorkerAllocators) {
+		return &nativeWorkerAllocators[owner]
 	}
-	return allocator
+	return &nativeExternalAllocator
+}
+
+func nativeWorkerAllocatorLocked(owner int) *nativeWorkerAllocator {
+	return nativeAllocatorForOwner(owner)
+}
+
+func resetNativeWorkerAllocatorsLocked() {
+	nativeWorkerAllocators = [nativeSchedulerMaxWorkers]nativeWorkerAllocator{}
+	nativeExternalAllocator = nativeWorkerAllocator{}
 }
 
 func newNativeHeapSpanLocked(classIndex, owner int) *nativeHeapSpan {
@@ -132,7 +142,7 @@ func takeReusableNativeSpanLocked(classIndex, owner int) *nativeHeapSpan {
 	return nil
 }
 
-func allocateNativeSpanSlotLocked(span *nativeHeapSpan) (unsafe.Pointer, uint32) {
+func allocateNativeSpanSlot(span *nativeHeapSpan) (unsafe.Pointer, uint32) {
 	var slot uint32
 	if count := len(span.free); count != 0 {
 		slot = span.free[count-1]
@@ -146,6 +156,29 @@ func allocateNativeSpanSlotLocked(span *nativeHeapSpan) (unsafe.Pointer, uint32)
 	ptr := unsafe.Add(span.base, uintptr(slot)*span.classSize)
 	clear(unsafe.Slice((*byte)(ptr), int(span.classSize)))
 	return ptr, slot
+}
+
+func allocateNativeHeapStorage(size uintptr) (unsafe.Pointer, []byte, *nativeHeapSpan, uint32) {
+	classIndex := nativeSizeClassIndex(size)
+	if classIndex < 0 {
+		ptr, data := nativeMap(size)
+		return ptr, data, nil, 0
+	}
+
+	owner := nativeAllocatorOwner()
+	if owner >= 0 && owner < len(nativeWorkerAllocators) {
+		allocator := nativeAllocatorForOwner(owner)
+		span := allocator.active[classIndex]
+		if len(allocator.remote) == 0 && nativeSpanHasSpace(span) {
+			ptr, slot := allocateNativeSpanSlot(span)
+			return ptr, nil, span, slot
+		}
+	}
+
+	nativeHeap.Lock()
+	ptr, data, span, slot := allocateNativeHeapStorageLocked(size)
+	nativeHeap.Unlock()
+	return ptr, data, span, slot
 }
 
 func allocateNativeHeapStorageLocked(size uintptr) (unsafe.Pointer, []byte, *nativeHeapSpan, uint32) {
@@ -166,13 +199,13 @@ func allocateNativeHeapStorageLocked(size uintptr) (unsafe.Pointer, []byte, *nat
 		}
 		allocator.active[classIndex] = span
 	}
-	ptr, slot := allocateNativeSpanSlotLocked(span)
+	ptr, slot := allocateNativeSpanSlot(span)
 	return ptr, nil, span, slot
 }
 
 func nativeSpanIsActiveLocked(span *nativeHeapSpan) bool {
-	allocator := nativeHeap.allocators[span.owner]
-	return allocator != nil && allocator.active[span.classIndex] == span
+	allocator := nativeAllocatorForOwner(span.owner)
+	return allocator.active[span.classIndex] == span
 }
 
 func removeReusableNativeSpanLocked(span *nativeHeapSpan) {
@@ -262,9 +295,11 @@ func releaseNativeHeapBlockStorage(block *nativeHeapBlock) []byte {
 	if block == nil {
 		return nil
 	}
+	nativeHeapWorld.Lock()
 	nativeHeap.Lock()
 	data := releaseNativeHeapBlockStorageLocked(block)
 	nativeHeap.Unlock()
+	nativeHeapWorld.Unlock()
 	return data
 }
 
