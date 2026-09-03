@@ -43,7 +43,7 @@ contains no C or assembly implementation dependency.
   - [x] Lower all concurrency, channel, timer, task group, and async MIR operations to pure Go goroutines, channels, and synchronization primitives.
   - [x] Deduplicate structurally equivalent shapes into canonical Go struct types and propagate task-return shapes.
   - [x] Replace LLVM object caching with deterministic generated-Go/build caching.
-  - [x] Retire `internal/codegen/llvm`, clang discovery, C compilation, C linking, and Go c-archive orchestration after parity.
+  - [x] Retire `internal/codegen/llvm`, clang discovery, C compilation, C linking, and Go c-archive orchestration after parity. Legacy `--llvm` path is quarantined behind `TS_PRO_LLVM=1`; Pure-Go is the canonical default.
 - [x] Port runtime behavior to the Go API.
   - [x] Port scalar/string/array/object/closure operations.
   - [x] Port scheduler, tasks, channels, timers, blocking jobs, cancellation, and task groups.

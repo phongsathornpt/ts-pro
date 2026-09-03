@@ -46,6 +46,10 @@ The runtime has transitioned to **100% pure Go (`CGO_ENABLED=0`)**:
 - **Canonical CLI**: Modern `cmd/tspro` entrypoint added alongside backward-compatible `cmd/tsnative`.
 - **Gopls & toolchain health**: Zero custom build tag errors in editor language servers; 100% clean `gopls check` and `go vet` across Darwin, Linux, and Windows.
 
+### Legacy LLVM backend quarantine
+
+The legacy LLVM/native compilation path (`--llvm` or `DisablePureGo: true`) is formally quarantined behind `TS_PRO_LLVM=1`. The Pure-Go code generator (`internal/codegen/golang`) is the sole supported, default, and canonical execution backend for `ts-pro`. All Map/Set reference semantics, cooperative task and group cancellation, task-local context inheritance, channel buffer admission bounds, and compile-time rejection of direct mutable Map/Set captures are natively enforced on the Pure-Go path.
+
 ## Concurrency subsystem
 
 `docs/CONCURRENCY.md` records the implementation model and remaining scheduler/GC work:
