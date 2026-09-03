@@ -54,3 +54,48 @@ func TestStructuralSubtyping(t *testing.T) {
 		t.Errorf("Point2D should NOT be assignable to Point3D")
 	}
 }
+
+func TestTypeVarsUseDeclarationIdentity(t *testing.T) {
+	a := NewTypeVar("T", nil)
+	b := NewTypeVar("T", nil)
+	if !a.Equals(a) {
+		t.Fatal("type variable must equal itself")
+	}
+	if a.Equals(b) {
+		t.Fatal("distinct declarations named T must not be equal")
+	}
+	constrained := NewTypeVar("N", TypeNumber)
+	if !constrained.AssignableTo(TypeNumber) {
+		t.Fatal("number-constrained type variable should be assignable to number")
+	}
+}
+
+func TestTupleTypeAndGenericSubstitution(t *testing.T) {
+	tvT := NewTypeVar("T", nil)
+	tvU := NewTypeVar("U", nil)
+	fn := NewGenericFunction(
+		[]*TypeVar{tvT, tvU},
+		[]Param{{Name: "first", Type: tvT}, {Name: "rest", Type: NewArray(tvU)}},
+		NewTuple(tvT, tvU),
+	)
+	inst, err := InstantiateFunction(fn, []Type{TypeString, TypeNumber})
+	if err != nil {
+		t.Fatalf("InstantiateFunction failed: %v", err)
+	}
+	if len(inst.TypeParams) != 0 {
+		t.Fatalf("instantiated function retained type params: %v", inst.TypeParams)
+	}
+	if !inst.Params[0].Type.Equals(TypeString) || !inst.Params[1].Type.Equals(NewArray(TypeNumber)) {
+		t.Fatalf("unexpected instantiated params: %s", inst)
+	}
+	want := NewTuple(TypeString, TypeNumber)
+	if !inst.Return.Equals(want) {
+		t.Fatalf("return = %s, want %s", inst.Return, want)
+	}
+	if got := want.String(); got != "[string, number]" {
+		t.Fatalf("tuple string = %q", got)
+	}
+	if !want.AssignableTo(NewArray(NewUnion(TypeString, TypeNumber))) {
+		t.Fatal("heterogeneous tuple should be assignable to compatible union array")
+	}
+}

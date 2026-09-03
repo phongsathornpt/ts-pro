@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 )
 
 type TypeKind uint8
@@ -78,6 +79,104 @@ var (
 	TypeNumber    Type = &primitiveType{kind: KindNumber, name: "number"}
 	TypeString    Type = &primitiveType{kind: KindString, name: "string"}
 )
+
+// --- Type Variables ---
+
+var nextTypeVarID atomic.Uint64
+
+type TypeVar struct {
+	ID         uint64
+	Name       string
+	Constraint Type
+}
+
+func NewTypeVar(name string, constraint Type) *TypeVar {
+	return &TypeVar{ID: nextTypeVarID.Add(1), Name: name, Constraint: constraint}
+}
+
+func (t *TypeVar) Kind() TypeKind { return KindTypeVar }
+func (t *TypeVar) String() string { return t.Name }
+func (t *TypeVar) Equals(other Type) bool {
+	o, ok := other.(*TypeVar)
+	return ok && t.ID == o.ID
+}
+func (t *TypeVar) AssignableTo(target Type) bool {
+	if target == nil {
+		return false
+	}
+	if target.Kind() == KindAny || target.Kind() == KindUnknown || t.Equals(target) {
+		return true
+	}
+	if u, ok := target.(*UnionType); ok {
+		return u.ContainsAssignable(t)
+	}
+	if t.Constraint != nil {
+		return t.Constraint.AssignableTo(target)
+	}
+	return false
+}
+
+// --- Tuple Type ---
+
+type TupleType struct {
+	Elements []Type
+}
+
+func NewTuple(elements ...Type) *TupleType {
+	return &TupleType{Elements: append([]Type(nil), elements...)}
+}
+
+func (t *TupleType) Kind() TypeKind { return KindTuple }
+func (t *TupleType) String() string {
+	parts := make([]string, len(t.Elements))
+	for i, elem := range t.Elements {
+		parts[i] = elem.String()
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+func (t *TupleType) Equals(other Type) bool {
+	o, ok := other.(*TupleType)
+	if !ok || len(t.Elements) != len(o.Elements) {
+		return false
+	}
+	for i := range t.Elements {
+		if !t.Elements[i].Equals(o.Elements[i]) {
+			return false
+		}
+	}
+	return true
+}
+func (t *TupleType) AssignableTo(target Type) bool {
+	if target == nil {
+		return false
+	}
+	if target.Kind() == KindAny || target.Kind() == KindUnknown {
+		return true
+	}
+	if o, ok := target.(*TupleType); ok {
+		if len(t.Elements) != len(o.Elements) {
+			return false
+		}
+		for i := range t.Elements {
+			if !t.Elements[i].AssignableTo(o.Elements[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if a, ok := target.(*ArrayType); ok {
+		for _, elem := range t.Elements {
+			if !elem.AssignableTo(a.Elem) {
+				return false
+			}
+		}
+		return true
+	}
+	if u, ok := target.(*UnionType); ok {
+		return u.ContainsAssignable(t)
+	}
+	return false
+}
 
 // --- Array Type ---
 
@@ -216,12 +315,17 @@ type Param struct {
 }
 
 type FunctionType struct {
-	Params []Param
-	Return Type
+	TypeParams []*TypeVar
+	Params     []Param
+	Return     Type
 }
 
 func NewFunction(params []Param, ret Type) *FunctionType {
 	return &FunctionType{Params: params, Return: ret}
+}
+
+func NewGenericFunction(typeParams []*TypeVar, params []Param, ret Type) *FunctionType {
+	return &FunctionType{TypeParams: append([]*TypeVar(nil), typeParams...), Params: params, Return: ret}
 }
 
 func (f *FunctionType) Kind() TypeKind { return KindFunction }
@@ -234,12 +338,25 @@ func (f *FunctionType) String() string {
 		}
 		parts = append(parts, fmt.Sprintf("%s%s: %s", p.Name, opt, p.Type.String()))
 	}
-	return fmt.Sprintf("(%s) => %s", strings.Join(parts, ", "), f.Return.String())
+	typeParams := ""
+	if len(f.TypeParams) > 0 {
+		names := make([]string, len(f.TypeParams))
+		for i, tp := range f.TypeParams {
+			names[i] = tp.String()
+		}
+		typeParams = "<" + strings.Join(names, ", ") + ">"
+	}
+	return fmt.Sprintf("%s(%s) => %s", typeParams, strings.Join(parts, ", "), f.Return.String())
 }
 func (f *FunctionType) Equals(other Type) bool {
 	o, ok := other.(*FunctionType)
-	if !ok || len(f.Params) != len(o.Params) || !f.Return.Equals(o.Return) {
+	if !ok || len(f.TypeParams) != len(o.TypeParams) || len(f.Params) != len(o.Params) || !f.Return.Equals(o.Return) {
 		return false
+	}
+	for i := range f.TypeParams {
+		if !f.TypeParams[i].Equals(o.TypeParams[i]) {
+			return false
+		}
 	}
 	for i := range f.Params {
 		if !f.Params[i].Type.Equals(o.Params[i].Type) {
@@ -363,4 +480,82 @@ func (u *UnionType) ContainsAssignable(src Type) bool {
 		}
 	}
 	return false
+}
+
+// Substitute recursively replaces type variables using declaration-identity bindings.
+// Types without bound variables are returned unchanged where practical.
+func Substitute(t Type, bindings map[*TypeVar]Type) Type {
+	if t == nil || len(bindings) == 0 {
+		return t
+	}
+	switch v := t.(type) {
+	case *TypeVar:
+		if replacement, ok := bindings[v]; ok {
+			return replacement
+		}
+		return v
+	case *ArrayType:
+		return NewArray(Substitute(v.Elem, bindings))
+	case *TupleType:
+		elems := make([]Type, len(v.Elements))
+		for i, elem := range v.Elements {
+			elems[i] = Substitute(elem, bindings)
+		}
+		return NewTuple(elems...)
+	case *UnionType:
+		members := make([]Type, len(v.Members))
+		for i, member := range v.Members {
+			members[i] = Substitute(member, bindings)
+		}
+		return NewUnion(members...)
+	case *ObjectType:
+		out := NewObject(v.Name)
+		for _, name := range v.FieldOrder {
+			field := v.Fields[name]
+			out.AddField(name, Substitute(field.Type, bindings), field.Optional)
+		}
+		return out
+	case *FunctionType:
+		params := make([]Param, len(v.Params))
+		for i, param := range v.Params {
+			params[i] = param
+			params[i].Type = Substitute(param.Type, bindings)
+		}
+		ret := Substitute(v.Return, bindings)
+		remaining := make([]*TypeVar, 0, len(v.TypeParams))
+		for _, tp := range v.TypeParams {
+			if _, bound := bindings[tp]; !bound {
+				remaining = append(remaining, tp)
+			}
+		}
+		return NewGenericFunction(remaining, params, ret)
+	default:
+		return t
+	}
+}
+
+func InstantiateFunction(fn *FunctionType, args []Type) (*FunctionType, error) {
+	if fn == nil {
+		return nil, fmt.Errorf("cannot instantiate nil function type")
+	}
+	if len(fn.TypeParams) != len(args) {
+		return nil, fmt.Errorf("generic function expects %d type arguments, got %d", len(fn.TypeParams), len(args))
+	}
+	bindings := make(map[*TypeVar]Type, len(args))
+	for i, tp := range fn.TypeParams {
+		arg := args[i]
+		if arg == nil {
+			return nil, fmt.Errorf("type argument %d is nil", i)
+		}
+		if tp.Constraint != nil && !arg.AssignableTo(tp.Constraint) {
+			return nil, fmt.Errorf("type argument %s does not satisfy constraint %s", arg, tp.Constraint)
+		}
+		bindings[tp] = arg
+	}
+	instantiated, ok := Substitute(fn, bindings).(*FunctionType)
+	if !ok {
+		return nil, fmt.Errorf("generic function substitution produced %T", instantiated)
+	}
+	instantiated.TypeParams = nil
+	return instantiated, nil
 }
