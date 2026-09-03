@@ -90,6 +90,30 @@ func modRM(mod byte, reg Register, rm Register) byte {
 	return ((mod & 0x03) << 6) | ((byte(reg) & 0x07) << 3) | (byte(rm) & 0x07)
 }
 
+func sib(scale byte, index Register, base Register) byte {
+	return ((scale & 0x03) << 6) | ((byte(index) & 0x07) << 3) | (byte(base) & 0x07)
+}
+
+func (e *Emitter) emitBaseDisp(regField Register, base Register, disp int32) {
+	mod := byte(0b10)
+	if disp >= -128 && disp <= 127 {
+		mod = 0b01
+	}
+
+	if base&7 == RSP {
+		e.emitByte(modRM(mod, regField, RSP))
+		e.emitByte(sib(0, RSP, base)) // no index, base=RSP/R12
+	} else {
+		e.emitByte(modRM(mod, regField, base))
+	}
+
+	if mod == 0b01 {
+		e.emitByte(byte(disp))
+	} else {
+		e.emitInt32(disp)
+	}
+}
+
 // MovRegReg: MOV dst, src (64-bit)
 func (e *Emitter) MovRegReg(dst, src Register) {
 	e.emitByte(rex(true, src >= 8, false, dst >= 8))
@@ -139,6 +163,21 @@ func (e *Emitter) CmpRegReg(r1, r2 Register) {
 	e.emitByte(rex(true, r2 >= 8, false, r1 >= 8))
 	e.emitByte(0x39)
 	e.emitByte(modRM(0b11, r2, r1))
+}
+
+// CmpRegImm32: CMP reg, imm32 (64-bit, sign-extended immediate).
+func (e *Emitter) CmpRegImm32(reg Register, imm int32) {
+	e.emitByte(rex(true, false, false, reg >= 8))
+	e.emitByte(0x81)
+	e.emitByte(modRM(0b11, 7, reg))
+	e.emitInt32(imm)
+}
+
+// TestRegReg: TEST lhs, rhs (64-bit).
+func (e *Emitter) TestRegReg(lhs, rhs Register) {
+	e.emitByte(rex(true, rhs >= 8, false, lhs >= 8))
+	e.emitByte(0x85)
+	e.emitByte(modRM(0b11, rhs, lhs))
 }
 
 // JmpRel32: JMP rel32
@@ -209,40 +248,45 @@ func (e *Emitter) OrRegReg(dst, src Register) {
 	e.emitByte(modRM(0b11, src, dst))
 }
 
-// Setcc: SETcc dst (sets lower 8 bits of reg to 1 if condition holds, 0 otherwise)
+// Setcc sets dst to a canonical 0/1 value. SETcc writes only the low byte,
+// so MOVZX is emitted immediately afterwards to clear the upper bits.
 func (e *Emitter) Setcc(cond Cond, dst Register) {
 	if dst >= 4 {
-		// REX prefix required to access SIL/DIL/BPL/SPL or R8B-R15B
+		// REX prefix required to access SIL/DIL/BPL/SPL or R8B-R15B.
 		e.emitByte(rex(false, false, false, dst >= 8))
 	}
 	e.emitBytes(0x0F, 0x90|byte(cond))
 	e.emitByte(modRM(0b11, 0, dst))
+
+	e.emitByte(rex(true, dst >= 8, false, dst >= 8))
+	e.emitBytes(0x0F, 0xB6)
+	e.emitByte(modRM(0b11, dst, dst))
 }
 
-// MovDerefReg: MOV [base + disp32], src (64-bit)
+// MovDerefReg: MOV [base + disp], src (64-bit).
 func (e *Emitter) MovDerefReg(base Register, disp int32, src Register) {
 	e.emitByte(rex(true, src >= 8, false, base >= 8))
 	e.emitByte(0x89)
-	if disp >= -128 && disp <= 127 {
-		e.emitByte(modRM(0b01, src, base))
-		e.emitByte(byte(disp))
-	} else {
-		e.emitByte(modRM(0b10, src, base))
-		e.emitInt32(disp)
-	}
+	e.emitBaseDisp(src, base, disp)
 }
 
-// MovRegDeref: MOV dst, [base + disp32] (64-bit)
+// MovRegDeref: MOV dst, [base + disp] (64-bit).
 func (e *Emitter) MovRegDeref(dst Register, base Register, disp int32) {
 	e.emitByte(rex(true, dst >= 8, false, base >= 8))
 	e.emitByte(0x8B)
-	if disp >= -128 && disp <= 127 {
-		e.emitByte(modRM(0b01, dst, base))
-		e.emitByte(byte(disp))
-	} else {
-		e.emitByte(modRM(0b10, dst, base))
-		e.emitInt32(disp)
-	}
+	e.emitBaseDisp(dst, base, disp)
+}
+
+// Cqo sign-extends RAX into RDX:RAX for signed division.
+func (e *Emitter) Cqo() {
+	e.emitBytes(0x48, 0x99)
+}
+
+// IdivReg divides signed RDX:RAX by src. Quotient is returned in RAX and remainder in RDX.
+func (e *Emitter) IdivReg(src Register) {
+	e.emitByte(rex(true, false, false, src >= 8))
+	e.emitByte(0xF7)
+	e.emitByte(modRM(0b11, 7, src))
 }
 
 // Syscall: SYSCALL

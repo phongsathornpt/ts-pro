@@ -55,3 +55,52 @@ func TestAMD64Encodings(t *testing.T) {
 		t.Errorf("LeaRipRel32 RAX, 0: got %x, want 488d0500000000", e.Code)
 	}
 }
+
+func TestAMD64MemoryAndConditionEncodings(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*Emitter)
+		want []byte
+	}{
+		{
+			name: "mov [rsp+16], rax uses sib",
+			emit: func(e *Emitter) { e.MovDerefReg(RSP, 16, RAX) },
+			want: []byte{0x48, 0x89, 0x44, 0x24, 0x10},
+		},
+		{
+			name: "mov rax, [rsp+16] uses sib",
+			emit: func(e *Emitter) { e.MovRegDeref(RAX, RSP, 16) },
+			want: []byte{0x48, 0x8B, 0x44, 0x24, 0x10},
+		},
+		{
+			name: "mov [r12+16], rax uses sib and rex-b",
+			emit: func(e *Emitter) { e.MovDerefReg(R12, 16, RAX) },
+			want: []byte{0x49, 0x89, 0x44, 0x24, 0x10},
+		},
+		{
+			name: "test r12 r12",
+			emit: func(e *Emitter) { e.TestRegReg(R12, R12) },
+			want: []byte{0x4D, 0x85, 0xE4},
+		},
+		{
+			name: "setne r12 canonicalizes upper bits",
+			emit: func(e *Emitter) { e.Setcc(CondNE, R12) },
+			want: []byte{0x41, 0x0F, 0x95, 0xC4, 0x4D, 0x0F, 0xB6, 0xE4},
+		},
+		{
+			name: "cqo idiv r12",
+			emit: func(e *Emitter) { e.Cqo(); e.IdivReg(R12) },
+			want: []byte{0x48, 0x99, 0x49, 0xF7, 0xFC},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewEmitter()
+			tc.emit(e)
+			if !bytes.Equal(e.Code, tc.want) {
+				t.Fatalf("encoding: got %x, want %x", e.Code, tc.want)
+			}
+		})
+	}
+}
