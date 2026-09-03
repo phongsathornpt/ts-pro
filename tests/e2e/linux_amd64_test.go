@@ -932,3 +932,40 @@ console.log(c.value());
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+func TestLinuxAMD64MapSetCollections(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "map_set_growth_delete_clear_and_gc",
+		source: `
+const m = new Map<string, number>();
+m.set("a", 1).set("b", 2).set("c", 3).set("d", 4).set("e", 5).set("f", 6);
+console.log(m.size);
+console.log(m.get("a"));
+console.log(m.get("f"));
+console.log(m.has("missing"));
+console.log(m.delete("c"));
+console.log(m.size);
+const heapKey = "heap-" + "key";
+m.set(heapKey, 99);
+for (let i = 0; i < 50000; i = i + 1) { const garbage = "g" + "c"; }
+console.log(m.has(heapKey));
+console.log(m.get(heapKey));
+m.clear();
+console.log(m.size);
+const s = new Set<number>();
+s.add(1).add(2).add(3).add(4).add(5);
+console.log(s.size);
+console.log(s.has(5));
+console.log(s.delete(2));
+console.log(s.has(2));
+const z = new Map<number, number>();
+z.set(-0, 7);
+console.log(z.has(0));
+console.log(z.get(0));
+const textKeys = new Map<string, number>();
+textKeys.set("same-" + "key", 77);
+console.log(textKeys.get("same-" + "key"));
+`,
+		expected: "6\n1\n6\n0\n1\n5\n1\n99\n0\n5\n1\n1\n0\n1\n7\n77\n",
+	})
+}

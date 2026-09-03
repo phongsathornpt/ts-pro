@@ -45,6 +45,13 @@ type ClassInfo struct {
 	Resolving    bool
 }
 
+type BuiltinCollectionInfo struct {
+	Kind     string
+	Instance *types.ObjectType
+	Key      types.Type
+	Value    types.Type
+}
+
 type Scope struct {
 	Parent  *Scope
 	Symbols map[string]*Symbol
@@ -77,15 +84,16 @@ func (s *Scope) Resolve(name string) *Symbol {
 
 // Result holds the analyzed types and symbols for an AST.
 type Result struct {
-	Types          map[ast.Node]types.Type
-	Symbols        map[ast.Node]*Symbol
-	GenericCalls   map[*ast.CallExpr]*types.FunctionType
-	GenericClasses map[*ast.NewExpr]*ClassInfo
-	Classes        map[string]*ClassInfo
-	Enums          map[string]map[string]float64
-	ImportAliases  map[string]string
-	RootScope      *Scope
-	Diagnostics    diag.DiagnosticList
+	Types              map[ast.Node]types.Type
+	Symbols            map[ast.Node]*Symbol
+	GenericCalls       map[*ast.CallExpr]*types.FunctionType
+	GenericClasses     map[*ast.NewExpr]*ClassInfo
+	Classes            map[string]*ClassInfo
+	Enums              map[string]map[string]float64
+	ImportAliases      map[string]string
+	BuiltinCollections map[string]*BuiltinCollectionInfo
+	RootScope          *Scope
+	Diagnostics        diag.DiagnosticList
 }
 
 type Checker struct {
@@ -103,15 +111,16 @@ func NewChecker() *Checker {
 	return &Checker{
 		currentScope: root,
 		result: &Result{
-			Types:          make(map[ast.Node]types.Type),
-			Symbols:        make(map[ast.Node]*Symbol),
-			GenericCalls:   make(map[*ast.CallExpr]*types.FunctionType),
-			GenericClasses: make(map[*ast.NewExpr]*ClassInfo),
-			Classes:        make(map[string]*ClassInfo),
-			Enums:          make(map[string]map[string]float64),
-			ImportAliases:  make(map[string]string),
-			RootScope:      root,
-			Diagnostics:    make(diag.DiagnosticList, 0),
+			Types:              make(map[ast.Node]types.Type),
+			Symbols:            make(map[ast.Node]*Symbol),
+			GenericCalls:       make(map[*ast.CallExpr]*types.FunctionType),
+			GenericClasses:     make(map[*ast.NewExpr]*ClassInfo),
+			Classes:            make(map[string]*ClassInfo),
+			Enums:              make(map[string]map[string]float64),
+			ImportAliases:      make(map[string]string),
+			BuiltinCollections: make(map[string]*BuiltinCollectionInfo),
+			RootScope:          root,
+			Diagnostics:        make(diag.DiagnosticList, 0),
 		},
 		genericClassSpecs: make(map[string]*ClassInfo),
 	}
@@ -456,6 +465,54 @@ func removeNullishType(t types.Type) types.Type {
 	}
 }
 
+func (c *Checker) builtinCollection(kind string, key, value types.Type) *BuiltinCollectionInfo {
+	name := "$" + kind + "<" + key.String()
+	if kind == "Map" {
+		name += "," + value.String()
+	}
+	name += ">"
+	if info := c.result.BuiltinCollections[name]; info != nil {
+		return info
+	}
+	info := &BuiltinCollectionInfo{Kind: kind, Key: key, Value: value}
+	info.Instance = types.NewObject(name)
+	c.result.BuiltinCollections[name] = info
+	return info
+}
+
+func (c *Checker) builtinCollectionMember(info *BuiltinCollectionInfo, property string) (types.Type, bool) {
+	if info == nil {
+		return nil, false
+	}
+	if property == "size" {
+		return types.TypeNumber, true
+	}
+	keyParam := types.Param{Name: "key", Type: info.Key}
+	switch info.Kind {
+	case "Map":
+		switch property {
+		case "set":
+			return types.NewFunction([]types.Param{keyParam, types.Param{Name: "value", Type: info.Value}}, info.Instance), true
+		case "get":
+			return types.NewFunction([]types.Param{keyParam}, types.NewUnion(info.Value, types.TypeUndefined)), true
+		case "has", "delete":
+			return types.NewFunction([]types.Param{keyParam}, types.TypeBoolean), true
+		case "clear":
+			return types.NewFunction(nil, types.TypeVoid), true
+		}
+	case "Set":
+		switch property {
+		case "add":
+			return types.NewFunction([]types.Param{keyParam}, info.Instance), true
+		case "has", "delete":
+			return types.NewFunction([]types.Param{keyParam}, types.TypeBoolean), true
+		case "clear":
+			return types.NewFunction(nil, types.TypeVoid), true
+		}
+	}
+	return nil, false
+}
+
 func (c *Checker) lookupMemberType(objType types.Type, property string) (types.Type, bool) {
 	if objType == nil {
 		return nil, false
@@ -478,6 +535,11 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 			return types.NewFunction(nil, t.Elem), true
 		}
 	case *types.ObjectType:
+		if builtin := c.result.BuiltinCollections[t.Name]; builtin != nil {
+			if member, ok := c.builtinCollectionMember(builtin, property); ok {
+				return member, true
+			}
+		}
 		if info := c.result.Classes[t.Name]; info != nil {
 			if method := info.Methods[property]; method != nil {
 				return method, true
@@ -833,6 +895,28 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
 	case *ast.NewExpr:
+		if e.ClassName == "Map" || e.ClassName == "Set" {
+			want := 1
+			if e.ClassName == "Map" {
+				want = 2
+			}
+			if len(e.TypeArgs) != want {
+				c.error(e.Span(), "TS2558", fmt.Sprintf("%s expects %d type arguments, got %d.", e.ClassName, want, len(e.TypeArgs)))
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
+			args := make([]types.Type, want)
+			for i, node := range e.TypeArgs {
+				args[i] = c.resolveTypeNode(node)
+			}
+			key, value := args[0], types.TypeUndefined
+			if e.ClassName == "Map" {
+				value = args[1]
+			}
+			info := c.builtinCollection(e.ClassName, key, value)
+			c.result.Types[e] = info.Instance
+			return info.Instance
+		}
 		info := c.result.Classes[e.ClassName]
 		if info == nil {
 			c.error(e.Span(), "TS2304", fmt.Sprintf("Cannot find class '%s'.", e.ClassName))

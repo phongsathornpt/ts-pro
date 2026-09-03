@@ -739,6 +739,67 @@ func (g *generator) staticStringKey(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
+func (g *generator) builtinCollectionInfo(t types.Type) *sema.BuiltinCollectionInfo {
+	obj, ok := t.(*types.ObjectType)
+	if !ok || g.semaResult == nil {
+		return nil
+	}
+	return g.semaResult.BuiltinCollections[obj.Name]
+}
+
+func (g *generator) emitBuiltinCollectionCall(call *ast.CallExpr, mem *ast.MemberExpr, info *sema.BuiltinCollectionInfo) ir.Operand {
+	obj := g.lowerExpr(mem.Object)
+	boxArg := func(i int) ir.Operand {
+		v := g.lowerExpr(call.Args[i])
+		return g.boxJSValue(v, g.semanticType(call.Args[i]))
+	}
+	resultType := g.semanticType(call)
+	switch info.Kind + "." + mem.Property {
+	case "Map.set":
+		if len(call.Args) != 2 {
+			return g.failExpr("Map.set expects two arguments")
+		}
+		res := g.currentFn.NewValue("map", info.Instance)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_set", Args: []ir.Operand{obj, boxArg(0), boxArg(1)}})
+		return res
+	case "Set.add":
+		if len(call.Args) != 1 {
+			return g.failExpr("Set.add expects one argument")
+		}
+		res := g.currentFn.NewValue("set", info.Instance)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_set", Args: []ir.Operand{obj, boxArg(0), ir.ConstUndefined{}}})
+		return res
+	case "Map.get":
+		if len(call.Args) != 1 {
+			return g.failExpr("Map.get expects one argument")
+		}
+		res := g.currentFn.NewValue("map_value", resultType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_get", Args: []ir.Operand{obj, boxArg(0)}})
+		return res
+	case "Map.has", "Set.has":
+		if len(call.Args) != 1 {
+			return g.failExpr("collection.has expects one argument")
+		}
+		res := g.currentFn.NewValue("has", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_has", Args: []ir.Operand{obj, boxArg(0)}})
+		return res
+	case "Map.delete", "Set.delete":
+		if len(call.Args) != 1 {
+			return g.failExpr("collection.delete expects one argument")
+		}
+		res := g.currentFn.NewValue("deleted", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_delete", Args: []ir.Operand{obj, boxArg(0)}})
+		return res
+	case "Map.clear", "Set.clear":
+		if len(call.Args) != 0 {
+			return g.failExpr("collection.clear expects no arguments")
+		}
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_collection_clear", Args: []ir.Operand{obj}})
+		return nil
+	}
+	return g.failExpr("unsupported native %s method %s", info.Kind, mem.Property)
+}
+
 func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 	t := g.semanticType(expr)
 	if t == nil {
@@ -1866,6 +1927,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.SuperExpr:
 		return g.failExpr("super lowering is reserved for the inheritance phase")
 	case *ast.NewExpr:
+		if collection := g.builtinCollectionInfo(g.semanticType(e)); collection != nil {
+			res := g.currentFn.NewValue(strings.ToLower(collection.Kind), collection.Instance)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_new"})
+			return res
+		}
 		info := g.semaResult.GenericClasses[e]
 		if info == nil {
 			info = g.semaResult.Classes[e.ClassName]
@@ -2207,6 +2273,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if collection := g.semaResult.BuiltinCollections[objType.Name]; collection != nil && e.Property == "size" {
+				obj := g.lowerExpr(e.Object)
+				res := g.currentFn.NewValue("collection_size", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_size", Args: []ir.Operand{obj}})
+				return res
+			}
 			offsets, _, _ := g.objectLayout(objType)
 			offset, exists := offsets[e.Property]
 			if !exists {
@@ -2276,6 +2348,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if collection := g.builtinCollectionInfo(g.semanticType(mem.Object)); collection != nil {
+				return g.emitBuiltinCollectionCall(e, mem, collection)
+			}
 			if staticType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
 				if staticInfo := g.semaResult.Classes[staticType.Name]; staticInfo != nil && staticInfo.Methods[mem.Property] != nil {
 					obj := g.lowerExpr(mem.Object)
