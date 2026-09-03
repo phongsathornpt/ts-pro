@@ -1,6 +1,7 @@
 package irgen
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -193,5 +194,29 @@ console.log(readX({ y: 4, x: 3 }));
 		if !strings.Contains(dump, want) {
 			t.Fatalf("expected %q in IR:\n%s", want, dump)
 		}
+	}
+}
+
+func TestIRGenRejectsObjectReferenceMaskOverflow(t *testing.T) {
+	var src strings.Builder
+	src.WriteString("const obj = {\n")
+	for i := 0; i < 65; i++ {
+		fmt.Fprintf(&src, "  f%02d: \"v%02d\",\n", i, i)
+	}
+	src.WriteString("};\nconsole.log(obj.f00);\n")
+
+	fs := source.NewFileSet()
+	f := fs.AddFile("object-mask-overflow.ts", []byte(src.String()))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %s", diags.Format(fs))
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %s", semaResult.Diagnostics.Format(fs))
+	}
+	if _, err := Generate(prog, semaResult); err == nil || !strings.Contains(err.Error(), "64-bit GC reference mask") {
+		t.Fatalf("expected GC reference-mask overflow error, got %v", err)
 	}
 }

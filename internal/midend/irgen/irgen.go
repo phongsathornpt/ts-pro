@@ -18,6 +18,7 @@ type generator struct {
 	currentFn  *ir.Function
 	currentBB  *ir.BasicBlock
 	locals     map[string]ir.Operand
+	err        error
 }
 
 func irHeapRefType(t types.Type) bool {
@@ -39,7 +40,7 @@ func irHeapRefType(t types.Type) bool {
 	return false
 }
 
-func objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
+func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
 	names := make([]string, 0, len(t.Fields))
 	for name := range t.Fields {
 		names = append(names, name)
@@ -49,8 +50,14 @@ func objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
 	var refMask uint64
 	for i, name := range names {
 		offsets[name] = 16 + i*8
-		if i < 64 && irHeapRefType(t.Fields[name].Type) {
-			refMask |= uint64(1) << i
+		if irHeapRefType(t.Fields[name].Type) {
+			if i >= 64 {
+				if g.err == nil {
+					g.err = fmt.Errorf("object reference field %q occupies slot %d beyond the 64-bit GC reference mask", name, i)
+				}
+			} else {
+				refMask |= uint64(1) << i
+			}
 		}
 	}
 	return offsets, refMask, strings.Join(names, ",")
@@ -82,6 +89,9 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		g.prog.Functions = append([]*ir.Function{mainFn}, g.prog.Functions...)
 	}
 
+	if g.err != nil {
+		return nil, g.err
+	}
 	return g.prog, nil
 }
 
@@ -504,7 +514,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if objType == nil {
 			return ir.ConstNumber{Value: 0}
 		}
-		offsets, refMask, shape := objectLayout(objType)
+		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		for _, prop := range e.Properties {
@@ -657,7 +667,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semaResult.Types[e.Object].(*types.ObjectType); ok {
-			offsets, _, _ := objectLayout(objType)
+			offsets, _, _ := g.objectLayout(objType)
 			obj := g.lowerExpr(e.Object)
 			resultType := types.TypeAny
 			if t, ok := g.semaResult.Types[e]; ok && t != nil {
@@ -726,7 +736,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.AssignExpr:
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
 			if objType, ok := g.semaResult.Types[mem.Object].(*types.ObjectType); ok {
-				offsets, _, _ := objectLayout(objType)
+				offsets, _, _ := g.objectLayout(objType)
 				obj := g.lowerExpr(mem.Object)
 				rhs := g.lowerExpr(e.Right)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offsets[mem.Property], Val: rhs})
