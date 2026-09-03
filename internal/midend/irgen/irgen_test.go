@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/parser"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/sema"
 	"github.com/phongsathornpt/ts-pro/internal/support/source"
@@ -218,5 +219,18 @@ func TestIRGenRejectsObjectReferenceMaskOverflow(t *testing.T) {
 	}
 	if _, err := Generate(prog, semaResult); err == nil || !strings.Contains(err.Error(), "64-bit GC reference mask") {
 		t.Fatalf("expected GC reference-mask overflow error, got %v", err)
+	}
+}
+
+func TestIRGenRejectsUnsupportedArrowFunctionValue(t *testing.T) {
+	prog := &ast.Program{Statements: []ast.Stmt{
+		&ast.ExprStmt{Expr: &ast.ArrowFuncExpr{
+			Body:       &ast.NumberLit{Value: 1},
+			IsExprBody: true,
+		}},
+	}}
+	semaResult := sema.Check(prog)
+	if _, err := Generate(prog, semaResult); err == nil || !strings.Contains(err.Error(), "unsupported expression node") {
+		t.Fatalf("expected unsupported-expression lowering error, got %v", err)
 	}
 }

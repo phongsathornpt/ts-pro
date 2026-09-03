@@ -63,6 +63,13 @@ func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, s
 	return offsets, refMask, strings.Join(names, ",")
 }
 
+func (g *generator) failExpr(format string, args ...any) ir.Operand {
+	if g.err == nil {
+		g.err = fmt.Errorf(format, args...)
+	}
+	return ir.ConstNumber{Value: 0}
+}
+
 // Generate lowers an AST program and its semantic facts into SSA IR.
 func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error) {
 	g := &generator{
@@ -512,7 +519,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.ObjectLit:
 		objType, _ := g.semaResult.Types[e].(*types.ObjectType)
 		if objType == nil {
-			return ir.ConstNumber{Value: 0}
+			return g.failExpr("cannot lower object literal without a closed object type")
 		}
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
@@ -526,9 +533,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if op, exists := g.locals[e.Name]; exists {
 			return op
 		}
-		// Undefined or global
-		v := g.currentFn.NewValue(e.Name, types.TypeNumber)
-		return v
+		return g.failExpr("cannot lower unresolved or non-local identifier %q as a value", e.Name)
 	case *ast.BinaryExpr:
 		if e.Op == token.AmpAmp || e.Op == token.PipePipe {
 			return g.lowerLogicalExpr(e)
@@ -587,6 +592,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			op = ir.OpAnd
 		case token.PipePipe:
 			op = ir.OpOr
+		default:
+			return g.failExpr("unsupported binary operator %s", e.Op)
 		}
 		resultType := types.TypeNumber
 		if g.semaResult != nil {
@@ -607,7 +614,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
 				currVal, exists := g.locals[ident.Name]
 				if !exists {
-					currVal = ir.ConstNumber{Value: 0}
+					return g.failExpr("cannot lower %s for unresolved local %q", e.Op, ident.Name)
 				}
 				op := ir.OpAdd
 				if e.Op == token.MinusMinus {
@@ -644,9 +651,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				RHS: ir.ConstNumber{Value: 0},
 			})
 			return resVal
+		} else if e.Op == token.Plus {
+			return g.lowerExpr(e.Target)
 		}
-		target := g.lowerExpr(e.Target)
-		return target
+		return g.failExpr("unsupported unary operator %s", e.Op)
 	case *ast.IndexExpr:
 		array := g.lowerExpr(e.Target)
 		index := g.lowerExpr(e.Index)
@@ -668,16 +676,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if objType, ok := g.semaResult.Types[e.Object].(*types.ObjectType); ok {
 			offsets, _, _ := g.objectLayout(objType)
+			offset, exists := offsets[e.Property]
+			if !exists {
+				return g.failExpr("object shape has no field %q", e.Property)
+			}
 			obj := g.lowerExpr(e.Object)
 			resultType := types.TypeAny
 			if t, ok := g.semaResult.Types[e]; ok && t != nil {
 				resultType = t
 			}
 			res := g.currentFn.NewValue("field", resultType)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offsets[e.Property]})
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
 			return res
 		}
-		return ir.ConstNumber{Value: 0}
+		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
 			if arrType, ok := g.semaResult.Types[mem.Object].(*types.ArrayType); ok {
@@ -685,7 +697,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				switch mem.Property {
 				case "push":
 					if len(e.Args) != 1 {
-						return ir.ConstNumber{Value: 0}
+						return g.failExpr("array.push expects exactly one argument in native lowering")
 					}
 					val := g.lowerExpr(e.Args[0])
 					res := g.currentFn.NewValue("len", types.TypeNumber)
@@ -716,6 +728,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 			}
 		}
+		if calleeName == "unknown" {
+			return g.failExpr("unsupported call target %T", e.Callee)
+		}
 		var args []ir.Operand
 		for _, arg := range e.Args {
 			args = append(args, g.lowerExpr(arg))
@@ -737,9 +752,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
 			if objType, ok := g.semaResult.Types[mem.Object].(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(objType)
+				offset, exists := offsets[mem.Property]
+				if !exists {
+					return g.failExpr("object shape has no writable field %q", mem.Property)
+				}
 				obj := g.lowerExpr(mem.Object)
 				rhs := g.lowerExpr(e.Right)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offsets[mem.Property], Val: rhs})
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: rhs})
 				return rhs
 			}
 		}
@@ -752,9 +771,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		rhs := g.lowerExpr(e.Right)
 		if ident, ok := e.Left.(*ast.IdentExpr); ok {
+			if _, exists := g.locals[ident.Name]; !exists {
+				return g.failExpr("cannot assign unresolved local %q", ident.Name)
+			}
 			g.locals[ident.Name] = rhs
+			return rhs
 		}
-		return rhs
+		return g.failExpr("unsupported assignment target %T", e.Left)
 	case *ast.TernaryExpr:
 		cond := g.lowerExpr(e.Cond)
 		thenBB := g.currentFn.NewBlock("tern_then")
@@ -788,6 +811,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		})
 		return resVal
 	default:
-		return ir.ConstNumber{Value: 0}
+		return g.failExpr("unsupported expression node %T", expr)
 	}
 }
