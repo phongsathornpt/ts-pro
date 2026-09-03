@@ -129,3 +129,24 @@ func TestInferGenericFunctionRejectsConflictingBindings(t *testing.T) {
 		t.Fatal("expected conflicting generic inference to fail")
 	}
 }
+
+func TestFunctionBindings(t *testing.T) {
+	tvT := NewTypeVar("T", nil)
+	tvU := NewTypeVar("U", nil)
+	generic := NewGenericFunction(
+		[]*TypeVar{tvT, tvU},
+		[]Param{{Name: "a", Type: tvT}, {Name: "b", Type: NewArray(tvU)}},
+		NewTuple(tvT, tvU),
+	)
+	concrete, err := InstantiateFunction(generic, []Type{TypeNumber, TypeString})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := FunctionBindings(generic, concrete)
+	if err != nil {
+		t.Fatalf("FunctionBindings failed: %v", err)
+	}
+	if !bindings[tvT].Equals(TypeNumber) || !bindings[tvU].Equals(TypeString) {
+		t.Fatalf("unexpected bindings: T=%v U=%v", bindings[tvT], bindings[tvU])
+	}
+}

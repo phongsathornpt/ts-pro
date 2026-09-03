@@ -655,3 +655,33 @@ func InferFunction(fn *FunctionType, actualArgs []Type) (*FunctionType, error) {
 	}
 	return InstantiateFunction(fn, args)
 }
+
+// FunctionBindings reconstructs declaration type-variable bindings from a
+// concrete function instantiation. It is used by monomorphizing backends to
+// substitute semantic types throughout the generic function body.
+func FunctionBindings(generic, concrete *FunctionType) (map[*TypeVar]Type, error) {
+	if generic == nil || concrete == nil {
+		return nil, fmt.Errorf("cannot bind nil function types")
+	}
+	if len(generic.TypeParams) == 0 {
+		return map[*TypeVar]Type{}, nil
+	}
+	if len(generic.Params) != len(concrete.Params) {
+		return nil, fmt.Errorf("generic/concrete parameter count mismatch: %d != %d", len(generic.Params), len(concrete.Params))
+	}
+	bindings := make(map[*TypeVar]Type, len(generic.TypeParams))
+	for i := range generic.Params {
+		if err := inferTypeBindings(generic.Params[i].Type, concrete.Params[i].Type, bindings); err != nil {
+			return nil, err
+		}
+	}
+	if err := inferTypeBindings(generic.Return, concrete.Return, bindings); err != nil {
+		return nil, err
+	}
+	for _, tp := range generic.TypeParams {
+		if _, ok := bindings[tp]; !ok {
+			return nil, fmt.Errorf("concrete function does not bind type parameter %s", tp)
+		}
+	}
+	return bindings, nil
+}
