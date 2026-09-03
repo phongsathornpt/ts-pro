@@ -1,6 +1,7 @@
 package irgen
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -738,6 +739,211 @@ func (g *generator) staticStringKey(expr ast.Expr) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (g *generator) concatNativeStrings(a, b ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("json_str", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_concat", Args: []ir.Operand{a, b}})
+	return res
+}
+
+func jsonConstantType(v any) types.Type {
+	switch x := v.(type) {
+	case nil:
+		return types.TypeNull
+	case bool:
+		return types.TypeBoolean
+	case float64:
+		return types.TypeNumber
+	case string:
+		return types.TypeString
+	case []any:
+		var elem types.Type = types.TypeNever
+		for _, item := range x {
+			t := jsonConstantType(item)
+			if elem == types.TypeNever {
+				elem = t
+			} else {
+				elem = types.NewUnion(elem, t)
+			}
+		}
+		if elem == types.TypeNever {
+			elem = types.TypeAny
+		}
+		return types.NewArray(elem)
+	case map[string]any:
+		obj := types.NewObject("")
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			obj.AddField(k, jsonConstantType(x[k]), false)
+		}
+		return obj
+	default:
+		return types.TypeAny
+	}
+}
+
+func (g *generator) lowerJSONConstant(v any) ir.Operand {
+	switch x := v.(type) {
+	case nil:
+		return ir.ConstNull{}
+	case bool:
+		return ir.ConstBool{Value: x}
+	case float64:
+		return ir.ConstNumber{Value: x}
+	case string:
+		return ir.ConstString{Value: x}
+	case []any:
+		arrType := jsonConstantType(x).(*types.ArrayType)
+		res := g.currentFn.NewValue("json_array", arrType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{Res: res, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(len(x))}})
+		for i, item := range x {
+			value := g.lowerJSONConstant(item)
+			if irJSValueType(arrType.Elem) {
+				value = g.boxJSValue(value, value.Type())
+			}
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: value})
+		}
+		return res
+	case map[string]any:
+		objType := jsonConstantType(x).(*types.ObjectType)
+		offsets, refMask, shape := g.objectLayout(objType)
+		res := g.currentFn.NewValue("json_object", objType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+		for _, name := range objType.FieldOrder {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: g.lowerJSONConstant(x[name])})
+		}
+		return res
+	default:
+		return g.failExpr("unsupported JSON constant %T", v)
+	}
+}
+
+func (g *generator) lowerJSONStringifyValue(value ir.Operand, t types.Type) ir.Operand {
+	if t == nil {
+		t = value.Type()
+	}
+	switch t {
+	case types.TypeNumber:
+		res := g.currentFn.NewValue("json_number", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_number_to_string", Args: []ir.Operand{value}})
+		return res
+	case types.TypeString:
+		return g.concatNativeStrings(g.concatNativeStrings(ir.ConstString{Value: "\""}, value), ir.ConstString{Value: "\""})
+	case types.TypeBoolean:
+		res := g.currentFn.NewValue("json_bool", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_bool_to_string", Args: []ir.Operand{value}})
+		return res
+	case types.TypeNull:
+		return ir.ConstString{Value: "null"}
+	}
+	if arr, ok := t.(*types.ArrayType); ok {
+		return g.lowerJSONStringifyArray(value, arr)
+	}
+	if obj, ok := t.(*types.ObjectType); ok {
+		offsets, _, _ := g.objectLayout(obj)
+		acc := ir.Operand(ir.ConstString{Value: "{"})
+		for i, name := range obj.FieldOrder {
+			prefix := "\"" + name + "\":"
+			if i > 0 {
+				prefix = "," + prefix
+			}
+			acc = g.concatNativeStrings(acc, ir.ConstString{Value: prefix})
+			field := obj.Fields[name]
+			fv := g.currentFn.NewValue("json_field", field.Type)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: fv, Obj: value, Field: name, Offset: offsets[name]})
+			acc = g.concatNativeStrings(acc, g.lowerJSONStringifyValue(fv, field.Type))
+		}
+		return g.concatNativeStrings(acc, ir.ConstString{Value: "}"})
+	}
+	return g.failExpr("JSON.stringify native lowering is not implemented for %s", t)
+}
+
+func (g *generator) lowerJSONStringifyArray(array ir.Operand, arr *types.ArrayType) ir.Operand {
+	start := g.currentBB
+	length := g.currentFn.NewValue("json_len", types.TypeNumber)
+	start.Instructions = append(start.Instructions, &ir.ArrayLengthInst{Res: length, Array: array})
+	hasAny := g.currentFn.NewValue("json_has", types.TypeBoolean)
+	start.Instructions = append(start.Instructions, &ir.BinaryInst{Res: hasAny, Op: ir.OpGt, LHS: length, RHS: ir.ConstNumber{Value: 0}})
+	nonEmpty := g.currentFn.NewBlock("json_array_nonempty")
+	empty := g.currentFn.NewBlock("json_array_empty")
+	cond := g.currentFn.NewBlock("json_array_cond")
+	body := g.currentFn.NewBlock("json_array_body")
+	done := g.currentFn.NewBlock("json_array_done")
+	join := g.currentFn.NewBlock("json_array_join")
+	start.Terminator = &ir.BranchTerm{Cond: hasAny, Then: nonEmpty, Else: empty}
+	empty.Terminator = &ir.JumpTerm{Target: join}
+
+	g.currentBB = nonEmpty
+	first := g.currentFn.NewValue("json_elem0", arr.Elem)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: first, Array: array, Index: ir.ConstNumber{Value: 0}})
+	firstText := g.lowerJSONStringifyValue(first, arr.Elem)
+	acc0 := g.concatNativeStrings(ir.ConstString{Value: "["}, firstText)
+	nonEmptyEnd := g.currentBB
+	nonEmptyEnd.Terminator = &ir.JumpTerm{Target: cond}
+
+	index := g.currentFn.NewValue("json_i", types.TypeNumber)
+	acc := g.currentFn.NewValue("json_acc", types.TypeString)
+	cond.Phis = append(cond.Phis, &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: nonEmptyEnd, Value: ir.ConstNumber{Value: 1}}}}, &ir.PhiInst{Res: acc, Incoming: []ir.PhiIncoming{{Block: nonEmptyEnd, Value: acc0}}})
+	more := g.currentFn.NewValue("json_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: length})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: done}
+
+	g.currentBB = body
+	elem := g.currentFn.NewValue("json_elem", arr.Elem)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: elem, Array: array, Index: index})
+	text := g.lowerJSONStringifyValue(elem, arr.Elem)
+	commaText := g.concatNativeStrings(ir.ConstString{Value: ","}, text)
+	nextAcc := g.concatNativeStrings(acc, commaText)
+	next := g.currentFn.NewValue("json_next", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
+	bodyEnd := g.currentBB
+	bodyEnd.Terminator = &ir.JumpTerm{Target: cond}
+	cond.Phis[0].Incoming = append(cond.Phis[0].Incoming, ir.PhiIncoming{Block: bodyEnd, Value: next})
+	cond.Phis[1].Incoming = append(cond.Phis[1].Incoming, ir.PhiIncoming{Block: bodyEnd, Value: nextAcc})
+
+	g.currentBB = done
+	final := g.concatNativeStrings(acc, ir.ConstString{Value: "]"})
+	doneEnd := g.currentBB
+	doneEnd.Terminator = &ir.JumpTerm{Target: join}
+	g.currentBB = join
+	result := g.currentFn.NewValue("json_result", types.TypeString)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{{Block: empty, Value: ir.ConstString{Value: "[]"}}, {Block: doneEnd, Value: final}}})
+	return result
+}
+
+func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
+	if len(call.Args) != 1 {
+		return g.failExpr("JSON.%s expects one argument", mem.Property)
+	}
+	switch mem.Property {
+	case "parse":
+		if lit, ok := call.Args[0].(*ast.StringLit); ok {
+			var decoded any
+			if err := json.Unmarshal([]byte(lit.Value), &decoded); err != nil {
+				return g.failExpr("JSON.parse literal: %v", err)
+			}
+			value := g.lowerJSONConstant(decoded)
+			switch decoded.(type) {
+			case []any, map[string]any:
+				return value
+			default:
+				return g.boxJSValue(value, value.Type())
+			}
+		}
+		text := g.lowerExpr(call.Args[0])
+		res := g.currentFn.NewValue("json_parsed", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_json_parse_scalar", Args: []ir.Operand{text}})
+		return res
+	case "stringify":
+		value := g.lowerExpr(call.Args[0])
+		return g.lowerJSONStringifyValue(value, value.Type())
+	}
+	return g.failExpr("unsupported JSON method %s", mem.Property)
 }
 
 func isBuiltinDateType(t types.Type) bool {
@@ -2396,6 +2602,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if ident, ok := mem.Object.(*ast.IdentExpr); ok && ident.Name == "JSON" {
+				return g.lowerJSONCall(e, mem)
+			}
 			if ident, ok := mem.Object.(*ast.IdentExpr); ok && ident.Name == "Date" && mem.Property == "now" {
 				if len(e.Args) != 0 {
 					return g.failExpr("Date.now expects no arguments")

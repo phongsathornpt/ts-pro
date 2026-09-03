@@ -561,6 +561,14 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$DateConstructor" && property == "now" {
 			return types.NewFunction(nil, types.TypeNumber), true
 		}
+		if t.Name == "$JSON" {
+			switch property {
+			case "parse":
+				return types.NewFunction([]types.Param{{Name: "text", Type: types.TypeString}}, types.TypeAny), true
+			case "stringify":
+				return types.NewFunction([]types.Param{{Name: "value", Type: types.TypeAny}}, types.TypeString), true
+			}
+		}
 		if builtin := c.result.BuiltinCollections[t.Name]; builtin != nil {
 			if member, ok := c.builtinCollectionMember(builtin, property); ok {
 				return member, true
@@ -997,6 +1005,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				ctor := types.NewObject("$DateConstructor")
 				c.result.Types[e] = ctor
 				return ctor
+			}
+			if e.Name == "JSON" {
+				jsonType := types.NewObject("$JSON")
+				c.result.Types[e] = jsonType
+				return jsonType
 			}
 			if e.Name == "console" {
 				obj := types.NewObject("console")

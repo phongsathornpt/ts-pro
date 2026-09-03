@@ -996,3 +996,32 @@ console.log(leap.getUTCSeconds());
 		expected: "1\n1970-01-01T00:00:00.000Z\n1970\n0\n1\n0\n0\n0\n2024-02-29T12:34:56.789Z\n2024\n1\n29\n12\n34\n56\n",
 	})
 }
+
+func TestLinuxAMD64JSONAPI(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "json_static_shapes_and_runtime_scalars",
+		source: `
+function payload(count: number, key: string): string {
+  return JSON.stringify({ count: count, key: key });
+}
+function parseRuntime(text: string): any { return JSON.parse(text); }
+console.log(JSON.stringify({ message: "hello" }));
+console.log(payload(5, "items"));
+console.log(JSON.stringify([10, 20, 30]));
+console.log(JSON.stringify(["a", "b", "c"]));
+console.log(JSON.stringify([true, false]));
+console.log(JSON.stringify(123.45));
+console.log(JSON.stringify("pure-Go"));
+console.log(JSON.stringify(true));
+console.log(JSON.parse("123.45"));
+console.log(JSON.parse("\"parsed string\""));
+console.log(JSON.parse("true"));
+console.log(JSON.parse("false"));
+console.log(parseRuntime("-12.5"));
+console.log(parseRuntime("true"));
+console.log(JSON.stringify(JSON.parse("[1, 2, 3]")));
+console.log(JSON.stringify(JSON.parse("{\"id\":42}")));
+`,
+		expected: "{\"message\":\"hello\"}\n{\"count\":5,\"key\":\"items\"}\n[10,20,30]\n[\"a\",\"b\",\"c\"]\n[true,false]\n123.45\n\"pure-Go\"\ntrue\n123.45\nparsed string\ntrue\nfalse\n-12.5\ntrue\n[1,2,3]\n{\"id\":42}\n",
+	})
+}
