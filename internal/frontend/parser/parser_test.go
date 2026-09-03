@@ -132,3 +132,27 @@ func TestParseObjectTypeAlias(t *testing.T) {
 		t.Fatal("expected optional field")
 	}
 }
+
+func TestParserUnsupportedSyntaxAlwaysMakesProgress(t *testing.T) {
+	cases := map[string]string{
+		"generic_function":   `function identity<T>(x: T): T { return x; }`,
+		"parameter_property": `class Box { constructor(public value: number) {} }`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			fs := source.NewFileSet()
+			file := fs.AddFile(name+".ts", []byte(src))
+			p := New(file)
+			prog, diags := p.Parse()
+			if prog == nil {
+				t.Fatal("parser returned nil program")
+			}
+			if !diags.HasErrors() {
+				t.Fatal("unsupported syntax must produce diagnostics until lowering support is added")
+			}
+			if p.current().Kind != token.EOF {
+				t.Fatalf("parser stopped before EOF at %s", p.current().Kind)
+			}
+		})
+	}
+}

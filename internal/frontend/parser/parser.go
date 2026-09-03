@@ -71,6 +71,9 @@ func (p *Parser) expect(kind token.Kind) token.Token {
 		return tok
 	}
 	p.error(tok.Span, fmt.Sprintf("expected %s, got %s", kind, tok.Kind))
+	if tok.Kind != token.EOF {
+		p.advance()
+	}
 	return tok
 }
 
@@ -83,18 +86,29 @@ func (p *Parser) error(span source.Span, msg string) {
 	})
 }
 
+func (p *Parser) ensureProgress(start int, context string) {
+	if p.cursor != start || p.current().Kind == token.EOF {
+		return
+	}
+	tok := p.current()
+	p.error(tok.Span, fmt.Sprintf("parser made no progress while parsing %s at %s", context, tok.Kind))
+	p.advance()
+}
+
 // Parse parses the whole program.
 func (p *Parser) Parse() (*ast.Program, diag.DiagnosticList) {
 	startPos := p.current().Span.Start
 	var stmts []ast.Stmt
 
 	for p.current().Kind != token.EOF {
+		loopStart := p.cursor
 		stmt := p.parseStatement()
 		if stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			p.advance() // recover
 		}
+		p.ensureProgress(loopStart, "top-level statement")
 	}
 
 	endPos := p.current().Span.End
@@ -196,6 +210,7 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 func (p *Parser) parseParams() []ast.Param {
 	var params []ast.Param
 	for p.current().Kind != token.RParen && p.current().Kind != token.EOF {
+		loopStart := p.cursor
 		paramTok := p.expect(token.Ident)
 		optional := p.match(token.Question)
 		var typeNode ast.TypeNode
@@ -214,8 +229,10 @@ func (p *Parser) parseParams() []ast.Param {
 			Default:    defExpr,
 		})
 		if !p.match(token.Comma) {
+			p.ensureProgress(loopStart, "parameter list")
 			break
 		}
+		p.ensureProgress(loopStart, "parameter list")
 	}
 	return params
 }
@@ -235,6 +252,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 	var methods []ast.ClassMethod
 
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		loopStart := p.cursor
 		isStatic := false
 		if p.current().Text == "static" {
 			p.advance()
@@ -277,6 +295,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 				IsStatic:   isStatic,
 			})
 		}
+		p.ensureProgress(loopStart, "class member")
 	}
 	rbrace := p.expect(token.RBrace)
 
@@ -296,6 +315,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	p.expect(token.LBrace)
 	var fields []ast.InterfaceField
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		loopStart := p.cursor
 		fieldTok := p.expect(token.Ident)
 		optional := p.match(token.Question)
 		p.expect(token.Colon)
@@ -307,6 +327,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 			Type:       t,
 			Optional:   optional,
 		})
+		p.ensureProgress(loopStart, "interface field")
 	}
 	rbrace := p.expect(token.RBrace)
 	return &ast.InterfaceDecl{
@@ -333,12 +354,14 @@ func (p *Parser) parseBlock() *ast.BlockStmt {
 	lbrace := p.expect(token.LBrace)
 	var stmts []ast.Stmt
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		loopStart := p.cursor
 		stmt := p.parseStatement()
 		if stmt != nil {
 			stmts = append(stmts, stmt)
 		} else {
 			p.advance()
 		}
+		p.ensureProgress(loopStart, "block statement")
 	}
 	rbrace := p.expect(token.RBrace)
 	return &ast.BlockStmt{
@@ -552,10 +575,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 			p.advance()
 			var args []ast.Expr
 			for p.current().Kind != token.RParen && p.current().Kind != token.EOF {
+				loopStart := p.cursor
 				args = append(args, p.parseExpression())
 				if !p.match(token.Comma) {
+					p.ensureProgress(loopStart, "call arguments")
 					break
 				}
+				p.ensureProgress(loopStart, "call arguments")
 			}
 			rparen := p.expect(token.RParen)
 			expr = &ast.CallExpr{
@@ -623,10 +649,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		var elements []ast.Expr
 		for p.current().Kind != token.RBracket && p.current().Kind != token.EOF {
+			loopStart := p.cursor
 			elements = append(elements, p.parseExpression())
 			if !p.match(token.Comma) {
+				p.ensureProgress(loopStart, "array literal")
 				break
 			}
+			p.ensureProgress(loopStart, "array literal")
 		}
 		rbracket := p.expect(token.RBracket)
 		return &ast.ArrayLit{
@@ -638,6 +667,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		var props []ast.PropertyAssignment
 		for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+			loopStart := p.cursor
 			keyTok := p.expect(token.Ident)
 			p.expect(token.Colon)
 			val := p.parseExpression()
@@ -647,8 +677,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 				Value:      val,
 			})
 			if !p.match(token.Comma) {
+				p.ensureProgress(loopStart, "object literal")
 				break
 			}
+			p.ensureProgress(loopStart, "object literal")
 		}
 		rbrace := p.expect(token.RBrace)
 		return &ast.ObjectLit{
@@ -699,6 +731,7 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 		lbrace := p.advance()
 		var fields []ast.InterfaceField
 		for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+			loopStart := p.cursor
 			fieldTok := p.expect(token.Ident)
 			optional := p.match(token.Question)
 			p.expect(token.Colon)
@@ -706,6 +739,7 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 			p.match(token.Semicolon)
 			p.match(token.Comma)
 			fields = append(fields, ast.InterfaceField{SourceSpan: fieldTok.Span, Name: fieldTok.Text, Type: fieldType, Optional: optional})
+			p.ensureProgress(loopStart, "object type field")
 		}
 		rbrace := p.expect(token.RBrace)
 		node = &ast.ObjectTypeNode{SourceSpan: source.Span{Start: lbrace.Span.Start, End: rbrace.Span.End}, Fields: fields}
