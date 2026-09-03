@@ -1779,3 +1779,17 @@ console.log(join(rejected()));
 		expected: "42\n42\n42\nthenable-reject\n7\n",
 	})
 }
+
+func TestLinuxAMD64SchedulerAwareSleepOrdering(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "scheduler_aware_sleep_ordering",
+		source: `
+const out = channel<number>(2);
+spawn((): void => { sleep(8); channelSend(out, 20); });
+spawn((): void => { sleep(1); channelSend(out, 30); });
+console.log(channelRecv(out));
+console.log(channelRecv(out));
+`,
+		expected: "30\n20\n",
+	})
+}

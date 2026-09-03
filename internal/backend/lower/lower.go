@@ -756,7 +756,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 144)
+	e.SubRegImm32(amd64.RSP, 160)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1599,8 +1599,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskSuspend(e)
 	fnOffsets["ts_task_spawn"] = len(e.Code)
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_clock_now_ns"] = len(e.Code)
+	emitAMD64ClockNowNS(e)
+	fnOffsets["ts_nanosleep_ns"] = len(e.Code)
+	emitAMD64NanosleepNS(e)
 	fnOffsets["ts_task_run_one"] = len(e.Code)
-	emitAMD64TaskRunOne(e, fnOffsets["ts_task_resume"])
+	emitAMD64TaskRunOne(e, fnOffsets["ts_task_resume"], fnOffsets["ts_clock_now_ns"], fnOffsets["ts_nanosleep_ns"])
 	fnOffsets["ts_task_drain"] = len(e.Code)
 	emitAMD64TaskDrain(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_join"] = len(e.Code)
@@ -1608,7 +1612,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_task_yield"] = len(e.Code)
 	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"], fnOffsets["ts_task_suspend"])
 	fnOffsets["ts_task_sleep"] = len(e.Code)
-	emitAMD64TaskSleep(e)
+	emitAMD64TaskSleep(e, fnOffsets["ts_clock_now_ns"], fnOffsets["ts_nanosleep_ns"], fnOffsets["ts_task_suspend"])
 	fnOffsets["ts_task_reject"] = len(e.Code)
 	emitAMD64TaskReject(e)
 	fnOffsets["ts_task_rejected"] = len(e.Code)
@@ -2112,7 +2116,7 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
-	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot} {
+	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead} {
 		e.MovDerefReg(amd64.R15, off, amd64.R11)
 	}
 	e.Ret()

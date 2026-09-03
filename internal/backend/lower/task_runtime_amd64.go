@@ -31,7 +31,8 @@ const (
 	amd64TaskCancelled  int32 = 168
 	amd64TaskContext    int32 = 176
 	amd64TaskGroupNext  int32 = 184
-	amd64TaskPayload    int32 = 192
+	amd64TaskWakeNS     int32 = 192
+	amd64TaskPayload    int32 = 200
 
 	amd64TaskResultVoid   int64 = 0
 	amd64TaskResultNumber int64 = 1
@@ -70,7 +71,7 @@ func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
 	e.MovRegDeref(amd64.R10, amd64.RSP, 16)
 	e.MovDerefReg(amd64.RBX, amd64TaskClosure, amd64.R10)
 	e.MovRegImm64(amd64.R10, 0)
-	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext} {
+	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext, amd64TaskWakeNS} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
 	e.MovDerefReg(amd64.RBX, amd64TaskKind, amd64.R12)
@@ -244,16 +245,76 @@ func emitAMD64TaskSuspend(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset int) {
+func emitAMD64ClockNowNS(e *amd64.Emitter) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, 16)
+	e.MovRegImm64(amd64.RAX, 228) // clock_gettime
+	e.MovRegImm64(amd64.RDI, 1)   // CLOCK_MONOTONIC
+	e.MovRegReg(amd64.RSI, amd64.RSP)
+	e.Syscall()
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 0)
+	e.MovRegImm64(amd64.R10, 1000000000)
+	e.ImulRegReg(amd64.RAX, amd64.R10)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 8)
+	e.AddRegReg(amd64.RAX, amd64.R10)
+	e.AddRegImm32(amd64.RSP, 16)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64NanosleepNS(e *amd64.Emitter) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, 16)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	doneJump := len(e.Code)
+	e.JccRel32(amd64.CondLE, 0)
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.Cqo()
+	e.MovRegImm64(amd64.R10, 1000000000)
+	e.IdivReg(amd64.R10)
+	e.MovDerefReg(amd64.RSP, 0, amd64.RAX)
+	e.MovDerefReg(amd64.RSP, 8, amd64.RDX)
+	e.MovRegImm64(amd64.RAX, 35) // nanosleep
+	e.MovRegReg(amd64.RDI, amd64.RSP)
+	e.MovRegImm64(amd64.RSI, 0)
+	e.Syscall()
+	done := len(e.Code)
+	patchJcc(doneJump, done)
+	e.AddRegImm32(amd64.RSP, 16)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset, nowOffset, sleepNSOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
 	e.Push(amd64.RBX)
 	e.SubRegImm32(amd64.RSP, 8)
 
+	// Due timers outrank runnable work so a cooperatively requeued waiter cannot
+	// starve a sleeping task that will satisfy it.
+	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTTimerHead)
+	e.TestRegReg(amd64.RBX, amd64.RBX)
+	noTimerPrecheck := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	callPreNow := len(e.Code)
+	e.CallRel32(int32(nowOffset - (callPreNow + 5)))
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64TaskWakeNS)
+	e.CmpRegReg(amd64.R10, amd64.RAX)
+	timerDue := len(e.Code)
+	e.JccRel32(amd64.CondLE, 0)
+
+	// Prefer ordinary runnable work while the earliest timer is still pending.
+	runnableLabel := len(e.Code)
+	patchJcc(noTimerPrecheck, runnableLabel)
 	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTTaskHead)
 	e.TestRegReg(amd64.RBX, amd64.RBX)
-	empty := len(e.Code)
+	noRunnable := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64TaskNext)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R10)
@@ -265,7 +326,36 @@ func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset int) {
 	patchJcc(hasNext, len(e.Code))
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R11)
+	haveRunnableJump := len(e.Code)
+	e.JmpRel32(0)
 
+	// No runnable work. Wait until the earliest timer if one exists.
+	noRunnableLabel := len(e.Code)
+	patchJcc(noRunnable, noRunnableLabel)
+	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTTimerHead)
+	e.TestRegReg(amd64.RBX, amd64.RBX)
+	noWork := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	callNow := len(e.Code)
+	e.CallRel32(int32(nowOffset - (callNow + 5)))
+	e.MovRegDeref(amd64.RDI, amd64.RBX, amd64TaskWakeNS)
+	e.SubRegReg(amd64.RDI, amd64.RAX)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	timerReadyAfterWait := len(e.Code)
+	e.JccRel32(amd64.CondLE, 0)
+	callSleep := len(e.Code)
+	e.CallRel32(int32(sleepNSOffset - (callSleep + 5)))
+	timerReadyLabel := len(e.Code)
+	patchJcc(timerReadyAfterWait, timerReadyLabel)
+	timerDueLabel := len(e.Code)
+	patchJcc(timerDue, timerDueLabel)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64TaskNext)
+	e.MovDerefReg(amd64.R15, amd64RTTimerHead, amd64.R10)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R11)
+
+	haveTask := len(e.Code)
+	patchJmp(haveRunnableJump, haveTask)
 	e.MovRegReg(amd64.RDI, amd64.RBX)
 	callResume := len(e.Code)
 	e.CallRel32(int32(resumeOffset - (callResume + 5)))
@@ -273,11 +363,11 @@ func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset int) {
 	doneJump := len(e.Code)
 	e.JmpRel32(0)
 
-	emptyLabel := len(e.Code)
-	patchJcc(empty, emptyLabel)
+	noWorkLabel := len(e.Code)
+	patchJcc(noWork, noWorkLabel)
 	e.MovRegImm64(amd64.RAX, 0)
 	done := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(done-(doneJump+5))))
+	patchJmp(doneJump, done)
 	e.AddRegImm32(amd64.RSP, 8)
 	e.Pop(amd64.RBX)
 	e.Pop(amd64.RBP)
@@ -419,30 +509,98 @@ func emitAMD64TaskError(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func emitAMD64TaskSleep(e *amd64.Emitter) {
-	// XMM0 = milliseconds. Blocking nanosleep remains the current timer backend;
-	// task suspension is handled independently at explicit scheduler/channel waits.
+func emitAMD64TaskSleep(e *amd64.Emitter, nowOffset, sleepNSOffset, suspendOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
-	e.SubRegImm32(amd64.RSP, 16)
-	e.Cvttsd2si(amd64.RAX, amd64.XMM0)
-	e.TestRegReg(amd64.RAX, amd64.RAX)
-	nonPositive := len(e.Code)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+
+	// Convert milliseconds to integer nanoseconds.
+	e.Cvttsd2si(amd64.R12, amd64.XMM0)
+	e.TestRegReg(amd64.R12, amd64.R12)
+	doneJump := len(e.Code)
 	e.JccRel32(amd64.CondLE, 0)
-	e.Cqo()
-	e.MovRegImm64(amd64.R10, 1000)
-	e.IdivReg(amd64.R10)
-	e.MovDerefReg(amd64.RSP, 0, amd64.RAX)
 	e.MovRegImm64(amd64.R10, 1000000)
-	e.ImulRegReg(amd64.RDX, amd64.R10)
-	e.MovDerefReg(amd64.RSP, 8, amd64.RDX)
-	e.MovRegImm64(amd64.RAX, 35)
-	e.MovRegReg(amd64.RDI, amd64.RSP)
-	e.MovRegImm64(amd64.RSI, 0)
-	e.Syscall()
+	e.ImulRegReg(amd64.R12, amd64.R10)
+
+	// Main-context sleep remains blocking; task sleep enters the timer queue.
+	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.RBX, amd64.RBX)
+	mainSleep := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	callNow := len(e.Code)
+	e.CallRel32(int32(nowOffset - (callNow + 5)))
+	e.AddRegReg(amd64.R12, amd64.RAX)
+	e.MovDerefReg(amd64.RBX, amd64TaskWakeNS, amd64.R12)
+
+	// Sorted insert by wake deadline. Sleeping tasks reuse task.next while they
+	// are not members of the runnable queue.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTTimerHead)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	emptyTimers := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskWakeNS)
+	e.CmpRegReg(amd64.R12, amd64.R11)
+	beforeHead := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+
+	// R10=previous, R11=current.
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskNext)
+	insertLoop := len(e.Code)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	insertAfter := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskWakeNS)
+	e.CmpRegReg(amd64.R12, amd64.RAX)
+	insertAfterCmp := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+	e.MovRegReg(amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.R11, amd64.R11, amd64TaskNext)
+	loopBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(loopBack, insertLoop)
+	insertAfterLabel := len(e.Code)
+	patchJcc(insertAfter, insertAfterLabel)
+	patchJcc(insertAfterCmp, insertAfterLabel)
+	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R11)
+	e.MovDerefReg(amd64.R10, amd64TaskNext, amd64.RBX)
+	insertedJump := len(e.Code)
+	e.JmpRel32(0)
+
+	beforeHeadLabel := len(e.Code)
+	patchJcc(beforeHead, beforeHeadLabel)
+	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R10)
+	e.MovDerefReg(amd64.R15, amd64RTTimerHead, amd64.RBX)
+	beforeHeadJump := len(e.Code)
+	e.JmpRel32(0)
+
+	emptyTimersLabel := len(e.Code)
+	patchJcc(emptyTimers, emptyTimersLabel)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTTimerHead, amd64.RBX)
+
+	inserted := len(e.Code)
+	patchJmp(insertedJump, inserted)
+	patchJmp(beforeHeadJump, inserted)
+	callSuspend := len(e.Code)
+	e.CallRel32(int32(suspendOffset - (callSuspend + 5)))
+	resumeJump := len(e.Code)
+	e.JmpRel32(0)
+
+	mainSleepLabel := len(e.Code)
+	patchJcc(mainSleep, mainSleepLabel)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	callBlockingSleep := len(e.Code)
+	e.CallRel32(int32(sleepNSOffset - (callBlockingSleep + 5)))
+
 	done := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[nonPositive+2:], uint32(int32(done-(nonPositive+6))))
-	e.AddRegImm32(amd64.RSP, 16)
+	patchJcc(doneJump, done)
+	patchJmp(resumeJump, done)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
 	e.Pop(amd64.RBP)
 	e.Ret()
 }

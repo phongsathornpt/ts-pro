@@ -88,6 +88,7 @@ const (
 	amd64RTSchedR13    int32 = 120
 	amd64RTSchedR14    int32 = 128
 	amd64RTSchedRoot   int32 = 136
+	amd64RTTimerHead   int32 = 144
 
 	amd64ChunkNext int32 = 0
 	amd64ChunkEnd  int32 = 8
