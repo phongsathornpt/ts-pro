@@ -40,6 +40,7 @@ const (
 	KwBreak
 	KwContinue
 	KwClass
+	KwEnum
 	KwInterface
 	KwType
 	KwExtends
@@ -138,6 +139,7 @@ var tokens = [...]string{
 	KwBreak:      "break",
 	KwContinue:   "continue",
 	KwClass:      "class",
+	KwEnum:       "enum",
 	KwInterface:  "interface",
 	KwType:       "type",
 	KwExtends:    "extends",
@@ -245,6 +247,7 @@ var keywords = map[string]Kind{
 	"break":      KwBreak,
 	"continue":   KwContinue,
 	"class":      KwClass,
+	"enum":       KwEnum,
 	"interface":  KwInterface,
 	"type":       KwType,
 	"extends":    KwExtends,

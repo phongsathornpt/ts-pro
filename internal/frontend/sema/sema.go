@@ -18,6 +18,7 @@ const (
 	SymParam
 	SymFunc
 	SymClass
+	SymEnum
 	SymInterface
 	SymTypeAlias
 )
@@ -81,6 +82,7 @@ type Result struct {
 	GenericCalls   map[*ast.CallExpr]*types.FunctionType
 	GenericClasses map[*ast.NewExpr]*ClassInfo
 	Classes        map[string]*ClassInfo
+	Enums          map[string]map[string]float64
 	RootScope      *Scope
 	Diagnostics    diag.DiagnosticList
 }
@@ -105,6 +107,7 @@ func NewChecker() *Checker {
 			GenericCalls:   make(map[*ast.CallExpr]*types.FunctionType),
 			GenericClasses: make(map[*ast.NewExpr]*ClassInfo),
 			Classes:        make(map[string]*ClassInfo),
+			Enums:          make(map[string]map[string]float64),
 			RootScope:      root,
 			Diagnostics:    make(diag.DiagnosticList, 0),
 		},
@@ -159,6 +162,16 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 	// Predeclare class identities so fields/functions may reference classes that
 	// appear later in the source file.
 	for _, stmt := range prog.Statements {
+		if enumDecl, ok := stmt.(*ast.EnumDecl); ok {
+			c.result.Enums[enumDecl.Name] = make(map[string]float64)
+			sym := &Symbol{Name: enumDecl.Name, Kind: SymEnum, Type: types.TypeNumber, Node: enumDecl}
+			if err := c.currentScope.Define(sym); err != nil {
+				c.error(enumDecl.Span(), "TS2300", err.Error())
+			}
+			c.result.Symbols[enumDecl] = sym
+			c.result.Types[enumDecl] = types.TypeNumber
+			continue
+		}
 		cls, ok := stmt.(*ast.ClassDecl)
 		if !ok {
 			continue
@@ -180,6 +193,20 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 
 	for _, stmt := range prog.Statements {
 		switch s := stmt.(type) {
+		case *ast.EnumDecl:
+			value := float64(0)
+			for _, member := range s.Members {
+				if member.Value != nil {
+					lit, ok := member.Value.(*ast.NumberLit)
+					if !ok {
+						c.error(member.Value.Span(), "TS1061", "Native enum member initializer must be a numeric literal.")
+						continue
+					}
+					value = lit.Value
+				}
+				c.result.Enums[s.Name][member.Name] = value
+				value++
+			}
 		case *ast.FunctionDecl:
 			fnType := c.resolveFunctionType(s)
 			sym := &Symbol{Name: s.Name, Kind: SymFunc, Type: fnType, Node: s}
@@ -355,6 +382,8 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		c.checkFunctionDecl(s)
 	case *ast.ClassDecl:
 		c.checkClassDecl(s)
+	case *ast.EnumDecl:
+		// Numeric enum members are resolved during declaration.
 	case *ast.BlockStmt:
 		c.checkBlock(s)
 	case *ast.IfStmt:
@@ -960,6 +989,16 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
 	case *ast.MemberExpr:
+		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			if members := c.result.Enums[ident.Name]; members != nil {
+				if _, exists := members[e.Property]; !exists {
+					c.error(e.Span(), "TS2339", fmt.Sprintf("Enum '%s' has no member '%s'.", ident.Name, e.Property))
+				}
+				c.result.Types[ident] = types.TypeNumber
+				c.result.Types[e] = types.TypeNumber
+				return types.TypeNumber
+			}
+		}
 		objType := c.checkExpr(e.Object)
 		if _, ok := objType.(*types.TupleType); ok {
 			if e.Property == "length" {
@@ -1076,7 +1115,7 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.NewArray(c.resolveTypeNode(t.TypeArgs[0]))
 		}
 		sym := c.currentScope.Resolve(t.Name)
-		if sym != nil && (sym.Kind == SymInterface || sym.Kind == SymClass || sym.Kind == SymTypeAlias) {
+		if sym != nil && (sym.Kind == SymInterface || sym.Kind == SymClass || sym.Kind == SymTypeAlias || sym.Kind == SymEnum) {
 			return sym.Type
 		}
 		return types.TypeAny

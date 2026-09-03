@@ -660,3 +660,23 @@ console.log(undefined);
 		expected: "1\n1\n2\n0\nundefined\n",
 	})
 }
+
+func TestLinuxAMD64NumericEnums(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "numeric_enum_constants",
+		source: `
+enum Status { Ok = 200, NotFound = 404 }
+enum Direction { Up, Down, Left, Right }
+function isUp(dir: Direction): boolean { return dir === Direction.Up; }
+console.log(Status.Ok);
+console.log(Status.NotFound);
+console.log(Direction.Up);
+console.log(Direction.Down);
+console.log(Direction.Left);
+console.log(Direction.Right);
+console.log(isUp(Direction.Up));
+console.log(isUp(Direction.Down));
+`,
+		expected: "200\n404\n0\n1\n2\n3\n1\n0\n",
+	})
+}

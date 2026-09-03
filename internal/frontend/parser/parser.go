@@ -128,6 +128,8 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseFunctionDecl()
 	case token.KwClass:
 		return p.parseClassDecl()
+	case token.KwEnum:
+		return p.parseEnumDecl()
 	case token.KwInterface:
 		return p.parseInterfaceDecl()
 	case token.KwType:
@@ -356,6 +358,26 @@ func (p *Parser) parseParams() []ast.Param {
 		p.ensureProgress(loopStart, "parameter list")
 	}
 	return params
+}
+
+func (p *Parser) parseEnumDecl() *ast.EnumDecl {
+	kw := p.advance()
+	name := p.expect(token.Ident)
+	p.expect(token.LBrace)
+	var members []ast.EnumMember
+	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		start := p.cursor
+		member := p.expect(token.Ident)
+		var value ast.Expr
+		if p.match(token.Eq) {
+			value = p.parseExpression()
+		}
+		members = append(members, ast.EnumMember{SourceSpan: member.Span, Name: member.Text, Value: value})
+		p.match(token.Comma)
+		p.ensureProgress(start, "enum member")
+	}
+	rbrace := p.expect(token.RBrace)
+	return &ast.EnumDecl{SourceSpan: source.Span{Start: kw.Span.Start, End: rbrace.Span.End}, Name: name.Text, Members: members}
 }
 
 func (p *Parser) parseClassDecl() *ast.ClassDecl {

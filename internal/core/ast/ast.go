@@ -268,6 +268,18 @@ type (
 		Methods    []ClassMethod
 	}
 
+	EnumMember struct {
+		SourceSpan source.Span
+		Name       string
+		Value      Expr
+	}
+
+	EnumDecl struct {
+		SourceSpan source.Span
+		Name       string
+		Members    []EnumMember
+	}
+
 	InterfaceField struct {
 		SourceSpan source.Span
 		Name       string
@@ -371,6 +383,9 @@ func (s *FunctionDecl) declNode()          {}
 func (s *ClassDecl) Span() source.Span     { return s.SourceSpan }
 func (s *ClassDecl) stmtNode()             {}
 func (s *ClassDecl) declNode()             {}
+func (s *EnumDecl) Span() source.Span      { return s.SourceSpan }
+func (s *EnumDecl) stmtNode()              {}
+func (s *EnumDecl) declNode()              {}
 func (s *InterfaceDecl) Span() source.Span { return s.SourceSpan }
 func (s *InterfaceDecl) stmtNode()         {}
 func (s *InterfaceDecl) declNode()         {}

@@ -1558,6 +1558,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
 		return res
 	case *ast.MemberExpr:
+		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			if members := g.semaResult.Enums[ident.Name]; members != nil {
+				if value, exists := members[e.Property]; exists {
+					return ir.ConstNumber{Value: value}
+				}
+				return g.failExpr("enum %s has no member %s", ident.Name, e.Property)
+			}
+		}
 		if tuple, ok := g.semanticType(e.Object).(*types.TupleType); ok && e.Property == "length" {
 			return ir.ConstNumber{Value: float64(len(tuple.Elements))}
 		}
