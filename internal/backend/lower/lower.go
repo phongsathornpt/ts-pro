@@ -1598,6 +1598,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_sleep"] = len(e.Code)
 	emitAMD64TaskSleep(e)
+	fnOffsets["ts_channel_new"] = len(e.Code)
+	emitAMD64ChannelNew(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_channel_try_send"] = len(e.Code)
+	emitAMD64ChannelTrySend(e)
+	fnOffsets["ts_channel_try_recv_or"] = len(e.Code)
+	emitAMD64ChannelTryRecvOr(e)
 
 	fnOffsets["ts_number_to_string"] = len(e.Code)
 	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])

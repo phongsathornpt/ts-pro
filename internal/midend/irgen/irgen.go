@@ -3220,6 +3220,55 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.CallExpr:
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "channel":
+				if len(e.Args) != 1 {
+					return g.failExpr("native channel expects one capacity")
+				}
+				capacity := g.lowerExpr(e.Args[0])
+				channelType, ok := g.semanticType(e).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native channel is missing channel metadata")
+				}
+				res := g.currentFn.NewValue("channel", channelType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_channel_new", Args: []ir.Operand{capacity}, ParamTypes: []types.Type{types.TypeNumber}})
+				return res
+			case "channelTrySend":
+				if len(e.Args) != 2 {
+					return g.failExpr("native channelTrySend expects channel and value")
+				}
+				ch := g.lowerExpr(e.Args[0])
+				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native channelTrySend is missing channel type")
+				}
+				elem, ok := g.semaResult.ChannelElements[chType.Name]
+				if !ok {
+					return g.failExpr("native channelTrySend is missing element metadata")
+				}
+				value := g.lowerExpr(e.Args[1])
+				value = g.boxJSValue(value, g.semanticType(e.Args[1]))
+				res := g.currentFn.NewValue("channel_sent", types.TypeBoolean)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_channel_try_send", Args: []ir.Operand{ch, value}, ParamTypes: []types.Type{chType, types.TypeAny}})
+				_ = elem
+				return res
+			case "channelTryRecvOr":
+				if len(e.Args) != 2 {
+					return g.failExpr("native channelTryRecvOr expects channel and fallback")
+				}
+				ch := g.lowerExpr(e.Args[0])
+				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native channelTryRecvOr is missing channel type")
+				}
+				elem, ok := g.semaResult.ChannelElements[chType.Name]
+				if !ok {
+					return g.failExpr("native channelTryRecvOr is missing element metadata")
+				}
+				fallback := g.lowerExpr(e.Args[1])
+				fallback = g.boxJSValue(fallback, g.semanticType(e.Args[1]))
+				boxed := g.currentFn.NewValue("channel_boxed", types.TypeAny)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boxed, Callee: "ts_channel_try_recv_or", Args: []ir.Operand{ch, fallback}, ParamTypes: []types.Type{chType, types.TypeAny}})
+				return g.coerceJSValueBoundary(boxed, types.TypeAny, elem)
 			case "spawn":
 				if len(e.Args) != 1 {
 					return g.failExpr("native spawn expects exactly one closure")

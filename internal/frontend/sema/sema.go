@@ -93,6 +93,7 @@ type Result struct {
 	ImportAliases      map[string]string
 	BuiltinCollections map[string]*BuiltinCollectionInfo
 	TaskResults        map[string]types.Type
+	ChannelElements    map[string]types.Type
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
@@ -110,6 +111,7 @@ type Checker struct {
 	genericClassSpecs map[string]*ClassInfo
 	classSpecCount    int
 	taskTypeCount     int
+	channelTypeCount  int
 }
 
 func NewChecker() *Checker {
@@ -127,6 +129,7 @@ func NewChecker() *Checker {
 			VarTypes:           make(map[*ast.VarDeclStmt][]types.Type),
 			BuiltinCollections: make(map[string]*BuiltinCollectionInfo),
 			TaskResults:        make(map[string]types.Type),
+			ChannelElements:    make(map[string]types.Type),
 			RootScope:          root,
 			Diagnostics:        make(diag.DiagnosticList, 0),
 		},
@@ -1230,6 +1233,70 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.CallExpr:
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "channel":
+				if len(e.TypeArgs) != 1 {
+					c.error(e.Span(), "TS2558", "channel expects exactly one type argument.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "channel expects exactly one capacity argument.")
+				} else if capType := c.checkExpr(e.Args[0]); !capType.AssignableTo(types.TypeNumber) {
+					c.error(e.Args[0].Span(), "TS2345", "channel capacity must be a number.")
+				}
+				elem := c.resolveTypeNode(e.TypeArgs[0])
+				name := fmt.Sprintf("$Channel$%d", c.channelTypeCount)
+				c.channelTypeCount++
+				channelType := types.NewObject(name)
+				c.result.ChannelElements[name] = elem
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = channelType
+				return channelType
+			case "channelTrySend":
+				if len(e.Args) != 2 {
+					c.error(e.Span(), "TS2554", "channelTrySend expects channel and value.")
+					c.result.Types[e] = types.TypeBoolean
+					return types.TypeBoolean
+				}
+				chType := c.checkExpr(e.Args[0])
+				obj, ok := chType.(*types.ObjectType)
+				elem, known := types.Type(nil), false
+				if ok {
+					elem, known = c.result.ChannelElements[obj.Name]
+				}
+				valueType := c.checkExpr(e.Args[1])
+				if !known {
+					c.error(e.Args[0].Span(), "TS2345", "channelTrySend expects a channel handle.")
+				} else if !valueType.AssignableTo(elem) {
+					c.error(e.Args[1].Span(), "TS2345", fmt.Sprintf("Type '%s' is not assignable to channel element type '%s'.", valueType, elem))
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeBoolean
+				return types.TypeBoolean
+			case "channelTryRecvOr":
+				if len(e.Args) != 2 {
+					c.error(e.Span(), "TS2554", "channelTryRecvOr expects channel and fallback.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				chType := c.checkExpr(e.Args[0])
+				obj, ok := chType.(*types.ObjectType)
+				elem, known := types.Type(nil), false
+				if ok {
+					elem, known = c.result.ChannelElements[obj.Name]
+				}
+				fallbackType := c.checkExpr(e.Args[1])
+				if !known {
+					c.error(e.Args[0].Span(), "TS2345", "channelTryRecvOr expects a channel handle.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				if !fallbackType.AssignableTo(elem) {
+					c.error(e.Args[1].Span(), "TS2345", fmt.Sprintf("Fallback type '%s' is not assignable to channel element type '%s'.", fallbackType, elem))
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = elem
+				return elem
 			case "spawn":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", "spawn expects exactly one zero-argument function.")

@@ -1387,3 +1387,23 @@ console.log(7);
 		expected: "42\n7\n",
 	})
 }
+func TestLinuxAMD64BufferedChannelTryOperations(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "buffered_channel_try_operations",
+		source: `
+const numbers = channel<number>(1);
+console.log(channelTrySend(numbers, 42));
+console.log(channelTrySend(numbers, 99));
+console.log(channelTryRecvOr(numbers, 7));
+console.log(channelTryRecvOr(numbers, 7));
+const strings = channel<string>(1);
+const held = "keep-" + "alive";
+console.log(channelTrySend(strings, held));
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(channelTryRecvOr(strings, "fallback"));
+console.log(channelTryRecvOr(strings, "fallback"));
+`,
+		expected: "1\n0\n42\n7\n1\nkeep-alive\nfallback\n",
+	})
+}
