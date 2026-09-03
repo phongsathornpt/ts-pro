@@ -756,7 +756,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 80)
+	e.SubRegImm32(amd64.RSP, 144)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1588,14 +1588,20 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
+	fnOffsets["ts_task_trampoline"] = len(e.Code)
+	emitAMD64TaskTrampoline(e)
+	fnOffsets["ts_task_resume"] = len(e.Code)
+	emitAMD64TaskResume(e, fnOffsets["ts_task_trampoline"])
+	fnOffsets["ts_task_suspend"] = len(e.Code)
+	emitAMD64TaskSuspend(e)
 	fnOffsets["ts_task_spawn"] = len(e.Code)
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_task_run_one"] = len(e.Code)
-	emitAMD64TaskRunOne(e)
+	emitAMD64TaskRunOne(e, fnOffsets["ts_task_resume"])
 	fnOffsets["ts_task_join"] = len(e.Code)
 	emitAMD64TaskJoin(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_yield"] = len(e.Code)
-	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"])
+	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"], fnOffsets["ts_task_suspend"])
 	fnOffsets["ts_task_sleep"] = len(e.Code)
 	emitAMD64TaskSleep(e)
 	fnOffsets["ts_channel_new"] = len(e.Code)
@@ -1605,9 +1611,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_channel_try_recv_or"] = len(e.Code)
 	emitAMD64ChannelTryRecvOr(e)
 	fnOffsets["ts_channel_send"] = len(e.Code)
-	emitAMD64ChannelSend(e, fnOffsets["ts_channel_try_send"], fnOffsets["ts_task_run_one"])
+	emitAMD64ChannelSend(e, fnOffsets["ts_channel_try_send"], fnOffsets["ts_task_yield"])
 	fnOffsets["ts_channel_recv"] = len(e.Code)
-	emitAMD64ChannelRecv(e, fnOffsets["ts_task_run_one"])
+	emitAMD64ChannelRecv(e, fnOffsets["ts_task_yield"])
 
 	fnOffsets["ts_number_to_string"] = len(e.Code)
 	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])
@@ -2079,6 +2085,9 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
+	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot} {
+		e.MovDerefReg(amd64.R15, off, amd64.R11)
+	}
 	e.Ret()
 }
 

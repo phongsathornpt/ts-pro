@@ -1433,3 +1433,43 @@ join(churner);
 		expected: "1\n2\nkeep-alive\n",
 	})
 }
+func TestLinuxAMD64StackfulTaskSuspensionAndCrossChannels(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "stackful_task_suspension_and_cross_channels",
+		source: `
+const keeper = spawn((): void => {
+  const keep = "keep-" + "alive";
+  yieldNow();
+  console.log(keep);
+});
+const churner = spawn((): void => {
+  let churn = "";
+  for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+});
+join(keeper);
+join(churner);
+
+const ready = channel<number>(1);
+const inbound = channel<string>(0);
+const receiver = spawn((): string => {
+  channelSend(ready, 1);
+  return channelRecv(inbound);
+});
+channelRecv(ready);
+channelSend(inbound, "external-to-task");
+console.log(join(receiver));
+
+const signal = channel<boolean>(0);
+const waiter = spawn((): void => { channelRecv(signal); console.log(2); });
+const producer = spawn((): void => {
+  channelSend(signal, true);
+  console.log(1);
+  yieldNow();
+  console.log(3);
+});
+join(waiter);
+join(producer);
+`,
+		expected: "keep-alive\nexternal-to-task\n2\n1\n3\n",
+	})
+}

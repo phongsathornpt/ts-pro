@@ -80,6 +80,14 @@ const (
 	amd64RTMappedBytes int32 = 56
 	amd64RTTaskHead    int32 = 64
 	amd64RTTaskTail    int32 = 72
+	amd64RTCurrentTask int32 = 80
+	amd64RTSchedRsp    int32 = 88
+	amd64RTSchedRbp    int32 = 96
+	amd64RTSchedRbx    int32 = 104
+	amd64RTSchedR12    int32 = 112
+	amd64RTSchedR13    int32 = 120
+	amd64RTSchedR14    int32 = 128
+	amd64RTSchedRoot   int32 = 136
 
 	amd64ChunkNext int32 = 0
 	amd64ChunkEnd  int32 = 8
