@@ -1185,10 +1185,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_runtime_init"] = len(e.Code)
 	emitAMD64RuntimeInit(e)
 
-	// Runtime allocations use a 16-byte-aligned bump arena and mmap only when a
-	// region must be refilled, rather than mapping once per allocation.
+	fnOffsets["ts_gc_collect"] = len(e.Code)
+	emitAMD64GCCollect(e)
+	fnOffsets["ts_gc_collections"] = len(e.Code)
+	emitAMD64GCMetricNumber(e, amd64RTCollections)
+	fnOffsets["ts_gc_reclaimed"] = len(e.Code)
+	emitAMD64GCMetricNumber(e, amd64RTReclaimed)
+	fnOffsets["ts_gc_mapped_bytes"] = len(e.Code)
+	emitAMD64GCMetricNumber(e, amd64RTMappedBytes)
+
+	// Allocation reuses swept blocks first, then bumps in the current chunk,
+	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
-	emitAMD64Alloc(e)
+	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
@@ -1498,13 +1507,79 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func emitAMD64Alloc(e *amd64.Emitter) {
-	// RBX holds the aligned total object size, including the 32-byte header.
+func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
+	patchJcc := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
+	}
+	patchJmp := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5))))
+	}
+	emitReturn := func() {
+		e.Pop(amd64.R14)
+		e.Pop(amd64.R13)
+		e.Pop(amd64.R12)
+		e.Pop(amd64.RBX)
+		e.Pop(amd64.RBP)
+		e.Ret()
+	}
+	emitFreeSearch := func() {
+		e.MovRegImm64(amd64.R12, 0) // previous header
+		e.MovRegDeref(amd64.R13, amd64.R15, amd64RTFreeList)
+		loop := len(e.Code)
+		e.TestRegReg(amd64.R13, amd64.R13)
+		miss := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		e.MovRegDeref(amd64.R10, amd64.R13, amd64ObjectSize)
+		e.CmpRegReg(amd64.R10, amd64.RBX)
+		found := len(e.Code)
+		e.JccRel32(amd64.CondAE, 0)
+		e.MovRegReg(amd64.R12, amd64.R13)
+		e.MovRegDeref(amd64.R13, amd64.R13, amd64ObjectNextFree)
+		back := len(e.Code)
+		e.JmpRel32(0)
+		patchJmp(back, loop)
+
+		foundLabel := len(e.Code)
+		patchJcc(found, foundLabel)
+		e.MovRegDeref(amd64.R14, amd64.R13, amd64ObjectNextFree)
+		e.TestRegReg(amd64.R12, amd64.R12)
+		hasPrev := len(e.Code)
+		e.JccRel32(amd64.CondNE, 0)
+		e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R14)
+		unlinked := len(e.Code)
+		e.JmpRel32(0)
+		hasPrevLabel := len(e.Code)
+		patchJcc(hasPrev, hasPrevLabel)
+		e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.R14)
+		unlinkDone := len(e.Code)
+		patchJmp(unlinked, unlinkDone)
+		e.MovRegImm64(amd64.R10, 0)
+		e.MovDerefReg(amd64.R13, amd64ObjectFlags, amd64.R10)
+		e.MovDerefReg(amd64.R13, amd64ObjectNextFree, amd64.R10)
+		e.MovRegReg(amd64.RAX, amd64.R13)
+		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+		emitReturn()
+
+		missLabel := len(e.Code)
+		patchJcc(miss, missLabel)
+	}
+
+	// Preserve callee-saved temporaries and keep call sites 16-byte aligned.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
 	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+
+	// RBX is the aligned total object size, including its 32-byte header.
 	e.MovRegReg(amd64.RBX, amd64.RDI)
 	e.AddRegImm32(amd64.RBX, amd64ObjectHeaderSize+15)
 	e.MovRegImm64(amd64.R11, -16)
 	e.AndRegReg(amd64.RBX, amd64.R11)
+
+	// Reclaimed blocks are preferred over fresh bump space.
+	emitFreeSearch()
 
 	// Fast bump allocation from the current chunk.
 	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTCursor)
@@ -1512,21 +1587,23 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.AddRegReg(amd64.R10, amd64.RBX)
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTEnd)
 	e.CmpRegReg(amd64.R10, amd64.R11)
-	refill := len(e.Code)
+	collect := len(e.Code)
 	e.JccRel32(amd64.CondA, 0)
-
 	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
 	e.MovDerefReg(amd64.R15, amd64RTCursor, amd64.R10)
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
 	e.MovDerefReg(amd64.R11, amd64ChunkUsed, amd64.R10)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
-	e.Pop(amd64.RBX)
-	e.Ret()
+	emitReturn()
 
-	refillLabel := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[refill+2:], uint32(int32(refillLabel-(refill+6))))
+	// On pressure, collect before mapping another chunk.
+	collectLabel := len(e.Code)
+	patchJcc(collect, collectLabel)
+	callAt := len(e.Code)
+	e.CallRel32(int32(gcOffset - (callAt + 5)))
+	emitFreeSearch()
 
-	// Refill with max(1 MiB, object size + chunk header).
+	// No reusable block fits. Refill with max(1 MiB, object + chunk header).
 	e.MovRegReg(amd64.RSI, amd64.RBX)
 	e.AddRegImm32(amd64.RSI, amd64ChunkSize)
 	e.CmpRegImm32(amd64.RSI, 1<<20)
@@ -1534,7 +1611,7 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondGE, 0)
 	e.MovRegImm64(amd64.RSI, 1<<20)
 	mapChunk := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[large+2:], uint32(int32(mapChunk-(large+6))))
+	patchJcc(large, mapChunk)
 	e.MovRegImm64(amd64.RDI, 0)
 	e.MovRegImm64(amd64.RDX, 3)
 	e.MovRegImm64(amd64.R10, 0x22)
@@ -1543,7 +1620,7 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RAX, 9)
 	e.Syscall()
 
-	// Link the new chunk at the head of the chunk list.
+	// Link and initialize the new chunk.
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
 	e.MovDerefReg(amd64.RAX, amd64ChunkNext, amd64.R11)
 	e.MovRegReg(amd64.R10, amd64.RAX)
@@ -1562,12 +1639,11 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.AddRegReg(amd64.R10, amd64.RSI)
 	e.MovDerefReg(amd64.R15, amd64RTMappedBytes, amd64.R10)
 
-	// Initialize the first object in the new chunk and return its payload.
+	// First object in the new chunk.
 	e.MovRegReg(amd64.RAX, amd64.R11)
 	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
-	e.Pop(amd64.RBX)
-	e.Ret()
+	emitReturn()
 }
 
 func emitAMD64InitObjectHeader(e *amd64.Emitter, header, total amd64.Register) {
