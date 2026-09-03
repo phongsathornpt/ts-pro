@@ -60,7 +60,8 @@ var amd64NumberParamRegs = []amd64.XMMRegister{
 
 // Callee-saved scratch registers for AMD64 regalloc (preserved across calls)
 var amd64ScratchRegs = []amd64.Register{
-	amd64.RBX, amd64.R12, amd64.R13, amd64.R14, amd64.R15,
+	// R15 is reserved as the Linux runtime-context pointer.
+	amd64.RBX, amd64.R12, amd64.R13, amd64.R14,
 }
 
 // ARM64 parameter registers
@@ -720,6 +721,13 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		}
 	}
 	fnOffsets["_start"] = len(e.Code)
+	// Reserve a small runtime context on the process stack. R15 is callee-saved
+	// by SysV and deliberately excluded from the program register allocator.
+	e.SubRegImm32(amd64.RSP, 32)
+	e.MovRegReg(amd64.R15, amd64.RSP)
+	initOffset := len(e.Code)
+	e.CallRel32(0)
+	callFixups = append(callFixups, callFixup{offset: initOffset, callee: "ts_runtime_init"})
 	if hasMain {
 		callOffset := len(e.Code)
 		e.CallRel32(0)
@@ -1106,6 +1114,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 										e.MovRegImm64(amd64.R10, 0)
 									}
 									storeValue(dstLoc, amd64.R10)
+								} else if c, ok := inc.Value.(ir.ConstString); ok {
+									strOffset := len(e.Code)
+									e.LeaRipRel32(amd64.R10, 0)
+									strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: amd64.R10, str: c.Value})
+									storeValue(dstLoc, amd64.R10)
 								}
 							}
 						}
@@ -1134,8 +1147,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_print_str"] = len(e.Code)
 	emitAMD64PrintStr(e)
 
-	// Bootstrap allocator uses anonymous mmap. This is deliberately simple until
-	// the native GC/arena ABI is integrated into the generated image.
+	fnOffsets["ts_runtime_init"] = len(e.Code)
+	emitAMD64RuntimeInit(e)
+
+	// Runtime allocations use a 16-byte-aligned bump arena and mmap only when a
+	// region must be refilled, rather than mapping once per allocation.
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e)
 
@@ -1411,9 +1427,49 @@ func emitAMD64PrintBool(e *amd64.Emitter) {
 	e.Ret()
 }
 
+func emitAMD64RuntimeInit(e *amd64.Emitter) {
+	// R15 points at a 32-byte process-lifetime runtime context. Seed it with a
+	// 1 MiB RW arena: [0]=cursor, [8]=end.
+	e.MovRegImm64(amd64.RDI, 0)
+	e.MovRegImm64(amd64.RSI, 1<<20)
+	e.MovRegImm64(amd64.RDX, 3)
+	e.MovRegImm64(amd64.R10, 0x22)
+	e.MovRegImm64(amd64.R8, -1)
+	e.MovRegImm64(amd64.R9, 0)
+	e.MovRegImm64(amd64.RAX, 9)
+	e.Syscall()
+	e.MovDerefReg(amd64.R15, 0, amd64.RAX)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 1<<20)
+	e.MovDerefReg(amd64.R15, 8, amd64.R10)
+	e.Ret()
+}
+
 func emitAMD64Alloc(e *amd64.Emitter) {
-	// mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
-	e.MovRegReg(amd64.RSI, amd64.RDI)
+	// Keep the aligned request in callee-saved RBX across a potential mmap.
+	e.Push(amd64.RBX)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.AddRegImm32(amd64.RBX, 15)
+	e.MovRegImm64(amd64.R11, -16)
+	e.AndRegReg(amd64.RBX, amd64.R11)
+
+	// Fast bump allocation from the current arena.
+	e.MovRegDeref(amd64.RAX, amd64.R15, 0)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegReg(amd64.R10, amd64.RBX)
+	e.MovRegDeref(amd64.R11, amd64.R15, 8)
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	fast := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+
+	// Refill with max(request, 1 MiB).
+	e.MovRegReg(amd64.RSI, amd64.RBX)
+	e.CmpRegImm32(amd64.RSI, 1<<20)
+	large := len(e.Code)
+	e.JccRel32(amd64.CondGE, 0)
+	e.MovRegImm64(amd64.RSI, 1<<20)
+	mapChunk := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[large+2:], uint32(int32(mapChunk-(large+6))))
 	e.MovRegImm64(amd64.RDI, 0)
 	e.MovRegImm64(amd64.RDX, 3)
 	e.MovRegImm64(amd64.R10, 0x22)
@@ -1421,6 +1477,21 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R9, 0)
 	e.MovRegImm64(amd64.RAX, 9)
 	e.Syscall()
+
+	// First object starts at the new mapping base; publish the remaining arena.
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegReg(amd64.R10, amd64.RBX)
+	e.MovDerefReg(amd64.R15, 0, amd64.R10)
+	e.MovRegReg(amd64.R11, amd64.RAX)
+	e.AddRegReg(amd64.R11, amd64.RSI)
+	e.MovDerefReg(amd64.R15, 8, amd64.R11)
+	e.Pop(amd64.RBX)
+	e.Ret()
+
+	fastPath := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[fast+2:], uint32(int32(fastPath-(fast+6))))
+	e.MovDerefReg(amd64.R15, 0, amd64.R10)
+	e.Pop(amd64.RBX)
 	e.Ret()
 }
 

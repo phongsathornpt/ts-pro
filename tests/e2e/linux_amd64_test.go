@@ -2,10 +2,12 @@ package e2e_test
 
 import (
 	"debug/elf"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/phongsathornpt/ts-pro/pkg/tspro"
@@ -164,4 +166,20 @@ console.log(pick7("a","b","c","d","e","f","stack-ok"));
 `,
 		expected: "stack-ok\n",
 	})
+}
+
+func TestLinuxAMD64ArenaAllocator(t *testing.T) {
+	for _, n := range []int{1000, 2500} {
+		t.Run(fmt.Sprintf("concat_%d", n), func(t *testing.T) {
+			runLinuxAMD64(t, linuxAMD64Case{
+				name: fmt.Sprintf("arena_concat_%d", n),
+				source: fmt.Sprintf(`
+let s = "";
+for (let i = 0; i < %d; i = i + 1) { s = s + "x"; }
+console.log(s);
+`, n),
+				expected: strings.Repeat("x", n) + "\n",
+			})
+		})
+	}
 }

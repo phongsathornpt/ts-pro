@@ -14,7 +14,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Move TypeScript `number` to IEEE-754 F64 payloads with SSE2/XMM arithmetic, comparisons, truthiness, calls, returns, NaN/Infinity, and signed-zero coverage on Linux AMD64.
 - [x] Implement SysV stack-passed arguments beyond register capacity for both SSE (`number`) and integer/reference classes, including 10-number and 7-string E2E coverage.
 - [x] Lower `&&` / `||` with CFG short-circuit and operand-value Phi semantics instead of eager integer AND/OR.
-- [ ] Replace per-allocation mmap string storage with the canonical native heap/GC integration.
+- [x] Replace per-allocation mmap string storage with a process-lifetime 16-byte-aligned arena, reserved R15 runtime context, and 1 MiB refill chunks; stress coverage crosses arena refill.
+- [ ] Add tracing/reclamation and precise roots to the Linux AMD64 native heap; the current arena intentionally reclaims only at process exit.
 - [ ] Replace the compact 12-digit F64 console formatter with ECMAScript shortest-roundtrip NumberToString semantics.
 - [ ] Add a macOS Linux-AMD64 execution runner (Docker/VM wrapper) in addition to compile/ELF validation; native Linux CI remains authoritative.
 
