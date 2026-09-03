@@ -18,6 +18,7 @@ const (
 	SymFunc
 	SymClass
 	SymInterface
+	SymTypeAlias
 )
 
 type Symbol struct {
@@ -134,6 +135,14 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 			}
 			c.result.Symbols[s] = sym
 			c.result.Types[s] = objType
+		case *ast.TypeAliasDecl:
+			aliasType := c.resolveTypeNode(s.Type)
+			sym := &Symbol{Name: s.Name, Kind: SymTypeAlias, Type: aliasType, Node: s}
+			if err := c.currentScope.Define(sym); err != nil {
+				c.error(s.Span(), "TS2300", err.Error())
+			}
+			c.result.Symbols[s] = sym
+			c.result.Types[s] = aliasType
 		}
 	}
 }
@@ -528,13 +537,19 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 	case *ast.TypeRefNode:
 		sym := c.currentScope.Resolve(t.Name)
-		if sym != nil && (sym.Kind == SymInterface || sym.Kind == SymClass) {
+		if sym != nil && (sym.Kind == SymInterface || sym.Kind == SymClass || sym.Kind == SymTypeAlias) {
 			return sym.Type
 		}
 		return types.TypeAny
 	case *ast.ArrayTypeNode:
 		elem := c.resolveTypeNode(t.ElemType)
 		return types.NewArray(elem)
+	case *ast.ObjectTypeNode:
+		obj := types.NewObject("")
+		for _, field := range t.Fields {
+			obj.AddField(field.Name, c.resolveTypeNode(field.Type), field.Optional)
+		}
+		return obj
 	case *ast.UnionTypeNode:
 		var members []types.Type
 		for _, m := range t.Types {

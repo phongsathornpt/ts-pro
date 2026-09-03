@@ -67,3 +67,21 @@ function test(): number {
 		t.Errorf("expected undefined identifier error, got none")
 	}
 }
+
+func TestObjectTypeAliasResolvesInArray(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("alias.ts", []byte(`
+type Point = { x: number; name: string };
+const points: Point[] = [{ x: 1, name: "one" }];
+console.log(points[0].name);
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+}

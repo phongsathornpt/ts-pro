@@ -689,14 +689,26 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 			node = &ast.TypeRefNode{SourceSpan: tok.Span, Name: tok.Text}
 		}
 	case token.LParen:
-		lparen := p.advance()
+		p.advance()
 		inner := p.parseType()
-		rparen := p.expect(token.RParen)
+		p.expect(token.RParen)
 		// Parentheses are type-level grouping only; retain the inner node while
 		// allowing suffixes such as (number | string)[].
-		_ = lparen
-		_ = rparen
 		node = inner
+	case token.LBrace:
+		lbrace := p.advance()
+		var fields []ast.InterfaceField
+		for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+			fieldTok := p.expect(token.Ident)
+			optional := p.match(token.Question)
+			p.expect(token.Colon)
+			fieldType := p.parseType()
+			p.match(token.Semicolon)
+			p.match(token.Comma)
+			fields = append(fields, ast.InterfaceField{SourceSpan: fieldTok.Span, Name: fieldTok.Text, Type: fieldType, Optional: optional})
+		}
+		rbrace := p.expect(token.RBrace)
+		node = &ast.ObjectTypeNode{SourceSpan: source.Span{Start: lbrace.Span.Start, End: rbrace.Span.End}, Fields: fields}
 	default:
 		p.error(tok.Span, fmt.Sprintf("expected type annotation, got %s", tok.Kind))
 		p.advance()

@@ -111,3 +111,24 @@ func TestParseParenthesizedUnionArrayType(t *testing.T) {
 		t.Fatalf("expected union element type, got %T", arr.ElemType)
 	}
 }
+
+func TestParseObjectTypeAlias(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("object-type.ts", []byte(`type Point = { x: number; y?: string };`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	alias, ok := prog.Statements[0].(*ast.TypeAliasDecl)
+	if !ok {
+		t.Fatalf("expected type alias, got %T", prog.Statements[0])
+	}
+	obj, ok := alias.Type.(*ast.ObjectTypeNode)
+	if !ok || len(obj.Fields) != 2 {
+		t.Fatalf("unexpected object type: %#v", alias.Type)
+	}
+	if !obj.Fields[1].Optional {
+		t.Fatal("expected optional field")
+	}
+}
