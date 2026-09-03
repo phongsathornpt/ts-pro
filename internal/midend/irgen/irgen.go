@@ -2995,6 +2995,17 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if proven, ok := g.provenObjectType(mem.Object); ok {
+				if info := g.semaResult.Classes[proven.Name]; info != nil && info.Methods[mem.Property] != nil {
+					boxed := g.lowerExpr(mem.Object)
+					receiver := g.unboxKnownObject(boxed, proven)
+					callArgs := make([]ir.Operand, 0, len(e.Args))
+					for _, arg := range e.Args {
+						callArgs = append(callArgs, g.lowerExpr(arg))
+					}
+					return g.emitClassMethodCall(receiver, info, mem.Property, callArgs)
+				}
+			}
 			if isBuiltinRegExpType(g.semanticType(mem.Object)) {
 				return g.emitRegExpTest(e, mem)
 			}

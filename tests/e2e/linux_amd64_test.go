@@ -1264,3 +1264,22 @@ console.log(captured(37));
 		expected: "42\n42\n42\n",
 	})
 }
+
+func TestLinuxAMD64DynamicClassMethodThis(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_class_method_this",
+		source: `
+class Counter {
+  value: number;
+  constructor(value: number) { this.value = value; }
+  add(delta: number): number { this.value = this.value + delta; return this.value; }
+}
+const dynamicCounter: any = new Counter(40);
+console.log(dynamicCounter.add(2));
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(dynamicCounter.add(8));
+`,
+		expected: "42\n50\n",
+	})
+}
