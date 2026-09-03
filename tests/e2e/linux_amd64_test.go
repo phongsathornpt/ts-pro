@@ -183,3 +183,25 @@ console.log(s);
 		})
 	}
 }
+
+func TestLinuxAMD64NumberToStringShortestRoundTrip(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "number_to_string_shortest_roundtrip",
+		source: `
+console.log(0.1);
+console.log(0.2);
+console.log(1.1);
+console.log(1.2345);
+console.log(0.1 + 0.2);
+console.log(100000000000000000000);
+console.log(1e21);
+console.log(0.000001);
+console.log(0.0000001);
+console.log(1.2345678901234567);
+console.log(1000000000000000100);
+console.log(2.2250738585072014e-308);
+console.log(5e-324);
+`,
+		expected: "0.1\n0.2\n1.1\n1.2345\n0.30000000000000004\n100000000000000000000\n1e+21\n0.000001\n1e-7\n1.2345678901234567\n1000000000000000100\n2.2250738585072014e-308\n5e-324\n",
+	})
+}

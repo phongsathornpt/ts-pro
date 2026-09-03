@@ -1138,7 +1138,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	// Emit ts_print_val for Linux AMD64
 	fnOffsets["ts_print_val"] = len(e.Code)
-	emitAMD64PrintVal(e)
+	emitAMD64PrintValV2(e)
 
 	fnOffsets["ts_print_bool"] = len(e.Code)
 	emitAMD64PrintBool(e)

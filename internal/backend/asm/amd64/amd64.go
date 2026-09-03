@@ -406,3 +406,71 @@ func (e *Emitter) LeaRipRel32(dst Register, disp int32) {
 	e.emitByte(modRM(0b00, dst, 5))
 	e.emitInt32(disp)
 }
+
+// FildDeref64 loads a signed 64-bit integer from memory into x87 ST(0).
+func (e *Emitter) FildDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDF)
+	e.emitBaseDisp(5, base, disp)
+}
+
+// FstpDeref64 stores x87 ST(0) as binary64 and pops the x87 stack.
+func (e *Emitter) FstpDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDD)
+	e.emitBaseDisp(3, base, disp)
+}
+
+// FmulDeref64 multiplies x87 ST(0) by a binary64 memory operand.
+func (e *Emitter) FmulDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDC)
+	e.emitBaseDisp(1, base, disp)
+}
+
+// FdivDeref64 divides x87 ST(0) by a binary64 memory operand.
+func (e *Emitter) FdivDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDC)
+	e.emitBaseDisp(6, base, disp)
+}
+
+func (e *Emitter) FldDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDD)
+	e.emitBaseDisp(0, base, disp)
+}
+func (e *Emitter) FsubDeref64(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDC)
+	e.emitBaseDisp(4, base, disp)
+}
+func (e *Emitter) Fabs()   { e.emitBytes(0xD9, 0xE1) }
+func (e *Emitter) FldST0() { e.emitBytes(0xD9, 0xC0) }
+func (e *Emitter) FstpDeref80(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDB)
+	e.emitBaseDisp(7, base, disp)
+}
+func (e *Emitter) FldDeref80(base Register, disp int32) {
+	if base >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xDB)
+	e.emitBaseDisp(5, base, disp)
+}
+func (e *Emitter) FcomipST1() { e.emitBytes(0xDF, 0xF1) }

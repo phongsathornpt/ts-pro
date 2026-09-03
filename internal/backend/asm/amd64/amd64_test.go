@@ -151,3 +151,26 @@ func TestAMD64SSE2NumberEncodings(t *testing.T) {
 		})
 	}
 }
+
+func TestAMD64X87MemoryEncodings(t *testing.T) {
+	e := NewEmitter()
+	e.FildDeref64(RBP, -120)
+	if want := []byte{0xDF, 0x6D, 0x88}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("fild: got %x want %x", e.Code, want)
+	}
+	e = NewEmitter()
+	e.FstpDeref64(RBP, -128)
+	if want := []byte{0xDD, 0x5D, 0x80}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("fstp: got %x want %x", e.Code, want)
+	}
+	e = NewEmitter()
+	e.FmulDeref64(RBP, -128)
+	if want := []byte{0xDC, 0x4D, 0x80}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("fmul: got %x want %x", e.Code, want)
+	}
+	e = NewEmitter()
+	e.FdivDeref64(RBP, -128)
+	if want := []byte{0xDC, 0x75, 0x80}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("fdiv: got %x want %x", e.Code, want)
+	}
+}
