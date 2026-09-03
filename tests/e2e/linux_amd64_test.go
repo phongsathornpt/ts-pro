@@ -361,3 +361,34 @@ console.log(box.label);
 		expected: "13\nab\n5\nr!\n8\nhi!\n",
 	})
 }
+
+func TestLinuxAMD64ClosuresFunctionArraysAndGC(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "closures_function_arrays_and_gc",
+		source: `
+function plusOne(x: number): number { return x + 1; }
+const offset = 5;
+const addOffset = (x: number): number => x + offset;
+const funcs: Array<(x: number) => number> = [plusOne, addOffset];
+console.log(funcs.length);
+console.log(funcs[0]!(3));
+console.log(funcs[1]!(7));
+
+function makeAdder(base: number): (x: number) => number {
+  const add = (x: number): number => base + x;
+  return add;
+}
+const add5 = makeAdder(5);
+console.log(add5(7));
+
+function makePrefix(prefix: string): (x: string) => string {
+  const add = (x: string): string => prefix + x;
+  return add;
+}
+const prefix = makePrefix("keep-" + "");
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(prefix("alive"));
+`,
+		expected: "2\n4\n12\n12\nkeep-alive\n",
+	})
+}

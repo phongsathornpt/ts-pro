@@ -12,7 +12,7 @@ func isAMD64HeapRefType(t types.Type) bool {
 		return false
 	}
 	switch t.Kind() {
-	case types.KindString, types.KindArray, types.KindObject:
+	case types.KindString, types.KindArray, types.KindObject, types.KindFunction:
 		return true
 	case types.KindUnion:
 		if u, ok := t.(*types.UnionType); ok {
@@ -89,4 +89,5 @@ const (
 	amd64ObjectTypeArrayData int64 = 2
 	amd64ObjectTypeRefData   int64 = 3
 	amd64ObjectTypeObject    int64 = 4
+	amd64ObjectTypeClosure   int64 = 5
 )

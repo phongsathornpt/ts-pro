@@ -105,6 +105,11 @@ type stringFixupAMD64 struct {
 	str       string
 }
 
+type closureCodeFixupAMD64 struct {
+	offset   int
+	function string
+}
+
 func lowerARM64(prog *ir.Program) ([]byte, error) {
 	e := arm64.NewEmitter()
 
@@ -709,6 +714,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	var callFixups []callFixup
 	var branchFixups []branchFixupAMD64
 	var strFixups []stringFixupAMD64
+	var closureCodeFixups []closureCodeFixupAMD64
 	bbOffsets := make(map[*ir.BasicBlock]int)
 
 	// Linux process entry is not a normal function call. Emit an explicit
@@ -1107,6 +1113,112 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					emitRuntimeCall("ts_array_pop")
 					storeSSAValue(bi.Res, amd64.RAX)
 
+				case *ir.MakeClosureInst:
+					// Closure payload: [code ptr, capture count, ref mask, captures...].
+					e.MovRegImm64(amd64.RDI, int64(24+len(bi.Captures)*8))
+					emitRuntimeCall("ts_alloc")
+					emitAMD64SetObjectType(e, amd64.RAX, amd64ObjectTypeClosure)
+					codeAt := len(e.Code)
+					e.LeaRipRel32(amd64.R10, 0)
+					closureCodeFixups = append(closureCodeFixups, closureCodeFixupAMD64{offset: codeAt + 3, function: bi.Function})
+					e.MovDerefReg(amd64.RAX, 0, amd64.R10)
+					e.MovRegImm64(amd64.R10, int64(len(bi.Captures)))
+					e.MovDerefReg(amd64.RAX, 8, amd64.R10)
+					e.MovRegImm64(amd64.R10, int64(bi.RefMask))
+					e.MovDerefReg(amd64.RAX, 16, amd64.R10)
+					for i, capture := range bi.Captures {
+						v, err := loadRawValue(capture, amd64.R11)
+						if err != nil {
+							return nil, err
+						}
+						if v != amd64.R11 {
+							e.MovRegReg(amd64.R11, v)
+						}
+						e.MovDerefReg(amd64.RAX, int32(24+i*8), amd64.R11)
+					}
+					storeSSAValue(bi.Res, amd64.RAX)
+
+				case *ir.ClosureGetInst:
+					closure, err := loadOperand(bi.Closure, amd64.R10)
+					if err != nil {
+						return nil, err
+					}
+					e.MovRegDeref(amd64.R11, closure, int32(24+bi.Index*8))
+					storeSSAValue(bi.Res, amd64.R11)
+
+				case *ir.IndirectCallInst:
+					closure, err := loadOperand(bi.Closure, amd64.R10)
+					if err != nil {
+						return nil, err
+					}
+					if closure != amd64.RAX {
+						e.MovRegReg(amd64.RAX, closure)
+					}
+					// Hidden closure environment occupies RDI. User integer-class arguments
+					// therefore begin at RSI; SSE arguments still begin at XMM0.
+					e.MovRegReg(amd64.RDI, amd64.RAX)
+					userGPRs := []amd64.Register{amd64.RSI, amd64.RDX, amd64.RCX, amd64.R8, amd64.R9}
+					gprArg, xmmArg := 0, 0
+					stackArgs := make([]ir.Operand, 0)
+					emitIndirectGPRArg := func(dst amd64.Register, arg ir.Operand) error {
+						v, err := loadRawValue(arg, amd64.R10)
+						if err != nil {
+							return err
+						}
+						if v != dst {
+							e.MovRegReg(dst, v)
+						}
+						return nil
+					}
+					for _, arg := range bi.Args {
+						if isNumberType(arg.Type()) {
+							if xmmArg < len(amd64NumberParamRegs) {
+								v, err := loadOperand(arg, amd64.R10)
+								if err != nil {
+									return nil, err
+								}
+								e.MovQXMMReg(amd64NumberParamRegs[xmmArg], v)
+								xmmArg++
+							} else {
+								stackArgs = append(stackArgs, arg)
+							}
+							continue
+						}
+						if gprArg < len(userGPRs) {
+							if err := emitIndirectGPRArg(userGPRs[gprArg], arg); err != nil {
+								return nil, err
+							}
+							gprArg++
+						} else {
+							stackArgs = append(stackArgs, arg)
+						}
+					}
+					stackBytes := len(stackArgs) * 8
+					padBytes := 0
+					if stackBytes%16 != 0 {
+						padBytes = 8
+						e.SubRegImm32(amd64.RSP, 8)
+					}
+					for i := len(stackArgs) - 1; i >= 0; i-- {
+						if err := emitIndirectGPRArg(amd64.R10, stackArgs[i]); err != nil {
+							return nil, err
+						}
+						e.Push(amd64.R10)
+					}
+					e.MovRegDeref(amd64.R11, amd64.RAX, 0)
+					e.CallReg(amd64.R11)
+					if cleanup := stackBytes + padBytes; cleanup != 0 {
+						e.AddRegImm32(amd64.RSP, int32(cleanup))
+					}
+					if bi.Res != nil {
+						if isNumberType(bi.Res.Type()) {
+							e.MovQRegXMM(amd64.R10, amd64.XMM0)
+							storeSSAValue(bi.Res, amd64.R10)
+						} else {
+							storeSSAValue(bi.Res, amd64.RAX)
+						}
+					}
+
 				case *ir.CallInst:
 					gprArg, xmmArg := 0, 0
 					stackArgs := make([]ir.Operand, 0)
@@ -1181,6 +1293,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 					}
 
+				default:
+					return nil, fmt.Errorf("unsupported AMD64 instruction %T", inst)
 				}
 			}
 
@@ -1384,6 +1498,16 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		targetAddr := strOffsets[sf.str]
 		disp := int32(targetAddr - (sf.offset + 4))
 		binary.LittleEndian.PutUint32(e.Code[sf.offset:], uint32(disp))
+	}
+
+	// Fix up closure code pointers encoded as RIP-relative LEA instructions.
+	for _, cf := range closureCodeFixups {
+		targetAddr, exists := fnOffsets[cf.function]
+		if !exists {
+			return nil, fmt.Errorf("unresolved closure function %q", cf.function)
+		}
+		disp := int32(targetAddr - (cf.offset + 4))
+		binary.LittleEndian.PutUint32(e.Code[cf.offset:], uint32(disp))
 	}
 
 	// Fix up function calls
