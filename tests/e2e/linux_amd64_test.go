@@ -392,3 +392,25 @@ console.log(prefix("alive"));
 		expected: "2\n4\n12\n12\nkeep-alive\n",
 	})
 }
+
+func TestLinuxAMD64ClosureReferenceGraphAndOverflowArgs(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "closure_reference_graph_and_overflow_args",
+		source: `
+const state = { nums: [40], label: "keep-" + "alive" };
+const readNumber = (x: number): number => state.nums[0]! + x;
+const readLabel = (): string => state.label;
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(readNumber(2));
+console.log(readLabel());
+
+const add10 = (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number): number =>
+  a + b + c + d + e + f + g + h + i + j;
+console.log(add10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
+
+const pickSixth = (a: string, b: string, c: string, d: string, e: string, f: string): string => f;
+console.log(pickSixth("a", "b", "c", "d", "e", "stack-ok"));
+`,
+		expected: "42\nkeep-alive\n55\nstack-ok\n",
+	})
+}
