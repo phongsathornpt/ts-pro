@@ -17,7 +17,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Replace per-allocation mmap string storage with a process-lifetime 16-byte-aligned arena, reserved R15 runtime context, and 1 MiB refill chunks; stress coverage crosses arena refill.
 - [ ] Add tracing/reclamation and precise roots to the Linux AMD64 native heap; the current arena intentionally reclaims only at process exit.
 - [ ] Replace the compact 12-digit F64 console formatter with ECMAScript shortest-roundtrip NumberToString semantics.
-- [ ] Add a macOS Linux-AMD64 execution runner (Docker/VM wrapper) in addition to compile/ELF validation; native Linux CI remains authoritative.
+- [x] Add a macOS Linux-AMD64 execution runner using Docker `--platform linux/amd64`; native Linux hosts execute the same suite directly.
 
 ## Architecture invariant
 
