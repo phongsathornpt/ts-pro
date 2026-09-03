@@ -10,7 +10,7 @@ test:
 	CGO_ENABLED=0 $(GO) test ./...
 
 test-linux-amd64:
-	CGO_ENABLED=0 $(GO) test ./tests/e2e -run '^TestLinuxAMD64ExplicitTarget$$' -count=1
+	./scripts/test-linux-amd64.sh
 
 vet:
 	CGO_ENABLED=0 $(GO) vet ./...
