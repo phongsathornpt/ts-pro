@@ -1226,3 +1226,21 @@ console.log(greater([5], 4));
 		expected: "true\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64JSValueStructuralObjectUnbox(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "jsvalue_structural_object_unbox",
+		source: `
+interface Child { value: number; }
+interface Holder { value: number; label: string; child: Child; }
+let dynamic: any = { value: 42, label: "materialized", child: { value: 7 } };
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+let typed: Holder = dynamic;
+console.log(typed.value);
+console.log(typed.label);
+console.log(typed.child.value);
+`,
+		expected: "42\nmaterialized\n7\n",
+	})
+}

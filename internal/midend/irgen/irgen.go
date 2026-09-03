@@ -1610,6 +1610,29 @@ func (g *generator) unboxKnownObject(value ir.Operand, objectType *types.ObjectT
 	return g.coerceJSValueBoundary(value, types.TypeAny, objectType)
 }
 
+func (g *generator) materializeDynamicObject(value ir.Operand, objectType *types.ObjectType) ir.Operand {
+	if value == nil || objectType == nil {
+		return value
+	}
+	if info := g.semaResult.Classes[objectType.Name]; info != nil {
+		return g.failExpr("dynamic structural conversion to class %q is not implemented", objectType.Name)
+	}
+	offsets, refMask, shape := g.objectLayout(objectType)
+	res := g.currentFn.NewValue("dynamic_struct", objectType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
+		Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask,
+	})
+	for _, name := range objectType.FieldOrder {
+		field := objectType.Fields[name]
+		boxed := g.lowerDynamicGet(value, name)
+		converted := g.coerceJSValueBoundary(boxed, types.TypeAny, field.Type)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+			Obj: res, Field: name, Offset: offsets[name], Val: converted,
+		})
+	}
+	return res
+}
+
 func (g *generator) lowerDynamicObjectLiteral(lit *ast.ObjectLit) ir.Operand {
 	obj := g.currentFn.NewValue("dynamic_object", types.TypeAny)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: obj, Callee: "ts_dynamic_object_new"})
@@ -1672,8 +1695,19 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 				}
 				if i < len(resolved) {
 					sourceType := g.semanticType(d.Init)
-					initOp = g.coerceJSValueBoundary(initOp, sourceType, resolved[i])
-					if irJSValueType(resolved[i]) {
+					targetType := resolved[i]
+					if objectType, ok := targetType.(*types.ObjectType); ok && irJSValueType(sourceType) {
+						if provenance, known := g.provenObjectType(d.Init); known {
+							initOp = g.unboxKnownObject(initOp, provenance)
+						} else if initOp.Type() == types.TypeAny {
+							initOp = g.materializeDynamicObject(initOp, objectType)
+						} else {
+							initOp = g.coerceJSValueBoundary(initOp, sourceType, targetType)
+						}
+					} else {
+						initOp = g.coerceJSValueBoundary(initOp, sourceType, targetType)
+					}
+					if irJSValueType(targetType) {
 						if objectType, ok := sourceType.(*types.ObjectType); ok {
 							if _, dynamicLiteral := d.Init.(*ast.ObjectLit); !dynamicLiteral {
 								g.localProvenance[d.Name] = objectType
