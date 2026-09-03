@@ -487,6 +487,81 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 	return packed
 }
 
+func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetType types.Type) ir.Operand {
+	if value == nil || targetType == nil {
+		return value
+	}
+	if sourceType == nil {
+		sourceType = value.Type()
+	}
+	actualType := value.Type()
+
+	// Primitive values entering any/unknown must use the boxed JSValue ABI.
+	if irJSValueType(targetType) {
+		if actualType != nil && irJSValueType(actualType) {
+			return value
+		}
+		switch sourceType.Kind() {
+		case types.KindNumber, types.KindString, types.KindBoolean:
+			return g.boxJSValue(value, sourceType)
+		case types.KindNull, types.KindUndefined:
+			return value
+		default:
+			// Reference boxing is handled separately so existing closed-shape
+			// provenance remains available until the dynamic-reference milestone.
+			return value
+		}
+	}
+
+	// Primitive typed consumers decode values that crossed an any boundary.
+	if irJSValueType(sourceType) || (actualType != nil && irJSValueType(actualType)) {
+		var callee string
+		switch targetType.Kind() {
+		case types.KindNumber:
+			callee = "ts_js_unbox_number"
+		case types.KindString:
+			callee = "ts_js_unbox_string"
+		case types.KindBoolean:
+			callee = "ts_js_unbox_bool"
+		default:
+			return value
+		}
+		res := g.currentFn.NewValue("js_unbox", targetType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: res, Callee: callee, Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny},
+		})
+		return res
+	}
+	return value
+}
+
+func (g *generator) coerceCallOperands(args []ir.Operand, sourceTypes []types.Type, fnType *types.FunctionType) []ir.Operand {
+	if fnType == nil {
+		return args
+	}
+	restIndex := restParamIndex(fnType.Params)
+	for i := range args {
+		var target types.Type
+		if restIndex >= 0 && i >= restIndex {
+			arr, ok := fnType.Params[restIndex].Type.(*types.ArrayType)
+			if ok {
+				target = arr.Elem
+			}
+		} else if i < len(fnType.Params) {
+			target = fnType.Params[i].Type
+		}
+		if target == nil {
+			continue
+		}
+		var source types.Type
+		if i < len(sourceTypes) {
+			source = sourceTypes[i]
+		}
+		args[i] = g.coerceJSValueBoundary(args[i], source, target)
+	}
+	return args
+}
+
 func (g *generator) boxJSValue(value ir.Operand, sourceType types.Type) ir.Operand {
 	if value == nil {
 		return value
@@ -1559,7 +1634,8 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 			g.lowerStatement(child)
 		}
 	case *ast.VarDeclStmt:
-		for _, d := range s.Declarations {
+		resolved := g.semaResult.VarTypes[s]
+		for i, d := range s.Declarations {
 			var initOp ir.Operand
 			if d.Init != nil {
 				if typeNodeIsAny(d.Type) {
@@ -1569,6 +1645,9 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 				}
 				if initOp == nil {
 					initOp = g.lowerExpr(d.Init)
+				}
+				if i < len(resolved) {
+					initOp = g.coerceJSValueBoundary(initOp, g.semanticType(d.Init), resolved[i])
 				}
 			}
 			if initOp == nil {
@@ -1580,6 +1659,7 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		var val ir.Operand
 		if s.Value != nil {
 			val = g.lowerExpr(s.Value)
+			val = g.coerceJSValueBoundary(val, g.semanticType(s.Value), g.currentFn.ReturnType)
 		}
 		g.currentBB.Terminator = &ir.ReturnTerm{Val: val}
 	case *ast.ExprStmt:
@@ -2750,9 +2830,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if !directNamed {
 				closure := g.lowerExpr(e.Callee)
 				args := make([]ir.Operand, 0, len(e.Args))
+				sourceTypes := make([]types.Type, 0, len(e.Args))
 				for _, arg := range e.Args {
 					args = append(args, g.lowerExpr(arg))
+					sourceTypes = append(sourceTypes, g.semanticType(arg))
 				}
+				args = g.coerceCallOperands(args, sourceTypes, fnType)
 				args = g.packRestOperands(args, fnType)
 				res := g.currentFn.NewValue("ret", fnType.Return)
 				paramTypes := make([]types.Type, len(fnType.Params))
@@ -2808,8 +2891,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.failExpr("unsupported call target %T", e.Callee)
 		}
 		var args []ir.Operand
+		var sourceTypes []types.Type
 		for _, arg := range e.Args {
 			args = append(args, g.lowerExpr(arg))
+			sourceTypes = append(sourceTypes, g.semanticType(arg))
 		}
 		callType, _ := g.semanticType(e.Callee).(*types.FunctionType)
 		if concrete := g.semaResult.GenericCalls[e]; concrete != nil {
@@ -2828,16 +2913,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					p := decl.Params[i]
 					if p.Default != nil {
 						args = append(args, g.lowerExpr(p.Default))
+						sourceTypes = append(sourceTypes, g.semanticType(p.Default))
 						continue
 					}
 					if p.Optional {
 						args = append(args, ir.ConstUndefined{})
+						sourceTypes = append(sourceTypes, types.TypeUndefined)
 						continue
 					}
 					break
 				}
 			}
 		}
+		args = g.coerceCallOperands(args, sourceTypes, callType)
 		args = g.packRestOperands(args, callType)
 		var paramTypes []types.Type
 		if callType != nil && !isConsoleLogCall(e.Callee) && !strings.HasPrefix(calleeName, "ts_") {
@@ -2984,6 +3072,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return g.failExpr("cannot assign unresolved local %q", ident.Name)
 			}
 			rhs := g.lowerExpr(e.Right)
+			if e.Op == token.Eq {
+				targetType := g.semanticType(e.Left)
+				rhs = g.coerceJSValueBoundary(rhs, g.semanticType(e.Right), targetType)
+				g.locals[ident.Name] = rhs
+				return rhs
+			}
 			value := g.lowerAssignmentValue(e, current, rhs)
 			g.locals[ident.Name] = value
 			return value

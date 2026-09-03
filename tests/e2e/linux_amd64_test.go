@@ -1047,3 +1047,36 @@ console.log(8 / 2);
 		expected: "1\n0\nworld\n1\n0\n1\n0\n1\n4\n",
 	})
 }
+
+func TestLinuxAMD64JSValuePrimitiveBoundaries(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "jsvalue_primitive_boundaries",
+		source: `
+function identityAny(value: any): any { return value; }
+function asNumber(value: any): number { return value; }
+let n: any = 41;
+let s: any = "hello";
+let b: any = true;
+let z: any = null;
+let u: any = undefined;
+console.log(n);
+console.log(s);
+console.log(b);
+console.log(z);
+console.log(u);
+let typedN: number = n;
+let typedS: string = s;
+let typedB: boolean = b;
+console.log(typedN + 1);
+console.log(typedS);
+console.log(typedB);
+n = "forty-two";
+console.log(n);
+console.log(identityAny(42));
+console.log(identityAny("boxed"));
+console.log(identityAny(false));
+console.log(asNumber(42) + 1);
+`,
+		expected: "41\nhello\ntrue\nnull\nundefined\n42\nhello\n1\nforty-two\n42\nboxed\nfalse\n43\n",
+	})
+}

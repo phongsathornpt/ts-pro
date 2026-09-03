@@ -94,6 +94,7 @@ type Result struct {
 	BuiltinCollections map[string]*BuiltinCollectionInfo
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
+	VarTypes           map[*ast.VarDeclStmt][]types.Type
 	RootScope          *Scope
 	Diagnostics        diag.DiagnosticList
 }
@@ -120,6 +121,7 @@ func NewChecker() *Checker {
 			Classes:            make(map[string]*ClassInfo),
 			Enums:              make(map[string]map[string]float64),
 			ImportAliases:      make(map[string]string),
+			VarTypes:           make(map[*ast.VarDeclStmt][]types.Type),
 			BuiltinCollections: make(map[string]*BuiltinCollectionInfo),
 			RootScope:          root,
 			Diagnostics:        make(diag.DiagnosticList, 0),
@@ -667,7 +669,8 @@ func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) type
 }
 
 func (c *Checker) checkVarDecl(stmt *ast.VarDeclStmt) {
-	for _, decl := range stmt.Declarations {
+	resolved := make([]types.Type, len(stmt.Declarations))
+	for declIndex, decl := range stmt.Declarations {
 		var declaredType types.Type
 		if decl.Type != nil {
 			declaredType = c.resolveTypeNode(decl.Type)
@@ -689,6 +692,7 @@ func (c *Checker) checkVarDecl(stmt *ast.VarDeclStmt) {
 		if finalType == nil {
 			finalType = types.TypeAny
 		}
+		resolved[declIndex] = finalType
 
 		if declaredType != nil && initType != nil {
 			if !initType.AssignableTo(declaredType) {
@@ -706,6 +710,7 @@ func (c *Checker) checkVarDecl(stmt *ast.VarDeclStmt) {
 			c.error(decl.SourceSpan, "TS2300", err.Error())
 		}
 	}
+	c.result.VarTypes[stmt] = resolved
 }
 
 func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {

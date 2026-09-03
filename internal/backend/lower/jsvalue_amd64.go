@@ -185,3 +185,22 @@ func emitAMD64JSPrint(e *amd64.Emitter, printNumber, printString, printUndefined
 	e.Pop(amd64.RBP)
 	e.Ret()
 }
+
+func emitAMD64JSUnboxNumber(e *amd64.Emitter) {
+	e.MovQXMMReg(amd64.XMM0, amd64.RDI)
+	e.Ret()
+}
+
+func emitAMD64JSUnboxBool(e *amd64.Emitter) {
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.MovRegImm64(amd64.R10, 1)
+	e.AndRegReg(amd64.RAX, amd64.R10)
+	e.Ret()
+}
+
+func emitAMD64JSUnboxString(e *amd64.Emitter) {
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
+	e.AndRegReg(amd64.RAX, amd64.R10)
+	e.Ret()
+}
