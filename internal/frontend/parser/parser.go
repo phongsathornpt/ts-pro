@@ -184,9 +184,62 @@ func (p *Parser) parseVarDecl() *ast.VarDeclStmt {
 	}
 }
 
+func (p *Parser) parseTypeParams() []string {
+	if !p.match(token.Lt) {
+		return nil
+	}
+	var params []string
+	for p.current().Kind != token.Gt && p.current().Kind != token.EOF {
+		start := p.cursor
+		name := p.expect(token.Ident)
+		if name.Kind == token.Ident {
+			params = append(params, name.Text)
+		}
+		if !p.match(token.Comma) {
+			p.ensureProgress(start, "type parameter list")
+			break
+		}
+		p.ensureProgress(start, "type parameter list")
+	}
+	p.expect(token.Gt)
+	return params
+}
+
+func (p *Parser) parseTypeArgsAfterLt() []ast.TypeNode {
+	var args []ast.TypeNode
+	for p.current().Kind != token.Gt && p.current().Kind != token.EOF {
+		start := p.cursor
+		args = append(args, p.parseType())
+		if !p.match(token.Comma) {
+			p.ensureProgress(start, "type argument list")
+			break
+		}
+		p.ensureProgress(start, "type argument list")
+	}
+	p.expect(token.Gt)
+	return args
+}
+
+func (p *Parser) tryParseCallTypeArgs() ([]ast.TypeNode, bool) {
+	if p.current().Kind != token.Lt {
+		return nil, false
+	}
+	savedCursor := p.cursor
+	savedDiagLen := len(p.diagnostics)
+	p.advance()
+	args := p.parseTypeArgsAfterLt()
+	if p.current().Kind != token.LParen || len(args) == 0 {
+		p.cursor = savedCursor
+		p.diagnostics = p.diagnostics[:savedDiagLen]
+		return nil, false
+	}
+	return args, true
+}
+
 func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 	kw := p.advance() // consume 'function'
 	nameTok := p.expect(token.Ident)
+	typeParams := p.parseTypeParams()
 
 	p.expect(token.LParen)
 	params := p.parseParams()
@@ -201,6 +254,7 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 	return &ast.FunctionDecl{
 		SourceSpan: source.Span{Start: kw.Span.Start, End: body.Span().End},
 		Name:       nameTok.Text,
+		TypeParams: typeParams,
 		Params:     params,
 		ReturnType: retType,
 		Body:       body,
@@ -240,6 +294,7 @@ func (p *Parser) parseParams() []ast.Param {
 func (p *Parser) parseClassDecl() *ast.ClassDecl {
 	kw := p.advance()
 	nameTok := p.expect(token.Ident)
+	typeParams := p.parseTypeParams()
 
 	extends := ""
 	if p.match(token.KwExtends) {
@@ -302,6 +357,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 	return &ast.ClassDecl{
 		SourceSpan: source.Span{Start: kw.Span.Start, End: rbrace.Span.End},
 		Name:       nameTok.Text,
+		TypeParams: typeParams,
 		Extends:    extends,
 		Fields:     fields,
 		Methods:    methods,
@@ -311,6 +367,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	kw := p.advance()
 	nameTok := p.expect(token.Ident)
+	typeParams := p.parseTypeParams()
 
 	p.expect(token.LBrace)
 	var fields []ast.InterfaceField
@@ -333,6 +390,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	return &ast.InterfaceDecl{
 		SourceSpan: source.Span{Start: kw.Span.Start, End: rbrace.Span.End},
 		Name:       nameTok.Text,
+		TypeParams: typeParams,
 		Fields:     fields,
 	}
 }
@@ -340,12 +398,14 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 func (p *Parser) parseTypeAliasDecl() *ast.TypeAliasDecl {
 	kw := p.advance()
 	nameTok := p.expect(token.Ident)
+	typeParams := p.parseTypeParams()
 	p.expect(token.Eq)
 	t := p.parseType()
 	p.match(token.Semicolon)
 	return &ast.TypeAliasDecl{
 		SourceSpan: source.Span{Start: kw.Span.Start, End: t.Span().End},
 		Name:       nameTok.Text,
+		TypeParams: typeParams,
 		Type:       t,
 	}
 }
@@ -570,6 +630,29 @@ func (p *Parser) parsePostfix() ast.Expr {
 			// TypeScript postfix non-null assertion is erased at runtime. Consume it
 			// here so member/index/call postfix parsing can continue normally.
 			p.advance()
+		case token.Lt:
+			typeArgs, ok := p.tryParseCallTypeArgs()
+			if !ok {
+				return expr
+			}
+			p.advance() // consume '('
+			var args []ast.Expr
+			for p.current().Kind != token.RParen && p.current().Kind != token.EOF {
+				loopStart := p.cursor
+				args = append(args, p.parseExpression())
+				if !p.match(token.Comma) {
+					p.ensureProgress(loopStart, "generic call arguments")
+					break
+				}
+				p.ensureProgress(loopStart, "generic call arguments")
+			}
+			rparen := p.expect(token.RParen)
+			expr = &ast.CallExpr{
+				SourceSpan: source.Span{Start: expr.Span().Start, End: rparen.Span.End},
+				Callee:     expr,
+				TypeArgs:   typeArgs,
+				Args:       args,
+			}
 		case token.LParen:
 			// Call
 			p.advance()
@@ -718,8 +801,35 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 		case "number", "string", "boolean", "void", "any", "never", "unknown":
 			node = &ast.PrimitiveTypeNode{SourceSpan: tok.Span, Kind: tok.Text}
 		default:
-			node = &ast.TypeRefNode{SourceSpan: tok.Span, Name: tok.Text}
+			ref := &ast.TypeRefNode{SourceSpan: tok.Span, Name: tok.Text}
+			if p.match(token.Lt) {
+				ref.TypeArgs = p.parseTypeArgsAfterLt()
+				if len(ref.TypeArgs) > 0 {
+					ref.SourceSpan.End = ref.TypeArgs[len(ref.TypeArgs)-1].Span().End
+				}
+			}
+			node = ref
 		}
+	case token.KwUndefined:
+		p.advance()
+		node = &ast.PrimitiveTypeNode{SourceSpan: tok.Span, Kind: "undefined"}
+	case token.KwNull:
+		p.advance()
+		node = &ast.PrimitiveTypeNode{SourceSpan: tok.Span, Kind: "null"}
+	case token.LBracket:
+		lbracket := p.advance()
+		var elems []ast.TypeNode
+		for p.current().Kind != token.RBracket && p.current().Kind != token.EOF {
+			loopStart := p.cursor
+			elems = append(elems, p.parseType())
+			if !p.match(token.Comma) {
+				p.ensureProgress(loopStart, "tuple type")
+				break
+			}
+			p.ensureProgress(loopStart, "tuple type")
+		}
+		rbracket := p.expect(token.RBracket)
+		node = &ast.TupleTypeNode{SourceSpan: source.Span{Start: lbracket.Span.Start, End: rbracket.Span.End}, Elements: elems}
 	case token.LParen:
 		p.advance()
 		inner := p.parseType()

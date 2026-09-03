@@ -135,7 +135,6 @@ func TestParseObjectTypeAlias(t *testing.T) {
 
 func TestParserUnsupportedSyntaxAlwaysMakesProgress(t *testing.T) {
 	cases := map[string]string{
-		"generic_function":   `function identity<T>(x: T): T { return x; }`,
 		"parameter_property": `class Box { constructor(public value: number) {} }`,
 	}
 	for name, src := range cases {
@@ -154,5 +153,51 @@ func TestParserUnsupportedSyntaxAlwaysMakesProgress(t *testing.T) {
 				t.Fatalf("parser stopped before EOF at %s", p.current().Kind)
 			}
 		})
+	}
+}
+
+func TestParseGenericSyntaxAndTupleTypes(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("generic-syntax.ts", []byte(`
+function pair<A, B>(first: A, second: B): [A, B] { return [first, second]; }
+class Box<T> { value: T; }
+interface Result<T> { value: T; }
+type Maybe<T> = T | undefined;
+const p = pair<string, number>("answer", 42);
+const cmp = 1 < 2;
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	fn, ok := prog.Statements[0].(*ast.FunctionDecl)
+	if !ok || len(fn.TypeParams) != 2 || fn.TypeParams[0] != "A" || fn.TypeParams[1] != "B" {
+		t.Fatalf("unexpected generic function: %#v", prog.Statements[0])
+	}
+	if tuple, ok := fn.ReturnType.(*ast.TupleTypeNode); !ok || len(tuple.Elements) != 2 {
+		t.Fatalf("expected two-element tuple return type, got %T %#v", fn.ReturnType, fn.ReturnType)
+	}
+	cls := prog.Statements[1].(*ast.ClassDecl)
+	if len(cls.TypeParams) != 1 || cls.TypeParams[0] != "T" {
+		t.Fatalf("unexpected class type params: %#v", cls.TypeParams)
+	}
+	iface := prog.Statements[2].(*ast.InterfaceDecl)
+	if len(iface.TypeParams) != 1 || iface.TypeParams[0] != "T" {
+		t.Fatalf("unexpected interface type params: %#v", iface.TypeParams)
+	}
+	alias := prog.Statements[3].(*ast.TypeAliasDecl)
+	if len(alias.TypeParams) != 1 || alias.TypeParams[0] != "T" {
+		t.Fatalf("unexpected alias type params: %#v", alias.TypeParams)
+	}
+	callDecl := prog.Statements[4].(*ast.VarDeclStmt)
+	call, ok := callDecl.Declarations[0].Init.(*ast.CallExpr)
+	if !ok || len(call.TypeArgs) != 2 {
+		t.Fatalf("expected generic call with two type args, got %T %#v", callDecl.Declarations[0].Init, callDecl.Declarations[0].Init)
+	}
+	cmpDecl := prog.Statements[5].(*ast.VarDeclStmt)
+	cmp, ok := cmpDecl.Declarations[0].Init.(*ast.BinaryExpr)
+	if !ok || cmp.Op != token.Lt {
+		t.Fatalf("comparison must remain binary <, got %T %#v", cmpDecl.Declarations[0].Init, cmpDecl.Declarations[0].Init)
 	}
 }

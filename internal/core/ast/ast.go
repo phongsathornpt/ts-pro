@@ -363,6 +363,11 @@ type (
 		ElemType   TypeNode
 	}
 
+	TupleTypeNode struct {
+		SourceSpan source.Span
+		Elements   []TypeNode
+	}
+
 	ObjectTypeNode struct {
 		SourceSpan source.Span
 		Fields     []InterfaceField
@@ -383,6 +388,8 @@ func (t *UnionTypeNode) Span() source.Span     { return t.SourceSpan }
 func (t *UnionTypeNode) typeNode()             {}
 func (t *ArrayTypeNode) Span() source.Span     { return t.SourceSpan }
 func (t *ArrayTypeNode) typeNode()             {}
+func (t *TupleTypeNode) Span() source.Span     { return t.SourceSpan }
+func (t *TupleTypeNode) typeNode()             {}
 func (t *ObjectTypeNode) Span() source.Span    { return t.SourceSpan }
 func (t *ObjectTypeNode) typeNode()            {}
 func (t *FunctionTypeNode) Span() source.Span  { return t.SourceSpan }
