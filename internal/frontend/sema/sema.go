@@ -2,6 +2,7 @@ package sema
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/token"
@@ -36,6 +37,9 @@ type ClassInfo struct {
 	Methods      map[string]*types.FunctionType
 	MethodOwners map[string]string
 	BaseName     string
+	TypeParams   []*types.TypeVar
+	TypeBindings map[*types.TypeVar]types.Type
+	GenericBase  string
 	Resolved     bool
 	Resolving    bool
 }
@@ -72,20 +76,23 @@ func (s *Scope) Resolve(name string) *Symbol {
 
 // Result holds the analyzed types and symbols for an AST.
 type Result struct {
-	Types        map[ast.Node]types.Type
-	Symbols      map[ast.Node]*Symbol
-	GenericCalls map[*ast.CallExpr]*types.FunctionType
-	Classes      map[string]*ClassInfo
-	RootScope    *Scope
-	Diagnostics  diag.DiagnosticList
+	Types          map[ast.Node]types.Type
+	Symbols        map[ast.Node]*Symbol
+	GenericCalls   map[*ast.CallExpr]*types.FunctionType
+	GenericClasses map[*ast.NewExpr]*ClassInfo
+	Classes        map[string]*ClassInfo
+	RootScope      *Scope
+	Diagnostics    diag.DiagnosticList
 }
 
 type Checker struct {
-	currentScope  *Scope
-	result        *Result
-	currentFnRet  types.Type
-	currentClass  *ClassInfo
-	typeParamEnvs []map[string]*types.TypeVar
+	currentScope      *Scope
+	result            *Result
+	currentFnRet      types.Type
+	currentClass      *ClassInfo
+	typeParamEnvs     []map[string]*types.TypeVar
+	genericClassSpecs map[string]*ClassInfo
+	classSpecCount    int
 }
 
 func NewChecker() *Checker {
@@ -93,13 +100,15 @@ func NewChecker() *Checker {
 	return &Checker{
 		currentScope: root,
 		result: &Result{
-			Types:        make(map[ast.Node]types.Type),
-			Symbols:      make(map[ast.Node]*Symbol),
-			GenericCalls: make(map[*ast.CallExpr]*types.FunctionType),
-			Classes:      make(map[string]*ClassInfo),
-			RootScope:    root,
-			Diagnostics:  make(diag.DiagnosticList, 0),
+			Types:          make(map[ast.Node]types.Type),
+			Symbols:        make(map[ast.Node]*Symbol),
+			GenericCalls:   make(map[*ast.CallExpr]*types.FunctionType),
+			GenericClasses: make(map[*ast.NewExpr]*ClassInfo),
+			Classes:        make(map[string]*ClassInfo),
+			RootScope:      root,
+			Diagnostics:    make(diag.DiagnosticList, 0),
 		},
+		genericClassSpecs: make(map[string]*ClassInfo),
 	}
 }
 
@@ -158,6 +167,7 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 		info := &ClassInfo{
 			Name: cls.Name, Decl: cls, Instance: instance,
 			Methods: make(map[string]*types.FunctionType), MethodOwners: make(map[string]string), BaseName: cls.Extends,
+			TypeParams: newTypeParams(cls.TypeParams),
 		}
 		c.result.Classes[cls.Name] = info
 		sym := &Symbol{Name: cls.Name, Kind: SymClass, Type: instance, Node: cls}
@@ -214,6 +224,8 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 	}
 	info.Resolving = true
 	defer func() { info.Resolving = false }()
+	popTypeParams := c.pushTypeParams(info.TypeParams)
+	defer popTypeParams()
 
 	if info.BaseName != "" {
 		base := c.result.Classes[info.BaseName]
@@ -236,10 +248,6 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 		}
 	}
 
-	if len(cls.TypeParams) > 0 {
-		// Generic class specialization is a later phase. Non-generic hierarchy
-		// metadata remains exact, while generic members currently resolve through any.
-	}
 	for _, field := range cls.Fields {
 		if field.IsStatic {
 			continue
@@ -278,6 +286,59 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 		info.Constructor = types.NewFunction(nil, types.TypeVoid)
 	}
 	info.Resolved = true
+}
+
+func genericClassKey(info *ClassInfo, args []types.Type) string {
+	parts := make([]string, len(args))
+	for i, arg := range args {
+		parts[i] = arg.String()
+	}
+	return info.Name + "<" + strings.Join(parts, ",") + ">"
+}
+
+func (c *Checker) specializeClass(info *ClassInfo, args []types.Type) (*ClassInfo, error) {
+	if info == nil {
+		return nil, fmt.Errorf("cannot specialize nil class")
+	}
+	if len(info.TypeParams) != len(args) {
+		return nil, fmt.Errorf("generic class '%s' expects %d type arguments, got %d", info.Name, len(info.TypeParams), len(args))
+	}
+	key := genericClassKey(info, args)
+	if spec := c.genericClassSpecs[key]; spec != nil {
+		return spec, nil
+	}
+	bindings := make(map[*types.TypeVar]types.Type, len(args))
+	for i, tp := range info.TypeParams {
+		bindings[tp] = args[i]
+	}
+	instance, ok := types.Substitute(info.Instance, bindings).(*types.ObjectType)
+	if !ok {
+		return nil, fmt.Errorf("generic class %s instance substitution produced %T", info.Name, instance)
+	}
+	name := fmt.Sprintf("%s$spec%d", info.Name, c.classSpecCount)
+	c.classSpecCount++
+	instance.Name = name
+	ctor, _ := types.Substitute(info.Constructor, bindings).(*types.FunctionType)
+	spec := &ClassInfo{
+		Name: name, Decl: info.Decl, Instance: instance, Constructor: ctor,
+		Methods: make(map[string]*types.FunctionType, len(info.Methods)), MethodOwners: make(map[string]string, len(info.Methods)),
+		BaseName: info.BaseName, TypeBindings: bindings, GenericBase: info.Name, Resolved: true,
+	}
+	for method, fn := range info.Methods {
+		concrete, ok := types.Substitute(fn, bindings).(*types.FunctionType)
+		if !ok {
+			return nil, fmt.Errorf("generic class %s method %s substitution produced %T", info.Name, method, concrete)
+		}
+		spec.Methods[method] = concrete
+		owner := info.MethodOwners[method]
+		if owner == info.Name || owner == "" {
+			owner = name
+		}
+		spec.MethodOwners[method] = owner
+	}
+	c.genericClassSpecs[key] = spec
+	c.result.Classes[name] = spec
+	return spec, nil
 }
 
 func (c *Checker) checkProgram(prog *ast.Program) {
@@ -446,7 +507,9 @@ func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 	parentClass := c.currentClass
 	parentRet := c.currentFnRet
 	c.currentClass = info
+	popTypeParams := c.pushTypeParams(info.TypeParams)
 	defer func() {
+		popTypeParams()
 		c.currentClass = parentClass
 		c.currentFnRet = parentRet
 	}()
@@ -636,8 +699,24 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
-		if len(info.Decl.TypeParams) > 0 {
-			c.error(e.Span(), "TS2314", fmt.Sprintf("Generic class '%s' native instantiation is not implemented yet.", e.ClassName))
+		if len(info.TypeParams) > 0 {
+			if len(e.TypeArgs) != len(info.TypeParams) {
+				c.error(e.Span(), "TS2558", fmt.Sprintf("Generic class '%s' expects %d type arguments, got %d.", e.ClassName, len(info.TypeParams), len(e.TypeArgs)))
+			} else {
+				typeArgs := make([]types.Type, len(e.TypeArgs))
+				for i, node := range e.TypeArgs {
+					typeArgs[i] = c.resolveTypeNode(node)
+				}
+				spec, err := c.specializeClass(info, typeArgs)
+				if err != nil {
+					c.error(e.Span(), "TS2314", err.Error())
+				} else {
+					info = spec
+					c.result.GenericClasses[e] = spec
+				}
+			}
+		} else if len(e.TypeArgs) > 0 {
+			c.error(e.Span(), "TS2558", fmt.Sprintf("Class '%s' is not generic.", e.ClassName))
 		}
 		ctor := info.Constructor
 		for i, arg := range e.Args {

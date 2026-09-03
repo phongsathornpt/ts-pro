@@ -362,3 +362,50 @@ const item: Base = new Derived(40);
 		t.Fatalf("override owner = %q, want Derived", got)
 	}
 }
+
+func TestSemaSpecializesGenericClasses(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("generic-class.ts", []byte(`
+class Box<T> {
+  value: T;
+  constructor(v: T) { this.value = v; }
+  get(): T { return this.value; }
+}
+const n = new Box<number>(42);
+const s = new Box<string>("hello");
+const nv: number = n.get();
+const sv: string = s.get();
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	var specs []*ClassInfo
+	for _, info := range result.GenericClasses {
+		specs = append(specs, info)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("generic class specializations = %d, want 2", len(specs))
+	}
+	seenNumber, seenString := false, false
+	for _, spec := range specs {
+		field := spec.Instance.Fields["value"].Type
+		if field == types.TypeNumber {
+			seenNumber = true
+		}
+		if field == types.TypeString {
+			seenString = true
+		}
+		if len(spec.TypeBindings) != 1 {
+			t.Fatalf("%s bindings = %d, want 1", spec.Name, len(spec.TypeBindings))
+		}
+	}
+	if !seenNumber || !seenString {
+		t.Fatalf("missing number/string specializations: %#v", specs)
+	}
+}
