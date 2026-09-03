@@ -6,7 +6,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
 > Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only and do **not** mean this active backend is 100% complete.
-> Current fixture sweep after template interpolation: **47 / 125 compile PASS, 68 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **15/25** compile cleanly; dynamic has **3 PASS / 1 DIAG / 10 backend FAIL**, and concurrency remains **57 DIAG**.
+> Current fixture sweep after rest/spread: **48 / 125 compile PASS, 67 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **16/25** compile cleanly; dynamic has **3 PASS / 1 DIAG / 10 backend FAIL**, and concurrency remains **57 DIAG**.
 
 ### Completed active milestones
 
@@ -23,10 +23,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ### Remaining basic TypeScript / standard-library fixtures
 
-- [ ] Rest parameters and spread syntax.
-  - [ ] Rest parameter ABI/lowering.
-  - [ ] Array spread.
-  - [ ] Object spread.
+- [x] Rest parameters and spread syntax.
+  - [x] Rest parameter ABI/lowering via typed native-array packing.
+  - [x] Array spread via SSA element-copy loops over existing native arrays.
+  - [x] Closed-object spread with source-order fixed-field copying and override semantics.
 - [ ] Nullish and optional semantics beyond the sentinel foundation.
   - [ ] `??` nullish coalescing.
   - [ ] Optional chaining `?.`.
