@@ -1080,3 +1080,25 @@ console.log(asNumber(42) + 1);
 		expected: "41\nhello\ntrue\nnull\nundefined\n42\nhello\n1\nforty-two\n42\nboxed\nfalse\n43\n",
 	})
 }
+
+func TestLinuxAMD64JSValueArrayAndClosureBoundaries(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "jsvalue_array_closure_boundaries",
+		source: `
+function inc(value: number): number { return value + 1; }
+function identityAny(value: any): any { return value; }
+let arrayAny: any = [40, 2];
+let closureAny: any = inc;
+let returnedClosureAny: any = identityAny(inc);
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+let arrayNative: number[] = arrayAny;
+let closureNative: (value: number) => number = closureAny;
+let returnedClosureNative: (value: number) => number = returnedClosureAny;
+console.log(arrayNative[0]! + arrayNative[1]!);
+console.log(closureNative(41));
+console.log(returnedClosureNative(41));
+`,
+		expected: "42\n42\n42\n",
+	})
+}

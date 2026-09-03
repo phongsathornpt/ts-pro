@@ -502,7 +502,8 @@ func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetTy
 			return value
 		}
 		switch sourceType.Kind() {
-		case types.KindNumber, types.KindString, types.KindBoolean:
+		case types.KindNumber, types.KindString, types.KindBoolean,
+			types.KindArray, types.KindTuple, types.KindFunction:
 			return g.boxJSValue(value, sourceType)
 		case types.KindNull, types.KindUndefined:
 			return value
@@ -523,6 +524,8 @@ func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetTy
 			callee = "ts_js_unbox_string"
 		case types.KindBoolean:
 			callee = "ts_js_unbox_bool"
+		case types.KindArray, types.KindTuple, types.KindFunction:
+			callee = "ts_js_unbox_ref"
 		default:
 			return value
 		}

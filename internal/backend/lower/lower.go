@@ -1550,6 +1550,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64JSUnboxBool(e)
 	fnOffsets["ts_js_unbox_string"] = len(e.Code)
 	emitAMD64JSUnboxString(e)
+	fnOffsets["ts_js_unbox_ref"] = len(e.Code)
+	emitAMD64JSUnboxRef(e)
 	fnOffsets["ts_js_print"] = len(e.Code)
 	emitAMD64JSPrint(e, fnOffsets["ts_print_val"], fnOffsets["ts_print_str"], fnOffsets["ts_print_undefined"], fnOffsets["ts_print_null"], fnOffsets["ts_print_object"], fnOffsets["ts_print_true"], fnOffsets["ts_print_false"])
 	fnOffsets["ts_json_parse_scalar"] = len(e.Code)

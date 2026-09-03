@@ -204,3 +204,10 @@ func emitAMD64JSUnboxString(e *amd64.Emitter) {
 	e.AndRegReg(amd64.RAX, amd64.R10)
 	e.Ret()
 }
+
+func emitAMD64JSUnboxRef(e *amd64.Emitter) {
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
+	e.AndRegReg(amd64.RAX, amd64.R10)
+	e.Ret()
+}
