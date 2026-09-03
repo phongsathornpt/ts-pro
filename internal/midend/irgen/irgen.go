@@ -1800,7 +1800,94 @@ func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
 
 func (g *generator) lowerFunction(fnDecl *ast.FunctionDecl) (*ir.Function, error) {
 	fnType, _ := g.semaResult.Types[fnDecl].(*types.FunctionType)
+	if fnDecl.IsAsync {
+		return g.lowerAsyncFunction(fnDecl, fnType, fnDecl.Name)
+	}
 	return g.lowerFunctionAs(fnDecl, fnType, fnDecl.Name)
+}
+
+func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
+	if fnType == nil {
+		return nil, fmt.Errorf("async function %q is missing semantic function type", fnDecl.Name)
+	}
+	taskType, ok := fnType.Return.(*types.ObjectType)
+	if !ok {
+		return nil, fmt.Errorf("async function %q is missing native task return type", fnDecl.Name)
+	}
+	innerType := g.semaResult.AsyncResults[fnDecl]
+	if innerType == nil {
+		return nil, fmt.Errorf("async function %q is missing inner result type", fnDecl.Name)
+	}
+
+	wrapper := ir.NewFunction(name, taskType)
+	g.currentFn = wrapper
+	g.currentBB = wrapper.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+
+	captures := make([]ir.Operand, 0, len(fnDecl.Params))
+	var refMask uint64
+	for i, p := range fnDecl.Params {
+		pt := types.TypeAny
+		if i < len(fnType.Params) {
+			pt = fnType.Params[i].Type
+		}
+		v := wrapper.NewValue(p.Name, pt)
+		wrapper.Params = append(wrapper.Params, v)
+		g.locals[p.Name] = v
+		captures = append(captures, v)
+		if irHeapRefType(pt) {
+			if i >= 64 {
+				return nil, fmt.Errorf("async function %q has too many reference parameters for closure mask", fnDecl.Name)
+			}
+			refMask |= uint64(1) << i
+		}
+	}
+
+	closureType := types.NewFunction(nil, innerType)
+	liftedName := fmt.Sprintf("$async%d", g.arrowCounter)
+	g.arrowCounter++
+	outerFn, outerBB, outerLocals, outerProvenance, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+
+	lifted := ir.NewFunction(liftedName, innerType)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", closureType)
+	lifted.Params = append(lifted.Params, env)
+	for i, p := range fnDecl.Params {
+		pt := captures[i].Type()
+		v := lifted.NewValue(p.Name+"_capture", pt)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: v, Closure: env, Index: i})
+		g.locals[p.Name] = v
+	}
+	if fnDecl.Body != nil {
+		for _, stmt := range fnDecl.Body.Statements {
+			g.lowerStatement(stmt)
+		}
+	}
+	if g.currentBB.Terminator == nil {
+		if innerType.Kind() == types.KindVoid {
+			g.currentBB.Terminator = &ir.ReturnTerm{}
+		} else {
+			return nil, fmt.Errorf("async function %q can fall through without returning %s", fnDecl.Name, innerType)
+		}
+	}
+	if g.err != nil {
+		return nil, g.err
+	}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirect
+	closure := wrapper.NewValue("async_closure", closureType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: liftedName, Captures: captures, RefMask: refMask})
+	task := wrapper.NewValue("async_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(innerType)}}})
+	g.currentBB.Terminator = &ir.ReturnTerm{Val: task}
+	return wrapper, nil
 }
 
 func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
@@ -3018,6 +3105,16 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.lowerArrowExpr(e)
 	case *ast.FunctionExpr:
 		return g.lowerFunctionExpr(e)
+	case *ast.AwaitExpr:
+		task := g.lowerExpr(e.Target)
+		resultType := g.semanticType(e)
+		if resultType == nil || resultType.Kind() == types.KindVoid {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_join", Args: []ir.Operand{task}})
+			return nil
+		}
+		res := g.currentFn.NewValue("await_result", resultType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_join", Args: []ir.Operand{task}})
+		return res
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {

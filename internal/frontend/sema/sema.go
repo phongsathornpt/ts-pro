@@ -95,6 +95,7 @@ type Result struct {
 	TaskResults        map[string]types.Type
 	ChannelElements    map[string]types.Type
 	TaskGroupType      *types.ObjectType
+	AsyncResults       map[*ast.FunctionDecl]types.Type
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
@@ -131,6 +132,7 @@ func NewChecker() *Checker {
 			BuiltinCollections: make(map[string]*BuiltinCollectionInfo),
 			TaskResults:        make(map[string]types.Type),
 			ChannelElements:    make(map[string]types.Type),
+			AsyncResults:       make(map[*ast.FunctionDecl]types.Type),
 			RootScope:          root,
 			Diagnostics:        make(diag.DiagnosticList, 0),
 		},
@@ -731,6 +733,11 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 		c.result.Types[fn] = fnType
 	}
 	c.currentFnRet = fnType.Return
+	if fn.IsAsync {
+		if inner := c.result.AsyncResults[fn]; inner != nil {
+			c.currentFnRet = inner
+		}
+	}
 	popTypeParams := c.pushTypeParams(fnType.TypeParams)
 	defer popTypeParams()
 
@@ -1113,6 +1120,22 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			c.result.Types[e] = lType
 			return lType
 		}
+	case *ast.AwaitExpr:
+		targetType := c.checkExpr(e.Target)
+		obj, ok := targetType.(*types.ObjectType)
+		if !ok {
+			c.error(e.Target.Span(), "TS1320", "await expects a task or Promise-like value.")
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		resultType, ok := c.result.TaskResults[obj.Name]
+		if !ok {
+			c.error(e.Target.Span(), "TS1320", "await received an unknown task/Promise handle.")
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		c.result.Types[e] = resultType
+		return resultType
 	case *ast.UnaryExpr:
 		targetType := c.checkExpr(e.Target)
 		if e.Op == token.Bang {
@@ -1719,9 +1742,25 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 			Rest:     p.Rest,
 		})
 	}
-	retType := c.resolveTypeNode(fn.ReturnType)
-	if retType == nil {
-		retType = types.TypeVoid
+	var retType types.Type
+	if fn.IsAsync {
+		inner := types.TypeAny
+		if ref, ok := fn.ReturnType.(*ast.TypeRefNode); ok && ref.Name == "Promise" && len(ref.TypeArgs) == 1 {
+			inner = c.resolveTypeNode(ref.TypeArgs[0])
+		} else {
+			c.error(fn.Span(), "TS1064", "An async function return type must be Promise<T>.")
+		}
+		name := fmt.Sprintf("$Task$async$%d", c.taskTypeCount)
+		c.taskTypeCount++
+		taskType := types.NewObject(name)
+		c.result.TaskResults[name] = inner
+		c.result.AsyncResults[fn] = inner
+		retType = taskType
+	} else {
+		retType = c.resolveTypeNode(fn.ReturnType)
+		if retType == nil {
+			retType = types.TypeVoid
+		}
 	}
 	return types.NewGenericFunction(typeParams, params, retType)
 }

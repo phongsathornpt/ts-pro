@@ -129,6 +129,8 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseVarDecl()
 	case token.KwFunction:
 		return p.parseFunctionDecl()
+	case token.KwAsync:
+		return p.parseAsyncFunctionDecl()
 	case token.KwClass:
 		return p.parseClassDecl()
 	case token.KwEnum:
@@ -321,6 +323,18 @@ func (p *Parser) tryParseCallTypeArgs() ([]ast.TypeNode, bool) {
 		return nil, false
 	}
 	return args, true
+}
+
+func (p *Parser) parseAsyncFunctionDecl() *ast.FunctionDecl {
+	asyncTok := p.advance()
+	if p.current().Kind != token.KwFunction {
+		p.error(asyncTok.Span, "async is currently supported only on function declarations")
+		return p.parseFunctionDecl()
+	}
+	fn := p.parseFunctionDecl()
+	fn.IsAsync = true
+	fn.SourceSpan.Start = asyncTok.Span.Start
+	return fn
 }
 
 func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
@@ -830,6 +844,10 @@ func (p *Parser) parseBinary(minPrec int) ast.Expr {
 
 func (p *Parser) parseUnary() ast.Expr {
 	switch p.current().Kind {
+	case token.KwAwait:
+		tok := p.advance()
+		target := p.parseUnary()
+		return &ast.AwaitExpr{SourceSpan: source.Span{Start: tok.Span.Start, End: target.Span().End}, Target: target}
 	case token.Bang, token.Minus, token.Plus, token.Tilde, token.PlusPlus, token.MinusMinus:
 		opTok := p.advance()
 		target := p.parseUnary()

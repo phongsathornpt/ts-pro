@@ -1556,3 +1556,26 @@ join(cb);
 		expected: "1\n2\n30\n3\n",
 	})
 }
+
+func TestLinuxAMD64FulfilledAsyncAwait(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "fulfilled_async_await",
+		source: `
+async function numberLeaf(v: number): Promise<number> { sleep(1); return v; }
+async function numberParent(): Promise<number> { return await numberLeaf(42); }
+async function boolLeaf(v: boolean): Promise<boolean> { yieldNow(); return v; }
+async function boolParent(): Promise<boolean> { return await boolLeaf(true); }
+async function stringLeaf(v: string): Promise<string> {
+  yieldNow();
+  let churn = "";
+  for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+  return v + "-done";
+}
+async function stringParent(v: string): Promise<string> { return await stringLeaf(v); }
+console.log(join(numberParent()));
+console.log(join(boolParent()));
+console.log(join(stringParent("async")));
+`,
+		expected: "42\n1\nasync-done\n",
+	})
+}

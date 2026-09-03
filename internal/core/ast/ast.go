@@ -110,6 +110,11 @@ type (
 		Prefix     bool
 	}
 
+	AwaitExpr struct {
+		SourceSpan source.Span
+		Target     Expr
+	}
+
 	CallExpr struct {
 		SourceSpan source.Span
 		Callee     Expr
@@ -208,6 +213,8 @@ func (e *BinaryExpr) Span() source.Span    { return e.SourceSpan }
 func (e *BinaryExpr) exprNode()            {}
 func (e *UnaryExpr) Span() source.Span     { return e.SourceSpan }
 func (e *UnaryExpr) exprNode()             {}
+func (e *AwaitExpr) Span() source.Span     { return e.SourceSpan }
+func (e *AwaitExpr) exprNode()             {}
 func (e *CallExpr) Span() source.Span      { return e.SourceSpan }
 func (e *CallExpr) exprNode()              {}
 func (e *MemberExpr) Span() source.Span    { return e.SourceSpan }
@@ -276,6 +283,7 @@ type (
 		Params     []Param
 		ReturnType TypeNode
 		Body       *BlockStmt
+		IsAsync    bool
 	}
 
 	ClassField struct {
