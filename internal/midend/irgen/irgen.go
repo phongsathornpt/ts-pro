@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
@@ -737,6 +738,34 @@ func (g *generator) staticStringKey(expr ast.Expr) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func isBuiltinDateType(t types.Type) bool {
+	obj, ok := t.(*types.ObjectType)
+	return ok && obj.Name == "$Date"
+}
+
+func (g *generator) emitDateMethodCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
+	if len(call.Args) != 0 {
+		return g.failExpr("Date.%s expects no arguments", mem.Property)
+	}
+	date := g.lowerExpr(mem.Object)
+	callee := map[string]string{
+		"toISOString":    "ts_date_to_iso",
+		"getUTCFullYear": "ts_date_get_year",
+		"getUTCMonth":    "ts_date_get_month",
+		"getUTCDate":     "ts_date_get_date",
+		"getUTCHours":    "ts_date_get_hours",
+		"getUTCMinutes":  "ts_date_get_minutes",
+		"getUTCSeconds":  "ts_date_get_seconds",
+	}[mem.Property]
+	if callee == "" {
+		return g.failExpr("unsupported native Date method %s", mem.Property)
+	}
+	resultType := g.semanticType(call)
+	res := g.currentFn.NewValue("date_result", resultType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: callee, Args: []ir.Operand{date}})
+	return res
 }
 
 func (g *generator) builtinCollectionInfo(t types.Type) *sema.BuiltinCollectionInfo {
@@ -1927,6 +1956,25 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.SuperExpr:
 		return g.failExpr("super lowering is reserved for the inheritance phase")
 	case *ast.NewExpr:
+		if e.ClassName == "Date" {
+			if len(e.Args) != 1 {
+				return g.failExpr("native Date constructor expects one argument")
+			}
+			arg := e.Args[0]
+			value := g.lowerExpr(arg)
+			if lit, ok := arg.(*ast.StringLit); ok {
+				parsed, err := time.Parse(time.RFC3339Nano, lit.Value)
+				if err != nil {
+					return g.failExpr("parse native Date ISO string %q: %v", lit.Value, err)
+				}
+				value = ir.ConstNumber{Value: float64(parsed.UnixMilli())}
+			} else if g.semanticType(arg) != types.TypeNumber {
+				return g.failExpr("native Date string construction currently requires a string literal")
+			}
+			res := g.currentFn.NewValue("date", g.semanticType(e))
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_date_from_number", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeNumber}})
+			return res
+		}
 		if collection := g.builtinCollectionInfo(g.semanticType(e)); collection != nil {
 			res := g.currentFn.NewValue(strings.ToLower(collection.Kind), collection.Instance)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_new"})
@@ -2348,6 +2396,17 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if ident, ok := mem.Object.(*ast.IdentExpr); ok && ident.Name == "Date" && mem.Property == "now" {
+				if len(e.Args) != 0 {
+					return g.failExpr("Date.now expects no arguments")
+				}
+				res := g.currentFn.NewValue("date_now", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_date_now"})
+				return res
+			}
+			if isBuiltinDateType(g.semanticType(mem.Object)) {
+				return g.emitDateMethodCall(e, mem)
+			}
 			if collection := g.builtinCollectionInfo(g.semanticType(mem.Object)); collection != nil {
 				return g.emitBuiltinCollectionCall(e, mem, collection)
 			}

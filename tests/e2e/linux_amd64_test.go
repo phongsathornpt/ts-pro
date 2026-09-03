@@ -969,3 +969,30 @@ console.log(textKeys.get("same-" + "key"));
 		expected: "6\n1\n6\n0\n1\n5\n1\n99\n0\n5\n1\n1\n0\n1\n7\n77\n",
 	})
 }
+
+func TestLinuxAMD64DateUTC(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "date_now_numeric_constructor_leap_day_and_iso",
+		source: `
+function iso(ms: number): string { return new Date(ms).toISOString(); }
+console.log(Date.now() > 0);
+const epoch = new Date(0);
+console.log(epoch.toISOString());
+console.log(epoch.getUTCFullYear());
+console.log(epoch.getUTCMonth());
+console.log(epoch.getUTCDate());
+console.log(epoch.getUTCHours());
+console.log(epoch.getUTCMinutes());
+console.log(epoch.getUTCSeconds());
+const leap = new Date(1709210096789);
+console.log(iso(1709210096789));
+console.log(leap.getUTCFullYear());
+console.log(leap.getUTCMonth());
+console.log(leap.getUTCDate());
+console.log(leap.getUTCHours());
+console.log(leap.getUTCMinutes());
+console.log(leap.getUTCSeconds());
+`,
+		expected: "1\n1970-01-01T00:00:00.000Z\n1970\n0\n1\n0\n0\n0\n2024-02-29T12:34:56.789Z\n2024\n1\n29\n12\n34\n56\n",
+	})
+}

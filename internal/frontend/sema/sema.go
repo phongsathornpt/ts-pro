@@ -92,6 +92,7 @@ type Result struct {
 	Enums              map[string]map[string]float64
 	ImportAliases      map[string]string
 	BuiltinCollections map[string]*BuiltinCollectionInfo
+	DateType           *types.ObjectType
 	RootScope          *Scope
 	Diagnostics        diag.DiagnosticList
 }
@@ -465,6 +466,23 @@ func removeNullishType(t types.Type) types.Type {
 	}
 }
 
+func (c *Checker) builtinDateType() *types.ObjectType {
+	if c.result.DateType == nil {
+		c.result.DateType = types.NewObject("$Date")
+	}
+	return c.result.DateType
+}
+
+func (c *Checker) builtinDateMember(property string) (types.Type, bool) {
+	switch property {
+	case "toISOString":
+		return types.NewFunction(nil, types.TypeString), true
+	case "getUTCFullYear", "getUTCMonth", "getUTCDate", "getUTCHours", "getUTCMinutes", "getUTCSeconds":
+		return types.NewFunction(nil, types.TypeNumber), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinCollection(kind string, key, value types.Type) *BuiltinCollectionInfo {
 	name := "$" + kind + "<" + key.String()
 	if kind == "Map" {
@@ -535,6 +553,14 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 			return types.NewFunction(nil, t.Elem), true
 		}
 	case *types.ObjectType:
+		if t.Name == "$Date" {
+			if member, ok := c.builtinDateMember(property); ok {
+				return member, true
+			}
+		}
+		if t.Name == "$DateConstructor" && property == "now" {
+			return types.NewFunction(nil, types.TypeNumber), true
+		}
 		if builtin := c.result.BuiltinCollections[t.Name]; builtin != nil {
 			if member, ok := c.builtinCollectionMember(builtin, property); ok {
 				return member, true
@@ -895,6 +921,19 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
 	case *ast.NewExpr:
+		if e.ClassName == "Date" {
+			if len(e.Args) != 1 {
+				c.error(e.Span(), "TS2554", "Native Date constructor currently expects exactly one number or ISO string argument.")
+			} else {
+				at := c.checkExpr(e.Args[0])
+				if at != types.TypeNumber && at != types.TypeString {
+					c.error(e.Args[0].Span(), "TS2345", fmt.Sprintf("Date constructor argument must be number or string, got '%s'.", at))
+				}
+			}
+			date := c.builtinDateType()
+			c.result.Types[e] = date
+			return date
+		}
 		if e.ClassName == "Map" || e.ClassName == "Set" {
 			want := 1
 			if e.ClassName == "Map" {
@@ -954,6 +993,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.IdentExpr:
 		sym := c.currentScope.Resolve(e.Name)
 		if sym == nil {
+			if e.Name == "Date" {
+				ctor := types.NewObject("$DateConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
 			if e.Name == "console" {
 				obj := types.NewObject("console")
 				obj.AddField("log", types.NewFunction([]types.Param{{Name: "value", Type: types.TypeAny}}, types.TypeVoid), false)

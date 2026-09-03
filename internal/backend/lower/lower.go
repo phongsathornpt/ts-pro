@@ -1571,6 +1571,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_bool_to_string"] = len(e.Code)
 	emitAMD64BoolToString(e, fnOffsets["ts_alloc"])
 
+	fnOffsets["ts_date_from_number"] = len(e.Code)
+	emitAMD64DateFromNumber(e)
+	fnOffsets["ts_date_now"] = len(e.Code)
+	emitAMD64DateNow(e)
+	dateGetters := [6]int{}
+	for i, name := range []string{"ts_date_get_year", "ts_date_get_month", "ts_date_get_date", "ts_date_get_hours", "ts_date_get_minutes", "ts_date_get_seconds"} {
+		fnOffsets[name] = len(e.Code)
+		dateGetters[i] = len(e.Code)
+		emitAMD64DateGetPart(e, i)
+	}
+	fnOffsets["ts_date_to_iso"] = len(e.Code)
+	emitAMD64DateToISO(e, fnOffsets["ts_alloc"], dateGetters)
+
 	fnOffsets["ts_object_new"] = len(e.Code)
 	emitAMD64ObjectNew(e, fnOffsets["ts_alloc"])
 
