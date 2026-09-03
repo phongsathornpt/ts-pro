@@ -1,58 +1,90 @@
 # ts-pro
 
-`ts-pro` is an experimental TypeScript 7 to native-binary compiler. TypeScript 7 owns the compiler implementation; Go is reserved for the native runtime and native libraries.
+`ts-pro` is a pure Go native TypeScript compiler and embedded runtime toolchain. It compiles strongly-typed TypeScript programs directly into standalone native machine code executables (Linux ELF64, macOS Mach-O 64, Windows PE/COFF 64) with `CGO_ENABLED=0` and zero external dependencies (no Node.js, V8, external C toolchains, or Clang).
 
-Goal: compile strongly typed TypeScript 7 programs into native binaries without embedding Node.js, V8, or another JavaScript engine in the normal runtime path.
-
-## Core architecture
-
-- TypeScript 7 is the compiler implementation, language, parser, binder, checker, and semantic authority.
-- Go is used only for the native runtime and native libraries behind stable native ABI boundaries.
-- Compile-time HIR/MIR/representation analysis/LLVM generation/build orchestration must not depend on Go in the target architecture.
-- TypeScript-LS is the semantic frontend and IDE service.
-- `TypeScript-LS` means the official TypeScript 7 native LSP (`tsc --lsp --stdio`).
-- SWC is not used for parsing, semantic analysis, or compiler lowering.
-- Typed semantic facts are normalized into compiler-owned HIR and MIR.
-- Native representation proof decides between unboxed values and dynamic `JSValue`.
-- LLVM is the initial machine-code backend.
-
-## Current native MVP
-
-The current transitional end-to-end path still uses the existing Go compiler driver while the TypeScript 7 compiler implementation is brought to parity. It covers typed scalars, mutable SSA control flow, specialized `number[]`, and native strings. From the project root:
-
-```bash
-go build -o bin/tspro ./cmd/tspro
-./bin/tspro build examples/basics/fib.ts -o build/fib -O2
-./build/fib
-```
-
-Expected output:
+## Project Structure
 
 ```text
-6765
+ts-pro/
+├── cmd/
+│   └── ts-pro/                    # CLI entry point (main.go)
+├── internal/
+│   ├── core/                      # Language Model & Intermediate Representations
+│   │   ├── token/                 # Token definitions & source locations (Span)
+│   │   ├── ast/                   # Abstract Syntax Tree nodes
+│   │   ├── types/                 # Static type representations (interfaces, unions, generics)
+│   │   └── ir/                    # SSA-form 3-address Intermediate Representation
+│   │
+│   ├── frontend/                  # Syntactic & Semantic Analysis
+│   │   ├── lexer/                 # Pure Go scanner (UTF-8 bytes -> tokens)
+│   │   ├── parser/                # Recursive descent parser (tokens -> AST)
+│   │   └── sema/                  # Type inference, type checking, symbol resolution
+│   │
+│   ├── midend/                    # Platform-Agnostic Transformations
+│   │   ├── irgen/                 # Lowers AST to Linear SSA IR
+│   │   └── opt/                   # Dead-code elimination, constant folding, devirtualization
+│   │
+│   ├── backend/                   # Pure Go Code Generation
+│   │   ├── regalloc/              # Register allocation (Linear Scan)
+│   │   ├── asm/                   # Instruction definitions & encoders
+│   │   │   ├── amd64/             # x86-64 opcode table & instruction encoding
+│   │   │   └── arm64/             # AArch64 instruction encodings
+│   │   ├── lower/                 # Lowers IR -> Target Assembly Instructions
+│   │   └── obj/                   # Executable format emitters (Pure Go writers)
+│   │       ├── elf/               # Linux ELF64 binary generator
+│   │       ├── macho/             # macOS Mach-O 64-bit generator
+│   │       └── pe/                # Windows PE/COFF 64-bit generator
+│   │
+│   ├── runtime/                   # Embedded TypeScript Runtime (Pure Go / Embedded ASM)
+│   │   ├── src/                   # Runtime primitives statically embedded via //go:embed
+│   │   │   ├── gc/                # Minimal Mark-Sweep or Arena memory allocator
+│   │   │   ├── string/            # UTF-16 / UTF-8 string layout & slice operations
+│   │   │   ├── array/             # Dynamic heap-allocated backing arrays
+│   │   │   ├── closure/           # Upvalue & closure environment management
+│   │   │   └── sys/               # Raw OS syscall wrappers (no libc dependency)
+│   │   └── runtime.go             # Bundles and links the runtime into generated code
+│   │
+│   └── support/                   # Diagnostic & File Utilities
+│       ├── diag/                  # Error reporting with source line/column visualizers
+│       └── source/                # Virtual file system & source memory buffers
+├── pkg/
+│   └── tspro/                     # Embeddable Go API for external tools
+├── examples/                      # TypeScript samples and fixtures
+├── go.mod
+└── Makefile
 ```
 
-The generated program is a native executable built under `CGO_ENABLED=0` without cgo, assembly, or external C toolchain dependencies; Node.js and V8 are not part of the runtime path. Handwritten C and assembly have been completely eliminated from the repository.
+## Quick Start
 
-Committed native coverage includes direct/recursive functions, numeric arithmetic and comparisons, mutable locals, `if`/`while`/`for` with SSA phi nodes, contiguous `number[]`, UTF-8 strings and concatenation, and native number/string console output. Closed object shapes are the active in-progress milestone.
+### Build Compiler
 
-Build optimization flags currently accepted are `-O0`, `-O1`, `-O2`, `-O3`, and `-Oz`. Use `-p <tsconfig.json>` to select the TypeScript project configuration.
+```bash
+make build
+```
 
-## Design goals
+The compiled CLI binary is produced at `build/ts-pro`.
 
-- One TypeScript semantic source for editor and compiler.
-- Preserve TypeScript 7 diagnostics and project resolution.
-- Reuse a long-lived TypeScript-LS process for incremental development.
-- Keep compile-time logic inside the TypeScript 7 compiler implementation; do not introduce a second Go compiler frontend.
-- Prefer direct calls, closed shapes, typed arrays, and monomorphization.
-- Keep dynamic runtime operations off typed hot paths.
+### Compile TypeScript to Native Executable
 
-## Non-goals for early milestones
+```bash
+./build/ts-pro build examples/basics/fib.ts -o build/fib -O2
+```
 
-- Reimplementing the TypeScript parser or type checker.
-- Using SWC/Babel/Oxc as a parallel semantic frontend.
-- Full JavaScript compatibility on day one.
-- `eval`, `new Function`, Proxy, prototype mutation, or runtime-created modules.
-- Embedding Node.js/V8 as the default execution engine.
+### Type Check
 
-See `docs/STATUS.md` for the current implementation boundary, then `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/TYPESCRIPT_LS.md`, and `TODO.md`.
+```bash
+./build/ts-pro check examples/basics/fib.ts
+```
+
+### Doctor Verification
+
+```bash
+./build/ts-pro doctor
+```
+
+### Quality Assurance
+
+```bash
+make check
+```
+Runs `go fmt`, `go vet`, `go test ./...`, and `go build`.

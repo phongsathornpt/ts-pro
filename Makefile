@@ -1,5 +1,5 @@
 GO ?= go
-BIN ?= build/tsnative
+BIN ?= build/ts-pro
 
 .PHONY: fmt test vet build pure-go-build check doctor clean
 
@@ -14,7 +14,7 @@ vet:
 
 build:
 	mkdir -p build
-	CGO_ENABLED=0 $(GO) build -o $(BIN) ./cmd/tsnative
+	CGO_ENABLED=0 $(GO) build -o $(BIN) ./cmd/ts-pro
 
 pure-go-build: build
 
