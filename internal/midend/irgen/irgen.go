@@ -22,6 +22,7 @@ type generator struct {
 	currentBB         *ir.BasicBlock
 	locals            map[string]ir.Operand
 	localProvenance   map[string]types.Type
+	localDirectCallee map[string]string
 	err               error
 	arrowCounter      int
 	genericDecls      map[string]*ast.FunctionDecl
@@ -750,7 +751,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		}
 	}
 
-	outerFn, outerBB, outerLocals, outerProvenance := g.currentFn, g.currentBB, g.locals, g.localProvenance
+	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
 	name := fmt.Sprintf("$arrow%d", g.arrowCounter)
 	g.arrowCounter++
 	lifted := ir.NewFunction(name, fnType.Return)
@@ -758,6 +759,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	g.currentBB = lifted.NewBlock("entry")
 	g.locals = make(map[string]ir.Operand)
 	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
 
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
@@ -782,7 +784,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	}
 	g.prog.Functions = append(g.prog.Functions, lifted)
 
-	g.currentFn, g.currentBB, g.locals, g.localProvenance = outerFn, outerBB, outerLocals, outerProvenance
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees
 	res := g.currentFn.NewValue("closure", fnType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
 		Res: res, Function: name, Captures: captureOps, RefMask: refMask,
@@ -1299,6 +1301,7 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 	g.currentBB = irFn.NewBlock("entry")
 	g.locals = make(map[string]ir.Operand)
 	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
 	previousClass := g.currentClass
 	g.currentClass = info
 	defer func() { g.currentClass = previousClass }()
@@ -1535,6 +1538,7 @@ func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
 	g.currentFn = irFn
 	g.locals = make(map[string]ir.Operand)
 	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
 
 	entryBB := irFn.NewBlock("entry")
 	g.currentBB = entryBB
@@ -1565,6 +1569,7 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 	g.currentFn = irFn
 	g.locals = make(map[string]ir.Operand)
 	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
 
 	entryBB := irFn.NewBlock("entry")
 	g.currentBB = entryBB
@@ -1594,13 +1599,52 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 	return irFn, nil
 }
 
-func (g *generator) provenObjectType(expr ast.Expr) (*types.ObjectType, bool) {
+func (g *generator) provenLocalType(expr ast.Expr) (types.Type, bool) {
 	ident, ok := expr.(*ast.IdentExpr)
 	if !ok || g.localProvenance == nil {
 		return nil, false
 	}
-	t, ok := g.localProvenance[ident.Name].(*types.ObjectType)
+	t, ok := g.localProvenance[ident.Name]
 	return t, ok && t != nil
+}
+
+func (g *generator) provenObjectType(expr ast.Expr) (*types.ObjectType, bool) {
+	t, ok := g.provenLocalType(expr)
+	if !ok {
+		return nil, false
+	}
+	objectType, ok := t.(*types.ObjectType)
+	return objectType, ok && objectType != nil
+}
+
+func (g *generator) provenFunctionType(expr ast.Expr) (*types.FunctionType, bool) {
+	t, ok := g.provenLocalType(expr)
+	if !ok {
+		return nil, false
+	}
+	fnType, ok := t.(*types.FunctionType)
+	return fnType, ok && fnType != nil
+}
+
+func (g *generator) directCalleeForExpr(expr ast.Expr) (string, bool) {
+	ident, ok := expr.(*ast.IdentExpr)
+	if !ok {
+		return "", false
+	}
+	if target := g.localDirectCallee[ident.Name]; target != "" {
+		return target, true
+	}
+	if _, local := g.locals[ident.Name]; local {
+		return "", false
+	}
+	if sym := g.semaResult.Symbols[ident]; sym != nil && sym.Kind == sema.SymFunc {
+		name := ident.Name
+		if imported := g.semaResult.ImportAliases[name]; imported != "" {
+			name = imported
+		}
+		return name, true
+	}
+	return "", false
 }
 
 func (g *generator) unboxKnownObject(value ir.Operand, objectType *types.ObjectType) ir.Operand {
@@ -1708,9 +1752,15 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 						initOp = g.coerceJSValueBoundary(initOp, sourceType, targetType)
 					}
 					if irJSValueType(targetType) {
-						if objectType, ok := sourceType.(*types.ObjectType); ok {
+						switch concrete := sourceType.(type) {
+						case *types.ObjectType:
 							if _, dynamicLiteral := d.Init.(*ast.ObjectLit); !dynamicLiteral {
-								g.localProvenance[d.Name] = objectType
+								g.localProvenance[d.Name] = concrete
+							}
+						case *types.FunctionType:
+							g.localProvenance[d.Name] = concrete
+							if target, ok := g.directCalleeForExpr(d.Init); ok {
+								g.localDirectCallee[d.Name] = target
 							}
 						}
 					}
@@ -1991,6 +2041,7 @@ func (g *generator) lowerIf(s *ast.IfStmt) {
 	// Restore locals for else block
 	g.locals = make(map[string]ir.Operand)
 	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
 	for k, v := range origLocals {
 		g.locals[k] = v
 	}
@@ -2995,6 +3046,30 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 			}
 		}
+		if fnType, ok := g.provenFunctionType(e.Callee); ok && !isConsoleLogCall(e.Callee) {
+			args := make([]ir.Operand, 0, len(e.Args))
+			sourceTypes := make([]types.Type, 0, len(e.Args))
+			for _, arg := range e.Args {
+				args = append(args, g.lowerExpr(arg))
+				sourceTypes = append(sourceTypes, g.semanticType(arg))
+			}
+			args = g.coerceCallOperands(args, sourceTypes, fnType)
+			args = g.packRestOperands(args, fnType)
+			res := g.currentFn.NewValue("dynamic_call", fnType.Return)
+			paramTypes := make([]types.Type, len(fnType.Params))
+			for i := range fnType.Params {
+				paramTypes[i] = fnType.Params[i].Type
+			}
+			if target, direct := g.directCalleeForExpr(e.Callee); direct {
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: target, Args: args, ParamTypes: paramTypes})
+				return res
+			}
+			boxedClosure := g.lowerExpr(e.Callee)
+			closure := g.coerceJSValueBoundary(boxedClosure, types.TypeAny, fnType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: res, Closure: closure, Args: args, ParamTypes: paramTypes})
+			return res
+		}
+
 		if fnType, ok := g.semanticType(e.Callee).(*types.FunctionType); ok && !isConsoleLogCall(e.Callee) {
 			directNamed := false
 			if ident, isIdent := e.Callee.(*ast.IdentExpr); isIdent {
@@ -3269,9 +3344,16 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				rhs = g.coerceJSValueBoundary(rhs, sourceType, targetType)
 				g.locals[ident.Name] = rhs
 				delete(g.localProvenance, ident.Name)
+				delete(g.localDirectCallee, ident.Name)
 				if irJSValueType(targetType) {
-					if objectType, ok := sourceType.(*types.ObjectType); ok {
-						g.localProvenance[ident.Name] = objectType
+					switch concrete := sourceType.(type) {
+					case *types.ObjectType:
+						g.localProvenance[ident.Name] = concrete
+					case *types.FunctionType:
+						g.localProvenance[ident.Name] = concrete
+						if target, ok := g.directCalleeForExpr(e.Right); ok {
+							g.localDirectCallee[ident.Name] = target
+						}
 					}
 				}
 				return rhs

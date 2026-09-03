@@ -1244,3 +1244,23 @@ console.log(typed.child.value);
 		expected: "42\nmaterialized\n7\n",
 	})
 }
+
+func TestLinuxAMD64DynamicCallableProvenance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_callable_provenance",
+		source: `
+interface Box { value: number; }
+function addOne(value: number): number { return value + 1; }
+function readBox(box: Box): number { return box.value; }
+const addAny: any = addOne;
+const readAny: any = readBox;
+const box: Box = { value: 42 };
+const offset = 5;
+const captured: any = (value: number): number => value + offset;
+console.log(addAny(41));
+console.log(readAny(box));
+console.log(captured(37));
+`,
+		expected: "42\n42\n42\n",
+	})
+}
