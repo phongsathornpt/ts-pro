@@ -76,6 +76,7 @@ func Emit(module mir.Module) (string, error) {
 	}
 	if g.usesTasks {
 		g.usesSync = true
+		g.usesRuntime = true
 		body.WriteString("\ttsAllTasks.Wait()\n")
 	}
 	body.WriteString("}\n")
@@ -87,6 +88,13 @@ func Emit(module mir.Module) (string, error) {
 	}
 	if g.usesPrintValue {
 		g.usesFmt = true
+	}
+	if g.usesMap || g.usesSet {
+		g.usesReflect = true
+		g.usesMath = true
+	}
+	if g.usesChannels {
+		g.usesMath = true
 	}
 
 	var source strings.Builder
@@ -112,6 +120,7 @@ func Emit(module mir.Module) (string, error) {
 		}
 		if g.usesSync {
 			source.WriteString("\t\"sync\"\n")
+			source.WriteString("\t\"sync/atomic\"\n")
 		}
 		if g.usesTime {
 			source.WriteString("\t\"time\"\n")
@@ -124,14 +133,64 @@ func Emit(module mir.Module) (string, error) {
 
 	if g.usesTasks || g.usesExceptions {
 		if g.usesTasks {
-			source.WriteString("var tsAllTasks sync.WaitGroup\n\n")
+			source.WriteString("var tsAllTasks sync.WaitGroup\n")
+			source.WriteString("var tsTaskMap sync.Map\n")
+			source.WriteString("var tsTaskSem = make(chan struct{}, 100000)\n\n")
+			source.WriteString(`func tsGoroutineID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	s := buf[:n]
+	if len(s) < 10 || string(s[:10]) != "goroutine " {
+		return 0
+	}
+	s = s[10:]
+	var id uint64
+	for _, b := range s {
+		if b < '0' || b > '9' {
+			break
 		}
-		source.WriteString("type tsTask struct {\n\tval any\n\terr any\n\tdone chan struct{}\n}\n\n")
+		id = id*10 + uint64(b-'0')
+	}
+	return id
+}
+
+func tsCurrentTaskCancelled() bool {
+	gid := tsGoroutineID()
+	if val, ok := tsTaskMap.Load(gid); ok {
+		t := val.(*tsTask)
+		if t.cancelled.Load() {
+			return true
+		}
+		if t.group != nil && t.group.cancelled.Load() {
+			return true
+		}
+	}
+	return false
+}
+
+func tsTaskContextSet(v any) {
+	gid := tsGoroutineID()
+	if val, ok := tsTaskMap.Load(gid); ok {
+		val.(*tsTask).ctx = v
+	}
+}
+
+func tsTaskContextGet() any {
+	gid := tsGoroutineID()
+	if val, ok := tsTaskMap.Load(gid); ok {
+		return val.(*tsTask).ctx
+	}
+	return nil
+}
+
+`)
+		}
+		source.WriteString("type tsTask struct {\n\tval any\n\terr any\n\tdone chan struct{}\n\tcancelled atomic.Bool\n\tctx any\n\tgroup *tsTaskGroup\n}\n\n")
 		source.WriteString("type tsException struct {\n\tval any\n}\n\n")
 		source.WriteString("func tsDoneChan() chan struct{} {\n\tc := make(chan struct{})\n\tclose(c)\n\treturn c\n}\n\n")
 	}
-	if g.usesTaskGroups {
-		source.WriteString("type tsTaskGroup struct {\n\twg sync.WaitGroup\n\tmu sync.Mutex\n\tcancelled bool\n}\n\n")
+	if g.usesTaskGroups || g.usesTasks {
+		source.WriteString("type tsTaskGroup struct {\n\twg sync.WaitGroup\n\tcancelled atomic.Bool\n}\n\n")
 	}
 	if g.usesJSConvert {
 		source.WriteString(`func tsToF64(v any) float64 {
@@ -286,11 +345,14 @@ func tsToBool(v any) bool {
 	if g.usesJSON {
 		g.emitJSONHelpers(&source)
 	}
+	if g.usesMap || g.usesSet {
+		source.WriteString("type tsKeyKind uint8\nconst (\n\ttsKeyKindNil tsKeyKind = iota\n\ttsKeyKindBool\n\ttsKeyKindF64\n\ttsKeyKindString\n\ttsKeyKindRef\n)\n\ntype tsMapKey struct {\n\tkind  tsKeyKind\n\tstr   string\n\tnum   uint64\n\tb     bool\n\trefID uintptr\n}\n\nfunc tsToMapKey(k any) tsMapKey {\n\tif k == nil {\n\t\treturn tsMapKey{kind: tsKeyKindNil}\n\t}\n\tswitch v := k.(type) {\n\tcase string:\n\t\treturn tsMapKey{kind: tsKeyKindString, str: v}\n\tcase float64:\n\t\tif math.IsNaN(v) {\n\t\t\treturn tsMapKey{kind: tsKeyKindF64, num: 0x7ff8000000000001}\n\t\t}\n\t\tif v == 0 {\n\t\t\treturn tsMapKey{kind: tsKeyKindF64, num: 0}\n\t\t}\n\t\treturn tsMapKey{kind: tsKeyKindF64, num: math.Float64bits(v)}\n\tcase int:\n\t\tf := float64(v)\n\t\tif f == 0 {\n\t\t\treturn tsMapKey{kind: tsKeyKindF64, num: 0}\n\t\t}\n\t\treturn tsMapKey{kind: tsKeyKindF64, num: math.Float64bits(f)}\n\tcase int32:\n\t\tf := float64(v)\n\t\tif f == 0 {\n\t\t\treturn tsMapKey{kind: tsKeyKindF64, num: 0}\n\t\t}\n\t\treturn tsMapKey{kind: tsKeyKindF64, num: math.Float64bits(f)}\n\tcase int64:\n\t\tf := float64(v)\n\t\tif f == 0 {\n\t\t\treturn tsMapKey{kind: tsKeyKindF64, num: 0}\n\t\t}\n\t\treturn tsMapKey{kind: tsKeyKindF64, num: math.Float64bits(f)}\n\tcase bool:\n\t\treturn tsMapKey{kind: tsKeyKindBool, b: v}\n\tdefault:\n\t\trv := reflect.ValueOf(k)\n\t\tswitch rv.Kind() {\n\t\tcase reflect.Pointer, reflect.UnsafePointer, reflect.Chan, reflect.Map, reflect.Func:\n\t\t\treturn tsMapKey{kind: tsKeyKindRef, refID: rv.Pointer()}\n\t\tcase reflect.Slice:\n\t\t\treturn tsMapKey{kind: tsKeyKindRef, refID: rv.Pointer()}\n\t\tdefault:\n\t\t\tif rv.CanAddr() {\n\t\t\t\treturn tsMapKey{kind: tsKeyKindRef, refID: uintptr(rv.UnsafeAddr())}\n\t\t\t}\n\t\t\treturn tsMapKey{kind: tsKeyKindRef, refID: 0}\n\t\t}\n\t}\n}\n\n")
+	}
 	if g.usesMap {
-		source.WriteString("type tsMap struct {\n\tdata map[any]any\n}\nfunc tsMapNew() any { return &tsMap{data: make(map[any]any)} }\nfunc tsMapSet(m, k, v any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data[k] = v\n\t}\n\treturn m\n}\nfunc tsMapGet(m, k any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn tm.data[k]\n\t}\n\treturn nil\n}\nfunc tsMapHas(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\t_, ok := tm.data[k]\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsMapDelete(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\t_, ok := tm.data[k]\n\t\tdelete(tm.data, k)\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsMapClear(m any) {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data = make(map[any]any)\n\t}\n}\nfunc tsMapSize(m any) float64 {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn float64(len(tm.data))\n\t}\n\treturn 0\n}\n\n")
+		source.WriteString("type tsMap struct {\n\tdata map[tsMapKey]any\n}\nfunc tsMapNew() any { return &tsMap{data: make(map[tsMapKey]any)} }\nfunc tsMapSet(m, k, v any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data[tsToMapKey(k)] = v\n\t}\n\treturn m\n}\nfunc tsMapGet(m, k any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn tm.data[tsToMapKey(k)]\n\t}\n\treturn nil\n}\nfunc tsMapHas(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\t_, ok := tm.data[tsToMapKey(k)]\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsMapDelete(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\tkey := tsToMapKey(k)\n\t\tif _, ok := tm.data[key]; ok {\n\t\t\tdelete(tm.data, key)\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\nfunc tsMapClear(m any) {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data = make(map[tsMapKey]any)\n\t}\n}\nfunc tsMapSize(m any) float64 {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn float64(len(tm.data))\n\t}\n\treturn 0\n}\n\n")
 	}
 	if g.usesSet {
-		source.WriteString("type tsSet struct {\n\tdata map[any]bool\n}\nfunc tsSetNew() any { return &tsSet{data: make(map[any]bool)} }\nfunc tsSetAdd(s, v any) any {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data[v] = true\n\t}\n\treturn s\n}\nfunc tsSetHas(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\treturn ts.data[v]\n\t}\n\treturn false\n}\nfunc tsSetDelete(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tok := ts.data[v]\n\t\tdelete(ts.data, v)\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsSetClear(s any) {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data = make(map[any]bool)\n\t}\n}\nfunc tsSetSize(s any) float64 {\n\tif ts, ok := s.(*tsSet); ok {\n\t\treturn float64(len(ts.data))\n\t}\n\treturn 0\n}\n\n")
+		source.WriteString("type tsSet struct {\n\tdata map[tsMapKey]struct{}\n}\nfunc tsSetNew() any { return &tsSet{data: make(map[tsMapKey]struct{})} }\nfunc tsSetAdd(s, v any) any {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data[tsToMapKey(v)] = struct{}{}\n\t}\n\treturn s\n}\nfunc tsSetHas(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\t_, ok := ts.data[tsToMapKey(v)]\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsSetDelete(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tkey := tsToMapKey(v)\n\t\tif _, ok := ts.data[key]; ok {\n\t\t\tdelete(ts.data, key)\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\nfunc tsSetClear(s any) {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data = make(map[tsMapKey]struct{})\n\t}\n}\nfunc tsSetSize(s any) float64 {\n\tif ts, ok := s.(*tsSet); ok {\n\t\treturn float64(len(ts.data))\n\t}\n\treturn 0\n}\n\n")
 	}
 	if g.usesDate {
 		source.WriteString("type tsDate struct {\n\tt time.Time\n}\n\n" +
@@ -310,6 +372,32 @@ func tsToBool(v any) bool {
 			"func tsRegExpNew(pattern any, flags ...any) *tsRegExp {\n\tpatStr := tsToString(pattern)\n\tflagStr := \"\"\n\tif len(flags) > 0 && flags[0] != nil {\n\t\tflagStr = tsToString(flags[0])\n\t}\n\tgoPat := patStr\n\tprefix := \"\"\n\tglobal := false\n\tfor _, f := range flagStr {\n\t\tswitch f {\n\t\tcase 'i':\n\t\t\tprefix += \"i\"\n\t\tcase 'm':\n\t\t\tprefix += \"m\"\n\t\tcase 's':\n\t\t\tprefix += \"s\"\n\t\tcase 'g':\n\t\t\tglobal = true\n\t\t}\n\t}\n\tif prefix != \"\" {\n\t\tgoPat = \"(?\" + prefix + \")\" + goPat\n\t}\n\tcompiled, err := regexp.Compile(goPat)\n\tif err != nil {\n\t\tcompiled = regexp.MustCompile(regexp.QuoteMeta(patStr))\n\t}\n\treturn &tsRegExp{re: compiled, source: patStr, flags: flagStr, global: global}\n}\n\n" +
 			"func tsRegExpTest(r any, s any) bool {\n\tif tr, ok := r.(*tsRegExp); ok {\n\t\treturn tr.re.MatchString(tsToString(s))\n\t}\n\treturn false\n}\n\n" +
 			"func tsRegExpSource(r any) string {\n\tif tr, ok := r.(*tsRegExp); ok {\n\t\treturn tr.source\n\t}\n\treturn \"\"\n}\n\n")
+	}
+	if g.usesChannels {
+		source.WriteString(`func tsChanCap(v any) int {
+	var f float64
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case int:
+		f = float64(n)
+	case int32:
+		f = float64(n)
+	case int64:
+		f = float64(n)
+	default:
+		f = 0
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return 0
+	}
+	if f > 65536 {
+		return 65536
+	}
+	return int(f)
+}
+
+`)
 	}
 	source.WriteString(body.String())
 
@@ -348,6 +436,7 @@ type generator struct {
 	usesSet             bool
 	usesDate            bool
 	usesRegExp          bool
+	usesChannels        bool
 }
 
 func (g *generator) canonicalShape(id mir.ShapeID) mir.ShapeID {
@@ -593,7 +682,7 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 			switch inst.Repr {
 			case mir.ReprF64:
 				g.usesJSConvert = true
-				assign(fmt.Sprintf("tsToFloat(%s)", getExpr))
+				assign(fmt.Sprintf("tsToF64(%s)", getExpr))
 			case mir.ReprBool:
 				g.usesJSConvert = true
 				assign(fmt.Sprintf("tsToBool(%s)", getExpr))
@@ -706,7 +795,11 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		for i, element := range op.Elements {
 			elements[i] = operand(element)
 		}
-		assign("[]float64{" + strings.Join(elements, ", ") + "}")
+		if len(elements) == 0 {
+			assign("make([]float64, 0, 1)")
+		} else {
+			assign("[]float64{" + strings.Join(elements, ", ") + "}")
+		}
 	case mir.ArrayLengthF64:
 		assign("float64(len(" + operand(op.Array) + ".([]float64)))")
 	case mir.ArrayGetF64:
@@ -724,7 +817,7 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		fmt.Fprintf(out, "\t}\n")
 	case mir.ArrayConcatF64:
 		if len(op.Arrays) == 0 {
-			assign("[]float64{}")
+			assign("make([]float64, 0, 1)")
 		} else {
 			expr := fmt.Sprintf("append([]float64(nil), %s.([]float64)...)", operand(op.Arrays[0]))
 			for _, arr := range op.Arrays[1:] {
@@ -934,7 +1027,11 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		for i, element := range op.Elements {
 			elements[i] = operand(element)
 		}
-		assign("[]bool{" + strings.Join(elements, ", ") + "}")
+		if len(elements) == 0 {
+			assign("make([]bool, 0, 1)")
+		} else {
+			assign("[]bool{" + strings.Join(elements, ", ") + "}")
+		}
 	case mir.ArrayLengthBool:
 		assign("float64(len(" + operand(op.Array) + ".([]bool)))")
 	case mir.ArrayGetBool:
@@ -952,7 +1049,7 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		fmt.Fprintf(out, "\t}\n")
 	case mir.ArrayConcatBool:
 		if len(op.Arrays) == 0 {
-			assign("[]bool{}")
+			assign("make([]bool, 0, 1)")
 		} else {
 			expr := fmt.Sprintf("append([]bool(nil), %s.([]bool)...)", operand(op.Arrays[0]))
 			for _, arr := range op.Arrays[1:] {
@@ -965,7 +1062,11 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		for i, element := range op.Elements {
 			elements[i] = operand(element)
 		}
-		assign("[]any{" + strings.Join(elements, ", ") + "}")
+		if len(elements) == 0 {
+			assign("make([]any, 0, 1)")
+		} else {
+			assign("[]any{" + strings.Join(elements, ", ") + "}")
+		}
 	case mir.ArrayLengthRef:
 		assign("float64(len(" + operand(op.Array) + ".([]any)))")
 	case mir.ArrayGetRef:
@@ -993,7 +1094,7 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		fmt.Fprintf(out, "\t}\n")
 	case mir.ArrayConcatRef:
 		if len(op.Arrays) == 0 {
-			assign("[]any{}")
+			assign("make([]any, 0, 1)")
 		} else {
 			expr := fmt.Sprintf("append([]any(nil), %s.([]any)...)", operand(op.Arrays[0]))
 			for _, arr := range op.Arrays[1:] {
@@ -1135,13 +1236,16 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		if op.Group != nil {
 			fmt.Fprintf(out, "\t%s.wg.Add(1)\n", operand(*op.Group))
 		}
+		fmt.Fprintf(out, "\ttsTaskSem <- struct{}{}\n")
 		fmt.Fprintf(out, "\ttsAllTasks.Add(1)\n")
-		assign("&tsTask{done: make(chan struct{})}")
 		if op.Group != nil {
-			fmt.Fprintf(out, "\tgo func(t *tsTask, grp *tsTaskGroup) {\n\t\tdefer tsAllTasks.Done()\n\t\tdefer grp.wg.Done()\n\t\tdefer close(t.done)\n")
+			assign(fmt.Sprintf("&tsTask{done: make(chan struct{}), group: %s, ctx: tsTaskContextGet()}", operand(*op.Group)))
+			fmt.Fprintf(out, "\tgo func(t *tsTask, grp *tsTaskGroup) {\n\t\tdefer func() { <-tsTaskSem }()\n\t\tdefer tsAllTasks.Done()\n\t\tdefer grp.wg.Done()\n\t\tdefer close(t.done)\n")
 		} else {
-			fmt.Fprintf(out, "\tgo func(t *tsTask) {\n\t\tdefer tsAllTasks.Done()\n\t\tdefer close(t.done)\n")
+			assign("&tsTask{done: make(chan struct{}), ctx: tsTaskContextGet()}")
+			fmt.Fprintf(out, "\tgo func(t *tsTask) {\n\t\tdefer func() { <-tsTaskSem }()\n\t\tdefer tsAllTasks.Done()\n\t\tdefer close(t.done)\n")
 		}
+		fmt.Fprintf(out, "\t\tgid := tsGoroutineID()\n\t\ttsTaskMap.Store(gid, t)\n\t\tdefer tsTaskMap.Delete(gid)\n")
 		fmt.Fprintf(out, "\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\tif ex, ok := r.(tsException); ok {\n\t\t\t\t\tt.err = ex.val\n\t\t\t\t} else {\n\t\t\t\t\tt.err = r\n\t\t\t\t}\n\t\t\t}\n\t\t}()\n")
 		if callee.ReturnRepr != mir.ReprVoid {
 			if op.Group != nil {
@@ -1181,9 +1285,11 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		g.usesRuntime = true
 		fmt.Fprintf(out, "\truntime.Gosched()\n")
 	case mir.TaskCancel:
-		fmt.Fprintf(out, "\t_ = %s\n", operand(op.Task))
+		g.usesTasks = true
+		fmt.Fprintf(out, "\t%s.cancelled.Store(true)\n", operand(op.Task))
 	case mir.TaskCancelled:
-		assign("false")
+		g.usesTasks = true
+		assign("tsCurrentTaskCancelled()")
 	case mir.TaskGroupNew:
 		g.usesSync = true
 		g.usesTaskGroups = true
@@ -1191,12 +1297,13 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 	case mir.TaskGroupJoin:
 		fmt.Fprintf(out, "\t%s.wg.Wait()\n", operand(op.Group))
 	case mir.TaskGroupCancel:
-		fmt.Fprintf(out, "\t%s.mu.Lock()\n\t%s.cancelled = true\n\t%s.mu.Unlock()\n",
-			operand(op.Group), operand(op.Group), operand(op.Group))
+		fmt.Fprintf(out, "\t%s.cancelled.Store(true)\n", operand(op.Group))
 	case mir.TaskContextSet:
-		fmt.Fprintf(out, "\t_ = %s\n", operand(op.Value))
+		g.usesTasks = true
+		fmt.Fprintf(out, "\ttsTaskContextSet(%s)\n", operand(op.Value))
 	case mir.TaskContextGet:
-		assign("nil")
+		g.usesTasks = true
+		assign("tsTaskContextGet()")
 	case mir.PromiseResolve:
 		g.usesTasks = true
 		assign(fmt.Sprintf("&tsTask{val: %s, done: tsDoneChan()}", operand(op.Value)))
@@ -1361,7 +1468,8 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		g.usesTime = true
 		fmt.Fprintf(out, "\ttime.Sleep(time.Duration(%s * float64(time.Millisecond)))\n", operand(op.Duration))
 	case mir.ChannelNewF64:
-		assign(fmt.Sprintf("make(chan float64, int(%s))", operand(op.Capacity)))
+		g.usesChannels = true
+		assign(fmt.Sprintf("make(chan float64, tsChanCap(%s))", operand(op.Capacity)))
 	case mir.ChannelSendF64:
 		fmt.Fprintf(out, "\t%s.(chan float64) <- %s\n", operand(op.Channel), operand(op.Value))
 	case mir.ChannelRecvF64:
@@ -1373,7 +1481,8 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		fmt.Fprintf(out, "\tselect {\n\tcase %s = <-%s.(chan float64):\n\tdefault:\n\t\t%s = %s\n\t}\n",
 			result, operand(op.Channel), result, operand(op.Fallback))
 	case mir.ChannelNewBool:
-		assign(fmt.Sprintf("make(chan bool, int(%s))", operand(op.Capacity)))
+		g.usesChannels = true
+		assign(fmt.Sprintf("make(chan bool, tsChanCap(%s))", operand(op.Capacity)))
 	case mir.ChannelSendBool:
 		fmt.Fprintf(out, "\t%s.(chan bool) <- %s\n", operand(op.Channel), operand(op.Value))
 	case mir.ChannelRecvBool:
@@ -1385,7 +1494,8 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		fmt.Fprintf(out, "\tselect {\n\tcase %s = <-%s.(chan bool):\n\tdefault:\n\t\t%s = %s\n\t}\n",
 			result, operand(op.Channel), result, operand(op.Fallback))
 	case mir.ChannelNewRef:
-		assign(fmt.Sprintf("make(chan any, int(%s))", operand(op.Capacity)))
+		g.usesChannels = true
+		assign(fmt.Sprintf("make(chan any, tsChanCap(%s))", operand(op.Capacity)))
 	case mir.ChannelSendRef:
 		fmt.Fprintf(out, "\t%s.(chan any) <- %s\n", operand(op.Channel), operand(op.Value))
 	case mir.ChannelRecvRef:

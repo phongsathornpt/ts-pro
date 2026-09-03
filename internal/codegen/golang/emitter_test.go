@@ -258,6 +258,44 @@ func TestEmitPureGoClosures(t *testing.T) {
 	}
 }
 
+func TestEmitPureGoChannelCapacityValidation(t *testing.T) {
+	entry := mir.FunctionID(0)
+	module := mir.Module{
+		Name:  "channel-cap-test",
+		Entry: &entry,
+		Functions: []mir.Function{
+			{
+				ID: 0, Name: "main", ReturnRepr: mir.ReprVoid, Entry: 0,
+				Blocks: []mir.Block{{
+					ID: 0,
+					Instructions: []mir.Instruction{
+						// Negative capacity -> clamped to 0
+						{Result: 0, Repr: mir.ReprF64, Op: mir.ConstF64{Value: -1}},
+						{Result: 1, Repr: mir.ReprChannelRef, Op: mir.ChannelNewF64{Capacity: 0}},
+						// Huge capacity (1e18) -> clamped to 65536
+						{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 1e18}},
+						{Result: 3, Repr: mir.ReprChannelRef, Op: mir.ChannelNewF64{Capacity: 2}},
+						// NaN capacity -> clamped to 0
+						{Result: 4, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 0}},
+						{Result: 5, Repr: mir.ReprF64, Op: mir.FloatBinary{Operator: mir.FloatDiv, Left: 4, Right: 4}},
+						{Result: 6, Repr: mir.ReprChannelRef, Op: mir.ChannelNewF64{Capacity: 5}},
+						// Send value 42 on channel 3 (buffered, cap clamped to 65536)
+						{Result: 7, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+						{Result: 8, Repr: mir.ReprVoid, Op: mir.ChannelSendF64{Channel: 3, Value: 7}},
+						{Result: 9, Repr: mir.ReprF64, Op: mir.ChannelRecvF64{Channel: 3}},
+						{Result: 10, Repr: mir.ReprVoid, Op: mir.IntrinsicCall{Intrinsic: mir.IntrinsicConsoleLogF64, Args: []mir.ValueID{9}}},
+					},
+					Terminator: mir.Return{},
+				}},
+			},
+		},
+	}
+	output := runEmittedModule(t, module)
+	if got := strings.TrimSpace(output); got != "42" {
+		t.Fatalf("output = %q, want %q", got, "42")
+	}
+}
+
 func runEmittedModule(t *testing.T, module mir.Module) string {
 	t.Helper()
 	source, err := Emit(module)
