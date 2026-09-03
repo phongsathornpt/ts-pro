@@ -135,7 +135,7 @@ func TestParseObjectTypeAlias(t *testing.T) {
 
 func TestParserUnsupportedSyntaxAlwaysMakesProgress(t *testing.T) {
 	cases := map[string]string{
-		"parameter_property": `class Box { constructor(public value: number) {} }`,
+		"rest_parameter": `function sum(...values: number[]): number { return 0; }`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -272,5 +272,51 @@ for (const value: number of values) {
 	loop, ok := prog.Statements[0].(*ast.ForOfStmt)
 	if !ok || loop.Name != "value" || loop.Type == nil {
 		t.Fatalf("unexpected for-of AST: %T %#v", prog.Statements[0], prog.Statements[0])
+	}
+}
+
+func TestParseClassThisNewParameterPropertiesAndOverride(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("classes-native.ts", []byte(`
+class Base<T> {
+  constructor(public value: T) {}
+  score(): T { return this.value; }
+}
+class Derived extends Base {
+  constructor(public x: number, protected readonly label: string) {
+    super(x);
+    this.x = this.x + 1;
+  }
+  override score(): number { return this.x; }
+}
+const item = new Derived(40, "ok");
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	if len(prog.Statements) != 3 {
+		t.Fatalf("statements = %d, want 3", len(prog.Statements))
+	}
+	base := prog.Statements[0].(*ast.ClassDecl)
+	if len(base.TypeParams) != 1 || len(base.Methods) != 2 {
+		t.Fatalf("unexpected base class: %#v", base)
+	}
+	ctor := base.Methods[0]
+	if ctor.Name != "constructor" || len(ctor.Params) != 1 || !ctor.Params[0].IsParameterProperty || ctor.Params[0].Visibility != "public" {
+		t.Fatalf("unexpected constructor parameter property: %#v", ctor)
+	}
+	derived := prog.Statements[1].(*ast.ClassDecl)
+	if derived.Extends != "Base" || len(derived.Methods) != 2 || !derived.Methods[1].IsOverride {
+		t.Fatalf("unexpected derived class: %#v", derived)
+	}
+	param := derived.Methods[0].Params[1]
+	if param.Visibility != "protected" || !param.Readonly || !param.IsParameterProperty {
+		t.Fatalf("unexpected protected readonly parameter property: %#v", param)
+	}
+	decl := prog.Statements[2].(*ast.VarDeclStmt)
+	if _, ok := decl.Declarations[0].Init.(*ast.NewExpr); !ok {
+		t.Fatalf("expected new expression, got %T", decl.Declarations[0].Init)
 	}
 }

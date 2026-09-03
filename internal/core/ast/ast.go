@@ -75,6 +75,21 @@ type (
 		SourceSpan source.Span
 	}
 
+	ThisExpr struct {
+		SourceSpan source.Span
+	}
+
+	SuperExpr struct {
+		SourceSpan source.Span
+	}
+
+	NewExpr struct {
+		SourceSpan source.Span
+		ClassName  string
+		TypeArgs   []TypeNode
+		Args       []Expr
+	}
+
 	BinaryExpr struct {
 		SourceSpan source.Span
 		Left       Expr
@@ -160,6 +175,12 @@ func (e *NullLit) Span() source.Span       { return e.SourceSpan }
 func (e *NullLit) exprNode()               {}
 func (e *UndefinedLit) Span() source.Span  { return e.SourceSpan }
 func (e *UndefinedLit) exprNode()          {}
+func (e *ThisExpr) Span() source.Span      { return e.SourceSpan }
+func (e *ThisExpr) exprNode()              {}
+func (e *SuperExpr) Span() source.Span     { return e.SourceSpan }
+func (e *SuperExpr) exprNode()             {}
+func (e *NewExpr) Span() source.Span       { return e.SourceSpan }
+func (e *NewExpr) exprNode()               {}
 func (e *BinaryExpr) Span() source.Span    { return e.SourceSpan }
 func (e *BinaryExpr) exprNode()            {}
 func (e *UnaryExpr) Span() source.Span     { return e.SourceSpan }
@@ -184,11 +205,14 @@ func (e *TernaryExpr) exprNode()           {}
 // --- Statements & Declarations ---
 
 type Param struct {
-	SourceSpan source.Span
-	Name       string
-	Type       TypeNode
-	Optional   bool
-	Default    Expr
+	SourceSpan          source.Span
+	Name                string
+	Type                TypeNode
+	Optional            bool
+	Default             Expr
+	Visibility          string
+	Readonly            bool
+	IsParameterProperty bool
 }
 
 type VarDeclarator struct {
@@ -220,6 +244,8 @@ type (
 		Type       TypeNode
 		Init       Expr
 		IsStatic   bool
+		Visibility string
+		Readonly   bool
 	}
 
 	ClassMethod struct {
@@ -229,6 +255,8 @@ type (
 		ReturnType TypeNode
 		Body       *BlockStmt
 		IsStatic   bool
+		IsOverride bool
+		Visibility string
 	}
 
 	ClassDecl struct {

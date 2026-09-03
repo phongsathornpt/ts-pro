@@ -273,6 +273,21 @@ func (p *Parser) parseParams() []ast.Param {
 	var params []ast.Param
 	for p.current().Kind != token.RParen && p.current().Kind != token.EOF {
 		loopStart := p.cursor
+		start := p.current().Span.Start
+		visibility := ""
+		readonly := false
+		for p.current().Kind == token.Ident {
+			switch p.current().Text {
+			case "public", "private", "protected":
+				visibility = p.advance().Text
+			case "readonly":
+				readonly = true
+				p.advance()
+			default:
+				goto paramModifiersDone
+			}
+		}
+	paramModifiersDone:
 		paramTok := p.expect(token.Ident)
 		optional := p.match(token.Question)
 		var typeNode ast.TypeNode
@@ -284,11 +299,9 @@ func (p *Parser) parseParams() []ast.Param {
 			defExpr = p.parseExpression()
 		}
 		params = append(params, ast.Param{
-			SourceSpan: paramTok.Span,
-			Name:       paramTok.Text,
-			Type:       typeNode,
-			Optional:   optional,
-			Default:    defExpr,
+			SourceSpan: source.Span{Start: start, End: paramTok.Span.End},
+			Name:       paramTok.Text, Type: typeNode, Optional: optional, Default: defExpr,
+			Visibility: visibility, Readonly: readonly, IsParameterProperty: visibility != "" || readonly,
 		})
 		if !p.match(token.Comma) {
 			p.ensureProgress(loopStart, "parameter list")
@@ -317,10 +330,27 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
 		loopStart := p.cursor
 		isStatic := false
-		if p.current().Text == "static" {
-			p.advance()
-			isStatic = true
+		isOverride := false
+		visibility := ""
+		readonly := false
+		for p.current().Kind == token.Ident {
+			switch p.current().Text {
+			case "static":
+				isStatic = true
+				p.advance()
+			case "override":
+				isOverride = true
+				p.advance()
+			case "public", "private", "protected":
+				visibility = p.advance().Text
+			case "readonly":
+				readonly = true
+				p.advance()
+			default:
+				goto classModifiersDone
+			}
 		}
+	classModifiersDone:
 		memberTok := p.expect(token.Ident)
 		if p.match(token.LParen) {
 			// Method
@@ -337,7 +367,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 				Params:     params,
 				ReturnType: retType,
 				Body:       body,
-				IsStatic:   isStatic,
+				IsStatic:   isStatic, IsOverride: isOverride, Visibility: visibility,
 			})
 		} else {
 			// Field
@@ -354,8 +384,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 				SourceSpan: memberTok.Span,
 				Name:       memberTok.Text,
 				Type:       typeNode,
-				Init:       init,
-				IsStatic:   isStatic,
+				Init:       init, IsStatic: isStatic, Visibility: visibility, Readonly: readonly,
 			})
 		}
 		p.ensureProgress(loopStart, "class member")
@@ -883,6 +912,32 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case token.KwUndefined:
 		p.advance()
 		return &ast.UndefinedLit{SourceSpan: tok.Span}
+	case token.KwThis:
+		p.advance()
+		return &ast.ThisExpr{SourceSpan: tok.Span}
+	case token.KwSuper:
+		p.advance()
+		return &ast.SuperExpr{SourceSpan: tok.Span}
+	case token.KwNew:
+		start := p.advance().Span.Start
+		classTok := p.expect(token.Ident)
+		var typeArgs []ast.TypeNode
+		if p.match(token.Lt) {
+			typeArgs = p.parseTypeArgsAfterLt()
+		}
+		p.expect(token.LParen)
+		var args []ast.Expr
+		for p.current().Kind != token.RParen && p.current().Kind != token.EOF {
+			loopStart := p.cursor
+			args = append(args, p.parseExpression())
+			if !p.match(token.Comma) {
+				p.ensureProgress(loopStart, "new arguments")
+				break
+			}
+			p.ensureProgress(loopStart, "new arguments")
+		}
+		rparen := p.expect(token.RParen)
+		return &ast.NewExpr{SourceSpan: source.Span{Start: start, End: rparen.Span.End}, ClassName: classTok.Text, TypeArgs: typeArgs, Args: args}
 	case token.LParen:
 		if arrow, ok := p.tryParseArrowExpr(); ok {
 			return arrow
