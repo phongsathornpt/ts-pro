@@ -28,6 +28,15 @@ type Symbol struct {
 	Node ast.Node
 }
 
+type ClassInfo struct {
+	Name        string
+	Decl        *ast.ClassDecl
+	Instance    *types.ObjectType
+	Constructor *types.FunctionType
+	Methods     map[string]*types.FunctionType
+	BaseName    string
+}
+
 type Scope struct {
 	Parent  *Scope
 	Symbols map[string]*Symbol
@@ -63,6 +72,7 @@ type Result struct {
 	Types        map[ast.Node]types.Type
 	Symbols      map[ast.Node]*Symbol
 	GenericCalls map[*ast.CallExpr]*types.FunctionType
+	Classes      map[string]*ClassInfo
 	RootScope    *Scope
 	Diagnostics  diag.DiagnosticList
 }
@@ -71,6 +81,7 @@ type Checker struct {
 	currentScope  *Scope
 	result        *Result
 	currentFnRet  types.Type
+	currentClass  *ClassInfo
 	typeParamEnvs []map[string]*types.TypeVar
 }
 
@@ -82,6 +93,7 @@ func NewChecker() *Checker {
 			Types:        make(map[ast.Node]types.Type),
 			Symbols:      make(map[ast.Node]*Symbol),
 			GenericCalls: make(map[*ast.CallExpr]*types.FunctionType),
+			Classes:      make(map[string]*ClassInfo),
 			RootScope:    root,
 			Diagnostics:  make(diag.DiagnosticList, 0),
 		},
@@ -132,16 +144,29 @@ func Check(prog *ast.Program) *Result {
 }
 
 func (c *Checker) declareTopLevel(prog *ast.Program) {
+	// Predeclare class identities so fields/functions may reference classes that
+	// appear later in the source file.
+	for _, stmt := range prog.Statements {
+		cls, ok := stmt.(*ast.ClassDecl)
+		if !ok {
+			continue
+		}
+		instance := types.NewObject(cls.Name)
+		info := &ClassInfo{Name: cls.Name, Decl: cls, Instance: instance, Methods: make(map[string]*types.FunctionType), BaseName: cls.Extends}
+		c.result.Classes[cls.Name] = info
+		sym := &Symbol{Name: cls.Name, Kind: SymClass, Type: instance, Node: cls}
+		if err := c.currentScope.Define(sym); err != nil {
+			c.error(cls.Span(), "TS2300", err.Error())
+		}
+		c.result.Symbols[cls] = sym
+		c.result.Types[cls] = instance
+	}
+
 	for _, stmt := range prog.Statements {
 		switch s := stmt.(type) {
 		case *ast.FunctionDecl:
 			fnType := c.resolveFunctionType(s)
-			sym := &Symbol{
-				Name: s.Name,
-				Kind: SymFunc,
-				Type: fnType,
-				Node: s,
-			}
+			sym := &Symbol{Name: s.Name, Kind: SymFunc, Type: fnType, Node: s}
 			if err := c.currentScope.Define(sym); err != nil {
 				c.error(s.Span(), "TS2300", err.Error())
 			}
@@ -150,15 +175,9 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 		case *ast.InterfaceDecl:
 			objType := types.NewObject(s.Name)
 			for _, f := range s.Fields {
-				fieldType := c.resolveTypeNode(f.Type)
-				objType.AddField(f.Name, fieldType, f.Optional)
+				objType.AddField(f.Name, c.resolveTypeNode(f.Type), f.Optional)
 			}
-			sym := &Symbol{
-				Name: s.Name,
-				Kind: SymInterface,
-				Type: objType,
-				Node: s,
-			}
+			sym := &Symbol{Name: s.Name, Kind: SymInterface, Type: objType, Node: s}
 			if err := c.currentScope.Define(sym); err != nil {
 				c.error(s.Span(), "TS2300", err.Error())
 			}
@@ -172,7 +191,57 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 			}
 			c.result.Symbols[s] = sym
 			c.result.Types[s] = aliasType
+		case *ast.ClassDecl:
+			c.resolveClassInfo(s)
 		}
+	}
+}
+
+func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
+	info := c.result.Classes[cls.Name]
+	if info == nil {
+		return
+	}
+	if len(cls.TypeParams) > 0 {
+		// Generic class instantiation is handled in the dedicated class-generic phase.
+		// Keep unresolved class type variables as any for now without corrupting
+		// non-generic class metadata.
+	}
+	for _, field := range cls.Fields {
+		if field.IsStatic {
+			continue
+		}
+		ft := c.resolveTypeNode(field.Type)
+		if ft == nil {
+			ft = types.TypeAny
+		}
+		info.Instance.AddField(field.Name, ft, false)
+	}
+	for _, method := range cls.Methods {
+		params := make([]types.Param, len(method.Params))
+		for i, p := range method.Params {
+			pt := c.resolveTypeNode(p.Type)
+			if pt == nil {
+				pt = types.TypeAny
+			}
+			params[i] = types.Param{Name: p.Name, Type: pt, Optional: p.Optional}
+			if method.Name == "constructor" && p.IsParameterProperty {
+				info.Instance.AddField(p.Name, pt, p.Optional)
+			}
+		}
+		ret := c.resolveTypeNode(method.ReturnType)
+		if ret == nil {
+			ret = types.TypeVoid
+		}
+		ft := types.NewFunction(params, ret)
+		if method.Name == "constructor" {
+			info.Constructor = ft
+		} else {
+			info.Methods[method.Name] = ft
+		}
+	}
+	if info.Constructor == nil {
+		info.Constructor = types.NewFunction(nil, types.TypeVoid)
 	}
 }
 
@@ -188,6 +257,8 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		c.checkVarDecl(s)
 	case *ast.FunctionDecl:
 		c.checkFunctionDecl(s)
+	case *ast.ClassDecl:
+		c.checkClassDecl(s)
 	case *ast.BlockStmt:
 		c.checkBlock(s)
 	case *ast.IfStmt:
@@ -332,6 +403,58 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 	}
 }
 
+func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
+	info := c.result.Classes[cls.Name]
+	if info == nil {
+		return
+	}
+	parentClass := c.currentClass
+	parentRet := c.currentFnRet
+	c.currentClass = info
+	defer func() {
+		c.currentClass = parentClass
+		c.currentFnRet = parentRet
+	}()
+
+	for _, field := range cls.Fields {
+		if field.IsStatic || field.Init == nil {
+			continue
+		}
+		expected := info.Instance.Fields[field.Name].Type
+		actual := c.checkExprWithExpected(field.Init, expected)
+		if !actual.AssignableTo(expected) {
+			c.error(field.Init.Span(), "TS2322", fmt.Sprintf("Type '%s' is not assignable to field '%s: %s'.", actual, field.Name, expected))
+		}
+	}
+
+	for i := range cls.Methods {
+		method := &cls.Methods[i]
+		var fnType *types.FunctionType
+		if method.Name == "constructor" {
+			fnType = info.Constructor
+		} else {
+			fnType = info.Methods[method.Name]
+		}
+		if fnType == nil {
+			continue
+		}
+		c.currentFnRet = fnType.Return
+		parentScope := c.currentScope
+		c.currentScope = NewScope(parentScope)
+		for j, p := range method.Params {
+			pt := types.TypeAny
+			if j < len(fnType.Params) {
+				pt = fnType.Params[j].Type
+			}
+			_ = c.currentScope.Define(&Symbol{Name: p.Name, Kind: SymParam, Type: pt, Node: cls})
+		}
+		for _, stmt := range method.Body.Statements {
+			c.checkStatement(stmt)
+		}
+		c.currentScope = parentScope
+	}
+}
+
 func (c *Checker) checkBlock(b *ast.BlockStmt) {
 	c.currentScope = NewScope(c.currentScope)
 	defer func() { c.currentScope = c.currentScope.Parent }()
@@ -451,6 +574,45 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.UndefinedLit:
 		c.result.Types[e] = types.TypeUndefined
 		return types.TypeUndefined
+	case *ast.ThisExpr:
+		if c.currentClass == nil {
+			c.error(e.Span(), "TS2335", "'this' can only be referenced in a class body.")
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		c.result.Types[e] = c.currentClass.Instance
+		return c.currentClass.Instance
+	case *ast.SuperExpr:
+		if c.currentClass == nil || c.currentClass.BaseName == "" {
+			c.error(e.Span(), "TS2335", "'super' can only be referenced in a derived class.")
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		if base := c.result.Classes[c.currentClass.BaseName]; base != nil {
+			c.result.Types[e] = base.Constructor
+			return base.Constructor
+		}
+		c.result.Types[e] = types.TypeAny
+		return types.TypeAny
+	case *ast.NewExpr:
+		info := c.result.Classes[e.ClassName]
+		if info == nil {
+			c.error(e.Span(), "TS2304", fmt.Sprintf("Cannot find class '%s'.", e.ClassName))
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		if len(info.Decl.TypeParams) > 0 {
+			c.error(e.Span(), "TS2314", fmt.Sprintf("Generic class '%s' native instantiation is not implemented yet.", e.ClassName))
+		}
+		ctor := info.Constructor
+		for i, arg := range e.Args {
+			at := c.checkExpr(arg)
+			if ctor != nil && i < len(ctor.Params) && !at.AssignableTo(ctor.Params[i].Type) {
+				c.error(arg.Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to constructor parameter '%s'.", at, ctor.Params[i].Type))
+			}
+		}
+		c.result.Types[e] = info.Instance
+		return info.Instance
 	case *ast.IdentExpr:
 		sym := c.currentScope.Resolve(e.Name)
 		if sym == nil {
@@ -713,6 +875,12 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			return types.TypeAny
 		}
 		if o, ok := objType.(*types.ObjectType); ok {
+			if info := c.result.Classes[o.Name]; info != nil {
+				if method := info.Methods[e.Property]; method != nil {
+					c.result.Types[e] = method
+					return method
+				}
+			}
 			if f, exists := o.Fields[e.Property]; exists {
 				c.result.Types[e] = f.Type
 				return f.Type

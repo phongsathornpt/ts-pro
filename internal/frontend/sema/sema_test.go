@@ -220,3 +220,80 @@ for (const value of values) {
 		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
 	}
 }
+
+func TestSemaNativeClassInstanceConstructorAndMethod(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("class.ts", []byte(`
+class NativePoint {
+  constructor(public x: number, public y: number) {}
+  sum(): number { return this.x + this.y; }
+}
+const p = new NativePoint(3, 4);
+const n: number = p.sum();
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	info := result.Classes["NativePoint"]
+	if info == nil || info.Constructor == nil || len(info.Constructor.Params) != 2 {
+		t.Fatalf("unexpected class info: %#v", info)
+	}
+	if x := info.Instance.Fields["x"]; !x.Type.Equals(types.TypeNumber) {
+		t.Fatalf("x field = %#v", x)
+	}
+	if y := info.Instance.Fields["y"]; !y.Type.Equals(types.TypeNumber) {
+		t.Fatalf("y field = %#v", y)
+	}
+	if sum := info.Methods["sum"]; sum == nil || !sum.Return.Equals(types.TypeNumber) {
+		t.Fatalf("sum method = %#v", sum)
+	}
+	pv := result.RootScope.Resolve("p")
+	if pv == nil || !pv.Type.Equals(info.Instance) {
+		t.Fatalf("p type = %v, want NativePoint", pv)
+	}
+}
+
+func TestSemaNativeClassInitializersAndMutation(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("class-effects.ts", []byte(`
+class Box {
+  value: number = 2;
+  constructor(delta: number) { this.value = this.value + delta; }
+  get(): number { return this.value; }
+}
+const box = new Box(3);
+const value: number = box.get();
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+}
+
+func TestSemaRejectsNativeConstructorArgumentMismatch(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("class-bad.ts", []byte(`
+class Box { constructor(public value: number) {} }
+const bad = new Box("wrong");
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if !result.Diagnostics.HasErrors() {
+		t.Fatal("expected constructor argument mismatch")
+	}
+}
