@@ -207,6 +207,40 @@ func emitAMD64TaskJoin(e *amd64.Emitter, runOneOffset int) {
 	e.Ret()
 }
 
+func emitAMD64TaskSleep(e *amd64.Emitter) {
+	// XMM0 = milliseconds. Linux nanosleep expects a timespec {sec,nsec}.
+	// This is intentionally a blocking sleep primitive for the current
+	// cooperative scheduler; timer-queue suspension can replace the syscall
+	// later without changing the frontend ABI.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, 16)
+	e.Cvttsd2si(amd64.RAX, amd64.XMM0)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	nonPositive := len(e.Code)
+	e.JccRel32(amd64.CondLE, 0)
+
+	// quotient = milliseconds / 1000, remainder = milliseconds % 1000
+	e.Cqo()
+	e.MovRegImm64(amd64.R10, 1000)
+	e.IdivReg(amd64.R10)
+	e.MovDerefReg(amd64.RSP, 0, amd64.RAX)
+	e.MovRegImm64(amd64.R10, 1000000)
+	e.ImulRegReg(amd64.RDX, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 8, amd64.RDX)
+
+	e.MovRegImm64(amd64.RAX, 35) // Linux nanosleep
+	e.MovRegReg(amd64.RDI, amd64.RSP)
+	e.MovRegImm64(amd64.RSI, 0)
+	e.Syscall()
+
+	done := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[nonPositive+2:], uint32(int32(done-(nonPositive+6))))
+	e.AddRegImm32(amd64.RSP, 16)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64TaskYield(e *amd64.Emitter, runOneOffset int) {
 	// Run at most one queued task and return to the yielding task/caller.
 	e.Push(amd64.RBP)

@@ -1259,6 +1259,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e.Callee] = types.TypeAny
 				c.result.Types[e] = types.TypeVoid
 				return types.TypeVoid
+			case "sleep":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "sleep expects exactly one millisecond argument.")
+				} else if argType := c.checkExpr(e.Args[0]); !argType.AssignableTo(types.TypeNumber) {
+					c.error(e.Args[0].Span(), "TS2345", "sleep expects a number of milliseconds.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
 			case "join":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", "join expects exactly one task.")

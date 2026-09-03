@@ -1596,6 +1596,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskJoin(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_yield"] = len(e.Code)
 	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"])
+	fnOffsets["ts_task_sleep"] = len(e.Code)
+	emitAMD64TaskSleep(e)
 
 	fnOffsets["ts_number_to_string"] = len(e.Code)
 	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])

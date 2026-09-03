@@ -3245,6 +3245,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
 				return nil
+			case "sleep":
+				if len(e.Args) != 1 {
+					return g.failExpr("native sleep expects exactly one millisecond argument")
+				}
+				ms := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_sleep", Args: []ir.Operand{ms}, ParamTypes: []types.Type{types.TypeNumber}})
+				return nil
 			case "join":
 				if len(e.Args) != 1 {
 					return g.failExpr("native join expects exactly one task")

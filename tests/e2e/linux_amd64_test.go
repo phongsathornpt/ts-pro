@@ -1367,3 +1367,23 @@ console.log(join(outer));
 		expected: "1\n3\n2\n42\n",
 	})
 }
+func TestLinuxAMD64TaskSleepAndDelayedJoin(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "task_sleep_and_delayed_join",
+		source: `
+sleep(0);
+const task = spawn((): number => {
+  sleep(2);
+  const child = spawn((): number => {
+    sleep(2);
+    return 40;
+  });
+  sleep(1);
+  return join(child) + 2;
+});
+console.log(join(task));
+console.log(7);
+`,
+		expected: "42\n7\n",
+	})
+}
