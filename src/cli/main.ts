@@ -1,5 +1,7 @@
 import { CompilerDriver } from "../compiler/build.ts";
 
+declare const process: any;
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
@@ -33,7 +35,7 @@ function main() {
     }
 
     if (!input) {
-      console.error("error: no input file specified");
+      console.log("error: no input file specified");
       process.exit(1);
     }
 
