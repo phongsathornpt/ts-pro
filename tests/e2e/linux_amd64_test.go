@@ -1676,3 +1676,18 @@ console.log(join(repeated()));
 		expected: "root-value:root-value\nreject-root\n42\n42\n",
 	})
 }
+
+func TestLinuxAMD64DrainsFireAndForgetTasksBeforeExit(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "drain_fire_and_forget_tasks",
+		source: `
+async function fire(): Promise<void> {
+  yieldNow();
+  console.log(42);
+}
+fire();
+console.log(1);
+`,
+		expected: "1\n42\n",
+	})
+}

@@ -284,6 +284,26 @@ func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset int) {
 	e.Ret()
 }
 
+func emitAMD64TaskDrain(e *amd64.Emitter, runOneOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	loop := len(e.Code)
+	callRun := len(e.Code)
+	e.CallRel32(int32(runOneOffset - (callRun + 5)))
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	doneJump := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	back := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(back, loop)
+	done := len(e.Code)
+	patchJcc(doneJump, done)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64TaskJoin(e *amd64.Emitter, runOneOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }

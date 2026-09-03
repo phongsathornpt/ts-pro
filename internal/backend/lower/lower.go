@@ -766,6 +766,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		e.CallRel32(0)
 		callFixups = append(callFixups, callFixup{offset: callOffset, callee: "@main"})
 	}
+	drainOffset := len(e.Code)
+	e.CallRel32(0)
+	callFixups = append(callFixups, callFixup{offset: drainOffset, callee: "ts_task_drain"})
 	exitOffset := len(e.Code)
 	e.CallRel32(0)
 	callFixups = append(callFixups, callFixup{offset: exitOffset, callee: "ts_sys_exit"})
@@ -1598,6 +1601,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_task_run_one"] = len(e.Code)
 	emitAMD64TaskRunOne(e, fnOffsets["ts_task_resume"])
+	fnOffsets["ts_task_drain"] = len(e.Code)
+	emitAMD64TaskDrain(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_join"] = len(e.Code)
 	emitAMD64TaskJoin(e, fnOffsets["ts_task_run_one"])
 	fnOffsets["ts_task_yield"] = len(e.Code)
