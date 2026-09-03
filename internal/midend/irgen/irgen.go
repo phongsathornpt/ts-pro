@@ -16,8 +16,15 @@ import (
 )
 
 type catchContext struct {
-	block *ir.BasicBlock
-	phi   *ir.PhiInst
+	block        *ir.BasicBlock
+	phi          *ir.PhiInst
+	finallyDepth int
+}
+
+type finallyContext struct {
+	block    *ir.BasicBlock
+	kindPhi  *ir.PhiInst
+	valuePhi *ir.PhiInst
 }
 
 type generator struct {
@@ -39,6 +46,7 @@ type generator struct {
 	classTags         map[string]int
 	emittedClassSpecs map[string]bool
 	catchStack        []*catchContext
+	finallyStack      []*finallyContext
 }
 
 func typeNodeIsAny(node ast.TypeNode) bool {
@@ -114,16 +122,48 @@ func (g *generator) currentCatch() *catchContext {
 	return g.catchStack[len(g.catchStack)-1]
 }
 
+func (g *generator) currentFinally() *finallyContext {
+	if len(g.finallyStack) == 0 {
+		return nil
+	}
+	return g.finallyStack[len(g.finallyStack)-1]
+}
+
+func (g *generator) routeFinallyCompletion(ctx *finallyContext, kind float64, value ir.Operand) {
+	if value == nil {
+		value = ir.ConstUndefined{}
+	}
+	from := g.currentBB
+	ctx.kindPhi.Incoming = append(ctx.kindPhi.Incoming, ir.PhiIncoming{Block: from, Value: ir.ConstNumber{Value: kind}})
+	ctx.valuePhi.Incoming = append(ctx.valuePhi.Incoming, ir.PhiIncoming{Block: from, Value: value})
+	from.Terminator = &ir.JumpTerm{Target: ctx.block}
+	g.currentBB = g.currentFn.NewBlock("after_finally_route_dead")
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+}
+
 func (g *generator) routeThrownValue(value ir.Operand) {
 	if value == nil {
 		value = ir.ConstUndefined{}
 	}
-	if ctx := g.currentCatch(); ctx != nil {
+	fctx := g.currentFinally()
+	cctx := g.currentCatch()
+	// A catch belonging to the innermost active try sees the throw before that
+	// try's finally. If the top catch belongs to an outer try, the inner finally
+	// must run first and forward the saved throw afterwards.
+	if fctx != nil && (cctx == nil || cctx.finallyDepth < len(g.finallyStack)) {
+		g.routeFinallyCompletion(fctx, 2, value)
+		return
+	}
+	if cctx != nil {
 		from := g.currentBB
-		ctx.phi.Incoming = append(ctx.phi.Incoming, ir.PhiIncoming{Block: from, Value: value})
-		from.Terminator = &ir.JumpTerm{Target: ctx.block}
+		cctx.phi.Incoming = append(cctx.phi.Incoming, ir.PhiIncoming{Block: from, Value: value})
+		from.Terminator = &ir.JumpTerm{Target: cctx.block}
 		g.currentBB = g.currentFn.NewBlock("after_throw_dead")
 		g.currentBB.Terminator = &ir.ReturnTerm{}
+		return
+	}
+	if fctx != nil {
+		g.routeFinallyCompletion(fctx, 2, value)
 		return
 	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
@@ -133,12 +173,12 @@ func (g *generator) routeThrownValue(value ir.Operand) {
 }
 
 func (g *generator) lowerTry(s *ast.TryStmt) {
+	if s.Finally != nil {
+		g.lowerTryWithFinally(s)
+		return
+	}
 	if s.Catch == nil {
-		// Finally-only semantics are handled in the dedicated finally phase.
 		g.lowerStatement(s.Try)
-		if s.Finally != nil {
-			g.lowerStatement(s.Finally)
-		}
 		return
 	}
 	outerLocals := cloneOperandMap(g.locals)
@@ -147,7 +187,7 @@ func (g *generator) lowerTry(s *ast.TryStmt) {
 	errorVal := g.currentFn.NewValue("caught_error", types.TypeAny)
 	phi := &ir.PhiInst{Res: errorVal}
 	catchBB.Phis = append(catchBB.Phis, phi)
-	ctx := &catchContext{block: catchBB, phi: phi}
+	ctx := &catchContext{block: catchBB, phi: phi, finallyDepth: len(g.finallyStack)}
 	g.catchStack = append(g.catchStack, ctx)
 	g.lowerStatement(s.Try)
 	g.catchStack = g.catchStack[:len(g.catchStack)-1]
@@ -156,7 +196,6 @@ func (g *generator) lowerTry(s *ast.TryStmt) {
 		g.currentBB.Terminator = &ir.JumpTerm{Target: exitBB}
 		hasExit = true
 	}
-
 	g.currentBB = catchBB
 	g.locals = cloneOperandMap(outerLocals)
 	if s.CatchName != "" {
@@ -172,8 +211,88 @@ func (g *generator) lowerTry(s *ast.TryStmt) {
 		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
 	g.locals = outerLocals
-	if s.Finally != nil {
-		g.lowerStatement(s.Finally)
+}
+
+func (g *generator) lowerTryWithFinally(s *ast.TryStmt) {
+	outerLocals := cloneOperandMap(g.locals)
+	finallyBB := g.currentFn.NewBlock("finally")
+	afterBB := g.currentFn.NewBlock("finally_after")
+	kindVal := g.currentFn.NewValue("completion_kind", types.TypeNumber)
+	valueVal := g.currentFn.NewValue("completion_value", types.TypeAny)
+	kindPhi := &ir.PhiInst{Res: kindVal}
+	valuePhi := &ir.PhiInst{Res: valueVal}
+	finallyBB.Phis = append(finallyBB.Phis, kindPhi, valuePhi)
+	fctx := &finallyContext{block: finallyBB, kindPhi: kindPhi, valuePhi: valuePhi}
+	g.finallyStack = append(g.finallyStack, fctx)
+	hasNormalCompletion := false
+
+	if s.Catch != nil {
+		catchBB := g.currentFn.NewBlock("catch")
+		errorVal := g.currentFn.NewValue("caught_error", types.TypeAny)
+		catchPhi := &ir.PhiInst{Res: errorVal}
+		catchBB.Phis = append(catchBB.Phis, catchPhi)
+		cctx := &catchContext{block: catchBB, phi: catchPhi, finallyDepth: len(g.finallyStack)}
+		g.catchStack = append(g.catchStack, cctx)
+		g.lowerStatement(s.Try)
+		g.catchStack = g.catchStack[:len(g.catchStack)-1]
+		if g.currentBB.Terminator == nil {
+			hasNormalCompletion = true
+			g.routeFinallyCompletion(fctx, 0, ir.ConstUndefined{})
+		}
+
+		g.currentBB = catchBB
+		g.locals = cloneOperandMap(outerLocals)
+		if s.CatchName != "" {
+			g.locals[s.CatchName] = errorVal
+		}
+		g.lowerStatement(s.Catch)
+		if g.currentBB.Terminator == nil {
+			hasNormalCompletion = true
+			g.routeFinallyCompletion(fctx, 0, ir.ConstUndefined{})
+		}
+	} else {
+		g.lowerStatement(s.Try)
+		if g.currentBB.Terminator == nil {
+			hasNormalCompletion = true
+			g.routeFinallyCompletion(fctx, 0, ir.ConstUndefined{})
+		}
+	}
+
+	g.finallyStack = g.finallyStack[:len(g.finallyStack)-1]
+	g.currentBB = finallyBB
+	g.locals = cloneOperandMap(outerLocals)
+	g.lowerStatement(s.Finally)
+	finalLocals := cloneOperandMap(g.locals)
+	if g.currentBB.Terminator != nil {
+		g.locals = outerLocals
+		return
+	}
+
+	normalBB := g.currentFn.NewBlock("finally_normal")
+	abruptBB := g.currentFn.NewBlock("finally_abrupt")
+	isNormal := g.currentFn.NewValue("completion_normal", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: isNormal, Op: ir.OpEq, LHS: kindVal, RHS: ir.ConstNumber{Value: 0}})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isNormal, Then: normalBB, Else: abruptBB}
+	normalBB.Terminator = &ir.JumpTerm{Target: afterBB}
+
+	g.currentBB = abruptBB
+	returnBB := g.currentFn.NewBlock("finally_return")
+	throwBB := g.currentFn.NewBlock("finally_throw")
+	isReturn := g.currentFn.NewValue("completion_return", types.TypeBoolean)
+	abruptBB.Instructions = append(abruptBB.Instructions, &ir.BinaryInst{Res: isReturn, Op: ir.OpEq, LHS: kindVal, RHS: ir.ConstNumber{Value: 1}})
+	abruptBB.Terminator = &ir.BranchTerm{Cond: isReturn, Then: returnBB, Else: throwBB}
+
+	g.currentBB = returnBB
+	ret := g.coerceJSValueBoundary(valueVal, types.TypeAny, g.currentFn.ReturnType)
+	returnBB.Terminator = &ir.ReturnTerm{Val: ret}
+
+	g.currentBB = throwBB
+	g.routeThrownValue(valueVal)
+
+	g.currentBB = afterBB
+	g.locals = finalLocals
+	if !hasNormalCompletion {
+		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
 }
 
@@ -2193,6 +2312,15 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 	case *ast.TryStmt:
 		g.lowerTry(s)
 	case *ast.ReturnStmt:
+		if fctx := g.currentFinally(); fctx != nil {
+			var val ir.Operand = ir.ConstUndefined{}
+			if s.Value != nil {
+				val = g.lowerExpr(s.Value)
+				val = g.boxJSValue(val, g.semanticType(s.Value))
+			}
+			g.routeFinallyCompletion(fctx, 1, val)
+			break
+		}
 		var val ir.Operand
 		if s.Value != nil {
 			val = g.lowerExpr(s.Value)

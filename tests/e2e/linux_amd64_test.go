@@ -1613,3 +1613,34 @@ console.log(join(parent()));
 		expected: "caught-local\ncaught-await\n",
 	})
 }
+
+func TestLinuxAMD64AsyncFinallyCompletionSemantics(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "async_finally_completion_semantics",
+		source: `
+async function returnOverride(): Promise<number> {
+  try { return 40; } catch (error: any) { return 1; } finally { return 99; }
+}
+async function throwOverride(): Promise<number> {
+  try { return 40; } catch (error: any) { return 1; } finally { throw "override"; }
+}
+async function recoverOverride(): Promise<number> {
+  try { return await throwOverride(); }
+  catch (error: any) { console.log(error); return 42; }
+  finally { console.log("outer-finally"); }
+}
+async function nested(): Promise<number> {
+  try {
+    try { throw "inner"; }
+    catch (error: any) { console.log(error); throw "middle"; }
+    finally { console.log("inner-finally"); }
+  } catch (error: any) { console.log(error); return 7; }
+  finally { console.log("final-finally"); }
+}
+console.log(join(returnOverride()));
+console.log(join(recoverOverride()));
+console.log(join(nested()));
+`,
+		expected: "99\noverride\nouter-finally\n42\ninner\ninner-finally\nmiddle\nfinal-finally\n7\n",
+	})
+}
