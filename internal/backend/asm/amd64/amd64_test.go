@@ -174,3 +174,22 @@ func TestAMD64X87MemoryEncodings(t *testing.T) {
 		t.Fatalf("fdiv: got %x want %x", e.Code, want)
 	}
 }
+
+func TestCallRegEncoding(t *testing.T) {
+	t.Run("rax", func(t *testing.T) {
+		e := NewEmitter()
+		e.CallReg(RAX)
+		want := []byte{0xFF, 0xD0}
+		if !bytes.Equal(e.Code, want) {
+			t.Fatalf("call rax encoding = % x, want % x", e.Code, want)
+		}
+	})
+	t.Run("r11", func(t *testing.T) {
+		e := NewEmitter()
+		e.CallReg(R11)
+		want := []byte{0x41, 0xFF, 0xD3}
+		if !bytes.Equal(e.Code, want) {
+			t.Fatalf("call r11 encoding = % x, want % x", e.Code, want)
+		}
+	})
+}

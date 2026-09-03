@@ -227,6 +227,15 @@ func (e *Emitter) CallRel32(rel int32) {
 	e.emitInt32(rel)
 }
 
+// CallReg emits CALL r64.
+func (e *Emitter) CallReg(reg Register) {
+	if reg >= 8 {
+		e.emitByte(0x41)
+	}
+	e.emitByte(0xFF)
+	e.emitByte(modRM(0b11, 2, reg))
+}
+
 // Ret: RET
 func (e *Emitter) Ret() {
 	e.emitByte(0xC3)
