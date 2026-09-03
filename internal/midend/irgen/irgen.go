@@ -1444,6 +1444,46 @@ func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
 	g.currentBB = exitBB
 }
 
+func (g *generator) lowerNullishExpr(e *ast.BinaryExpr) ir.Operand {
+	lhs := g.lowerExpr(e.Left)
+	lhsBB := g.currentBB
+	checkNullBB := g.currentFn.NewBlock("nullish_check_null")
+	rhsBB := g.currentFn.NewBlock("nullish_rhs")
+	shortBB := g.currentFn.NewBlock("nullish_value")
+	joinBB := g.currentFn.NewBlock("nullish_join")
+
+	undef := g.currentFn.NewValue("is_undefined", types.TypeBoolean)
+	lhsBB.Instructions = append(lhsBB.Instructions, &ir.BinaryInst{Res: undef, Op: ir.OpEq, LHS: lhs, RHS: ir.ConstUndefined{}})
+	lhsBB.Terminator = &ir.BranchTerm{Cond: undef, Then: rhsBB, Else: checkNullBB}
+
+	g.currentBB = checkNullBB
+	isNull := g.currentFn.NewValue("is_null", types.TypeBoolean)
+	checkNullBB.Instructions = append(checkNullBB.Instructions, &ir.BinaryInst{Res: isNull, Op: ir.OpEq, LHS: lhs, RHS: ir.ConstNull{}})
+	checkNullBB.Terminator = &ir.BranchTerm{Cond: isNull, Then: rhsBB, Else: shortBB}
+
+	g.currentBB = shortBB
+	shortBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = rhsBB
+	rhs := g.lowerExpr(e.Right)
+	rhsEnd := g.currentBB
+	if rhsEnd.Terminator == nil {
+		rhsEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	}
+
+	g.currentBB = joinBB
+	resultType := rhs.Type()
+	if t := g.semanticType(e); t != nil {
+		resultType = t
+	}
+	res := g.currentFn.NewValue("nullish", resultType)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: res, Incoming: []ir.PhiIncoming{
+		{Block: shortBB, Value: lhs},
+		{Block: rhsEnd, Value: rhs},
+	}})
+	return res
+}
+
 func (g *generator) lowerLogicalExpr(e *ast.BinaryExpr) ir.Operand {
 	lhs := g.lowerExpr(e.Left)
 	lhsBB := g.currentBB
@@ -1650,6 +1690,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.BinaryExpr:
 		if e.Op == token.AmpAmp || e.Op == token.PipePipe {
 			return g.lowerLogicalExpr(e)
+		}
+		if e.Op == token.QuestionQuestion {
+			return g.lowerNullishExpr(e)
 		}
 
 		lhs := g.lowerExpr(e.Left)

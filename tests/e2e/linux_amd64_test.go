@@ -748,3 +748,23 @@ console.log(config.env);
 		expected: "localhost\n9000\n1\nprod\n",
 	})
 }
+
+func TestLinuxAMD64NullishCoalescing(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "nullish_coalescing_preserves_falsy_values",
+		source: `
+function name(v: string | null): string { return v ?? "Anonymous"; }
+function count(v: number | null): number { return v ?? 42; }
+function flag(v: boolean | null): boolean { return v ?? true; }
+console.log(name(null));
+console.log(name("Alice"));
+console.log(count(null));
+console.log(count(0));
+console.log(count(100));
+console.log(flag(null));
+console.log(flag(false));
+console.log(flag(true));
+`,
+		expected: "Anonymous\nAlice\n42\n0\n100\n1\n0\n1\n",
+	})
+}

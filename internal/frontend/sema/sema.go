@@ -407,6 +407,34 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 	}
 }
 
+func removeNullishType(t types.Type) types.Type {
+	if t == nil {
+		return nil
+	}
+	if t == types.TypeNull || t == types.TypeUndefined {
+		return types.TypeNever
+	}
+	union, ok := t.(*types.UnionType)
+	if !ok {
+		return t
+	}
+	members := make([]types.Type, 0, len(union.Members))
+	for _, member := range union.Members {
+		if member == types.TypeNull || member == types.TypeUndefined {
+			continue
+		}
+		members = append(members, member)
+	}
+	switch len(members) {
+	case 0:
+		return types.TypeNever
+	case 1:
+		return members[0]
+	default:
+		return types.NewUnion(members...)
+	}
+}
+
 func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) types.Type {
 	if expr == nil || expected == nil {
 		return c.checkExpr(expr)
@@ -794,6 +822,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		case token.AmpAmp, token.PipePipe:
 			c.result.Types[e] = rType
 			return rType
+		case token.QuestionQuestion:
+			left := removeNullishType(lType)
+			if left == types.TypeNever {
+				c.result.Types[e] = rType
+				return rType
+			}
+			result := types.NewUnion(left, rType)
+			c.result.Types[e] = result
+			return result
 		default:
 			c.result.Types[e] = lType
 			return lType
