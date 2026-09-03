@@ -1473,3 +1473,19 @@ join(producer);
 		expected: "keep-alive\nexternal-to-task\n2\n1\n3\n",
 	})
 }
+func TestLinuxAMD64TaskFunctionResult(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "task_function_result",
+		source: `
+const task = spawn((): (() => number) => {
+  const inner = (): number => 42;
+  return inner;
+});
+const fn: () => number = join(task);
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(fn());
+`,
+		expected: "42\n",
+	})
+}

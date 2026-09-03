@@ -891,6 +891,13 @@ func (p *Parser) tryParseFunctionType() (ast.TypeNode, bool) {
 	if !p.match(token.LParen) {
 		return nil, false
 	}
+	// A nested '(' immediately after the opening paren means this is type
+	// grouping such as (() => number), not a function parameter list.
+	if p.current().Kind == token.LParen {
+		p.cursor = startCursor
+		p.diagnostics = p.diagnostics[:startDiags]
+		return nil, false
+	}
 	params := p.parseParams()
 	if p.current().Kind != token.RParen {
 		p.cursor = startCursor
