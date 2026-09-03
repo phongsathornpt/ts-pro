@@ -1068,6 +1068,10 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 
 		switch e.Op {
 		case token.Plus:
+			if lType == types.TypeAny || rType == types.TypeAny || lType == types.TypeUnknown || rType == types.TypeUnknown {
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
 			if lType == types.TypeString || rType == types.TypeString {
 				c.result.Types[e] = types.TypeString
 				return types.TypeString

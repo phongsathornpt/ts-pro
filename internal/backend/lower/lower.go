@@ -1643,6 +1643,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_js_array_to_string"] = len(e.Code)
+	emitAMD64JSArrayToString(e, fnOffsets["ts_js_array_to_string"], fnOffsets["ts_alloc"], fnOffsets["ts_number_to_string"], fnOffsets["ts_bool_to_string"], fnOffsets["ts_string_concat"])
+	fnOffsets["ts_js_to_string"] = len(e.Code)
+	emitAMD64JSToString(e, fnOffsets["ts_alloc"], fnOffsets["ts_number_to_string"], fnOffsets["ts_bool_to_string"], fnOffsets["ts_js_array_to_string"])
+	fnOffsets["ts_js_add"] = len(e.Code)
+	emitAMD64JSAdd(e, fnOffsets["ts_js_to_string"], fnOffsets["ts_string_concat"], fnOffsets["ts_js_box_number"])
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)

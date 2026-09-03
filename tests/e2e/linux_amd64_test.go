@@ -1131,3 +1131,24 @@ console.log(typed.child.value);
 		expected: "42\nbefore\n1\n7\nundefined\n99\nafter\n0\n77\n",
 	})
 }
+
+func TestLinuxAMD64DynamicAdditionCoercion(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_addition_coercion",
+		source: `
+function add(left: any, right: any): any { return left + right; }
+console.log(add(20, 22));
+console.log(add("value=", 42));
+console.log(add(true, 2));
+console.log(add("bool=", true));
+console.log(add(null, 2));
+console.log(add(undefined, 2));
+console.log(add("value=", null));
+console.log(add("value=", undefined));
+console.log(add({ value: 1 }, 2));
+console.log(add("array=", [1, 2]));
+console.log(add([1, 2], 3));
+`,
+		expected: "42\nvalue=42\n3\nbool=true\n2\nNaN\nvalue=null\nvalue=undefined\n[object Object]2\narray=1,2\n1,23\n",
+	})
+}
