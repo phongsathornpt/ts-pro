@@ -309,3 +309,25 @@ console.log(xs[200000]);
 		t.Run(tc.name, func(t *testing.T) { runLinuxAMD64(t, tc) })
 	}
 }
+
+func TestLinuxAMD64ClosedObjectsAndGC(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "closed_object_fields_mutation_and_gc",
+		source: `
+type Point = { x: number; name: string };
+type Box = { label: string; child: Point };
+let p: Point = { x: 1, name: "one" };
+console.log(p.x);
+console.log(p.name);
+p.x = 2.5;
+p.name = "two";
+console.log(p.x);
+console.log(p.name);
+let box: Box = { label: "keep-" + "alive", child: p };
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(box.label);
+console.log(box.child.name);
+`,
+		expected: "1\none\n2.5\ntwo\nkeep-alive\ntwo\n",
+	})
+}

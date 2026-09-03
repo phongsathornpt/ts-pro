@@ -992,6 +992,37 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.XorRegReg(amd64.R10, amd64.R11)
 					storeValue(locs[bi.Res.ID], amd64.R10)
 
+				case *ir.AllocObjectInst:
+					e.MovRegImm64(amd64.RDI, int64(bi.FieldCount))
+					e.MovRegImm64(amd64.RSI, int64(bi.RefMask))
+					emitRuntimeCall("ts_object_new")
+					storeSSAValue(bi.Res, amd64.RAX)
+
+				case *ir.GetFieldInst:
+					obj, err := loadOperand(bi.Obj, amd64.R10)
+					if err != nil {
+						return nil, err
+					}
+					e.MovRegDeref(amd64.R11, obj, int32(bi.Offset))
+					storeSSAValue(bi.Res, amd64.R11)
+
+				case *ir.SetFieldInst:
+					obj, err := loadOperand(bi.Obj, amd64.R10)
+					if err != nil {
+						return nil, err
+					}
+					if obj != amd64.R10 {
+						e.MovRegReg(amd64.R10, obj)
+					}
+					val, err := loadRawValue(bi.Val, amd64.R11)
+					if err != nil {
+						return nil, err
+					}
+					if val != amd64.R11 {
+						e.MovRegReg(amd64.R11, val)
+					}
+					e.MovDerefReg(amd64.R10, int32(bi.Offset), amd64.R11)
+
 				case *ir.AllocArrayInst:
 					if err := loadArrayIndex(bi.Length, amd64.RDI); err != nil {
 						return nil, err
@@ -1307,6 +1338,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
+
+	fnOffsets["ts_object_new"] = len(e.Code)
+	emitAMD64ObjectNew(e, fnOffsets["ts_alloc"])
 
 	fnOffsets["ts_array_new"] = len(e.Code)
 	emitAMD64ArrayNew(e, fnOffsets["ts_alloc"])

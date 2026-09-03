@@ -88,4 +88,5 @@ const (
 	amd64ObjectTypeArray     int64 = 1
 	amd64ObjectTypeArrayData int64 = 2
 	amd64ObjectTypeRefData   int64 = 3
+	amd64ObjectTypeObject    int64 = 4
 )
