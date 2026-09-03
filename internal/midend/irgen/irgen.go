@@ -315,6 +315,143 @@ func isConsoleLogCall(expr ast.Expr) bool {
 	return ok && ident.Name == "console"
 }
 
+func classConstructorName(className string) string {
+	return className + "$constructor"
+}
+
+func classMethodName(className, methodName string) string {
+	return className + "$" + methodName
+}
+
+func classConstructorDecl(cls *ast.ClassDecl) *ast.ClassMethod {
+	for i := range cls.Methods {
+		if cls.Methods[i].Name == "constructor" {
+			return &cls.Methods[i]
+		}
+	}
+	return nil
+}
+
+func (g *generator) lowerClassFunction(cls *ast.ClassDecl, method *ast.ClassMethod, fnType *types.FunctionType, name string, constructor bool) (*ir.Function, error) {
+	info := g.semaResult.Classes[cls.Name]
+	if info == nil || info.Instance == nil {
+		return nil, fmt.Errorf("class %q is missing semantic metadata", cls.Name)
+	}
+	retType := types.TypeVoid
+	if fnType != nil {
+		retType = fnType.Return
+	}
+	if constructor {
+		retType = types.TypeVoid
+	}
+
+	irFn := ir.NewFunction(name, retType)
+	g.currentFn = irFn
+	g.currentBB = irFn.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+
+	thisVal := irFn.NewValue("$this", info.Instance)
+	irFn.Params = append(irFn.Params, thisVal)
+	g.locals["$this"] = thisVal
+
+	if method != nil {
+		for i, p := range method.Params {
+			pt := types.TypeAny
+			if fnType != nil && i < len(fnType.Params) {
+				pt = fnType.Params[i].Type
+			}
+			v := irFn.NewValue(p.Name, pt)
+			irFn.Params = append(irFn.Params, v)
+			g.locals[p.Name] = v
+		}
+	}
+
+	if constructor {
+		offsets, _, _ := g.objectLayout(info.Instance)
+		// Class field initializers run for each new instance before the base-class
+		// constructor body in the current non-derived class subset.
+		for _, field := range cls.Fields {
+			if field.IsStatic || field.Init == nil {
+				continue
+			}
+			offset, ok := offsets[field.Name]
+			if !ok {
+				return nil, fmt.Errorf("class %s field %q is missing from instance layout", cls.Name, field.Name)
+			}
+			value := g.lowerExpr(field.Init)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+				Obj: thisVal, Field: field.Name, Offset: offset, Val: value,
+			})
+		}
+		if method != nil {
+			for _, p := range method.Params {
+				if !p.IsParameterProperty {
+					continue
+				}
+				offset, ok := offsets[p.Name]
+				if !ok {
+					return nil, fmt.Errorf("class %s parameter property %q is missing from instance layout", cls.Name, p.Name)
+				}
+				value := g.locals[p.Name]
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+					Obj: thisVal, Field: p.Name, Offset: offset, Val: value,
+				})
+			}
+		}
+	}
+
+	if method != nil && method.Body != nil {
+		for _, stmt := range method.Body.Statements {
+			g.lowerStatement(stmt)
+		}
+	}
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+	}
+	if g.err != nil {
+		return nil, g.err
+	}
+	return irFn, nil
+}
+
+func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
+	info := g.semaResult.Classes[cls.Name]
+	if info == nil {
+		return fmt.Errorf("class %q is missing semantic metadata", cls.Name)
+	}
+	if len(cls.TypeParams) > 0 {
+		// Generic classes are emitted only after concrete class specialization is
+		// implemented. Their declarations have no standalone native ABI.
+		return nil
+	}
+
+	outerFn, outerBB, outerLocals, outerBindings := g.currentFn, g.currentBB, g.locals, g.typeBindings
+	defer func() {
+		g.currentFn, g.currentBB, g.locals, g.typeBindings = outerFn, outerBB, outerLocals, outerBindings
+	}()
+
+	ctorDecl := classConstructorDecl(cls)
+	ctor, err := g.lowerClassFunction(cls, ctorDecl, info.Constructor, classConstructorName(cls.Name), true)
+	if err != nil {
+		return err
+	}
+	g.prog.Functions = append(g.prog.Functions, ctor)
+
+	for i := range cls.Methods {
+		method := &cls.Methods[i]
+		if method.Name == "constructor" || method.IsStatic {
+			continue
+		}
+		fnType := info.Methods[method.Name]
+		fn, err := g.lowerClassFunction(cls, method, fnType, classMethodName(cls.Name, method.Name), false)
+		if err != nil {
+			return err
+		}
+		g.prog.Functions = append(g.prog.Functions, fn)
+	}
+	return nil
+}
+
 // Generate lowers an AST program and its semantic facts into SSA IR.
 func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error) {
 	g := &generator{
@@ -329,6 +466,13 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 			g.genericDecls[fnDecl.Name] = fnDecl
 		}
 	}
+	for _, stmt := range astProg.Statements {
+		if cls, ok := stmt.(*ast.ClassDecl); ok {
+			if err := g.lowerClassDecl(cls); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	var topStmts []ast.Stmt
 	for _, stmt := range astProg.Statements {
@@ -341,7 +485,7 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 				return nil, err
 			}
 			g.prog.Functions = append(g.prog.Functions, fn)
-		} else {
+		} else if _, isClass := stmt.(*ast.ClassDecl); !isClass {
 			topStmts = append(topStmts, stmt)
 		}
 	}
@@ -955,6 +1099,35 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return ir.ConstString{Value: e.Value}
 	case *ast.BoolLit:
 		return ir.ConstBool{Value: e.Value}
+	case *ast.ThisExpr:
+		if thisVal, ok := g.locals["$this"]; ok {
+			return thisVal
+		}
+		return g.failExpr("cannot lower 'this' outside a native class function")
+	case *ast.SuperExpr:
+		return g.failExpr("super lowering is reserved for the inheritance phase")
+	case *ast.NewExpr:
+		info := g.semaResult.Classes[e.ClassName]
+		if info == nil || info.Instance == nil {
+			return g.failExpr("cannot lower new %s without class metadata", e.ClassName)
+		}
+		if len(info.Decl.TypeParams) > 0 {
+			return g.failExpr("generic class %s requires concrete class specialization", e.ClassName)
+		}
+		offsets, refMask, shape := g.objectLayout(info.Instance)
+		obj := g.currentFn.NewValue("instance", info.Instance)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
+			Res: obj, Shape: shape, FieldCount: len(offsets), RefMask: refMask,
+		})
+		args := make([]ir.Operand, 0, len(e.Args)+1)
+		args = append(args, obj)
+		for _, arg := range e.Args {
+			args = append(args, g.lowerExpr(arg))
+		}
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Callee: classConstructorName(e.ClassName), Args: args,
+		})
+		return obj
 	case *ast.ArrayLit:
 		arrType := types.NewArray(types.TypeAny)
 		if semantic := g.semanticType(e); semantic != nil {
@@ -1192,6 +1365,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
+				if info := g.semaResult.Classes[objType.Name]; info != nil {
+					if methodType := info.Methods[mem.Property]; methodType != nil {
+						obj := g.lowerExpr(mem.Object)
+						args := make([]ir.Operand, 0, len(e.Args)+1)
+						args = append(args, obj)
+						for _, arg := range e.Args {
+							args = append(args, g.lowerExpr(arg))
+						}
+						if methodType.Return == types.TypeVoid {
+							g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+								Callee: classMethodName(objType.Name, mem.Property), Args: args,
+							})
+							return nil
+						}
+						res := g.currentFn.NewValue("method_ret", methodType.Return)
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+							Res: res, Callee: classMethodName(objType.Name, mem.Property), Args: args,
+						})
+						return res
+					}
+				}
+			}
 			if arrType, ok := g.semanticType(mem.Object).(*types.ArrayType); ok {
 				array := g.lowerExpr(mem.Object)
 				switch mem.Property {

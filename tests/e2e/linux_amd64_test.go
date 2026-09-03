@@ -537,3 +537,33 @@ console.log(keep[1]);
 		expected: "answer\n42\n2\n50\nkeep-alive\n7\n",
 	})
 }
+
+func TestLinuxAMD64NativeClasses(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "native_classes_initializers_methods_mutation_and_gc",
+		source: `
+class Point {
+  x: number = 20;
+  y: number = 22;
+  sum(): number { return this.x + this.y; }
+}
+class Counter {
+  value: number = 1;
+  bump(): number { this.value += 1; return this.value; }
+}
+class Label {
+  constructor(public text: string) {}
+  get(): string { return this.text; }
+}
+const p = new Point();
+console.log(p.sum());
+const c = new Counter();
+console.log(c.bump());
+console.log(c.bump());
+const label = new Label("keep-" + "alive");
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(label.get());
+`,
+		expected: "42\n2\n3\nkeep-alive\n",
+	})
+}
