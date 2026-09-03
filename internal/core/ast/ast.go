@@ -161,6 +161,14 @@ type (
 		IsExprBody bool
 	}
 
+	FunctionExpr struct {
+		SourceSpan source.Span
+		Name       string
+		Params     []Param
+		ReturnType TypeNode
+		Body       *BlockStmt
+	}
+
 	AssignExpr struct {
 		SourceSpan source.Span
 		Left       Expr
@@ -214,6 +222,8 @@ func (e *ObjectLit) Span() source.Span     { return e.SourceSpan }
 func (e *ObjectLit) exprNode()             {}
 func (e *ArrowFuncExpr) Span() source.Span { return e.SourceSpan }
 func (e *ArrowFuncExpr) exprNode()         {}
+func (e *FunctionExpr) Span() source.Span  { return e.SourceSpan }
+func (e *FunctionExpr) exprNode()          {}
 func (e *AssignExpr) Span() source.Span    { return e.SourceSpan }
 func (e *AssignExpr) exprNode()            {}
 func (e *TernaryExpr) Span() source.Span   { return e.SourceSpan }
@@ -227,6 +237,7 @@ type Param struct {
 	Type                TypeNode
 	Optional            bool
 	Rest                bool
+	IsThis              bool
 	Default             Expr
 	Visibility          string
 	Readonly            bool

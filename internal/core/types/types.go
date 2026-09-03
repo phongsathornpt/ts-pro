@@ -317,6 +317,7 @@ type Param struct {
 
 type FunctionType struct {
 	TypeParams []*TypeVar
+	This       Type
 	Params     []Param
 	Return     Type
 }
@@ -332,6 +333,9 @@ func NewGenericFunction(typeParams []*TypeVar, params []Param, ret Type) *Functi
 func (f *FunctionType) Kind() TypeKind { return KindFunction }
 func (f *FunctionType) String() string {
 	var parts []string
+	if f.This != nil {
+		parts = append(parts, fmt.Sprintf("this: %s", f.This.String()))
+	}
 	for _, p := range f.Params {
 		opt := ""
 		if p.Optional {
@@ -358,6 +362,12 @@ func (f *FunctionType) Equals(other Type) bool {
 	if !ok || len(f.TypeParams) != len(o.TypeParams) || len(f.Params) != len(o.Params) || !f.Return.Equals(o.Return) {
 		return false
 	}
+	if (f.This == nil) != (o.This == nil) {
+		return false
+	}
+	if f.This != nil && !f.This.Equals(o.This) {
+		return false
+	}
 	for i := range f.TypeParams {
 		if !f.TypeParams[i].Equals(o.TypeParams[i]) {
 			return false
@@ -378,6 +388,11 @@ func (f *FunctionType) AssignableTo(target Type) bool {
 		return true
 	}
 	if o, ok := target.(*FunctionType); ok {
+		if o.This != nil {
+			if f.This == nil || !o.This.AssignableTo(f.This) {
+				return false
+			}
+		}
 		if !f.Return.AssignableTo(o.Return) {
 			return false
 		}
@@ -527,13 +542,16 @@ func Substitute(t Type, bindings map[*TypeVar]Type) Type {
 			params[i].Type = Substitute(param.Type, bindings)
 		}
 		ret := Substitute(v.Return, bindings)
+		thisType := Substitute(v.This, bindings)
 		remaining := make([]*TypeVar, 0, len(v.TypeParams))
 		for _, tp := range v.TypeParams {
 			if _, bound := bindings[tp]; !bound {
 				remaining = append(remaining, tp)
 			}
 		}
-		return NewGenericFunction(remaining, params, ret)
+		out := NewGenericFunction(remaining, params, ret)
+		out.This = thisType
+		return out
 	default:
 		return t
 	}

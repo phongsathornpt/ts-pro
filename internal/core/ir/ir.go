@@ -121,6 +121,7 @@ type (
 	IndirectCallInst struct {
 		Res        *Value
 		Closure    Operand
+		ThisArg    Operand
 		Args       []Operand
 		ParamTypes []types.Type
 	}

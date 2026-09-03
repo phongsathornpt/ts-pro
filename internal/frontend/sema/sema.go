@@ -104,6 +104,7 @@ type Checker struct {
 	result            *Result
 	currentFnRet      types.Type
 	currentClass      *ClassInfo
+	currentThisType   types.Type
 	typeParamEnvs     []map[string]*types.TypeVar
 	genericClassSpecs map[string]*ClassInfo
 	classSpecCount    int
@@ -934,8 +935,12 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = types.TypeUndefined
 		return types.TypeUndefined
 	case *ast.ThisExpr:
+		if c.currentThisType != nil {
+			c.result.Types[e] = c.currentThisType
+			return c.currentThisType
+		}
 		if c.currentClass == nil {
-			c.error(e.Span(), "TS2335", "'this' can only be referenced in a class body.")
+			c.error(e.Span(), "TS2335", "'this' can only be referenced in a class body or a function with a this parameter.")
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
@@ -1115,23 +1120,38 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		return targetType
 	case *ast.ArrowFuncExpr:
 		params := make([]types.Param, 0, len(e.Params))
+		var thisType types.Type
 		for _, param := range e.Params {
 			pt := c.resolveTypeNode(param.Type)
 			if pt == nil {
 				pt = types.TypeAny
+			}
+			if param.IsThis {
+				thisType = pt
+				continue
 			}
 			params = append(params, types.Param{Name: param.Name, Type: pt, Optional: param.Optional, Rest: param.Rest})
 		}
 
 		parentScope := c.currentScope
 		parentFnRet := c.currentFnRet
+		parentThis := c.currentThisType
 		c.currentScope = NewScope(parentScope)
+		if thisType != nil {
+			c.currentThisType = thisType
+		}
 		defer func() {
 			c.currentScope = parentScope
 			c.currentFnRet = parentFnRet
+			c.currentThisType = parentThis
 		}()
-		for i, param := range e.Params {
-			_ = c.currentScope.Define(&Symbol{Name: param.Name, Kind: SymParam, Type: params[i].Type, Node: e})
+		runtimeIndex := 0
+		for _, param := range e.Params {
+			if param.IsThis {
+				continue
+			}
+			_ = c.currentScope.Define(&Symbol{Name: param.Name, Kind: SymParam, Type: params[runtimeIndex].Type, Node: e})
+			runtimeIndex++
 		}
 
 		declaredReturn := c.resolveTypeNode(e.ReturnType)
@@ -1163,6 +1183,45 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			returnType = declaredReturn
 		}
 		fnType := types.NewFunction(params, returnType)
+		fnType.This = thisType
+		c.result.Types[e] = fnType
+		return fnType
+	case *ast.FunctionExpr:
+		params := make([]types.Param, 0, len(e.Params))
+		var thisType types.Type
+		for _, param := range e.Params {
+			pt := c.resolveTypeNode(param.Type)
+			if pt == nil {
+				pt = types.TypeAny
+			}
+			if param.IsThis {
+				thisType = pt
+				continue
+			}
+			params = append(params, types.Param{Name: param.Name, Type: pt, Optional: param.Optional, Rest: param.Rest})
+		}
+		declaredReturn := c.resolveTypeNode(e.ReturnType)
+		if declaredReturn == nil {
+			declaredReturn = types.TypeVoid
+		}
+		parentScope, parentFnRet, parentThis := c.currentScope, c.currentFnRet, c.currentThisType
+		c.currentScope = NewScope(parentScope)
+		c.currentFnRet = declaredReturn
+		c.currentThisType = thisType
+		runtimeIndex := 0
+		for _, param := range e.Params {
+			if param.IsThis {
+				continue
+			}
+			_ = c.currentScope.Define(&Symbol{Name: param.Name, Kind: SymParam, Type: params[runtimeIndex].Type, Node: e})
+			runtimeIndex++
+		}
+		for _, stmt := range e.Body.Statements {
+			c.checkStatement(stmt)
+		}
+		c.currentScope, c.currentFnRet, c.currentThisType = parentScope, parentFnRet, parentThis
+		fnType := types.NewFunction(params, declaredReturn)
+		fnType.This = thisType
 		c.result.Types[e] = fnType
 		return fnType
 	case *ast.CallExpr:
@@ -1471,10 +1530,15 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		return types.NewUnion(members...)
 	case *ast.FunctionTypeNode:
 		params := make([]types.Param, 0, len(t.Params))
+		var thisType types.Type
 		for _, p := range t.Params {
 			pt := c.resolveTypeNode(p.Type)
 			if pt == nil {
 				pt = types.TypeAny
+			}
+			if p.IsThis {
+				thisType = pt
+				continue
 			}
 			params = append(params, types.Param{Name: p.Name, Type: pt, Optional: p.Optional, Rest: p.Rest})
 		}
@@ -1482,7 +1546,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		if ret == nil {
 			ret = types.TypeVoid
 		}
-		return types.NewFunction(params, ret)
+		fn := types.NewFunction(params, ret)
+		fn.This = thisType
+		return fn
 	default:
 		return types.TypeAny
 	}

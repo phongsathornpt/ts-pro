@@ -369,3 +369,34 @@ const n = 8 / 2;
 		t.Fatalf("division init = %#v", second)
 	}
 }
+
+func TestParseThisParameterFunctionExpressionAndTypedArrow(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("structural-this.ts", []byte(`
+interface Box { value: number; add: (this: Box, delta: number) => number; }
+const box = {
+  value: 40,
+  add: function (this: Box, delta: number): number { return this.value + delta; },
+  plain: (delta: number): number => 40 + delta,
+};
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	iface := prog.Statements[0].(*ast.InterfaceDecl)
+	ft, ok := iface.Fields[1].Type.(*ast.FunctionTypeNode)
+	if !ok || len(ft.Params) != 2 || !ft.Params[0].IsThis {
+		t.Fatalf("unexpected function type this parameter: %T %#v", iface.Fields[1].Type, iface.Fields[1].Type)
+	}
+	decl := prog.Statements[1].(*ast.VarDeclStmt)
+	lit := decl.Declarations[0].Init.(*ast.ObjectLit)
+	fn, ok := lit.Properties[1].Value.(*ast.FunctionExpr)
+	if !ok || len(fn.Params) != 2 || !fn.Params[0].IsThis || fn.ReturnType == nil {
+		t.Fatalf("unexpected function expression: %T %#v", lit.Properties[1].Value, lit.Properties[1].Value)
+	}
+	if _, ok := lit.Properties[2].Value.(*ast.ArrowFuncExpr); !ok {
+		t.Fatalf("expected typed arrow, got %T", lit.Properties[2].Value)
+	}
+}

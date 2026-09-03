@@ -792,6 +792,55 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	return res
 }
 
+func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
+	fnType, ok := g.semanticType(e).(*types.FunctionType)
+	if !ok {
+		return g.failExpr("function expression is missing a resolved function type")
+	}
+	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	name := fmt.Sprintf("$function%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, fnType.Return)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	if fnType.This != nil {
+		thisVal := lifted.NewValue("$this", fnType.This)
+		lifted.Params = append(lifted.Params, thisVal)
+		g.locals["$this"] = thisVal
+	}
+	runtimeIndex := 0
+	for _, p := range e.Params {
+		if p.IsThis {
+			continue
+		}
+		pt := types.TypeAny
+		if runtimeIndex < len(fnType.Params) {
+			pt = fnType.Params[runtimeIndex].Type
+		}
+		v := lifted.NewValue(p.Name, pt)
+		lifted.Params = append(lifted.Params, v)
+		g.locals[p.Name] = v
+		runtimeIndex++
+	}
+	for _, stmt := range e.Body.Statements {
+		g.lowerStatement(stmt)
+	}
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+	}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees
+	res := g.currentFn.NewValue("closure", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: name})
+	return res
+}
+
 func consolePrinterForType(t types.Type) (string, bool) {
 	switch t {
 	case types.TypeNumber:
@@ -2772,6 +2821,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return resVal
 	case *ast.ArrowFuncExpr:
 		return g.lowerArrowExpr(e)
+	case *ast.FunctionExpr:
+		return g.lowerFunctionExpr(e)
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
@@ -2996,6 +3047,34 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
 			if proven, ok := g.provenObjectType(mem.Object); ok {
+				if field, exists := proven.Fields[mem.Property]; exists {
+					if fnType, ok := field.Type.(*types.FunctionType); ok {
+						boxedReceiver := g.lowerExpr(mem.Object)
+						receiver := g.unboxKnownObject(boxedReceiver, proven)
+						offsets, _, _ := g.objectLayout(proven)
+						closure := g.currentFn.NewValue("method_closure", fnType)
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: closure, Obj: receiver, Field: mem.Property, Offset: offsets[mem.Property]})
+						args := make([]ir.Operand, 0, len(e.Args))
+						sourceTypes := make([]types.Type, 0, len(e.Args))
+						for _, arg := range e.Args {
+							args = append(args, g.lowerExpr(arg))
+							sourceTypes = append(sourceTypes, g.semanticType(arg))
+						}
+						args = g.coerceCallOperands(args, sourceTypes, fnType)
+						args = g.packRestOperands(args, fnType)
+						res := g.currentFn.NewValue("structural_method", fnType.Return)
+						paramTypes := make([]types.Type, len(fnType.Params))
+						for i := range fnType.Params {
+							paramTypes[i] = fnType.Params[i].Type
+						}
+						var thisArg ir.Operand
+						if fnType.This != nil {
+							thisArg = receiver
+						}
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: res, Closure: closure, ThisArg: thisArg, Args: args, ParamTypes: paramTypes})
+						return res
+					}
+				}
 				if info := g.semaResult.Classes[proven.Name]; info != nil && info.Methods[mem.Property] != nil {
 					boxed := g.lowerExpr(mem.Object)
 					receiver := g.unboxKnownObject(boxed, proven)

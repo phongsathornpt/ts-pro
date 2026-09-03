@@ -1283,3 +1283,27 @@ console.log(dynamicCounter.add(8));
 		expected: "42\n50\n",
 	})
 }
+
+func TestLinuxAMD64DynamicStructuralFunctionThis(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_structural_function_this",
+		source: `
+interface Box {
+  value: number;
+  add: (this: Box, delta: number) => number;
+  plain: (delta: number) => number;
+}
+const box: Box = {
+  value: 40,
+  add: function (this: Box, delta: number): number { return this.value + delta; },
+  plain: (delta: number): number => 40 + delta,
+};
+const dynamicBox: any = box;
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(dynamicBox.add(2));
+console.log(dynamicBox.plain(2));
+`,
+		expected: "42\n42\n",
+	})
+}

@@ -200,6 +200,9 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 				if v, ok := i.Closure.(*ir.Value); ok {
 					endMap[v.ID] = step
 				}
+				if v, ok := i.ThisArg.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
 				for _, arg := range i.Args {
 					if v, ok := arg.(*ir.Value); ok {
 						endMap[v.ID] = step

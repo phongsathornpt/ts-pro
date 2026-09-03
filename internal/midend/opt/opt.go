@@ -191,6 +191,9 @@ func deadCodeElim(fn *ir.Function) bool {
 				if v, ok := i.Closure.(*ir.Value); ok {
 					uses[v.ID]++
 				}
+				if v, ok := i.ThisArg.(*ir.Value); ok {
+					uses[v.ID]++
+				}
 				for _, arg := range i.Args {
 					if v, ok := arg.(*ir.Value); ok {
 						uses[v.ID]++

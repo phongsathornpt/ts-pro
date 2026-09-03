@@ -1232,10 +1232,21 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					if closure != amd64.RAX {
 						e.MovRegReg(amd64.RAX, closure)
 					}
-					// Hidden closure environment occupies RDI. User integer-class arguments
-					// therefore begin at RSI; SSE arguments still begin at XMM0.
+					// Hidden closure environment occupies RDI. Method-style structural
+					// calls optionally place their receiver in RSI; user integer-class
+					// arguments then begin at RDX. SSE arguments still begin at XMM0.
 					e.MovRegReg(amd64.RDI, amd64.RAX)
 					userGPRs := []amd64.Register{amd64.RSI, amd64.RDX, amd64.RCX, amd64.R8, amd64.R9}
+					if bi.ThisArg != nil {
+						thisReg, err := loadRawValue(bi.ThisArg, amd64.R10)
+						if err != nil {
+							return nil, err
+						}
+						if thisReg != amd64.RSI {
+							e.MovRegReg(amd64.RSI, thisReg)
+						}
+						userGPRs = []amd64.Register{amd64.RDX, amd64.RCX, amd64.R8, amd64.R9}
+					}
 					gprArg, xmmArg := 0, 0
 					stackArgs := make([]ir.Operand, 0)
 					emitIndirectGPRArg := func(dst amd64.Register, arg ir.Operand) error {

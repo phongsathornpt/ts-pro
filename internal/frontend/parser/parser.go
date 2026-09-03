@@ -368,7 +368,14 @@ func (p *Parser) parseParams() []ast.Param {
 		}
 	paramModifiersDone:
 		rest := p.match(token.DotDotDot)
-		paramTok := p.expect(token.Ident)
+		isThis := false
+		var paramTok token.Token
+		if p.current().Kind == token.KwThis {
+			paramTok = p.advance()
+			isThis = true
+		} else {
+			paramTok = p.expect(token.Ident)
+		}
 		optional := p.match(token.Question)
 		var typeNode ast.TypeNode
 		if p.match(token.Colon) {
@@ -380,7 +387,7 @@ func (p *Parser) parseParams() []ast.Param {
 		}
 		params = append(params, ast.Param{
 			SourceSpan: source.Span{Start: start, End: paramTok.Span.End},
-			Name:       paramTok.Text, Type: typeNode, Optional: optional, Rest: rest, Default: defExpr,
+			Name:       paramTok.Text, Type: typeNode, Optional: optional, Rest: rest, IsThis: isThis, Default: defExpr,
 			Visibility: visibility, Readonly: readonly, IsParameterProperty: visibility != "" || readonly,
 		})
 		if !p.match(token.Comma) {
@@ -1153,6 +1160,21 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case token.KwUndefined:
 		p.advance()
 		return &ast.UndefinedLit{SourceSpan: tok.Span}
+	case token.KwFunction:
+		start := p.advance().Span.Start
+		name := ""
+		if p.current().Kind == token.Ident {
+			name = p.advance().Text
+		}
+		p.expect(token.LParen)
+		params := p.parseParams()
+		p.expect(token.RParen)
+		var retType ast.TypeNode
+		if p.match(token.Colon) {
+			retType = p.parseType()
+		}
+		body := p.parseBlock()
+		return &ast.FunctionExpr{SourceSpan: source.Span{Start: start, End: body.Span().End}, Name: name, Params: params, ReturnType: retType, Body: body}
 	case token.KwThis:
 		p.advance()
 		return &ast.ThisExpr{SourceSpan: tok.Span}
