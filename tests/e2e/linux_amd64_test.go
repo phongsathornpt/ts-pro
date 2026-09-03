@@ -1489,3 +1489,21 @@ console.log(fn());
 		expected: "42\n",
 	})
 }
+func TestLinuxAMD64TaskCancellationFlag(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "task_cancellation_flag",
+		source: `
+const gate = channel<boolean>(0);
+const worker = spawn((): void => {
+  channelRecv(gate);
+  console.log(taskCancelled());
+});
+cancelTask(worker);
+const release = spawn((): void => { channelSend(gate, true); });
+join(worker);
+join(release);
+console.log(taskCancelled());
+`,
+		expected: "1\n0\n",
+	})
+}

@@ -28,7 +28,8 @@ const (
 	amd64TaskReturnR14  int32 = 144
 	amd64TaskReturnRoot int32 = 152
 	amd64TaskParent     int32 = 160
-	amd64TaskPayload    int32 = 168
+	amd64TaskCancelled  int32 = 168
+	amd64TaskPayload    int32 = 176
 
 	amd64TaskResultVoid   int64 = 0
 	amd64TaskResultNumber int64 = 1
@@ -67,7 +68,7 @@ func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
 	e.MovRegDeref(amd64.R10, amd64.RSP, 16)
 	e.MovDerefReg(amd64.RBX, amd64TaskClosure, amd64.R10)
 	e.MovRegImm64(amd64.R10, 0)
-	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent} {
+	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
 	e.MovDerefReg(amd64.RBX, amd64TaskKind, amd64.R12)
@@ -369,5 +370,31 @@ func emitAMD64TaskSleep(e *amd64.Emitter) {
 	binary.LittleEndian.PutUint32(e.Code[nonPositive+2:], uint32(int32(done-(nonPositive+6))))
 	e.AddRegImm32(amd64.RSP, 16)
 	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64TaskCancel(e *amd64.Emitter) {
+	// RDI = task handle.
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RDI, amd64TaskCancelled, amd64.R10)
+	e.Ret()
+}
+
+func emitAMD64TaskCancelled(e *amd64.Emitter) {
+	// Return whether the currently running task has been cancelled. Main context
+	// has no current task and therefore observes false.
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	noTask := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R10, amd64TaskCancelled)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+	noTaskLabel := len(e.Code)
+	patchJcc(noTask, noTaskLabel)
+	e.MovRegImm64(amd64.RAX, 0)
+	done := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(done-(doneJump+5))))
 	e.Ret()
 }

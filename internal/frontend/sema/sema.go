@@ -1376,6 +1376,28 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e.Callee] = types.TypeAny
 				c.result.Types[e] = types.TypeVoid
 				return types.TypeVoid
+			case "cancelTask":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "cancelTask expects exactly one task.")
+				} else {
+					taskType := c.checkExpr(e.Args[0])
+					obj, ok := taskType.(*types.ObjectType)
+					if !ok {
+						c.error(e.Args[0].Span(), "TS2345", "cancelTask expects a task handle.")
+					} else if _, known := c.result.TaskResults[obj.Name]; !known {
+						c.error(e.Args[0].Span(), "TS2345", "cancelTask received an unknown task handle type.")
+					}
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
+			case "taskCancelled":
+				if len(e.Args) != 0 {
+					c.error(e.Span(), "TS2554", "taskCancelled expects no arguments.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeBoolean
+				return types.TypeBoolean
 			case "join":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", "join expects exactly one task.")
