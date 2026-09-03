@@ -13,13 +13,17 @@ import (
 )
 
 type generator struct {
-	semaResult   *sema.Result
-	prog         *ir.Program
-	currentFn    *ir.Function
-	currentBB    *ir.BasicBlock
-	locals       map[string]ir.Operand
-	err          error
-	arrowCounter int
+	semaResult       *sema.Result
+	prog             *ir.Program
+	currentFn        *ir.Function
+	currentBB        *ir.BasicBlock
+	locals           map[string]ir.Operand
+	err              error
+	arrowCounter     int
+	genericDecls     map[string]*ast.FunctionDecl
+	genericSpecs     map[string]string
+	genericSpecCount int
+	typeBindings     map[*types.TypeVar]types.Type
 }
 
 func irHeapRefType(t types.Type) bool {
@@ -71,15 +75,62 @@ func (g *generator) failExpr(format string, args ...any) ir.Operand {
 	return ir.ConstNumber{Value: 0}
 }
 
+func (g *generator) semanticType(node ast.Node) types.Type {
+	if node == nil || g.semaResult == nil {
+		return nil
+	}
+	t := g.semaResult.Types[node]
+	if t == nil || len(g.typeBindings) == 0 {
+		return t
+	}
+	return types.Substitute(t, g.typeBindings)
+}
+
+func genericSpecializationKey(name string, fn *types.FunctionType) string {
+	parts := make([]string, len(fn.Params))
+	for i, p := range fn.Params {
+		parts[i] = p.Type.String()
+	}
+	return name + "(" + strings.Join(parts, ",") + ")->" + fn.Return.String()
+}
+
+func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete *types.FunctionType) (string, error) {
+	generic, ok := g.semaResult.Types[decl].(*types.FunctionType)
+	if !ok || len(generic.TypeParams) == 0 {
+		return "", fmt.Errorf("function %q is not a resolved generic declaration", decl.Name)
+	}
+	bindings, err := types.FunctionBindings(generic, concrete)
+	if err != nil {
+		return "", fmt.Errorf("bind generic %s: %w", decl.Name, err)
+	}
+	key := genericSpecializationKey(decl.Name, concrete)
+	if name, ok := g.genericSpecs[key]; ok {
+		return name, nil
+	}
+	name := fmt.Sprintf("%s$spec%d", decl.Name, g.genericSpecCount)
+	g.genericSpecCount++
+	// Register before lowering so recursive calls reuse this specialization.
+	g.genericSpecs[key] = name
+
+	outerFn, outerBB, outerLocals, outerBindings := g.currentFn, g.currentBB, g.locals, g.typeBindings
+	g.typeBindings = bindings
+	fn, err := g.lowerFunctionAs(decl, concrete, name)
+	g.currentFn, g.currentBB, g.locals, g.typeBindings = outerFn, outerBB, outerLocals, outerBindings
+	if err != nil {
+		delete(g.genericSpecs, key)
+		return "", err
+	}
+	g.prog.Functions = append(g.prog.Functions, fn)
+	return name, nil
+}
+
 func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Operand) ir.Operand {
 	if e.Op == token.Eq {
 		return rhs
 	}
 	resultType := current.Type()
-	if g.semaResult != nil {
-		if t, ok := g.semaResult.Types[e]; ok && t != nil {
-			resultType = t
-		}
+	if t := g.semanticType(e); t != nil {
+		resultType = t
 	}
 	if e.Op == token.PlusEq && resultType == types.TypeString {
 		if current.Type() != types.TypeString || rhs.Type() != types.TypeString {
@@ -176,7 +227,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	if !ok {
 		return g.failExpr("arrow expression body has unsupported node %T", e.Body)
 	}
-	fnType, ok := g.semaResult.Types[e].(*types.FunctionType)
+	fnType, ok := g.semanticType(e).(*types.FunctionType)
 	if !ok {
 		return g.failExpr("arrow function is missing a resolved function type")
 	}
@@ -249,13 +300,24 @@ func isConsoleLogCall(expr ast.Expr) bool {
 // Generate lowers an AST program and its semantic facts into SSA IR.
 func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error) {
 	g := &generator{
-		semaResult: semaResult,
-		prog:       &ir.Program{},
+		semaResult:   semaResult,
+		prog:         &ir.Program{},
+		genericDecls: make(map[string]*ast.FunctionDecl),
+		genericSpecs: make(map[string]string),
+	}
+
+	for _, stmt := range astProg.Statements {
+		if fnDecl, ok := stmt.(*ast.FunctionDecl); ok && len(fnDecl.TypeParams) > 0 {
+			g.genericDecls[fnDecl.Name] = fnDecl
+		}
 	}
 
 	var topStmts []ast.Stmt
 	for _, stmt := range astProg.Statements {
 		if fnDecl, ok := stmt.(*ast.FunctionDecl); ok {
+			if len(fnDecl.TypeParams) > 0 {
+				continue
+			}
 			fn, err := g.lowerFunction(fnDecl)
 			if err != nil {
 				return nil, err
@@ -299,47 +361,44 @@ func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
 
 func (g *generator) lowerFunction(fnDecl *ast.FunctionDecl) (*ir.Function, error) {
 	fnType, _ := g.semaResult.Types[fnDecl].(*types.FunctionType)
+	return g.lowerFunctionAs(fnDecl, fnType, fnDecl.Name)
+}
+
+func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
 	var retType types.Type = types.TypeVoid
 	if fnType != nil {
 		retType = fnType.Return
 	}
 
-	irFn := ir.NewFunction(fnDecl.Name, retType)
+	irFn := ir.NewFunction(name, retType)
 	g.currentFn = irFn
 	g.locals = make(map[string]ir.Operand)
 
-	// Entry block
 	entryBB := irFn.NewBlock("entry")
 	g.currentBB = entryBB
 
-	// Lower parameters as values
-	for _, p := range fnDecl.Params {
+	for i, p := range fnDecl.Params {
 		pType := types.TypeNumber
-		if fnType != nil {
-			for _, param := range fnType.Params {
-				if param.Name == p.Name {
-					pType = param.Type
-					break
-				}
-			}
+		if fnType != nil && i < len(fnType.Params) {
+			pType = fnType.Params[i].Type
 		}
 		val := irFn.NewValue(p.Name, pType)
 		irFn.Params = append(irFn.Params, val)
 		g.locals[p.Name] = val
 	}
 
-	// Lower statements
 	if fnDecl.Body != nil {
 		for _, stmt := range fnDecl.Body.Statements {
 			g.lowerStatement(stmt)
 		}
 	}
 
-	// Ensure entry or current block has a terminator
 	if g.currentBB.Terminator == nil {
 		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
-
+	if g.err != nil {
+		return nil, g.err
+	}
 	return irFn, nil
 }
 
@@ -852,10 +911,8 @@ func (g *generator) lowerLogicalExpr(e *ast.BinaryExpr) ir.Operand {
 
 	g.currentBB = joinBB
 	resultType := rhsVal.Type()
-	if g.semaResult != nil {
-		if t, ok := g.semaResult.Types[e]; ok && t != nil {
-			resultType = t
-		}
+	if t := g.semanticType(e); t != nil {
+		resultType = t
 	}
 	res := g.currentFn.NewValue("logical", resultType)
 	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{
@@ -882,8 +939,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return ir.ConstBool{Value: e.Value}
 	case *ast.ArrayLit:
 		arrType := types.NewArray(types.TypeAny)
-		if g.semaResult != nil {
-			if t, ok := g.semaResult.Types[e].(*types.ArrayType); ok {
+		if semantic := g.semanticType(e); semantic != nil {
+			if tuple, ok := semantic.(*types.TupleType); ok {
+				return g.failExpr("tuple literal lowering is not yet implemented for %s", tuple)
+			}
+			if t, ok := semantic.(*types.ArrayType); ok {
 				arrType = t
 			}
 		}
@@ -899,7 +959,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return res
 	case *ast.ObjectLit:
-		objType, _ := g.semaResult.Types[e].(*types.ObjectType)
+		objType, _ := g.semanticType(e).(*types.ObjectType)
 		if objType == nil {
 			return g.failExpr("cannot lower object literal without a closed object type")
 		}
@@ -920,6 +980,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if !ok {
 				return g.failExpr("function symbol %q has non-function type %T", e.Name, sym.Type)
 			}
+			if len(fnType.TypeParams) > 0 {
+				return g.failExpr("generic function %q requires specialization before use as a value", e.Name)
+			}
 			res := g.currentFn.NewValue("closure", fnType)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
 			return res
@@ -935,14 +998,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 		if e.Op == token.Plus {
 			isString := false
-			if g.semaResult != nil {
-				if t, ok := g.semaResult.Types[e]; ok && t == types.TypeString {
-					isString = true
-				} else if t, ok := g.semaResult.Types[e.Left]; ok && t == types.TypeString {
-					isString = true
-				} else if t, ok := g.semaResult.Types[e.Right]; ok && t == types.TypeString {
-					isString = true
-				}
+			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString {
+				isString = true
 			}
 			if isString {
 				resVal := g.currentFn.NewValue("str", types.TypeString)
@@ -987,10 +1044,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.failExpr("unsupported binary operator %s", e.Op)
 		}
 		resultType := types.TypeNumber
-		if g.semaResult != nil {
-			if t, ok := g.semaResult.Types[e]; ok && t != nil {
-				resultType = t
-			}
+		if t := g.semanticType(e); t != nil {
+			resultType = t
 		}
 		resVal := g.currentFn.NewValue("t", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
@@ -1052,22 +1107,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		array := g.lowerExpr(e.Target)
 		index := g.lowerExpr(e.Index)
 		resultType := types.TypeAny
-		if g.semaResult != nil {
-			if t, ok := g.semaResult.Types[e]; ok && t != nil {
-				resultType = t
-			}
+		if t := g.semanticType(e); t != nil {
+			resultType = t
 		}
 		res := g.currentFn.NewValue("elem", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
 		return res
 	case *ast.MemberExpr:
-		if _, ok := g.semaResult.Types[e.Object].(*types.ArrayType); ok && e.Property == "length" {
+		if _, ok := g.semanticType(e.Object).(*types.ArrayType); ok && e.Property == "length" {
 			array := g.lowerExpr(e.Object)
 			res := g.currentFn.NewValue("len", types.TypeNumber)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: res, Array: array})
 			return res
 		}
-		if objType, ok := g.semaResult.Types[e.Object].(*types.ObjectType); ok {
+		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
 			offsets, _, _ := g.objectLayout(objType)
 			offset, exists := offsets[e.Property]
 			if !exists {
@@ -1075,7 +1128,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 			obj := g.lowerExpr(e.Object)
 			resultType := types.TypeAny
-			if t, ok := g.semaResult.Types[e]; ok && t != nil {
+			if t := g.semanticType(e); t != nil {
 				resultType = t
 			}
 			res := g.currentFn.NewValue("field", resultType)
@@ -1085,7 +1138,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if arrType, ok := g.semaResult.Types[mem.Object].(*types.ArrayType); ok {
+			if arrType, ok := g.semanticType(mem.Object).(*types.ArrayType); ok {
 				array := g.lowerExpr(mem.Object)
 				switch mem.Property {
 				case "push":
@@ -1103,7 +1156,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 			}
 		}
-		if fnType, ok := g.semaResult.Types[e.Callee].(*types.FunctionType); ok && !isConsoleLogCall(e.Callee) {
+		if fnType, ok := g.semanticType(e.Callee).(*types.FunctionType); ok && !isConsoleLogCall(e.Callee) {
 			directNamed := false
 			if ident, isIdent := e.Callee.(*ast.IdentExpr); isIdent {
 				_, isLocal := g.locals[ident.Name]
@@ -1125,11 +1178,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		calleeName := "unknown"
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			calleeName = ident.Name
+			if decl := g.genericDecls[ident.Name]; decl != nil {
+				concrete := g.semaResult.GenericCalls[e]
+				if concrete == nil {
+					return g.failExpr("generic call %q is missing a semantic instantiation", ident.Name)
+				}
+				if len(g.typeBindings) > 0 {
+					substituted, ok := types.Substitute(concrete, g.typeBindings).(*types.FunctionType)
+					if !ok {
+						return g.failExpr("generic call %q substitution produced %T", ident.Name, substituted)
+					}
+					concrete = substituted
+				}
+				specialized, err := g.ensureGenericSpecialization(decl, concrete)
+				if err != nil {
+					return g.failExpr("specialize %q: %v", ident.Name, err)
+				}
+				calleeName = specialized
+			}
 		} else if mem, ok := e.Callee.(*ast.MemberExpr); ok {
 			if objIdent, ok := mem.Object.(*ast.IdentExpr); ok && objIdent.Name == "console" && mem.Property == "log" {
 				calleeName = "ts_print_val"
 				if len(e.Args) > 0 && g.semaResult != nil {
-					if t, ok := g.semaResult.Types[e.Args[0]]; ok {
+					if t := g.semanticType(e.Args[0]); t != nil {
 						switch t {
 						case types.TypeString:
 							calleeName = "ts_print_str"
@@ -1148,10 +1219,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			args = append(args, g.lowerExpr(arg))
 		}
 		resultType := types.TypeNumber
-		if g.semaResult != nil {
-			if t, ok := g.semaResult.Types[e]; ok && t != nil {
-				resultType = t
-			}
+		if t := g.semanticType(e); t != nil {
+			resultType = t
 		}
 		resVal := g.currentFn.NewValue("ret", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
@@ -1162,7 +1231,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return resVal
 	case *ast.AssignExpr:
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
-			if objType, ok := g.semaResult.Types[mem.Object].(*types.ObjectType); ok {
+			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(objType)
 				offset, exists := offsets[mem.Property]
 				if !exists {
@@ -1175,7 +1244,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					return rhs
 				}
 				fieldType := types.TypeAny
-				if t, ok := g.semaResult.Types[mem]; ok && t != nil {
+				if t := g.semanticType(mem); t != nil {
 					fieldType = t
 				}
 				current := g.currentFn.NewValue("field_old", fieldType)
@@ -1195,7 +1264,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return rhs
 			}
 			currentType := types.TypeAny
-			if t, ok := g.semaResult.Types[idx]; ok && t != nil {
+			if t := g.semanticType(idx); t != nil {
 				currentType = t
 			}
 			current := g.currentFn.NewValue("elem_old", currentType)

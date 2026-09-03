@@ -280,3 +280,36 @@ function f(x: number): number {
 		t.Fatalf("expected explicit switch fallthrough rejection, got %v", err)
 	}
 }
+
+func TestIRGenMonomorphizesGenericIdentity(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("generic-identity.ts", []byte(`
+function identity<T>(x: T): T { return x; }
+console.log(identity<number>(42));
+console.log(identity<string>("hello"));
+console.log(identity(7));
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %s", semaResult.Diagnostics.Format(fs))
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	if strings.Contains(dump, "define @identity(") {
+		t.Fatalf("unresolved generic declaration must not be emitted:\n%s", dump)
+	}
+	if got := strings.Count(dump, "define @identity$spec"); got != 2 {
+		t.Fatalf("generic specialization count = %d, want 2:\n%s", got, dump)
+	}
+	if !strings.Contains(dump, "call @identity$spec") {
+		t.Fatalf("expected calls to specialized identity functions:\n%s", dump)
+	}
+}

@@ -503,3 +503,17 @@ for (const word of words) { console.log(word); }
 		expected: "100\n2\na\nb\nc\n",
 	})
 }
+
+func TestLinuxAMD64GenericIdentitySpecialization(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "generic_identity_specialization",
+		source: `
+function identity<T>(x: T): T { return x; }
+console.log(identity<number>(42));
+console.log(identity<string>("hello"));
+console.log(identity(7));
+console.log(identity("inferred"));
+`,
+		expected: "42\nhello\n7\ninferred\n",
+	})
+}
