@@ -165,6 +165,8 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		c.checkIf(s)
 	case *ast.WhileStmt:
 		c.checkWhile(s)
+	case *ast.DoWhileStmt:
+		c.checkDoWhile(s)
 	case *ast.ForStmt:
 		c.checkFor(s)
 	case *ast.ReturnStmt:
@@ -265,6 +267,11 @@ func (c *Checker) checkIf(s *ast.IfStmt) {
 func (c *Checker) checkWhile(s *ast.WhileStmt) {
 	c.checkExpr(s.Cond)
 	c.checkStatement(s.Body)
+}
+
+func (c *Checker) checkDoWhile(s *ast.DoWhileStmt) {
+	c.checkStatement(s.Body)
+	c.checkExpr(s.Cond)
 }
 
 func (c *Checker) checkFor(s *ast.ForStmt) {

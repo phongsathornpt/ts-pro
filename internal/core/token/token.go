@@ -32,6 +32,7 @@ const (
 	KwIf
 	KwElse
 	KwWhile
+	KwDo
 	KwFor
 	KwBreak
 	KwContinue
@@ -126,6 +127,7 @@ var tokens = [...]string{
 	KwIf:         "if",
 	KwElse:       "else",
 	KwWhile:      "while",
+	KwDo:         "do",
 	KwFor:        "for",
 	KwBreak:      "break",
 	KwContinue:   "continue",
@@ -229,6 +231,7 @@ var keywords = map[string]Kind{
 	"if":         KwIf,
 	"else":       KwElse,
 	"while":      KwWhile,
+	"do":         KwDo,
 	"for":        KwFor,
 	"break":      KwBreak,
 	"continue":   KwContinue,

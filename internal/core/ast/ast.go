@@ -285,6 +285,12 @@ type (
 		Body       Stmt
 	}
 
+	DoWhileStmt struct {
+		SourceSpan source.Span
+		Body       Stmt
+		Cond       Expr
+	}
+
 	ForStmt struct {
 		SourceSpan source.Span
 		Init       Stmt
@@ -330,6 +336,8 @@ func (s *IfStmt) Span() source.Span        { return s.SourceSpan }
 func (s *IfStmt) stmtNode()                {}
 func (s *WhileStmt) Span() source.Span     { return s.SourceSpan }
 func (s *WhileStmt) stmtNode()             {}
+func (s *DoWhileStmt) Span() source.Span   { return s.SourceSpan }
+func (s *DoWhileStmt) stmtNode()           {}
 func (s *ForStmt) Span() source.Span       { return s.SourceSpan }
 func (s *ForStmt) stmtNode()               {}
 func (s *ReturnStmt) Span() source.Span    { return s.SourceSpan }

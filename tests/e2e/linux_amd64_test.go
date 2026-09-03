@@ -414,3 +414,22 @@ console.log(pickSixth("a", "b", "c", "d", "e", "stack-ok"));
 		expected: "42\nkeep-alive\n55\nstack-ok\n",
 	})
 }
+
+func TestLinuxAMD64DoWhile(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "do_while_executes_body_before_condition",
+		source: `
+let count: number = 0;
+let total: number = 0;
+do {
+  total = total + count;
+  count++;
+} while (count < 5);
+let once: number = 0;
+do { once++; } while (false);
+console.log(total);
+console.log(once);
+`,
+		expected: "10\n1\n",
+	})
+}

@@ -137,6 +137,8 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseIf()
 	case token.KwWhile:
 		return p.parseWhile()
+	case token.KwDo:
+		return p.parseDoWhile()
 	case token.KwFor:
 		return p.parseFor()
 	case token.LBrace:
@@ -479,6 +481,20 @@ func (p *Parser) parseWhile() *ast.WhileStmt {
 		SourceSpan: source.Span{Start: kw.Span.Start, End: body.Span().End},
 		Cond:       cond,
 		Body:       body,
+	}
+}
+
+func (p *Parser) parseDoWhile() *ast.DoWhileStmt {
+	kw := p.advance()
+	body := p.parseStatement()
+	p.expect(token.KwWhile)
+	p.expect(token.LParen)
+	cond := p.parseExpression()
+	rparen := p.expect(token.RParen)
+	p.match(token.Semicolon)
+	return &ast.DoWhileStmt{
+		SourceSpan: source.Span{Start: kw.Span.Start, End: rparen.Span.End},
+		Body:       body, Cond: cond,
 	}
 }
 

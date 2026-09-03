@@ -372,6 +372,8 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		g.lowerIf(s)
 	case *ast.WhileStmt:
 		g.lowerWhile(s)
+	case *ast.DoWhileStmt:
+		g.lowerDoWhile(s)
 	case *ast.ForStmt:
 		g.lowerFor(s)
 	}
@@ -410,6 +412,9 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 		case *ast.WhileStmt:
 			walk(node.Cond)
 			walk(node.Body)
+		case *ast.DoWhileStmt:
+			walk(node.Body)
+			walk(node.Cond)
 		case *ast.ForStmt:
 			walk(node.Init)
 			walk(node.Cond)
@@ -614,6 +619,51 @@ func (g *generator) lowerWhile(s *ast.WhileStmt) {
 			Value: updatedVal,
 		})
 		g.locals[name] = phi.Res
+	}
+
+	g.currentBB = exitBB
+}
+
+func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
+	preBB := g.currentBB
+	bodyBB := g.currentFn.NewBlock("do_body")
+	condBB := g.currentFn.NewBlock("do_cond")
+	exitBB := g.currentFn.NewBlock("do_exit")
+	if preBB.Terminator == nil {
+		preBB.Terminator = &ir.JumpTerm{Target: bodyBB}
+	}
+
+	modVars := findModifiedVars(s.Body)
+	for name := range findModifiedVars(&ast.ExprStmt{Expr: s.Cond}) {
+		modVars[name] = true
+	}
+	loopPhis := make(map[string]*ir.PhiInst)
+	for name := range modVars {
+		if val, exists := g.locals[name]; exists {
+			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_do", name), val.Type())
+			phi := &ir.PhiInst{Res: phiVal, Incoming: []ir.PhiIncoming{{Block: preBB, Value: val}}}
+			loopPhis[name] = phi
+			bodyBB.Phis = append(bodyBB.Phis, phi)
+			g.locals[name] = phiVal
+		}
+	}
+
+	g.currentBB = bodyBB
+	g.lowerStatement(s.Body)
+	bodyEnd := g.currentBB
+	if bodyEnd.Terminator == nil {
+		bodyEnd.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+
+	g.currentBB = condBB
+	cond := g.lowerExpr(s.Cond)
+	condEnd := g.currentBB
+	if condEnd.Terminator == nil {
+		condEnd.Terminator = &ir.BranchTerm{Cond: cond, Then: bodyBB, Else: exitBB}
+	}
+	for name, phi := range loopPhis {
+		updated := g.locals[name]
+		phi.Incoming = append(phi.Incoming, ir.PhiIncoming{Block: condEnd, Value: updated})
 	}
 
 	g.currentBB = exitBB
