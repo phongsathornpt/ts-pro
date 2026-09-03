@@ -13,7 +13,7 @@ function add(a: number, b: number): number {
 
 	c := New(Options{
 		TargetOS:   "darwin",
-		TargetArch: "amd64",
+		TargetArch: "arm64",
 		OptLevel:   2,
 	})
 

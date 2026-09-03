@@ -8,6 +8,7 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/arm64"
 	"github.com/phongsathornpt/ts-pro/internal/backend/regalloc"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
+	"github.com/phongsathornpt/ts-pro/internal/target"
 )
 
 type Arch string
@@ -17,15 +18,29 @@ const (
 	ArchARM64 Arch = "arm64"
 )
 
-// Lower lowers an IR program into target machine code.
-func Lower(prog *ir.Program, target Arch) ([]byte, error) {
-	switch target {
+// Lower lowers an IR program by architecture only. It is retained for focused
+// backend tests; production compilation should use LowerTarget so OS-specific
+// startup/runtime code cannot be selected by architecture accidentally.
+func Lower(prog *ir.Program, arch Arch) ([]byte, error) {
+	switch arch {
 	case ArchAMD64:
 		return lowerAMD64(prog)
 	case ArchARM64:
 		return lowerARM64(prog)
 	default:
-		return nil, fmt.Errorf("unsupported architecture: %s", target)
+		return nil, fmt.Errorf("unsupported architecture: %s", arch)
+	}
+}
+
+// LowerTarget selects the OS/architecture-specific native lowering path.
+func LowerTarget(prog *ir.Program, tgt target.Target) ([]byte, error) {
+	switch {
+	case tgt.OS == target.OSLinux && tgt.Arch == target.ArchAMD64:
+		return lowerAMD64(prog)
+	case tgt.OS == target.OSDarwin && tgt.Arch == target.ArchARM64:
+		return lowerARM64(prog)
+	default:
+		return nil, fmt.Errorf("unsupported lowering target: %s", tgt)
 	}
 }
 
@@ -56,14 +71,14 @@ type callFixup struct {
 
 type branchFixupARM64 struct {
 	offset   int
-	targetBB string
+	targetBB *ir.BasicBlock
 	isCond   bool
 	condReg  arm64.Register
 }
 
 type branchFixupAMD64 struct {
 	offset   int
-	targetBB string
+	targetBB *ir.BasicBlock
 	isCond   bool
 	condReg  amd64.Register
 }
@@ -87,7 +102,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 	var callFixups []callFixup
 	var branchFixups []branchFixupARM64
 	var strFixups []stringFixupARM64
-	bbOffsets := make(map[string]int)
+	bbOffsets := make(map[*ir.BasicBlock]int)
 
 	for _, fn := range prog.Functions {
 		fnOffsets[fn.Name] = len(e.Code)
@@ -116,7 +131,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 
 		// Emit basic blocks
 		for _, bb := range fn.Blocks {
-			bbOffsets[bb.Name] = len(e.Code)
+			bbOffsets[bb] = len(e.Code)
 
 			for _, inst := range bb.Instructions {
 				switch bi := inst.(type) {
@@ -298,7 +313,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 					e.Cbnz(condReg, 0)
 					branchFixups = append(branchFixups, branchFixupARM64{
 						offset:   branchOffset,
-						targetBB: term.Then.Name,
+						targetBB: term.Then,
 						isCond:   true,
 						condReg:  condReg,
 					})
@@ -308,7 +323,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 					e.B(0)
 					branchFixups = append(branchFixups, branchFixupARM64{
 						offset:   jumpOffset,
-						targetBB: term.Else.Name,
+						targetBB: term.Else,
 						isCond:   false,
 					})
 
@@ -353,7 +368,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 					e.B(0)
 					branchFixups = append(branchFixups, branchFixupARM64{
 						offset:   jumpOffset,
-						targetBB: term.Target.Name,
+						targetBB: term.Target,
 						isCond:   false,
 					})
 				}
@@ -413,7 +428,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 	for _, cf := range callFixups {
 		targetAddr, exists := fnOffsets[cf.callee]
 		if !exists {
-			continue
+			return nil, fmt.Errorf("unresolved call target %q", cf.callee)
 		}
 		wordOffset := int32((targetAddr - cf.offset) / 4)
 		binary.LittleEndian.PutUint32(e.Code[cf.offset:], 0x94000000|(uint32(wordOffset)&0x03FFFFFF))
@@ -423,7 +438,7 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 	for _, bf := range branchFixups {
 		targetAddr, exists := bbOffsets[bf.targetBB]
 		if !exists {
-			continue
+			return nil, fmt.Errorf("unresolved basic block target %p", bf.targetBB)
 		}
 		wordOffset := int32((targetAddr - bf.offset) / 4)
 		if bf.isCond {
@@ -667,15 +682,59 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	var callFixups []callFixup
 	var branchFixups []branchFixupAMD64
 	var strFixups []stringFixupAMD64
-	bbOffsets := make(map[string]int)
+	bbOffsets := make(map[*ir.BasicBlock]int)
+
+	// Linux process entry is not a normal function call. Emit an explicit
+	// startup stub so generated functions can use ordinary SysV call/return.
+	hasMain := false
+	for _, fn := range prog.Functions {
+		if fn.Name == "@main" {
+			hasMain = true
+			break
+		}
+	}
+	fnOffsets["_start"] = len(e.Code)
+	if hasMain {
+		callOffset := len(e.Code)
+		e.CallRel32(0)
+		callFixups = append(callFixups, callFixup{offset: callOffset, callee: "@main"})
+	}
+	exitOffset := len(e.Code)
+	e.CallRel32(0)
+	callFixups = append(callFixups, callFixup{offset: exitOffset, callee: "ts_sys_exit"})
 
 	for _, fn := range prog.Functions {
 		fnOffsets[fn.Name] = len(e.Code)
 
 		ra := regalloc.New(len(amd64ScratchRegs))
 		locs := ra.Allocate(fn)
+		spillBytes := ra.StackFrameSlots() * 8
+		// After CALL, push RBP + five callee-saved registers leaves RSP at 8 mod 16.
+		// Choose a frame size that is 8 mod 16 so call sites remain 16-byte aligned.
+		frameSize := int32(((spillBytes + 23) &^ 15) - 8)
+		spillOffset := func(loc regalloc.Location) int32 {
+			return int32(-48 - loc.StackSlot*8)
+		}
+		loadValue := func(v *ir.Value, scratch amd64.Register) amd64.Register {
+			loc := locs[v.ID]
+			if loc.IsReg {
+				return amd64ScratchRegs[loc.Reg]
+			}
+			e.MovRegDeref(scratch, amd64.RBP, spillOffset(loc))
+			return scratch
+		}
+		storeValue := func(loc regalloc.Location, src amd64.Register) {
+			if loc.IsReg {
+				dst := amd64ScratchRegs[loc.Reg]
+				if dst != src {
+					e.MovRegReg(dst, src)
+				}
+				return
+			}
+			e.MovDerefReg(amd64.RBP, spillOffset(loc), src)
+		}
 
-		// Prologue: save RBP and callee-saved registers RBX, R12-R15
+		// Prologue: save RBP and callee-saved registers RBX, R12-R15.
 		e.Push(amd64.RBP)
 		e.MovRegReg(amd64.RBP, amd64.RSP)
 		e.Push(amd64.RBX)
@@ -683,49 +742,62 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		e.Push(amd64.R13)
 		e.Push(amd64.R14)
 		e.Push(amd64.R15)
-		e.SubRegImm32(amd64.RSP, 8)
+		e.SubRegImm32(amd64.RSP, frameSize)
 
-		// Copy incoming parameters
+		// Copy incoming SysV register parameters into their allocated locations.
 		for i, param := range fn.Params {
 			if i < len(amd64ParamRegs) {
-				loc := locs[param.ID]
-				if loc.IsReg {
-					targetReg := amd64ScratchRegs[loc.Reg]
-					e.MovRegReg(targetReg, amd64ParamRegs[i])
-				}
+				storeValue(locs[param.ID], amd64ParamRegs[i])
 			}
 		}
 
 		for _, bb := range fn.Blocks {
-			bbOffsets[bb.Name] = len(e.Code)
+			bbOffsets[bb] = len(e.Code)
 
 			for _, inst := range bb.Instructions {
 				switch bi := inst.(type) {
 				case *ir.BinaryInst:
 					dstLoc := locs[bi.Res.ID]
-					if !dstLoc.IsReg {
-						continue
+					dstReg := amd64.R10
+					if dstLoc.IsReg {
+						dstReg = amd64ScratchRegs[dstLoc.Reg]
 					}
-					dstReg := amd64ScratchRegs[dstLoc.Reg]
+
+					// Preserve RHS before writing the two-address destination.
+					var rhsReg amd64.Register = amd64.R11
+					if vRHS, ok := bi.RHS.(*ir.Value); ok {
+						rhsReg = loadValue(vRHS, amd64.R11)
+						if rhsReg == dstReg {
+							e.MovRegReg(amd64.R11, rhsReg)
+							rhsReg = amd64.R11
+						}
+					} else if cRHS, ok := bi.RHS.(ir.ConstNumber); ok {
+						e.MovRegImm64(amd64.R11, int64(cRHS.Value))
+					} else if cRHS, ok := bi.RHS.(ir.ConstBool); ok {
+						if cRHS.Value {
+							e.MovRegImm64(amd64.R11, 1)
+						} else {
+							e.MovRegImm64(amd64.R11, 0)
+						}
+					} else {
+						return nil, fmt.Errorf("unsupported AMD64 RHS operand %T", bi.RHS)
+					}
 
 					if vLHS, ok := bi.LHS.(*ir.Value); ok {
-						srcLoc := locs[vLHS.ID]
-						if srcLoc.IsReg {
-							e.MovRegReg(dstReg, amd64ScratchRegs[srcLoc.Reg])
+						srcReg := loadValue(vLHS, amd64.RAX)
+						if srcReg != dstReg {
+							e.MovRegReg(dstReg, srcReg)
 						}
 					} else if cLHS, ok := bi.LHS.(ir.ConstNumber); ok {
 						e.MovRegImm64(dstReg, int64(cLHS.Value))
-					}
-
-					var rhsReg amd64.Register = amd64.RAX
-					if vRHS, ok := bi.RHS.(*ir.Value); ok {
-						rhsLoc := locs[vRHS.ID]
-						if rhsLoc.IsReg {
-							rhsReg = amd64ScratchRegs[rhsLoc.Reg]
+					} else if cLHS, ok := bi.LHS.(ir.ConstBool); ok {
+						if cLHS.Value {
+							e.MovRegImm64(dstReg, 1)
+						} else {
+							e.MovRegImm64(dstReg, 0)
 						}
-					} else if cRHS, ok := bi.RHS.(ir.ConstNumber); ok {
-						e.MovRegImm64(amd64.RAX, int64(cRHS.Value))
-						rhsReg = amd64.RAX
+					} else {
+						return nil, fmt.Errorf("unsupported AMD64 LHS operand %T", bi.LHS)
 					}
 
 					switch bi.Op {
@@ -735,6 +807,15 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						e.SubRegReg(dstReg, rhsReg)
 					case ir.OpMul:
 						e.ImulRegReg(dstReg, rhsReg)
+					case ir.OpDiv, ir.OpMod:
+						e.MovRegReg(amd64.RAX, dstReg)
+						e.Cqo()
+						e.IdivReg(rhsReg)
+						if bi.Op == ir.OpDiv {
+							e.MovRegReg(dstReg, amd64.RAX)
+						} else {
+							e.MovRegReg(dstReg, amd64.RDX)
+						}
 					case ir.OpLt:
 						e.CmpRegReg(dstReg, rhsReg)
 						e.Setcc(amd64.CondL, dstReg)
@@ -757,16 +838,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						e.AndRegReg(dstReg, rhsReg)
 					case ir.OpOr:
 						e.OrRegReg(dstReg, rhsReg)
+					default:
+						return nil, fmt.Errorf("unsupported AMD64 binary op %v", bi.Op)
 					}
+					storeValue(dstLoc, dstReg)
 
 				case *ir.CallInst:
 					for i, arg := range bi.Args {
 						if i < len(amd64ParamRegs) {
 							targetParam := amd64ParamRegs[i]
 							if vArg, ok := arg.(*ir.Value); ok {
-								argLoc := locs[vArg.ID]
-								if argLoc.IsReg {
-									e.MovRegReg(targetParam, amd64ScratchRegs[argLoc.Reg])
+								srcReg := loadValue(vArg, amd64.R10)
+								if srcReg != targetParam {
+									e.MovRegReg(targetParam, srcReg)
 								}
 							} else if cArg, ok := arg.(ir.ConstNumber); ok {
 								e.MovRegImm64(targetParam, int64(cArg.Value))
@@ -787,11 +871,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					callFixups = append(callFixups, callFixup{offset: callOffset, callee: bi.Callee})
 
 					if bi.Res != nil {
-						dstLoc := locs[bi.Res.ID]
-						if dstLoc.IsReg {
-							dstReg := amd64ScratchRegs[dstLoc.Reg]
-							e.MovRegReg(dstReg, amd64.RAX)
-						}
+						storeValue(locs[bi.Res.ID], amd64.RAX)
 					}
 				}
 			}
@@ -801,12 +881,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				case *ir.ReturnTerm:
 					if term.Val != nil {
 						if v, ok := term.Val.(*ir.Value); ok {
-							loc := locs[v.ID]
-							if loc.IsReg {
-								srcReg := amd64ScratchRegs[loc.Reg]
-								if srcReg != amd64.RAX {
-									e.MovRegReg(amd64.RAX, srcReg)
-								}
+							srcReg := loadValue(v, amd64.RAX)
+							if srcReg != amd64.RAX {
+								e.MovRegReg(amd64.RAX, srcReg)
 							}
 						} else if c, ok := term.Val.(ir.ConstNumber); ok {
 							e.MovRegImm64(amd64.RAX, int64(c.Value))
@@ -821,14 +898,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 					}
 
-					if fn.Name == "@main" {
-						callOffset := len(e.Code)
-						e.CallRel32(0)
-						callFixups = append(callFixups, callFixup{offset: callOffset, callee: "ts_sys_exit"})
-					}
-
 					// Epilogue: restore callee-saved registers and RBP
-					e.AddRegImm32(amd64.RSP, 8)
+					e.AddRegImm32(amd64.RSP, frameSize)
 					e.Pop(amd64.R15)
 					e.Pop(amd64.R14)
 					e.Pop(amd64.R13)
@@ -838,20 +909,37 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.Ret()
 
 				case *ir.BranchTerm:
+					if c, ok := term.Cond.(ir.ConstBool); ok {
+						target := term.Else
+						if c.Value {
+							target = term.Then
+						}
+						jumpOffset := len(e.Code)
+						e.JmpRel32(0)
+						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: target})
+						break
+					}
+					if c, ok := term.Cond.(ir.ConstNumber); ok {
+						target := term.Else
+						if c.Value != 0 {
+							target = term.Then
+						}
+						jumpOffset := len(e.Code)
+						e.JmpRel32(0)
+						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: target})
+						break
+					}
+
 					var condReg amd64.Register = amd64.RAX
 					if vCond, ok := term.Cond.(*ir.Value); ok {
-						loc := locs[vCond.ID]
-						if loc.IsReg {
-							condReg = amd64ScratchRegs[loc.Reg]
-						}
+						condReg = loadValue(vCond, amd64.R10)
 					}
-					// cmp condReg, 0
-					e.CmpRegReg(condReg, condReg)
+					e.TestRegReg(condReg, condReg)
 					branchOffset := len(e.Code)
 					e.JccRel32(amd64.CondNE, 0)
 					branchFixups = append(branchFixups, branchFixupAMD64{
 						offset:   branchOffset,
-						targetBB: term.Then.Name,
+						targetBB: term.Then,
 						isCond:   true,
 						condReg:  condReg,
 					})
@@ -860,7 +948,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.JmpRel32(0)
 					branchFixups = append(branchFixups, branchFixupAMD64{
 						offset:   jumpOffset,
-						targetBB: term.Else.Name,
+						targetBB: term.Else,
 						isCond:   false,
 					})
 
@@ -869,19 +957,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						for _, inc := range phi.Incoming {
 							if inc.Block == bb {
 								dstLoc := locs[phi.Res.ID]
-								if dstLoc.IsReg {
-									dstReg := amd64ScratchRegs[dstLoc.Reg]
-									if v, ok := inc.Value.(*ir.Value); ok {
-										srcLoc := locs[v.ID]
-										if srcLoc.IsReg {
-											srcReg := amd64ScratchRegs[srcLoc.Reg]
-											if dstReg != srcReg {
-												e.MovRegReg(dstReg, srcReg)
-											}
-										}
-									} else if c, ok := inc.Value.(ir.ConstNumber); ok {
-										e.MovRegImm64(dstReg, int64(c.Value))
+								if v, ok := inc.Value.(*ir.Value); ok {
+									srcReg := loadValue(v, amd64.R10)
+									storeValue(dstLoc, srcReg)
+								} else if c, ok := inc.Value.(ir.ConstNumber); ok {
+									e.MovRegImm64(amd64.R10, int64(c.Value))
+									storeValue(dstLoc, amd64.R10)
+								} else if c, ok := inc.Value.(ir.ConstBool); ok {
+									if c.Value {
+										e.MovRegImm64(amd64.R10, 1)
+									} else {
+										e.MovRegImm64(amd64.R10, 0)
 									}
+									storeValue(dstLoc, amd64.R10)
 								}
 							}
 						}
@@ -891,7 +979,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.JmpRel32(0)
 					branchFixups = append(branchFixups, branchFixupAMD64{
 						offset:   jumpOffset,
-						targetBB: term.Target.Name,
+						targetBB: term.Target,
 						isCond:   false,
 					})
 				}
@@ -906,6 +994,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// Emit ts_print_str for Linux AMD64
 	fnOffsets["ts_print_str"] = len(e.Code)
 	emitAMD64PrintStr(e)
+
+	// Bootstrap allocator uses anonymous mmap. This is deliberately simple until
+	// the native GC/arena ABI is integrated into the generated image.
+	fnOffsets["ts_alloc"] = len(e.Code)
+	emitAMD64Alloc(e)
+
+	fnOffsets["ts_string_concat"] = len(e.Code)
+	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)
@@ -939,7 +1035,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	for _, cf := range callFixups {
 		targetAddr, exists := fnOffsets[cf.callee]
 		if !exists {
-			continue
+			return nil, fmt.Errorf("unresolved call target %q", cf.callee)
 		}
 		rel32 := int32(targetAddr - (cf.offset + 5))
 		binary.LittleEndian.PutUint32(e.Code[cf.offset+1:], uint32(rel32))
@@ -949,7 +1045,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	for _, bf := range branchFixups {
 		targetAddr, exists := bbOffsets[bf.targetBB]
 		if !exists {
-			continue
+			return nil, fmt.Errorf("unresolved basic block target %p", bf.targetBB)
 		}
 		if bf.isCond {
 			rel32 := int32(targetAddr - (bf.offset + 6))
@@ -964,18 +1060,161 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 }
 
 func emitAMD64PrintVal(e *amd64.Emitter) {
-	// Push RBP, Mov RBP, RSP
+	// RDI contains the signed bootstrap integer value. Build the decimal string
+	// backwards in a stack buffer and issue write(1, buf, len).
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
-	e.SubRegImm32(amd64.RSP, 48)
+	e.SubRegImm32(amd64.RSP, 64)
 
-	// RDI has the value to print.
-	// We'll write to buffer at RBP - 32 ... RBP - 1
-	// Set RBP-1 to '\n'
-	e.MovDerefReg(amd64.RBP, -1, amd64.RAX) // placeholder
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.MovRegReg(amd64.RSI, amd64.RBP)
+	e.SubRegImm32(amd64.RSI, 1)
+	e.MovRegImm64(amd64.RDX, 10)
+	e.MovDerefReg8(amd64.RSI, 0, amd64.RDX) // newline
+	e.MovRegImm64(amd64.R8, 1)              // output length
+	e.MovRegImm64(amd64.R9, 0)              // negative flag
 
-	// Epilogue
+	e.CmpRegImm32(amd64.RAX, 0)
+	nonNegativeJump := len(e.Code)
+	e.JccRel32(amd64.CondGE, 0)
+	e.MovRegImm64(amd64.R9, 1)
+	e.NegReg(amd64.RAX)
+	nonNegative := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[nonNegativeJump+2:], uint32(int32(nonNegative-(nonNegativeJump+6))))
+
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	nonZeroJump := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.SubRegImm32(amd64.RSI, 1)
+	e.MovRegImm64(amd64.RDX, '0')
+	e.MovDerefReg8(amd64.RSI, 0, amd64.RDX)
+	e.AddRegImm32(amd64.R8, 1)
+	afterZeroJump := len(e.Code)
+	e.JmpRel32(0)
+
+	digitLoop := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[nonZeroJump+2:], uint32(int32(digitLoop-(nonZeroJump+6))))
+	e.MovRegImm64(amd64.R10, 10)
+	e.Cqo()
+	e.IdivReg(amd64.R10)
+	e.AddRegImm32(amd64.RDX, '0')
+	e.SubRegImm32(amd64.RSI, 1)
+	e.MovDerefReg8(amd64.RSI, 0, amd64.RDX)
+	e.AddRegImm32(amd64.R8, 1)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	loopJump := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	binary.LittleEndian.PutUint32(e.Code[loopJump+2:], uint32(int32(digitLoop-(loopJump+6))))
+
+	afterDigits := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[afterZeroJump+1:], uint32(int32(afterDigits-(afterZeroJump+5))))
+	e.TestRegReg(amd64.R9, amd64.R9)
+	noSignJump := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.SubRegImm32(amd64.RSI, 1)
+	e.MovRegImm64(amd64.RDX, '-')
+	e.MovDerefReg8(amd64.RSI, 0, amd64.RDX)
+	e.AddRegImm32(amd64.R8, 1)
+	print := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[noSignJump+2:], uint32(int32(print-(noSignJump+6))))
+
+	e.MovRegReg(amd64.RDX, amd64.R8)
+	e.MovRegImm64(amd64.RDI, 1)
+	e.MovRegImm64(amd64.RAX, 1)
+	e.Syscall()
+
 	e.MovRegReg(amd64.RSP, amd64.RBP)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64Alloc(e *amd64.Emitter) {
+	// mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+	e.MovRegReg(amd64.RSI, amd64.RDI)
+	e.MovRegImm64(amd64.RDI, 0)
+	e.MovRegImm64(amd64.RDX, 3)
+	e.MovRegImm64(amd64.R10, 0x22)
+	e.MovRegImm64(amd64.R8, -1)
+	e.MovRegImm64(amd64.R9, 0)
+	e.MovRegImm64(amd64.RAX, 9)
+	e.Syscall()
+	e.Ret()
+}
+
+func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.Push(amd64.R15)
+	e.SubRegImm32(amd64.RSP, 8)
+
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegReg(amd64.R12, amd64.RSI)
+	e.MovRegDeref(amd64.R13, amd64.RBX, 0)
+	e.MovRegDeref(amd64.R14, amd64.R12, 0)
+	e.MovRegReg(amd64.RDI, amd64.R13)
+	e.AddRegReg(amd64.RDI, amd64.R14)
+	e.AddRegImm32(amd64.RDI, 8)
+	callAt := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAt + 5)))
+	e.MovRegReg(amd64.R15, amd64.RAX)
+
+	e.MovRegReg(amd64.R11, amd64.R13)
+	e.AddRegReg(amd64.R11, amd64.R14)
+	e.MovDerefReg(amd64.R15, 0, amd64.R11)
+
+	// dst = result + 8, src = a + 8
+	e.MovRegReg(amd64.R10, amd64.R15)
+	e.AddRegImm32(amd64.R10, 8)
+	e.MovRegReg(amd64.R8, amd64.RBX)
+	e.AddRegImm32(amd64.R8, 8)
+	e.MovRegImm64(amd64.R9, 0)
+	e.TestRegReg(amd64.R13, amd64.R13)
+	skipA := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	loopA := len(e.Code)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R8, 0)
+	e.MovDerefReg8(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R8, 1)
+	e.AddRegImm32(amd64.R10, 1)
+	e.AddRegImm32(amd64.R9, 1)
+	e.CmpRegReg(amd64.R9, amd64.R13)
+	backA := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+	binary.LittleEndian.PutUint32(e.Code[backA+2:], uint32(int32(loopA-(backA+6))))
+	afterA := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[skipA+2:], uint32(int32(afterA-(skipA+6))))
+
+	// src = b + 8; dst already follows a.
+	e.MovRegReg(amd64.R8, amd64.R12)
+	e.AddRegImm32(amd64.R8, 8)
+	e.MovRegImm64(amd64.R9, 0)
+	e.TestRegReg(amd64.R14, amd64.R14)
+	skipB := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	loopB := len(e.Code)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R8, 0)
+	e.MovDerefReg8(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R8, 1)
+	e.AddRegImm32(amd64.R10, 1)
+	e.AddRegImm32(amd64.R9, 1)
+	e.CmpRegReg(amd64.R9, amd64.R14)
+	backB := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+	binary.LittleEndian.PutUint32(e.Code[backB+2:], uint32(int32(loopB-(backB+6))))
+	afterB := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[skipB+2:], uint32(int32(afterB-(skipB+6))))
+
+	e.MovRegReg(amd64.RAX, amd64.R15)
+	e.AddRegImm32(amd64.RSP, 8)
+	e.Pop(amd64.R15)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
 	e.Pop(amd64.RBP)
 	e.Ret()
 }

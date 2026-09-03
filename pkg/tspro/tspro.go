@@ -103,11 +103,7 @@ func (c *Compiler) CompileSource(filename string, src []byte) ([]byte, diag.Diag
 		return nil, allDiags, err
 	}
 
-	arch := lower.ArchAMD64
-	if tgt.Arch == target.ArchARM64 {
-		arch = lower.ArchARM64
-	}
-	code, err := lower.Lower(irProg, arch)
+	code, err := lower.LowerTarget(irProg, tgt)
 	if err != nil {
 		return nil, allDiags, fmt.Errorf("lowering failed: %w", err)
 	}

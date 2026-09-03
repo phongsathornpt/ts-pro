@@ -104,3 +104,23 @@ func TestAMD64MemoryAndConditionEncodings(t *testing.T) {
 		})
 	}
 }
+
+func TestAMD64ByteMemoryEncodings(t *testing.T) {
+	e := NewEmitter()
+	e.MovDerefReg8(RSP, 16, RDX)
+	if want := []byte{0x88, 0x54, 0x24, 0x10}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("mov byte [rsp+16], dl: got %x, want %x", e.Code, want)
+	}
+
+	e = NewEmitter()
+	e.MovzxRegDeref8(R12, RSP, 16)
+	if want := []byte{0x4C, 0x0F, 0xB6, 0x64, 0x24, 0x10}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("movzx r12, byte [rsp+16]: got %x, want %x", e.Code, want)
+	}
+
+	e = NewEmitter()
+	e.NegReg(R12)
+	if want := []byte{0x49, 0xF7, 0xDC}; !bytes.Equal(e.Code, want) {
+		t.Fatalf("neg r12: got %x, want %x", e.Code, want)
+	}
+}

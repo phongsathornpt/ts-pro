@@ -263,6 +263,29 @@ func (e *Emitter) Setcc(cond Cond, dst Register) {
 	e.emitByte(modRM(0b11, dst, dst))
 }
 
+// NegReg: NEG reg (64-bit).
+func (e *Emitter) NegReg(reg Register) {
+	e.emitByte(rex(true, false, false, reg >= 8))
+	e.emitByte(0xF7)
+	e.emitByte(modRM(0b11, 3, reg))
+}
+
+// MovDerefReg8: MOV byte ptr [base + disp], src8.
+func (e *Emitter) MovDerefReg8(base Register, disp int32, src Register) {
+	if src >= 4 || base >= 8 {
+		e.emitByte(rex(false, src >= 8, false, base >= 8))
+	}
+	e.emitByte(0x88)
+	e.emitBaseDisp(src, base, disp)
+}
+
+// MovzxRegDeref8: MOVZX dst64, byte ptr [base + disp].
+func (e *Emitter) MovzxRegDeref8(dst Register, base Register, disp int32) {
+	e.emitByte(rex(true, dst >= 8, false, base >= 8))
+	e.emitBytes(0x0F, 0xB6)
+	e.emitBaseDisp(dst, base, disp)
+}
+
 // MovDerefReg: MOV [base + disp], src (64-bit).
 func (e *Emitter) MovDerefReg(base Register, disp int32, src Register) {
 	e.emitByte(rex(true, src >= 8, false, base >= 8))

@@ -33,7 +33,7 @@ func (t Target) Validate() error {
 	switch {
 	case t.OS == OSLinux && t.Arch == ArchAMD64:
 		return nil
-	case t.OS == OSDarwin && (t.Arch == ArchAMD64 || t.Arch == ArchARM64):
+	case t.OS == OSDarwin && t.Arch == ArchARM64:
 		return nil
 	default:
 		return fmt.Errorf("unsupported target: %s/%s", t.OS, t.Arch)

@@ -8,7 +8,6 @@ func TestParseSupportedTargets(t *testing.T) {
 		arch string
 	}{
 		{os: "linux", arch: "amd64"},
-		{os: "darwin", arch: "amd64"},
 		{os: "darwin", arch: "arm64"},
 	} {
 		if _, err := Parse(tc.os, tc.arch); err != nil {
@@ -23,6 +22,7 @@ func TestParseRejectsUnsupportedTargets(t *testing.T) {
 		arch string
 	}{
 		{os: "linux", arch: "arm64"},
+		{os: "darwin", arch: "amd64"},
 		{os: "linux", arch: "potato"},
 		{os: "windows", arch: "amd64"},
 	} {

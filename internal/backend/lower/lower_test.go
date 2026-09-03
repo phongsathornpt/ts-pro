@@ -86,6 +86,15 @@ func TestLowerScalars(t *testing.T) {
 
 func TestCallArgPassing(t *testing.T) {
 	prog := &ir.Program{}
+
+	mathFn := ir.NewFunction("math", types.TypeNumber)
+	a := mathFn.NewValue("a", types.TypeNumber)
+	bArg := mathFn.NewValue("b", types.TypeNumber)
+	mathFn.Params = []*ir.Value{a, bArg}
+	mathBB := mathFn.NewBlock("entry")
+	mathBB.Terminator = &ir.ReturnTerm{Val: a}
+	prog.Functions = append(prog.Functions, mathFn)
+
 	fn := ir.NewFunction("@main", types.TypeVoid)
 	b := fn.NewBlock("entry")
 	v0 := fn.NewValue("ret", types.TypeNumber)
@@ -109,5 +118,18 @@ func TestCallArgPassing(t *testing.T) {
 	}
 	for i := 0; i < 40 && i < len(code); i += 4 {
 		t.Logf("%04x: %02x %02x %02x %02x", i, code[i], code[i+1], code[i+2], code[i+3])
+	}
+}
+
+func TestLowerRejectsUnresolvedCall(t *testing.T) {
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	b := fn.NewBlock("entry")
+	b.Instructions = append(b.Instructions, &ir.CallInst{Callee: "missing"})
+	b.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+
+	if _, err := Lower(prog, ArchAMD64); err == nil {
+		t.Fatal("expected unresolved call target to fail lowering")
 	}
 }
