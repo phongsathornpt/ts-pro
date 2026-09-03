@@ -623,3 +623,24 @@ console.log(stack.popItem());
 		expected: "42\nkeep-alive\n2\n20\n",
 	})
 }
+
+func TestLinuxAMD64Destructuring(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "array_object_tuple_destructuring",
+		source: `
+function point(): [number, string] { return [7, "seven"]; }
+const nums = [10, 20];
+const [a, b] = nums;
+const cfg = { host: "localhost", port: 8080 };
+const { host, port: p } = cfg;
+const [id, label] = point();
+console.log(a);
+console.log(b);
+console.log(host);
+console.log(p);
+console.log(id);
+console.log(label);
+`,
+		expected: "10\n20\nlocalhost\n8080\n7\nseven\n",
+	})
+}

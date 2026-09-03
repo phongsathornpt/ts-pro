@@ -13,10 +13,11 @@ import (
 
 // Parser parses tokens into an AST.
 type Parser struct {
-	file        *source.File
-	tokens      []token.Token
-	cursor      int
-	diagnostics diag.DiagnosticList
+	file            *source.File
+	tokens          []token.Token
+	cursor          int
+	diagnostics     diag.DiagnosticList
+	destructCounter int
 }
 
 // New creates a new Parser for the given source File.
@@ -157,39 +158,84 @@ func (p *Parser) parseStatement() ast.Stmt {
 func (p *Parser) parseVarDecl() *ast.VarDeclStmt {
 	kw := p.advance()
 	start := kw.Span.Start
-
 	var decls []ast.VarDeclarator
 	for {
-		nameTok := p.expect(token.Ident)
-		var typeNode ast.TypeNode
-		if p.match(token.Colon) {
-			typeNode = p.parseType()
+		if p.current().Kind == token.LBracket || p.current().Kind == token.LBrace {
+			patternStart := p.current().Span.Start
+			arrayPattern := p.match(token.LBracket)
+			type binding struct {
+				sourceName, targetName string
+				span                   source.Span
+			}
+			var bindings []binding
+			if arrayPattern {
+				index := 0
+				for p.current().Kind != token.RBracket && p.current().Kind != token.EOF {
+					if p.match(token.Comma) {
+						index++
+						continue
+					}
+					name := p.expect(token.Ident)
+					bindings = append(bindings, binding{sourceName: strconv.Itoa(index), targetName: name.Text, span: name.Span})
+					index++
+					if !p.match(token.Comma) {
+						break
+					}
+				}
+				p.expect(token.RBracket)
+			} else {
+				p.expect(token.LBrace)
+				for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+					prop := p.expect(token.Ident)
+					target := prop.Text
+					if p.match(token.Colon) {
+						target = p.expect(token.Ident).Text
+					}
+					bindings = append(bindings, binding{sourceName: prop.Text, targetName: target, span: prop.Span})
+					if !p.match(token.Comma) {
+						break
+					}
+				}
+				p.expect(token.RBrace)
+			}
+			p.expect(token.Eq)
+			init := p.parseExpression()
+			tmp := fmt.Sprintf("__tspro_destruct_%d", p.destructCounter)
+			p.destructCounter++
+			decls = append(decls, ast.VarDeclarator{SourceSpan: source.Span{Start: patternStart, End: init.Span().End}, Name: tmp, Init: init})
+			for _, bind := range bindings {
+				base := &ast.IdentExpr{SourceSpan: bind.span, Name: tmp}
+				var expr ast.Expr
+				if arrayPattern {
+					i, _ := strconv.Atoi(bind.sourceName)
+					expr = &ast.IndexExpr{SourceSpan: bind.span, Target: base, Index: &ast.NumberLit{SourceSpan: bind.span, Value: float64(i), Raw: bind.sourceName}}
+				} else {
+					expr = &ast.MemberExpr{SourceSpan: bind.span, Object: base, Property: bind.sourceName}
+				}
+				decls = append(decls, ast.VarDeclarator{SourceSpan: bind.span, Name: bind.targetName, Init: expr})
+			}
+		} else {
+			nameTok := p.expect(token.Ident)
+			var typeNode ast.TypeNode
+			if p.match(token.Colon) {
+				typeNode = p.parseType()
+			}
+			var init ast.Expr
+			if p.match(token.Eq) {
+				init = p.parseExpression()
+			}
+			end := nameTok.Span.End
+			if init != nil {
+				end = init.Span().End
+			}
+			decls = append(decls, ast.VarDeclarator{SourceSpan: source.Span{Start: nameTok.Span.Start, End: end}, Name: nameTok.Text, Type: typeNode, Init: init})
 		}
-		var init ast.Expr
-		if p.match(token.Eq) {
-			init = p.parseExpression()
-		}
-		end := nameTok.Span.End
-		if init != nil {
-			end = init.Span().End
-		}
-		decls = append(decls, ast.VarDeclarator{
-			SourceSpan: source.Span{Start: nameTok.Span.Start, End: end},
-			Name:       nameTok.Text,
-			Type:       typeNode,
-			Init:       init,
-		})
 		if !p.match(token.Comma) {
 			break
 		}
 	}
 	p.match(token.Semicolon)
-	end := p.current().Span.Start
-	return &ast.VarDeclStmt{
-		SourceSpan:   source.Span{Start: start, End: end},
-		Kind:         kw.Kind,
-		Declarations: decls,
-	}
+	return &ast.VarDeclStmt{SourceSpan: source.Span{Start: start, End: p.current().Span.Start}, Kind: kw.Kind, Declarations: decls}
 }
 
 func (p *Parser) parseTypeParams() []string {
