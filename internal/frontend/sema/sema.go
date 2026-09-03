@@ -1376,6 +1376,22 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e.Callee] = types.TypeAny
 				c.result.Types[e] = types.TypeVoid
 				return types.TypeVoid
+			case "setTaskContext":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "setTaskContext expects one string argument.")
+				} else if argType := c.checkExpr(e.Args[0]); !argType.AssignableTo(types.TypeString) {
+					c.error(e.Args[0].Span(), "TS2345", "setTaskContext expects a string.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
+			case "taskContext":
+				if len(e.Args) != 0 {
+					c.error(e.Span(), "TS2554", "taskContext expects no arguments.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeString
+				return types.TypeString
 			case "cancelTask":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", "cancelTask expects exactly one task.")

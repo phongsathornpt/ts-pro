@@ -1507,3 +1507,23 @@ console.log(taskCancelled());
 		expected: "1\n0\n",
 	})
 }
+func TestLinuxAMD64TaskContextInheritance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "task_context_inheritance",
+		source: `
+const parent = spawn((): void => {
+  setTaskContext("trace-" + "42");
+  const child = spawn((): void => {
+    yieldNow();
+    console.log(taskContext());
+  });
+  let churn = "";
+  for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+  join(child);
+  console.log(taskContext());
+});
+join(parent);
+`,
+		expected: "trace-42\ntrace-42\n",
+	})
+}

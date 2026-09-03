@@ -416,6 +416,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	markTaskParentCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markTaskParentCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskContext)
+	markTaskContextCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markTaskContextCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
 
 	// A suspended task owns a precise-root chain on its private native stack.
 	// Walk those frames exactly like the active runtime root chain.

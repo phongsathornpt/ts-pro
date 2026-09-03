@@ -3333,6 +3333,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				ms := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_sleep", Args: []ir.Operand{ms}, ParamTypes: []types.Type{types.TypeNumber}})
 				return nil
+			case "setTaskContext":
+				if len(e.Args) != 1 {
+					return g.failExpr("native setTaskContext expects one string")
+				}
+				value := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_set_context", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeString}})
+				return nil
+			case "taskContext":
+				if len(e.Args) != 0 {
+					return g.failExpr("native taskContext expects no arguments")
+				}
+				res := g.currentFn.NewValue("task_context", types.TypeString)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_context"})
+				return res
 			case "cancelTask":
 				if len(e.Args) != 1 {
 					return g.failExpr("native cancelTask expects one task")

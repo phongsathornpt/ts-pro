@@ -29,7 +29,8 @@ const (
 	amd64TaskReturnRoot int32 = 152
 	amd64TaskParent     int32 = 160
 	amd64TaskCancelled  int32 = 168
-	amd64TaskPayload    int32 = 176
+	amd64TaskContext    int32 = 176
+	amd64TaskPayload    int32 = 184
 
 	amd64TaskResultVoid   int64 = 0
 	amd64TaskResultNumber int64 = 1
@@ -68,10 +69,19 @@ func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
 	e.MovRegDeref(amd64.R10, amd64.RSP, 16)
 	e.MovDerefReg(amd64.RBX, amd64TaskClosure, amd64.R10)
 	e.MovRegImm64(amd64.R10, 0)
-	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled} {
+	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
 	e.MovDerefReg(amd64.RBX, amd64TaskKind, amd64.R12)
+	// Inherit task-local string context from the currently running parent.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	noParentContext := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskContext)
+	e.MovDerefReg(amd64.RBX, amd64TaskContext, amd64.R11)
+	noParentContextLabel := len(e.Code)
+	patchJcc(noParentContext, noParentContextLabel)
 
 	// mmap one private RW stack. It is outside the GC heap; heap references on
 	// suspended task stacks are discovered through the saved precise-root chain.
@@ -389,6 +399,37 @@ func emitAMD64TaskCancelled(e *amd64.Emitter) {
 	noTask := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.RAX, amd64.R10, amd64TaskCancelled)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+	noTaskLabel := len(e.Code)
+	patchJcc(noTask, noTaskLabel)
+	e.MovRegImm64(amd64.RAX, 0)
+	done := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(done-(doneJump+5))))
+	e.Ret()
+}
+
+func emitAMD64TaskSetContext(e *amd64.Emitter) {
+	// RDI = native string payload. Main context has no task, so this is a no-op.
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	noTask := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovDerefReg(amd64.R10, amd64TaskContext, amd64.RDI)
+	done := len(e.Code)
+	patchJcc(noTask, done)
+	e.Ret()
+}
+
+func emitAMD64TaskContext(e *amd64.Emitter) {
+	// Returns the current task's native string payload or nil in main context.
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	noTask := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R10, amd64TaskContext)
 	doneJump := len(e.Code)
 	e.JmpRel32(0)
 	noTaskLabel := len(e.Code)
