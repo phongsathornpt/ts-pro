@@ -1095,7 +1095,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 		var elements []ast.Expr
 		for p.current().Kind != token.RBracket && p.current().Kind != token.EOF {
 			loopStart := p.cursor
-			elements = append(elements, p.parseExpression())
+			if p.current().Kind == token.DotDotDot {
+				start := p.advance().Span.Start
+				value := p.parseExpression()
+				elements = append(elements, &ast.SpreadExpr{SourceSpan: source.Span{Start: start, End: value.Span().End}, Value: value})
+			} else {
+				elements = append(elements, p.parseExpression())
+			}
 			if !p.match(token.Comma) {
 				p.ensureProgress(loopStart, "array literal")
 				break

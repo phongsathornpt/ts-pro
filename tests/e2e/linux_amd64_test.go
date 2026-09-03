@@ -716,3 +716,19 @@ console.log(formatList("empty"));
 		expected: "60\n0\nitems:a:b:c\nempty\n",
 	})
 }
+
+func TestLinuxAMD64ArraySpread(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "typed_array_spread",
+		source: `
+const a = [10, 20];
+const b = [0, ...a, 30, 40];
+for (const x of b) { console.log(x); }
+const s1 = ["first", "second"];
+const s2 = ["third"];
+const combined = [...s1, ...s2];
+for (const s of combined) { console.log(s); }
+`,
+		expected: "0\n10\n20\n30\n40\nfirst\nsecond\nthird\n",
+	})
+}

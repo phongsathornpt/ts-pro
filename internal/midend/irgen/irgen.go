@@ -442,6 +442,39 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 	return packed
 }
 
+func (g *generator) pushArrayOperand(array ir.Operand, value ir.Operand) {
+	length := g.currentFn.NewValue("push_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: length, Array: array, Val: value})
+}
+
+func (g *generator) appendSpreadArray(dst ir.Operand, src ir.Operand, elemType types.Type) {
+	preheader := g.currentBB
+	condBB := g.currentFn.NewBlock("spread_cond")
+	bodyBB := g.currentFn.NewBlock("spread_body")
+	doneBB := g.currentFn.NewBlock("spread_done")
+	preheader.Terminator = &ir.JumpTerm{Target: condBB}
+
+	index := g.currentFn.NewValue("spread_i", types.TypeNumber)
+	next := g.currentFn.NewValue("spread_next", types.TypeNumber)
+	condBB.Phis = append(condBB.Phis, &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{
+		{Block: preheader, Value: ir.ConstNumber{Value: 0}},
+		{Block: bodyBB, Value: next},
+	}})
+	length := g.currentFn.NewValue("spread_len", types.TypeNumber)
+	condBB.Instructions = append(condBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: src})
+	cond := g.currentFn.NewValue("spread_more", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: cond, Op: ir.OpLt, LHS: index, RHS: length})
+	condBB.Terminator = &ir.BranchTerm{Cond: cond, Then: bodyBB, Else: doneBB}
+
+	g.currentBB = bodyBB
+	elem := g.currentFn.NewValue("spread_elem", elemType)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.GetElementInst{Res: elem, Array: src, Index: index})
+	g.pushArrayOperand(dst, elem)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
+	bodyBB.Terminator = &ir.JumpTerm{Target: condBB}
+	g.currentBB = doneBB
+}
+
 func isNumberSemanticType(t types.Type) bool {
 	if t == nil {
 		return false
@@ -499,6 +532,8 @@ func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct
 			for _, el := range n.Elements {
 				walk(el)
 			}
+		case *ast.SpreadExpr:
+			walk(n.Value)
 		case *ast.ObjectLit:
 			for _, prop := range n.Properties {
 				walk(prop.Value)
@@ -1502,12 +1537,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			Callee: classConstructorName(info.Name), Args: args,
 		})
 		return obj
+	case *ast.SpreadExpr:
+		return g.lowerExpr(e.Value)
 	case *ast.ArrayLit:
 		arrType := types.NewArray(types.TypeAny)
 		if semantic := g.semanticType(e); semantic != nil {
 			if tuple, ok := semantic.(*types.TupleType); ok {
 				if len(tuple.Elements) != len(e.Elements) {
 					return g.failExpr("tuple literal has %d elements, expected %d", len(e.Elements), len(tuple.Elements))
+				}
+				for _, el := range e.Elements {
+					if _, spread := el.(*ast.SpreadExpr); spread {
+						return g.failExpr("native tuple literals do not support spread elements yet")
+					}
 				}
 				res := g.currentFn.NewValue("tuple", tuple)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
@@ -1525,15 +1567,39 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				arrType = t
 			}
 		}
+		hasSpread := false
+		for _, el := range e.Elements {
+			if _, ok := el.(*ast.SpreadExpr); ok {
+				hasSpread = true
+				break
+			}
+		}
 		res := g.currentFn.NewValue("arr", arrType)
+		initialLength := float64(len(e.Elements))
+		if hasSpread {
+			initialLength = 0
+		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
-			Res: res, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(len(e.Elements))},
+			Res: res, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: initialLength},
 		})
 		for i, el := range e.Elements {
+			if spread, ok := el.(*ast.SpreadExpr); ok {
+				sourceType, ok := g.semanticType(spread.Value).(*types.ArrayType)
+				if !ok {
+					return g.failExpr("native array spread requires an array source")
+				}
+				source := g.lowerExpr(spread.Value)
+				g.appendSpreadArray(res, source, sourceType.Elem)
+				continue
+			}
 			val := g.lowerExpr(el)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
-				Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: val,
-			})
+			if hasSpread {
+				g.pushArrayOperand(res, val)
+			} else {
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
+					Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: val,
+				})
+			}
 		}
 		return res
 	case *ast.ObjectLit:

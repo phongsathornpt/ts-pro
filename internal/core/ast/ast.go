@@ -129,6 +129,11 @@ type (
 		Elements   []Expr
 	}
 
+	SpreadExpr struct {
+		SourceSpan source.Span
+		Value      Expr
+	}
+
 	PropertyAssignment struct {
 		SourceSpan source.Span
 		Key        string
@@ -193,6 +198,8 @@ func (e *IndexExpr) Span() source.Span     { return e.SourceSpan }
 func (e *IndexExpr) exprNode()             {}
 func (e *ArrayLit) Span() source.Span      { return e.SourceSpan }
 func (e *ArrayLit) exprNode()              {}
+func (e *SpreadExpr) Span() source.Span    { return e.SourceSpan }
+func (e *SpreadExpr) exprNode()            {}
 func (e *ObjectLit) Span() source.Span     { return e.SourceSpan }
 func (e *ObjectLit) exprNode()             {}
 func (e *ArrowFuncExpr) Span() source.Span { return e.SourceSpan }

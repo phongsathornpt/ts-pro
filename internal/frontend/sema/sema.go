@@ -945,10 +945,23 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		resType := types.NewUnion(t1, t2)
 		c.result.Types[e] = resType
 		return resType
+	case *ast.SpreadExpr:
+		t := c.checkExpr(e.Value)
+		c.result.Types[e] = t
+		return t
 	case *ast.ArrayLit:
 		var elemType types.Type = types.TypeNever
 		for _, el := range e.Elements {
 			t := c.checkExpr(el)
+			if spread, ok := el.(*ast.SpreadExpr); ok {
+				arr, ok := t.(*types.ArrayType)
+				if !ok {
+					c.error(spread.Span(), "TS2488", fmt.Sprintf("Type '%s' is not spreadable by native array spread lowering.", t))
+					t = types.TypeAny
+				} else {
+					t = arr.Elem
+				}
+			}
 			if elemType == types.TypeNever {
 				elemType = t
 			} else {
