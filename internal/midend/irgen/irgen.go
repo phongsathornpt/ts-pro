@@ -2556,6 +2556,30 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return resVal
 		}
 
+		if (e.Op == token.Minus || e.Op == token.Star || e.Op == token.Slash || e.Op == token.Percent) &&
+			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+			if !irJSValueType(lhs.Type()) {
+				lhs = g.boxJSValue(lhs, lhs.Type())
+			}
+			if !irJSValueType(rhs.Type()) {
+				rhs = g.boxJSValue(rhs, rhs.Type())
+			}
+			callee := "ts_js_sub"
+			switch e.Op {
+			case token.Star:
+				callee = "ts_js_mul"
+			case token.Slash:
+				callee = "ts_js_div"
+			case token.Percent:
+				callee = "ts_js_mod"
+			}
+			resVal := g.currentFn.NewValue("js_num_op", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Res: resVal, Callee: callee, Args: []ir.Operand{lhs, rhs}, ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
+			})
+			return resVal
+		}
+
 		if e.Op == token.Plus {
 			isString := false
 			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString {

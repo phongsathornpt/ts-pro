@@ -1152,3 +1152,24 @@ console.log(add([1, 2], 3));
 		expected: "42\nvalue=42\n3\nbool=true\n2\nNaN\nvalue=null\nvalue=undefined\n[object Object]2\narray=1,2\n1,23\n",
 	})
 }
+
+func TestLinuxAMD64DynamicNumericCoercion(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_numeric_coercion",
+		source: `
+function sub(a: any, b: any): number { return a - b; }
+function mul(a: any, b: any): number { return a * b; }
+function div(a: any, b: any): number { return a / b; }
+function mod(a: any, b: any): number { return a % b; }
+console.log(sub("6", 1));
+console.log(mul("6", 7));
+console.log(div(84, 7));
+console.log(mod("7", 4));
+console.log(sub([5], 2));
+console.log(sub(true, false));
+console.log(sub(null, 2));
+console.log(sub(undefined, 2));
+`,
+		expected: "5\n42\n12\n3\n3\n1\n-2\nNaN\n",
+	})
+}

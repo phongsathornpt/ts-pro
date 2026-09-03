@@ -1556,6 +1556,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64JSPrint(e, fnOffsets["ts_print_val"], fnOffsets["ts_print_str"], fnOffsets["ts_print_undefined"], fnOffsets["ts_print_null"], fnOffsets["ts_print_object"], fnOffsets["ts_print_true"], fnOffsets["ts_print_false"])
 	fnOffsets["ts_json_parse_scalar"] = len(e.Code)
 	emitAMD64JSONParseScalar(e)
+	fnOffsets["ts_js_string_to_number"] = len(e.Code)
+	emitAMD64JSStringToNumber(e, fnOffsets["ts_json_parse_scalar"])
 
 	fnOffsets["ts_runtime_init"] = len(e.Code)
 	emitAMD64RuntimeInit(e)
@@ -1649,6 +1651,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64JSToString(e, fnOffsets["ts_alloc"], fnOffsets["ts_number_to_string"], fnOffsets["ts_bool_to_string"], fnOffsets["ts_js_array_to_string"])
 	fnOffsets["ts_js_add"] = len(e.Code)
 	emitAMD64JSAdd(e, fnOffsets["ts_js_to_string"], fnOffsets["ts_string_concat"], fnOffsets["ts_js_box_number"])
+	fnOffsets["ts_js_to_number"] = len(e.Code)
+	emitAMD64JSToNumber(e, fnOffsets["ts_js_string_to_number"], fnOffsets["ts_js_array_to_string"])
+	for _, spec := range []struct{ name, op string }{
+		{"ts_js_sub", "sub"}, {"ts_js_mul", "mul"}, {"ts_js_div", "div"}, {"ts_js_mod", "mod"},
+	} {
+		fnOffsets[spec.name] = len(e.Code)
+		emitAMD64JSNumericBinary(e, fnOffsets["ts_js_to_number"], spec.op)
+	}
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)
