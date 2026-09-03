@@ -205,3 +205,20 @@ console.log(5e-324);
 		expected: "0.1\n0.2\n1.1\n1.2345\n0.30000000000000004\n100000000000000000000\n1e+21\n0.000001\n1e-7\n1.2345678901234567\n1000000000000000100\n2.2250738585072014e-308\n5e-324\n",
 	})
 }
+
+func TestLinuxAMD64GCPreservesLiveStringRoots(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "gc_preserves_live_string_roots",
+		source: `
+function churn(keep: string): string {
+  for (let i = 0; i < 50000; i = i + 1) {
+    let garbage = "ab" + "cd";
+  }
+  return keep;
+}
+let keep = "keep-" + "alive";
+console.log(churn(keep));
+`,
+		expected: "keep-alive\n",
+	})
+}
