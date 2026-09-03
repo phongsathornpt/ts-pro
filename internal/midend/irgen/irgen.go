@@ -2,6 +2,8 @@ package irgen
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
@@ -16,6 +18,42 @@ type generator struct {
 	currentFn  *ir.Function
 	currentBB  *ir.BasicBlock
 	locals     map[string]ir.Operand
+}
+
+func irHeapRefType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case types.KindString, types.KindArray, types.KindObject:
+		return true
+	case types.KindUnion:
+		if u, ok := t.(*types.UnionType); ok {
+			for _, m := range u.Members {
+				if irHeapRefType(m) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
+	names := make([]string, 0, len(t.Fields))
+	for name := range t.Fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	offsets := make(map[string]int, len(names))
+	var refMask uint64
+	for i, name := range names {
+		offsets[name] = 16 + i*8
+		if i < 64 && irHeapRefType(t.Fields[name].Type) {
+			refMask |= uint64(1) << i
+		}
+	}
+	return offsets, refMask, strings.Join(names, ",")
 }
 
 // Generate lowers an AST program and its semantic facts into SSA IR.
@@ -461,6 +499,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			})
 		}
 		return res
+	case *ast.ObjectLit:
+		objType, _ := g.semaResult.Types[e].(*types.ObjectType)
+		if objType == nil {
+			return ir.ConstNumber{Value: 0}
+		}
+		offsets, refMask, shape := objectLayout(objType)
+		res := g.currentFn.NewValue("obj", objType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+		for _, prop := range e.Properties {
+			val := g.lowerExpr(prop.Value)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: prop.Key, Offset: offsets[prop.Key], Val: val})
+		}
+		return res
 	case *ast.IdentExpr:
 		if op, exists := g.locals[e.Name]; exists {
 			return op
@@ -599,11 +650,21 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
 		return res
 	case *ast.MemberExpr:
-		if arrType, ok := g.semaResult.Types[e.Object].(*types.ArrayType); ok && e.Property == "length" {
-			_ = arrType
+		if _, ok := g.semaResult.Types[e.Object].(*types.ArrayType); ok && e.Property == "length" {
 			array := g.lowerExpr(e.Object)
 			res := g.currentFn.NewValue("len", types.TypeNumber)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: res, Array: array})
+			return res
+		}
+		if objType, ok := g.semaResult.Types[e.Object].(*types.ObjectType); ok {
+			offsets, _, _ := objectLayout(objType)
+			obj := g.lowerExpr(e.Object)
+			resultType := types.TypeAny
+			if t, ok := g.semaResult.Types[e]; ok && t != nil {
+				resultType = t
+			}
+			res := g.currentFn.NewValue("field", resultType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offsets[e.Property]})
 			return res
 		}
 		return ir.ConstNumber{Value: 0}
@@ -663,6 +724,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		})
 		return resVal
 	case *ast.AssignExpr:
+		if mem, ok := e.Left.(*ast.MemberExpr); ok {
+			if objType, ok := g.semaResult.Types[mem.Object].(*types.ObjectType); ok {
+				offsets, _, _ := objectLayout(objType)
+				obj := g.lowerExpr(mem.Object)
+				rhs := g.lowerExpr(e.Right)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offsets[mem.Property], Val: rhs})
+				return rhs
+			}
+		}
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
 			array := g.lowerExpr(idx.Target)
 			index := g.lowerExpr(idx.Index)

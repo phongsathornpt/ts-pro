@@ -169,6 +169,17 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 				if v, ok := i.Val.(*ir.Value); ok {
 					endMap[v.ID] = step
 				}
+			case *ir.GetFieldInst:
+				if v, ok := i.Obj.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.SetFieldInst:
+				if v, ok := i.Obj.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
 			case *ir.CallInst:
 				for _, arg := range i.Args {
 					if v, ok := arg.(*ir.Value); ok {

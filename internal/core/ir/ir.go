@@ -93,20 +93,24 @@ type (
 	}
 
 	AllocObjectInst struct {
-		Res   *Value
-		Shape string
+		Res        *Value
+		Shape      string
+		FieldCount int
+		RefMask    uint64
 	}
 
 	GetFieldInst struct {
-		Res   *Value
-		Obj   Operand
-		Field string
+		Res    *Value
+		Obj    Operand
+		Field  string
+		Offset int
 	}
 
 	SetFieldInst struct {
-		Obj   Operand
-		Field string
-		Val   Operand
+		Obj    Operand
+		Field  string
+		Offset int
+		Val    Operand
 	}
 
 	AllocArrayInst struct {
@@ -223,16 +227,18 @@ func (i *CallInst) String() string {
 }
 func (i *AllocObjectInst) instructionNode() {}
 func (i *AllocObjectInst) Result() *Value   { return i.Res }
-func (i *AllocObjectInst) String() string   { return fmt.Sprintf("%s = alloc_obj %s", i.Res, i.Shape) }
-func (i *GetFieldInst) instructionNode()    {}
-func (i *GetFieldInst) Result() *Value      { return i.Res }
+func (i *AllocObjectInst) String() string {
+	return fmt.Sprintf("%s = alloc_obj %s fields=%d refs=%#x", i.Res, i.Shape, i.FieldCount, i.RefMask)
+}
+func (i *GetFieldInst) instructionNode() {}
+func (i *GetFieldInst) Result() *Value   { return i.Res }
 func (i *GetFieldInst) String() string {
-	return fmt.Sprintf("%s = getfield %s.%s", i.Res, i.Obj, i.Field)
+	return fmt.Sprintf("%s = getfield %s.%s@%d", i.Res, i.Obj, i.Field, i.Offset)
 }
 func (i *SetFieldInst) instructionNode() {}
 func (i *SetFieldInst) Result() *Value   { return nil }
 func (i *SetFieldInst) String() string {
-	return fmt.Sprintf("setfield %s.%s = %s", i.Obj, i.Field, i.Val)
+	return fmt.Sprintf("setfield %s.%s@%d = %s", i.Obj, i.Field, i.Offset, i.Val)
 }
 func (i *AllocArrayInst) instructionNode() {}
 func (i *AllocArrayInst) Result() *Value   { return i.Res }

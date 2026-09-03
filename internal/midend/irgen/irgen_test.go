@@ -167,3 +167,31 @@ console.log(mutate([1, 2, 3]));
 		}
 	}
 }
+
+func TestIRGenObjectFieldsUseCanonicalOffsets(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("objects.ts", []byte(`
+interface Point { x: number; y: number; }
+function readX(p: Point): number { return p.x; }
+console.log(readX({ y: 4, x: 3 }));
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	for _, want := range []string{"alloc_obj", "getfield %p.x@16", "setfield %obj.x@16", "setfield %obj.y@24"} {
+		if !strings.Contains(dump, want) {
+			t.Fatalf("expected %q in IR:\n%s", want, dump)
+		}
+	}
+}

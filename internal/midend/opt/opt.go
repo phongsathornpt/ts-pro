@@ -160,6 +160,17 @@ func deadCodeElim(fn *ir.Function) bool {
 				if v, ok := i.Val.(*ir.Value); ok {
 					uses[v.ID]++
 				}
+			case *ir.GetFieldInst:
+				if v, ok := i.Obj.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.SetFieldInst:
+				if v, ok := i.Obj.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					uses[v.ID]++
+				}
 			case *ir.CallInst:
 				for _, arg := range i.Args {
 					if v, ok := arg.(*ir.Value); ok {
@@ -225,7 +236,7 @@ func deadCodeElim(fn *ir.Function) bool {
 			res := inst.Result()
 			// Keep calls or instructions with side effects
 			switch inst.(type) {
-			case *ir.CallInst, *ir.SetElementInst, *ir.ArrayPushInst, *ir.ArrayPopInst:
+			case *ir.CallInst, *ir.SetFieldInst, *ir.SetElementInst, *ir.ArrayPushInst, *ir.ArrayPopInst:
 				retained = append(retained, inst)
 				continue
 			}
