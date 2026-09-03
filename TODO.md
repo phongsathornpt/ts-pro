@@ -6,7 +6,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
 > Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only and do **not** mean this active backend is 100% complete.
-> Current fixture sweep after rest/spread: **48 / 125 compile PASS, 67 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **16/25** compile cleanly; dynamic has **3 PASS / 1 DIAG / 10 backend FAIL**, and concurrency remains **57 DIAG**.
+> Current fixture sweep after optional/computed-property support: **48 / 125 compile PASS, 67 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **8/10 PASS + 2 dynamic-value backend blocks**, memory **9/9**, objects **10/10**, basics **19/25** compile cleanly; dynamic has **2 PASS / 4 DIAG / 8 backend FAIL**, and concurrency remains **57 DIAG**.
 
 ### Completed active milestones
 
@@ -27,12 +27,12 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Rest parameter ABI/lowering via typed native-array packing.
   - [x] Array spread via SSA element-copy loops over existing native arrays.
   - [x] Closed-object spread with source-order fixed-field copying and override semantics.
-- [ ] Nullish and optional semantics beyond the sentinel foundation.
-  - [ ] `??` nullish coalescing.
-  - [ ] Optional chaining `?.`.
-  - [ ] Optional object fields and missing-field `undefined`.
-  - [ ] Union property lookup across compatible object members.
-- [ ] Computed property keys / index access for statically known string keys.
+- [x] Nullish and optional semantics beyond the sentinel foundation.
+  - [x] `??` nullish coalescing with sentinel-only short-circuit semantics.
+  - [x] Optional chaining `?.` with nullish receiver guards and nested-chain composition.
+  - [x] Optional object fields with full contextual native shape allocation and missing-field `undefined`.
+  - [x] Common union-property lookup across compatible closed object members.
+- [x] Computed property keys / index access for statically known string keys and concretely proven `any` aliases.
 - [ ] Evolving/dynamic object shapes.
 - [ ] Multi-module import/export graph, module resolution, linking, and cross-module symbol naming.
 - [ ] Native standard APIs required by fixtures.
