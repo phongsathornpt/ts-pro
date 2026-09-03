@@ -331,3 +331,33 @@ console.log(box.child.name);
 		expected: "1\none\n2.5\ntwo\nkeep-alive\ntwo\n",
 	})
 }
+
+func TestLinuxAMD64CompoundAssignments(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "compound_assignment_locals_arrays_objects",
+		source: `
+let x = 10;
+x += 5;
+x *= 2;
+x -= 4;
+x /= 2;
+console.log(x);
+let s = "a";
+s += "b";
+console.log(s);
+let xs: number[] = [1, 2];
+xs[1] += 3;
+console.log(xs[1]);
+let refs: string[] = ["r"];
+refs[0] += "!";
+console.log(refs[0]);
+type Box = { n: number; label: string };
+let box: Box = { n: 2, label: "hi" };
+box.n *= 4;
+box.label += "!";
+console.log(box.n);
+console.log(box.label);
+`,
+		expected: "13\nab\n5\nr!\n8\nhi!\n",
+	})
+}

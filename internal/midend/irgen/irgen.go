@@ -70,6 +70,45 @@ func (g *generator) failExpr(format string, args ...any) ir.Operand {
 	return ir.ConstNumber{Value: 0}
 }
 
+func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Operand) ir.Operand {
+	if e.Op == token.Eq {
+		return rhs
+	}
+	resultType := current.Type()
+	if g.semaResult != nil {
+		if t, ok := g.semaResult.Types[e]; ok && t != nil {
+			resultType = t
+		}
+	}
+	if e.Op == token.PlusEq && resultType == types.TypeString {
+		if current.Type() != types.TypeString || rhs.Type() != types.TypeString {
+			return g.failExpr("native string += currently requires string operands")
+		}
+		res := g.currentFn.NewValue("str_assign", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_concat", Args: []ir.Operand{current, rhs}})
+		return res
+	}
+	var op ir.BinaryOp
+	switch e.Op {
+	case token.PlusEq:
+		op = ir.OpAdd
+	case token.MinusEq:
+		op = ir.OpSub
+	case token.StarEq:
+		op = ir.OpMul
+	case token.SlashEq:
+		op = ir.OpDiv
+	default:
+		return g.failExpr("unsupported assignment operator %s", e.Op)
+	}
+	if current.Type() != types.TypeNumber || rhs.Type() != types.TypeNumber {
+		return g.failExpr("native %s currently requires number operands", e.Op)
+	}
+	res := g.currentFn.NewValue("assign", resultType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: res, Op: op, LHS: current, RHS: rhs})
+	return res
+}
+
 // Generate lowers an AST program and its semantic facts into SSA IR.
 func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error) {
 	g := &generator{
@@ -757,27 +796,54 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					return g.failExpr("object shape has no writable field %q", mem.Property)
 				}
 				obj := g.lowerExpr(mem.Object)
+				if e.Op == token.Eq {
+					rhs := g.lowerExpr(e.Right)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: rhs})
+					return rhs
+				}
+				fieldType := types.TypeAny
+				if t, ok := g.semaResult.Types[mem]; ok && t != nil {
+					fieldType = t
+				}
+				current := g.currentFn.NewValue("field_old", fieldType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: current, Obj: obj, Field: mem.Property, Offset: offset})
 				rhs := g.lowerExpr(e.Right)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: rhs})
-				return rhs
+				value := g.lowerAssignmentValue(e, current, rhs)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: value})
+				return value
 			}
 		}
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
 			array := g.lowerExpr(idx.Target)
 			index := g.lowerExpr(idx.Index)
+			if e.Op == token.Eq {
+				rhs := g.lowerExpr(e.Right)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: rhs})
+				return rhs
+			}
+			currentType := types.TypeAny
+			if t, ok := g.semaResult.Types[idx]; ok && t != nil {
+				currentType = t
+			}
+			current := g.currentFn.NewValue("elem_old", currentType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: current, Array: array, Index: index})
 			rhs := g.lowerExpr(e.Right)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: rhs})
-			return rhs
+			value := g.lowerAssignmentValue(e, current, rhs)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: value})
+			return value
 		}
-		rhs := g.lowerExpr(e.Right)
 		if ident, ok := e.Left.(*ast.IdentExpr); ok {
-			if _, exists := g.locals[ident.Name]; !exists {
+			current, exists := g.locals[ident.Name]
+			if !exists {
 				return g.failExpr("cannot assign unresolved local %q", ident.Name)
 			}
-			g.locals[ident.Name] = rhs
-			return rhs
+			rhs := g.lowerExpr(e.Right)
+			value := g.lowerAssignmentValue(e, current, rhs)
+			g.locals[ident.Name] = value
+			return value
 		}
 		return g.failExpr("unsupported assignment target %T", e.Left)
+
 	case *ast.TernaryExpr:
 		cond := g.lowerExpr(e.Cond)
 		thenBB := g.currentFn.NewBlock("tern_then")
