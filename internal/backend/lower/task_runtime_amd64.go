@@ -296,7 +296,7 @@ func emitAMD64TaskJoin(e *amd64.Emitter, runOneOffset int) {
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64TaskState)
 	e.CmpRegImm32(amd64.R10, 2)
 	doneTask := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
+	e.JccRel32(amd64.CondAE, 0)
 	callRun := len(e.Code)
 	e.CallRel32(int32(runOneOffset - (callRun + 5)))
 	back := len(e.Code)
@@ -353,6 +353,49 @@ func emitAMD64TaskYield(e *amd64.Emitter, runOneOffset, suspendOffset int) {
 	done := len(e.Code)
 	patchJmp(doneJump, done)
 	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64TaskReject(e *amd64.Emitter) {
+	// RDI = NaN-boxed JSValue rejection reason. Reject the currently running
+	// task and restore the context that resumed it. This helper never returns to
+	// the throwing task.
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTCurrentTask)
+	e.MovDerefReg(amd64.R11, amd64TaskResult, amd64.RDI)
+	e.MovRegImm64(amd64.R10, 3)
+	e.MovDerefReg(amd64.R11, amd64TaskState, amd64.R10)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.R11, amd64TaskSavedRsp, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskSavedRoot, amd64.R10)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskReturnRoot)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskParent)
+	e.MovDerefReg(amd64.R15, amd64RTCurrentTask, amd64.RAX)
+	e.MovRegDeref(amd64.RBP, amd64.R11, amd64TaskReturnRbp)
+	e.MovRegDeref(amd64.RBX, amd64.R11, amd64TaskReturnRbx)
+	e.MovRegDeref(amd64.R12, amd64.R11, amd64TaskReturnR12)
+	e.MovRegDeref(amd64.R13, amd64.R11, amd64TaskReturnR13)
+	e.MovRegDeref(amd64.R14, amd64.R11, amd64TaskReturnR14)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskReturnRsp)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.R11, amd64TaskReturnRoot, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskParent, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskReturnRsp, amd64.R10)
+	e.MovRegReg(amd64.RSP, amd64.RAX)
+	e.Ret()
+}
+
+func emitAMD64TaskRejected(e *amd64.Emitter) {
+	// RDI = task. Return canonical bool in RAX.
+	e.MovRegDeref(amd64.R10, amd64.RDI, amd64TaskState)
+	e.CmpRegImm32(amd64.R10, 3)
+	e.Setcc(amd64.CondE, amd64.RAX)
+	e.Ret()
+}
+
+func emitAMD64TaskError(e *amd64.Emitter) {
+	// RDI = task. Return raw NaN-boxed rejection reason.
+	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64TaskResult)
 	e.Ret()
 }
 

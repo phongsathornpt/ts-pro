@@ -413,6 +413,20 @@ type (
 		Value      Expr
 	}
 
+	ThrowStmt struct {
+		SourceSpan source.Span
+		Value      Expr
+	}
+
+	TryStmt struct {
+		SourceSpan source.Span
+		Try        *BlockStmt
+		CatchName  string
+		CatchType  TypeNode
+		Catch      *BlockStmt
+		Finally    *BlockStmt
+	}
+
 	BreakStmt struct {
 		SourceSpan source.Span
 	}
@@ -461,6 +475,10 @@ func (s *SwitchStmt) Span() source.Span    { return s.SourceSpan }
 func (s *SwitchStmt) stmtNode()            {}
 func (s *ReturnStmt) Span() source.Span    { return s.SourceSpan }
 func (s *ReturnStmt) stmtNode()            {}
+func (s *ThrowStmt) Span() source.Span     { return s.SourceSpan }
+func (s *ThrowStmt) stmtNode()             {}
+func (s *TryStmt) Span() source.Span       { return s.SourceSpan }
+func (s *TryStmt) stmtNode()               {}
 func (s *BreakStmt) Span() source.Span     { return s.SourceSpan }
 func (s *BreakStmt) stmtNode()             {}
 func (s *ContinueStmt) Span() source.Span  { return s.SourceSpan }

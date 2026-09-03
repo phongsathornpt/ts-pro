@@ -1579,3 +1579,37 @@ console.log(join(stringParent("async")));
 		expected: "42\n1\nasync-done\n",
 	})
 }
+
+func TestLinuxAMD64AsyncTryCatchAndAwaitRejection(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "async_try_catch_and_await_rejection",
+		source: `
+async function local(): Promise<any> {
+  try {
+    let reason = "caught-" + "local";
+    throw reason;
+  } catch (error: any) {
+    let churn = "";
+    for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+    return error;
+  }
+}
+async function leaf(): Promise<number> {
+  yieldNow();
+  throw "caught-await";
+}
+async function parent(): Promise<any> {
+  try {
+    return await leaf();
+  } catch (error: any) {
+    let churn = "";
+    for (let i = 0; i < 50000; i = i + 1) { churn = "xy" + "zz"; }
+    return error;
+  }
+}
+console.log(join(local()));
+console.log(join(parent()));
+`,
+		expected: "caught-local\ncaught-await\n",
+	})
+}

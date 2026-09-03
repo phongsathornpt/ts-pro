@@ -141,6 +141,10 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseTypeAliasDecl()
 	case token.KwReturn:
 		return p.parseReturn()
+	case token.KwThrow:
+		return p.parseThrow()
+	case token.KwTry:
+		return p.parseTry()
 	case token.KwIf:
 		return p.parseIf()
 	case token.KwWhile:
@@ -586,6 +590,38 @@ func (p *Parser) parseBlock() *ast.BlockStmt {
 		SourceSpan: source.Span{Start: lbrace.Span.Start, End: rbrace.Span.End},
 		Statements: stmts,
 	}
+}
+
+func (p *Parser) parseThrow() *ast.ThrowStmt {
+	kw := p.advance()
+	value := p.parseExpression()
+	p.match(token.Semicolon)
+	return &ast.ThrowStmt{SourceSpan: source.Span{Start: kw.Span.Start, End: value.Span().End}, Value: value}
+}
+
+func (p *Parser) parseTry() *ast.TryStmt {
+	kw := p.advance()
+	tryBlock := p.parseBlock()
+	stmt := &ast.TryStmt{SourceSpan: source.Span{Start: kw.Span.Start, End: tryBlock.Span().End}, Try: tryBlock}
+	if p.match(token.KwCatch) {
+		p.expect(token.LParen)
+		name := p.expect(token.Ident)
+		stmt.CatchName = name.Text
+		if p.match(token.Colon) {
+			stmt.CatchType = p.parseType()
+		}
+		p.expect(token.RParen)
+		stmt.Catch = p.parseBlock()
+		stmt.SourceSpan.End = stmt.Catch.Span().End
+	}
+	if p.match(token.KwFinally) {
+		stmt.Finally = p.parseBlock()
+		stmt.SourceSpan.End = stmt.Finally.Span().End
+	}
+	if stmt.Catch == nil && stmt.Finally == nil {
+		p.error(stmt.SourceSpan, "try must have catch or finally")
+	}
+	return stmt
 }
 
 func (p *Parser) parseReturn() *ast.ReturnStmt {

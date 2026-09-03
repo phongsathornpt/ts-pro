@@ -58,6 +58,10 @@ const (
 	KwUndefined
 	KwAsync
 	KwAwait
+	KwTry
+	KwCatch
+	KwFinally
+	KwThrow
 	KwOf
 	KwIn
 
@@ -158,6 +162,10 @@ var tokens = [...]string{
 	KwUndefined:  "undefined",
 	KwAsync:      "async",
 	KwAwait:      "await",
+	KwTry:        "try",
+	KwCatch:      "catch",
+	KwFinally:    "finally",
+	KwThrow:      "throw",
 	KwOf:         "of",
 	KwIn:         "in",
 
@@ -267,6 +275,10 @@ var keywords = map[string]Kind{
 	"undefined":  KwUndefined,
 	"async":      KwAsync,
 	"await":      KwAwait,
+	"try":        KwTry,
+	"catch":      KwCatch,
+	"finally":    KwFinally,
+	"throw":      KwThrow,
 	"of":         KwOf,
 	"in":         KwIn,
 }

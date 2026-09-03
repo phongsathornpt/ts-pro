@@ -446,6 +446,10 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		// Control-flow legality is enforced during native lowering for now.
 	case *ast.ReturnStmt:
 		c.checkReturn(s)
+	case *ast.ThrowStmt:
+		c.checkExpr(s.Value)
+	case *ast.TryStmt:
+		c.checkTry(s)
 	case *ast.ExprStmt:
 		c.checkExpr(s.Expr)
 	}
@@ -822,6 +826,28 @@ func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 			c.checkStatement(stmt)
 		}
 		c.currentScope = parentScope
+	}
+}
+
+func (c *Checker) checkTry(s *ast.TryStmt) {
+	c.checkBlock(s.Try)
+	if s.Catch != nil {
+		catchType := types.TypeAny
+		if s.CatchType != nil {
+			if resolved := c.resolveTypeNode(s.CatchType); resolved != nil {
+				catchType = resolved
+			}
+		}
+		parent := c.currentScope
+		c.currentScope = NewScope(parent)
+		_ = c.currentScope.Define(&Symbol{Name: s.CatchName, Kind: SymVar, Type: catchType, Node: s})
+		for _, stmt := range s.Catch.Statements {
+			c.checkStatement(stmt)
+		}
+		c.currentScope = parent
+	}
+	if s.Finally != nil {
+		c.checkBlock(s.Finally)
 	}
 }
 

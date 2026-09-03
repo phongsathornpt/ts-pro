@@ -15,6 +15,11 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/frontend/sema"
 )
 
+type catchContext struct {
+	block *ir.BasicBlock
+	phi   *ir.PhiInst
+}
+
 type generator struct {
 	semaResult        *sema.Result
 	prog              *ir.Program
@@ -33,6 +38,7 @@ type generator struct {
 	currentClass      *sema.ClassInfo
 	classTags         map[string]int
 	emittedClassSpecs map[string]bool
+	catchStack        []*catchContext
 }
 
 func typeNodeIsAny(node ast.TypeNode) bool {
@@ -91,6 +97,84 @@ func irHeapRefType(t types.Type) bool {
 		}
 	}
 	return false
+}
+
+func cloneOperandMap(src map[string]ir.Operand) map[string]ir.Operand {
+	out := make(map[string]ir.Operand, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+func (g *generator) currentCatch() *catchContext {
+	if len(g.catchStack) == 0 {
+		return nil
+	}
+	return g.catchStack[len(g.catchStack)-1]
+}
+
+func (g *generator) routeThrownValue(value ir.Operand) {
+	if value == nil {
+		value = ir.ConstUndefined{}
+	}
+	if ctx := g.currentCatch(); ctx != nil {
+		from := g.currentBB
+		ctx.phi.Incoming = append(ctx.phi.Incoming, ir.PhiIncoming{Block: from, Value: value})
+		from.Terminator = &ir.JumpTerm{Target: ctx.block}
+		g.currentBB = g.currentFn.NewBlock("after_throw_dead")
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+		return
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.currentBB = g.currentFn.NewBlock("after_reject_dead")
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+}
+
+func (g *generator) lowerTry(s *ast.TryStmt) {
+	if s.Catch == nil {
+		// Finally-only semantics are handled in the dedicated finally phase.
+		g.lowerStatement(s.Try)
+		if s.Finally != nil {
+			g.lowerStatement(s.Finally)
+		}
+		return
+	}
+	outerLocals := cloneOperandMap(g.locals)
+	catchBB := g.currentFn.NewBlock("catch")
+	exitBB := g.currentFn.NewBlock("try_exit")
+	errorVal := g.currentFn.NewValue("caught_error", types.TypeAny)
+	phi := &ir.PhiInst{Res: errorVal}
+	catchBB.Phis = append(catchBB.Phis, phi)
+	ctx := &catchContext{block: catchBB, phi: phi}
+	g.catchStack = append(g.catchStack, ctx)
+	g.lowerStatement(s.Try)
+	g.catchStack = g.catchStack[:len(g.catchStack)-1]
+	hasExit := false
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.JumpTerm{Target: exitBB}
+		hasExit = true
+	}
+
+	g.currentBB = catchBB
+	g.locals = cloneOperandMap(outerLocals)
+	if s.CatchName != "" {
+		g.locals[s.CatchName] = errorVal
+	}
+	g.lowerStatement(s.Catch)
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.JumpTerm{Target: exitBB}
+		hasExit = true
+	}
+	g.currentBB = exitBB
+	if !hasExit {
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+	}
+	g.locals = outerLocals
+	if s.Finally != nil {
+		g.lowerStatement(s.Finally)
+	}
 }
 
 func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
@@ -2102,6 +2186,12 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 			}
 			g.locals[d.Name] = initOp
 		}
+	case *ast.ThrowStmt:
+		val := g.lowerExpr(s.Value)
+		val = g.boxJSValue(val, g.semanticType(s.Value))
+		g.routeThrownValue(val)
+	case *ast.TryStmt:
+		g.lowerTry(s)
 	case *ast.ReturnStmt:
 		var val ir.Operand
 		if s.Value != nil {
@@ -3108,12 +3198,24 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.AwaitExpr:
 		task := g.lowerExpr(e.Target)
 		resultType := g.semanticType(e)
+		var res ir.Operand
 		if resultType == nil || resultType.Kind() == types.KindVoid {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_join", Args: []ir.Operand{task}})
-			return nil
+		} else {
+			v := g.currentFn.NewValue("await_result", resultType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: v, Callee: "ts_task_join", Args: []ir.Operand{task}})
+			res = v
 		}
-		res := g.currentFn.NewValue("await_result", resultType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_join", Args: []ir.Operand{task}})
+		rejected := g.currentFn.NewValue("await_rejected", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rejected, Callee: "ts_task_rejected", Args: []ir.Operand{task}})
+		okBB := g.currentFn.NewBlock("await_ok")
+		rejectBB := g.currentFn.NewBlock("await_reject")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: okBB}
+		g.currentBB = rejectBB
+		errVal := g.currentFn.NewValue("await_error", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}})
+		g.routeThrownValue(errVal)
+		g.currentBB = okBB
 		return res
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {

@@ -493,6 +493,12 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	taskReturnRootsDoneLabel := len(e.Code)
 	patchJcc(taskReturnRootsDone, taskReturnRootsDoneLabel)
 
+	// Rejection reasons are always JSValue payloads regardless of the declared
+	// fulfilled result kind. Fulfilled tasks only trace ref/JS result classes.
+	e.MovRegDeref(amd64.R10, amd64.R12, amd64ObjectHeaderSize+amd64TaskState)
+	e.CmpRegImm32(amd64.R10, 3)
+	traceRejectedResult := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R10, amd64.R12, amd64ObjectHeaderSize+amd64TaskKind)
 	e.CmpRegImm32(amd64.R10, int32(amd64TaskResultRef))
 	traceTaskResult := len(e.Code)
@@ -500,6 +506,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	traceTaskDone := len(e.Code)
 	e.JmpRel32(0)
 	traceTaskResultLabel := len(e.Code)
+	patchJcc(traceRejectedResult, traceTaskResultLabel)
 	patchJcc(traceTaskResult, traceTaskResultLabel)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskResult)
 	markTaskResultCall := len(e.Code)
