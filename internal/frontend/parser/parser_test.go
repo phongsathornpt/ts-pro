@@ -340,3 +340,32 @@ func TestParseNamedImportAliases(t *testing.T) {
 		t.Fatalf("alias specifier = %#v", imp.Specifiers[1])
 	}
 }
+
+func TestParseRegexLiteralWithoutBreakingDivision(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("regex.ts", []byte(`
+const r = /abc\d+/i;
+const n = 8 / 2;
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	if len(prog.Statements) != 2 {
+		t.Fatalf("statements = %d", len(prog.Statements))
+	}
+	first := prog.Statements[0].(*ast.VarDeclStmt).Declarations[0].Init
+	r, ok := first.(*ast.RegexLit)
+	if !ok {
+		t.Fatalf("regex init = %T", first)
+	}
+	if r.Pattern != `abc\d+` || r.Flags != "i" {
+		t.Fatalf("regex = /%s/%s", r.Pattern, r.Flags)
+	}
+	second := prog.Statements[1].(*ast.VarDeclStmt).Declarations[0].Init
+	bin, ok := second.(*ast.BinaryExpr)
+	if !ok || bin.Op != token.Slash {
+		t.Fatalf("division init = %#v", second)
+	}
+}

@@ -1066,6 +1066,62 @@ func (p *Parser) parseTemplateLiteral(tok token.Token) ast.Expr {
 	return result
 }
 
+func (p *Parser) parseRegexLiteral(tok token.Token) ast.Expr {
+	start := int(tok.Span.Start - p.file.Base)
+	src := p.file.Src
+	i := start + 1
+	escaped, inClass := false, false
+	endSlash := -1
+	for i < len(src) {
+		ch := src[i]
+		if escaped {
+			escaped = false
+			i++
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			i++
+			continue
+		}
+		if ch == '[' {
+			inClass = true
+			i++
+			continue
+		}
+		if ch == ']' {
+			inClass = false
+			i++
+			continue
+		}
+		if ch == '/' && !inClass {
+			endSlash = i
+			break
+		}
+		if ch == '\n' || ch == '\r' {
+			break
+		}
+		i++
+	}
+	if endSlash < 0 {
+		p.error(tok.Span, "unterminated regular expression literal")
+		p.advance()
+		return &ast.RegexLit{SourceSpan: tok.Span}
+	}
+	j := endSlash + 1
+	for j < len(src) && ((src[j] >= 'a' && src[j] <= 'z') || (src[j] >= 'A' && src[j] <= 'Z')) {
+		j++
+	}
+	endPos := p.file.Base + source.Pos(j)
+	for p.current().Kind != token.EOF && p.current().Span.Start < endPos {
+		p.advance()
+	}
+	return &ast.RegexLit{
+		SourceSpan: source.Span{Start: tok.Span.Start, End: endPos},
+		Pattern:    string(src[start+1 : endSlash]), Flags: string(src[endSlash+1 : j]),
+	}
+}
+
 func (p *Parser) parsePrimary() ast.Expr {
 	tok := p.current()
 
@@ -1080,6 +1136,8 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case token.String:
 		p.advance()
 		return &ast.StringLit{SourceSpan: tok.Span, Value: tok.Text}
+	case token.Slash:
+		return p.parseRegexLiteral(tok)
 	case token.TemplateNoSubst:
 		p.advance()
 		return p.parseTemplateLiteral(tok)

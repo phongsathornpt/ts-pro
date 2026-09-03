@@ -62,6 +62,12 @@ type (
 		Value      string
 	}
 
+	RegexLit struct {
+		SourceSpan source.Span
+		Pattern    string
+		Flags      string
+	}
+
 	BoolLit struct {
 		SourceSpan source.Span
 		Value      bool
@@ -176,6 +182,8 @@ func (e *NumberLit) Span() source.Span     { return e.SourceSpan }
 func (e *NumberLit) exprNode()             {}
 func (e *StringLit) Span() source.Span     { return e.SourceSpan }
 func (e *StringLit) exprNode()             {}
+func (e *RegexLit) Span() source.Span      { return e.SourceSpan }
+func (e *RegexLit) exprNode()              {}
 func (e *BoolLit) Span() source.Span       { return e.SourceSpan }
 func (e *BoolLit) exprNode()               {}
 func (e *NullLit) Span() source.Span       { return e.SourceSpan }

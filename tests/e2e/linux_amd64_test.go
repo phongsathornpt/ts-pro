@@ -1025,3 +1025,25 @@ console.log(JSON.stringify(JSON.parse("{\"id\":42}")));
 		expected: "{\"message\":\"hello\"}\n{\"count\":5,\"key\":\"items\"}\n[10,20,30]\n[\"a\",\"b\",\"c\"]\n[true,false]\n123.45\n\"pure-Go\"\ntrue\n123.45\nparsed string\ntrue\nfalse\n-12.5\ntrue\n[1,2,3]\n{\"id\":42}\n",
 	})
 }
+
+func TestLinuxAMD64RegExpAPI(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "regexp_literals_constructor_flags_and_division",
+		source: `
+const ci = new RegExp("world", "i");
+console.log(ci.test("Hello World"));
+console.log(ci.test("Hello Earth"));
+console.log(ci.source);
+const digits = /abc\d+/;
+console.log(digits.test("xxabc1234yy"));
+console.log(digits.test("abcdef"));
+const prefix = new RegExp("^foo");
+console.log(prefix.test("foobar"));
+console.log(prefix.test("barfoo"));
+const plain = new RegExp("cat");
+console.log(plain.test("xxcatxx"));
+console.log(8 / 2);
+`,
+		expected: "1\n0\nworld\n1\n0\n1\n0\n1\n4\n",
+	})
+}

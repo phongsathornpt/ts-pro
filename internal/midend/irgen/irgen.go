@@ -946,6 +946,66 @@ func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Op
 	return g.failExpr("unsupported JSON method %s", mem.Property)
 }
 
+func isBuiltinRegExpType(t types.Type) bool {
+	obj, ok := t.(*types.ObjectType)
+	return ok && obj.Name == "$RegExp"
+}
+
+func classifyNativeRegExp(pattern, flags string) (kind float64, needle string, flagBits float64, err error) {
+	for _, flag := range flags {
+		if flag == 'i' {
+			flagBits = 1
+			continue
+		}
+		return 0, "", 0, fmt.Errorf("unsupported native RegExp flag %q", flag)
+	}
+	if strings.HasPrefix(pattern, "^") {
+		needle = pattern[1:]
+		if strings.ContainsAny(needle, `.*+?[](){}|^$\\`) {
+			return 0, "", 0, fmt.Errorf("unsupported anchored RegExp pattern %q", pattern)
+		}
+		return 1, needle, flagBits, nil
+	}
+	if strings.HasSuffix(pattern, `\d+`) {
+		needle = strings.TrimSuffix(pattern, `\d+`)
+		if needle == "" || strings.ContainsAny(needle, `.*+?[](){}|^$\\`) {
+			return 0, "", 0, fmt.Errorf("unsupported digit RegExp pattern %q", pattern)
+		}
+		return 2, needle, flagBits, nil
+	}
+	if strings.ContainsAny(pattern, `.*+?[](){}|^$\\`) {
+		return 0, "", 0, fmt.Errorf("unsupported native RegExp pattern %q", pattern)
+	}
+	return 0, pattern, flagBits, nil
+}
+
+func (g *generator) lowerNativeRegExp(pattern, flags string, resultType types.Type) ir.Operand {
+	kind, needle, flagBits, err := classifyNativeRegExp(pattern, flags)
+	if err != nil {
+		return g.failExpr("%v", err)
+	}
+	res := g.currentFn.NewValue("regexp", resultType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: "$RegExp", FieldCount: 4, RefMask: 0b0011})
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: res, Field: "source", Offset: 16, Val: ir.ConstString{Value: pattern}},
+		&ir.SetFieldInst{Obj: res, Field: "needle", Offset: 24, Val: ir.ConstString{Value: needle}},
+		&ir.SetFieldInst{Obj: res, Field: "kind", Offset: 32, Val: ir.ConstNumber{Value: kind}},
+		&ir.SetFieldInst{Obj: res, Field: "flags", Offset: 40, Val: ir.ConstNumber{Value: flagBits}},
+	)
+	return res
+}
+
+func (g *generator) emitRegExpTest(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
+	if mem.Property != "test" || len(call.Args) != 1 {
+		return g.failExpr("unsupported native RegExp call .%s", mem.Property)
+	}
+	obj := g.lowerExpr(mem.Object)
+	text := g.lowerExpr(call.Args[0])
+	res := g.currentFn.NewValue("regexp_test", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_regexp_test", Args: []ir.Operand{obj, text}})
+	return res
+}
+
 func isBuiltinDateType(t types.Type) bool {
 	obj, ok := t.(*types.ObjectType)
 	return ok && obj.Name == "$Date"
@@ -2148,6 +2208,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return ir.ConstNumber{Value: e.Value}
 	case *ast.StringLit:
 		return ir.ConstString{Value: e.Value}
+	case *ast.RegexLit:
+		return g.lowerNativeRegExp(e.Pattern, e.Flags, g.semanticType(e))
 	case *ast.BoolLit:
 		return ir.ConstBool{Value: e.Value}
 	case *ast.NullLit:
@@ -2162,6 +2224,24 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.SuperExpr:
 		return g.failExpr("super lowering is reserved for the inheritance phase")
 	case *ast.NewExpr:
+		if e.ClassName == "RegExp" {
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				return g.failExpr("native RegExp expects one pattern and optional flags")
+			}
+			pattern, ok := e.Args[0].(*ast.StringLit)
+			if !ok {
+				return g.failExpr("native RegExp pattern currently requires a string literal")
+			}
+			flags := ""
+			if len(e.Args) == 2 {
+				f, ok := e.Args[1].(*ast.StringLit)
+				if !ok {
+					return g.failExpr("native RegExp flags currently require a string literal")
+				}
+				flags = f.Value
+			}
+			return g.lowerNativeRegExp(pattern.Value, flags, g.semanticType(e))
+		}
 		if e.ClassName == "Date" {
 			if len(e.Args) != 1 {
 				return g.failExpr("native Date constructor expects one argument")
@@ -2527,6 +2607,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if objType.Name == "$RegExp" && e.Property == "source" {
+				obj := g.lowerExpr(e.Object)
+				res := g.currentFn.NewValue("regexp_source", types.TypeString)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: "source", Offset: 16})
+				return res
+			}
 			if collection := g.semaResult.BuiltinCollections[objType.Name]; collection != nil && e.Property == "size" {
 				obj := g.lowerExpr(e.Object)
 				res := g.currentFn.NewValue("collection_size", types.TypeNumber)
@@ -2602,6 +2688,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if isBuiltinRegExpType(g.semanticType(mem.Object)) {
+				return g.emitRegExpTest(e, mem)
+			}
 			if ident, ok := mem.Object.(*ast.IdentExpr); ok && ident.Name == "JSON" {
 				return g.lowerJSONCall(e, mem)
 			}

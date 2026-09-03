@@ -93,6 +93,7 @@ type Result struct {
 	ImportAliases      map[string]string
 	BuiltinCollections map[string]*BuiltinCollectionInfo
 	DateType           *types.ObjectType
+	RegExpType         *types.ObjectType
 	RootScope          *Scope
 	Diagnostics        diag.DiagnosticList
 }
@@ -466,6 +467,13 @@ func removeNullishType(t types.Type) types.Type {
 	}
 }
 
+func (c *Checker) builtinRegExpType() *types.ObjectType {
+	if c.result.RegExpType == nil {
+		c.result.RegExpType = types.NewObject("$RegExp")
+	}
+	return c.result.RegExpType
+}
+
 func (c *Checker) builtinDateType() *types.ObjectType {
 	if c.result.DateType == nil {
 		c.result.DateType = types.NewObject("$Date")
@@ -556,6 +564,14 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
 				return member, true
+			}
+		}
+		if t.Name == "$RegExp" {
+			switch property {
+			case "test":
+				return types.NewFunction([]types.Param{{Name: "text", Type: types.TypeString}}, types.TypeBoolean), true
+			case "source":
+				return types.TypeString, true
 			}
 		}
 		if t.Name == "$DateConstructor" && property == "now" {
@@ -899,6 +915,10 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.StringLit:
 		c.result.Types[e] = types.TypeString
 		return types.TypeString
+	case *ast.RegexLit:
+		t := c.builtinRegExpType()
+		c.result.Types[e] = t
+		return t
 	case *ast.BoolLit:
 		c.result.Types[e] = types.TypeBoolean
 		return types.TypeBoolean
@@ -929,6 +949,19 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
 	case *ast.NewExpr:
+		if e.ClassName == "RegExp" {
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				c.error(e.Span(), "TS2554", "RegExp expects a pattern and optional flags.")
+			}
+			for _, arg := range e.Args {
+				if c.checkExpr(arg) != types.TypeString {
+					c.error(arg.Span(), "TS2345", "Native RegExp pattern and flags must be strings.")
+				}
+			}
+			t := c.builtinRegExpType()
+			c.result.Types[e] = t
+			return t
+		}
 		if e.ClassName == "Date" {
 			if len(e.Args) != 1 {
 				c.error(e.Span(), "TS2554", "Native Date constructor currently expects exactly one number or ISO string argument.")

@@ -1604,6 +1604,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_string_eq"] = len(e.Code)
 	emitAMD64StringEq(e)
+	fnOffsets["ts_regexp_test"] = len(e.Code)
+	emitAMD64RegExpTest(e)
 
 	fnOffsets["ts_js_key_eq"] = len(e.Code)
 	emitAMD64JSKeyEq(e, fnOffsets["ts_string_eq"])
