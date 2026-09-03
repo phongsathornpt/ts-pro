@@ -782,3 +782,28 @@ console.log(bio(null));
 		expected: "Hello\nnone\n",
 	})
 }
+
+func TestLinuxAMD64OptionalProperties(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "optional_object_slots_and_union_properties",
+		source: `
+interface Config { host: string; port?: number; secure?: boolean; }
+interface Circle { kind: string; radius: number; }
+interface Square { kind: string; size: number; }
+type Shape = Circle | Square;
+const c1: Config = { host: "localhost", port: 8080, secure: true };
+const c2: Config = { host: "remote" };
+console.log(c1.host);
+console.log(c1.port);
+console.log(c1.secure);
+console.log(c2.host);
+console.log(c2.port);
+console.log(c2.secure);
+const s1: Shape = { kind: "circle", radius: 10 };
+const s2: Shape = { kind: "square", size: 20 };
+console.log(s1.kind);
+console.log(s2.kind);
+`,
+		expected: "localhost\n8080\n1\nremote\nundefined\nundefined\ncircle\nsquare\n",
+	})
+}

@@ -627,6 +627,84 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	return res
 }
 
+func consolePrinterForType(t types.Type) (string, bool) {
+	switch t {
+	case types.TypeNumber:
+		return "ts_print_val", true
+	case types.TypeString:
+		return "ts_print_str", true
+	case types.TypeBoolean:
+		return "ts_print_bool", true
+	case types.TypeUndefined:
+		return "ts_print_undefined", true
+	case types.TypeNull:
+		return "ts_print_null", true
+	default:
+		return "", false
+	}
+}
+
+func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
+	t := g.semanticType(expr)
+	if t == nil {
+		t = types.TypeAny
+	}
+	if callee, ok := consolePrinterForType(t); ok {
+		if t == types.TypeUndefined || t == types.TypeNull {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee})
+			return nil
+		}
+		value := g.lowerExpr(expr)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee, Args: []ir.Operand{value}, ParamTypes: []types.Type{t}})
+		return nil
+	}
+	union, ok := t.(*types.UnionType)
+	if !ok {
+		return g.failExpr("console.log native printing is not implemented for %s", t)
+	}
+	var concrete types.Type
+	hasNull, hasUndefined := false, false
+	for _, member := range union.Members {
+		switch member {
+		case types.TypeNull:
+			hasNull = true
+		case types.TypeUndefined:
+			hasUndefined = true
+		default:
+			if concrete != nil {
+				return g.failExpr("console.log native nullable-union printing requires one concrete member, got %s", t)
+			}
+			concrete = member
+		}
+	}
+	printer, printable := consolePrinterForType(concrete)
+	if !printable {
+		return g.failExpr("console.log native printing is not implemented for %s", t)
+	}
+	value := g.lowerExpr(expr)
+	join := g.currentFn.NewBlock("print_join")
+	emitMissing := func(name string, sentinel ir.Operand, callee string) {
+		cond := g.currentFn.NewValue(name+"_match", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: cond, Op: ir.OpEq, LHS: value, RHS: sentinel})
+		printBB := g.currentFn.NewBlock(name)
+		nextBB := g.currentFn.NewBlock(name + "_next")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: cond, Then: printBB, Else: nextBB}
+		printBB.Instructions = append(printBB.Instructions, &ir.CallInst{Callee: callee})
+		printBB.Terminator = &ir.JumpTerm{Target: join}
+		g.currentBB = nextBB
+	}
+	if hasUndefined {
+		emitMissing("print_undefined", ir.ConstUndefined{}, "ts_print_undefined")
+	}
+	if hasNull {
+		emitMissing("print_null", ir.ConstNull{}, "ts_print_null")
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: printer, Args: []ir.Operand{value}, ParamTypes: []types.Type{concrete}})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: join}
+	g.currentBB = join
+	return nil
+}
+
 func isConsoleLogCall(expr ast.Expr) bool {
 	mem, ok := expr.(*ast.MemberExpr)
 	if !ok || mem.Property != "log" {
@@ -1726,6 +1804,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+		written := make(map[string]bool, len(objType.Fields))
 		for _, prop := range e.Properties {
 			if prop.Spread {
 				sourceType, ok := g.semanticType(prop.Value).(*types.ObjectType)
@@ -1739,11 +1818,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					value := g.currentFn.NewValue("spread_field", field.Type)
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: value, Obj: source, Field: name, Offset: sourceOffsets[name]})
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: value})
+					written[name] = true
 				}
 				continue
 			}
 			val := g.lowerExpr(prop.Value)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: prop.Key, Offset: offsets[prop.Key], Val: val})
+			written[prop.Key] = true
+		}
+		for _, name := range objType.FieldOrder {
+			field := objType.Fields[name]
+			if written[name] || !field.Optional {
+				continue
+			}
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: ir.ConstUndefined{}})
 		}
 		return res
 	case *ast.IdentExpr:
@@ -1945,8 +2033,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
 			return res
 		}
+		if _, ok := g.semanticType(e.Object).(*types.UnionType); ok {
+			obj := g.lowerExpr(e.Object)
+			if concrete, ok := obj.Type().(*types.ObjectType); ok {
+				offsets, _, _ := g.objectLayout(concrete)
+				if offset, exists := offsets[e.Property]; exists {
+					resultType := types.TypeAny
+					if t := g.semanticType(e); t != nil {
+						resultType = t
+					}
+					res := g.currentFn.NewValue("union_field", resultType)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
+					return res
+				}
+			}
+		}
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
+		if isConsoleLogCall(e.Callee) {
+			if len(e.Args) != 1 {
+				return g.failExpr("console.log native lowering expects exactly one argument")
+			}
+			return g.lowerConsoleLog(e.Args[0])
+		}
 		if _, ok := e.Callee.(*ast.SuperExpr); ok {
 			if g.currentClass == nil || g.currentClass.BaseName == "" {
 				return g.failExpr("cannot lower super(...) outside a derived class constructor")

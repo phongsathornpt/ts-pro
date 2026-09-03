@@ -517,6 +517,16 @@ func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) type
 			}
 		}
 	}
+	if object, ok := expected.(*types.ObjectType); ok {
+		if lit, ok := expr.(*ast.ObjectLit); ok {
+			actual := c.checkExpr(lit)
+			if actual.AssignableTo(object) {
+				c.result.Types[lit] = object
+				return object
+			}
+			return actual
+		}
+	}
 	return c.checkExpr(expr)
 }
 

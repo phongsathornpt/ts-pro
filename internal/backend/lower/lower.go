@@ -1523,6 +1523,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64PrintBool(e)
 	fnOffsets["ts_print_undefined"] = len(e.Code)
 	emitAMD64PrintLiteral(e, "undefined\n")
+	fnOffsets["ts_print_null"] = len(e.Code)
+	emitAMD64PrintLiteral(e, "null\n")
 
 	// Emit ts_print_str for Linux AMD64
 	fnOffsets["ts_print_str"] = len(e.Code)
