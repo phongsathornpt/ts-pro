@@ -509,7 +509,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		case token.PipePipe:
 			op = ir.OpOr
 		}
-		resVal := g.currentFn.NewValue("t", types.TypeNumber)
+		resultType := types.TypeNumber
+		if g.semaResult != nil {
+			if t, ok := g.semaResult.Types[e]; ok && t != nil {
+				resultType = t
+			}
+		}
+		resVal := g.currentFn.NewValue("t", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
 			Res: resVal,
 			Op:  op,
@@ -543,13 +549,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 		} else if e.Op == token.Minus {
 			target := g.lowerExpr(e.Target)
+			if c, ok := target.(ir.ConstNumber); ok {
+				return ir.ConstNumber{Value: -c.Value}
+			}
 			resVal := g.currentFn.NewValue("neg", types.TypeNumber)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
-				Res: resVal,
-				Op:  ir.OpSub,
-				LHS: ir.ConstNumber{Value: 0},
-				RHS: target,
-			})
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.UnaryInst{Res: resVal, Op: "-", Val: target})
 			return resVal
 		} else if e.Op == token.Bang {
 			target := g.lowerExpr(e.Target)
@@ -572,8 +576,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if objIdent, ok := mem.Object.(*ast.IdentExpr); ok && objIdent.Name == "console" && mem.Property == "log" {
 				calleeName = "ts_print_val"
 				if len(e.Args) > 0 && g.semaResult != nil {
-					if t, ok := g.semaResult.Types[e.Args[0]]; ok && t == types.TypeString {
-						calleeName = "ts_print_str"
+					if t, ok := g.semaResult.Types[e.Args[0]]; ok {
+						switch t {
+						case types.TypeString:
+							calleeName = "ts_print_str"
+						case types.TypeBoolean:
+							calleeName = "ts_print_bool"
+						}
 					}
 				}
 			}
@@ -582,7 +591,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		for _, arg := range e.Args {
 			args = append(args, g.lowerExpr(arg))
 		}
-		resVal := g.currentFn.NewValue("ret", types.TypeNumber)
+		resultType := types.TypeNumber
+		if g.semaResult != nil {
+			if t, ok := g.semaResult.Types[e]; ok && t != nil {
+				resultType = t
+			}
+		}
+		resVal := g.currentFn.NewValue("ret", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
 			Res:    resVal,
 			Callee: calleeName,

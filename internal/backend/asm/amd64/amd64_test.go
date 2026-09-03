@@ -124,3 +124,30 @@ func TestAMD64ByteMemoryEncodings(t *testing.T) {
 		t.Fatalf("neg r12: got %x, want %x", e.Code, want)
 	}
 }
+
+func TestAMD64SSE2NumberEncodings(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*Emitter)
+		want []byte
+	}{
+		{"movq xmm0 rax", func(e *Emitter) { e.MovQXMMReg(XMM0, RAX) }, []byte{0x66, 0x48, 0x0F, 0x6E, 0xC0}},
+		{"movq r12 xmm3", func(e *Emitter) { e.MovQRegXMM(R12, XMM3) }, []byte{0x66, 0x49, 0x0F, 0x7E, 0xDC}},
+		{"addsd xmm0 xmm1", func(e *Emitter) { e.AddSD(XMM0, XMM1) }, []byte{0xF2, 0x0F, 0x58, 0xC1}},
+		{"subsd xmm2 xmm3", func(e *Emitter) { e.SubSD(XMM2, XMM3) }, []byte{0xF2, 0x0F, 0x5C, 0xD3}},
+		{"mulsd xmm0 xmm1", func(e *Emitter) { e.MulSD(XMM0, XMM1) }, []byte{0xF2, 0x0F, 0x59, 0xC1}},
+		{"divsd xmm0 xmm1", func(e *Emitter) { e.DivSD(XMM0, XMM1) }, []byte{0xF2, 0x0F, 0x5E, 0xC1}},
+		{"ucomisd xmm0 xmm1", func(e *Emitter) { e.Ucomisd(XMM0, XMM1) }, []byte{0x66, 0x0F, 0x2E, 0xC1}},
+		{"cvttsd2si rax xmm2", func(e *Emitter) { e.Cvttsd2si(RAX, XMM2) }, []byte{0xF2, 0x48, 0x0F, 0x2C, 0xC2}},
+		{"cvtsi2sd xmm3 r12", func(e *Emitter) { e.Cvtsi2sd(XMM3, R12) }, []byte{0xF2, 0x49, 0x0F, 0x2A, 0xDC}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewEmitter()
+			tc.emit(e)
+			if !bytes.Equal(e.Code, tc.want) {
+				t.Fatalf("encoding: got %x, want %x", e.Code, tc.want)
+			}
+		})
+	}
+}

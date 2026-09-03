@@ -7,6 +7,28 @@ import (
 // Register represents a 64-bit AMD64 integer register.
 type Register uint8
 
+// XMMRegister represents an SSE register whose low lane carries binary64 values.
+type XMMRegister uint8
+
+const (
+	XMM0 XMMRegister = iota
+	XMM1
+	XMM2
+	XMM3
+	XMM4
+	XMM5
+	XMM6
+	XMM7
+	XMM8
+	XMM9
+	XMM10
+	XMM11
+	XMM12
+	XMM13
+	XMM14
+	XMM15
+)
+
 const (
 	RAX Register = 0
 	RCX Register = 1
@@ -36,6 +58,12 @@ const (
 	CondLE Cond = 0xE // Less or Equal
 	CondG  Cond = 0xF // Greater
 	CondGE Cond = 0xD // Greater or Equal
+	CondB  Cond = 0x2
+	CondAE Cond = 0x3
+	CondBE Cond = 0x6
+	CondA  Cond = 0x7
+	CondP  Cond = 0xA
+	CondNP Cond = 0xB
 )
 
 // Emitter emits x86-64 machine code bytes.
@@ -310,6 +338,60 @@ func (e *Emitter) IdivReg(src Register) {
 	e.emitByte(rex(true, false, false, src >= 8))
 	e.emitByte(0xF7)
 	e.emitByte(modRM(0b11, 7, src))
+}
+
+// MovQXMMReg moves a raw 64-bit GPR payload into an XMM low lane.
+func (e *Emitter) MovQXMMReg(dst XMMRegister, src Register) {
+	e.emitByte(0x66)
+	e.emitByte(rex(true, dst >= 8, false, src >= 8))
+	e.emitBytes(0x0F, 0x6E)
+	e.emitByte((0b11 << 6) | ((byte(dst) & 7) << 3) | (byte(src) & 7))
+}
+
+// MovQRegXMM moves an XMM low lane into a GPR without conversion.
+func (e *Emitter) MovQRegXMM(dst Register, src XMMRegister) {
+	e.emitByte(0x66)
+	e.emitByte(rex(true, src >= 8, false, dst >= 8))
+	e.emitBytes(0x0F, 0x7E)
+	e.emitByte((0b11 << 6) | ((byte(src) & 7) << 3) | (byte(dst) & 7))
+}
+
+func (e *Emitter) emitSSE2Binary(prefix, opcode byte, dst, src XMMRegister) {
+	e.emitByte(prefix)
+	if dst >= 8 || src >= 8 {
+		e.emitByte(rex(false, dst >= 8, false, src >= 8))
+	}
+	e.emitBytes(0x0F, opcode)
+	e.emitByte((0b11 << 6) | ((byte(dst) & 7) << 3) | (byte(src) & 7))
+}
+
+func (e *Emitter) MovSDRegReg(dst, src XMMRegister) { e.emitSSE2Binary(0xF2, 0x10, dst, src) }
+func (e *Emitter) AddSD(dst, src XMMRegister)       { e.emitSSE2Binary(0xF2, 0x58, dst, src) }
+func (e *Emitter) SubSD(dst, src XMMRegister)       { e.emitSSE2Binary(0xF2, 0x5C, dst, src) }
+func (e *Emitter) MulSD(dst, src XMMRegister)       { e.emitSSE2Binary(0xF2, 0x59, dst, src) }
+func (e *Emitter) DivSD(dst, src XMMRegister)       { e.emitSSE2Binary(0xF2, 0x5E, dst, src) }
+func (e *Emitter) XorPD(dst, src XMMRegister)       { e.emitSSE2Binary(0x66, 0x57, dst, src) }
+func (e *Emitter) Ucomisd(lhs, rhs XMMRegister)     { e.emitSSE2Binary(0x66, 0x2E, lhs, rhs) }
+
+func (e *Emitter) Cvttsd2si(dst Register, src XMMRegister) {
+	e.emitByte(0xF2)
+	e.emitByte(rex(true, dst >= 8, false, src >= 8))
+	e.emitBytes(0x0F, 0x2C)
+	e.emitByte((0b11 << 6) | ((byte(dst) & 7) << 3) | (byte(src) & 7))
+}
+
+func (e *Emitter) Cvtsi2sd(dst XMMRegister, src Register) {
+	e.emitByte(0xF2)
+	e.emitByte(rex(true, dst >= 8, false, src >= 8))
+	e.emitBytes(0x0F, 0x2A)
+	e.emitByte((0b11 << 6) | ((byte(dst) & 7) << 3) | (byte(src) & 7))
+}
+
+func (e *Emitter) ShrRegImm8(reg Register, imm byte) {
+	e.emitByte(rex(true, false, false, reg >= 8))
+	e.emitByte(0xC1)
+	e.emitByte(modRM(0b11, 5, reg))
+	e.emitByte(imm)
 }
 
 // Syscall: SYSCALL

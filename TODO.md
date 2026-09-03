@@ -11,10 +11,11 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Integer-bootstrap arithmetic, comparisons, division/modulo, branching, recursion, loops, and top-level execution.
 - [x] Linux syscall runtime bootstrap for integer/string printing, anonymous mmap allocation, and string concatenation.
 - [x] Explicit Linux AMD64 E2E suite that validates ELF output on every host and executes natively on Linux AMD64.
-- [ ] Move TypeScript `number` from the current integer bootstrap representation to IEEE-754 F64/XMM lowering.
-- [ ] Implement SysV stack-passed arguments beyond the first six integer-class arguments.
-- [ ] Lower `&&` / `||` with JavaScript short-circuit/value semantics instead of integer AND/OR.
+- [x] Move TypeScript `number` to IEEE-754 F64 payloads with SSE2/XMM arithmetic, comparisons, truthiness, calls, returns, NaN/Infinity, and signed-zero coverage on Linux AMD64.
+- [x] Implement SysV stack-passed arguments beyond register capacity for both SSE (`number`) and integer/reference classes, including 10-number and 7-string E2E coverage.
+- [x] Lower `&&` / `||` with CFG short-circuit and operand-value Phi semantics instead of eager integer AND/OR.
 - [ ] Replace per-allocation mmap string storage with the canonical native heap/GC integration.
+- [ ] Replace the compact 12-digit F64 console formatter with ECMAScript shortest-roundtrip NumberToString semantics.
 - [ ] Add a macOS Linux-AMD64 execution runner (Docker/VM wrapper) in addition to compile/ELF validation; native Linux CI remains authoritative.
 
 ## Architecture invariant

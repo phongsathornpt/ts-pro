@@ -2,6 +2,7 @@ package opt
 
 import (
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
+	"math"
 )
 
 // Options controls optimization passes.
@@ -61,17 +62,9 @@ func constantFold(fn *ir.Function) bool {
 					case ir.OpMul:
 						res = c1.Value * c2.Value
 					case ir.OpDiv:
-						if c2.Value != 0 {
-							res = c1.Value / c2.Value
-						} else {
-							valid = false
-						}
+						res = c1.Value / c2.Value
 					case ir.OpMod:
-						if int64(c2.Value) != 0 {
-							res = float64(int64(c1.Value) % int64(c2.Value))
-						} else {
-							valid = false
-						}
+						res = math.Mod(c1.Value, c2.Value)
 					case ir.OpAnd:
 						res = float64(int64(c1.Value) & int64(c2.Value))
 					case ir.OpOr:
@@ -87,6 +80,15 @@ func constantFold(fn *ir.Function) bool {
 				}
 				bi.LHS = lhs
 				bi.RHS = rhs
+				newInsts = append(newInsts, bi)
+			case *ir.UnaryInst:
+				val := resolveConst(bi.Val, constMap)
+				if c, ok := val.(ir.ConstNumber); ok && bi.Op == "-" && bi.Res != nil {
+					constMap[bi.Res.ID] = ir.ConstNumber{Value: -c.Value}
+					changed = true
+					continue
+				}
+				bi.Val = val
 				newInsts = append(newInsts, bi)
 			case *ir.CallInst:
 				for i, arg := range bi.Args {
@@ -152,6 +154,10 @@ func deadCodeElim(fn *ir.Function) bool {
 					uses[v.ID]++
 				}
 				if v, ok := i.RHS.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.UnaryInst:
+				if v, ok := i.Val.(*ir.Value); ok {
 					uses[v.ID]++
 				}
 			case *ir.CallInst:

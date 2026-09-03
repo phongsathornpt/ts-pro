@@ -108,3 +108,60 @@ if (1) {
 		t.Run(tc.name, func(t *testing.T) { runLinuxAMD64(t, tc) })
 	}
 }
+
+func TestLinuxAMD64F64Semantics(t *testing.T) {
+	cases := []linuxAMD64Case{
+		{
+			name: "f64_arithmetic_and_special_values",
+			source: `
+function mod(a: number, b: number): number { return a % b; }
+console.log(1.5 + 2.25);
+console.log(5 / 2);
+console.log(mod(5.5, 2));
+console.log(1 / 0);
+console.log(0 / 0);
+console.log(-0);
+`,
+			expected: "3.75\n2.5\n1.5\nInfinity\nNaN\n-0\n",
+		},
+		{
+			name: "f64_truthiness_and_nan_comparisons",
+			source: `
+function truth(x: number): number { if (x) { return 1; } return 0; }
+function neg(x: number): number { return -x; }
+console.log(truth(-0));
+console.log(truth(0 / 0));
+console.log(neg(0));
+console.log((0 / 0) == (0 / 0));
+console.log((0 / 0) != (0 / 0));
+`,
+			expected: "0\n1\n-0\n0\n1\n",
+		},
+		{
+			name: "sysv_ten_sse_arguments",
+			source: `
+function sum10(a:number,b:number,c:number,d:number,e:number,f:number,g:number,h:number,i:number,j:number): number {
+  return a+b+c+d+e+f+g+h+i+j;
+}
+console.log(sum10(1,2,3,4,5,6,7,8,9,10));
+`,
+			expected: "55\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { runLinuxAMD64(t, tc) })
+	}
+}
+
+func TestLinuxAMD64SysVStackIntegerClass(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "sysv_seven_integer_class_arguments",
+		source: `
+function pick7(a:string,b:string,c:string,d:string,e:string,f:string,g:string): string {
+  return g;
+}
+console.log(pick7("a","b","c","d","e","f","stack-ok"));
+`,
+		expected: "stack-ok\n",
+	})
+}
