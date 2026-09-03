@@ -807,6 +807,20 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				return scratch, fmt.Errorf("unsupported AMD64 operand %T", op)
 			}
 		}
+		loadArrayIndex := func(op ir.Operand, dst amd64.Register) error {
+			src, err := loadOperand(op, amd64.R10)
+			if err != nil {
+				return err
+			}
+			e.MovQXMMReg(amd64.XMM0, src)
+			e.Cvttsd2si(dst, amd64.XMM0)
+			return nil
+		}
+		emitRuntimeCall := func(callee string) {
+			at := len(e.Code)
+			e.CallRel32(0)
+			callFixups = append(callFixups, callFixup{offset: at, callee: callee})
+		}
 
 		// Prologue: save RBP and callee-saved registers RBX, R12-R15.
 		e.Push(amd64.RBP)
@@ -968,6 +982,90 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.MovRegImm64(amd64.R11, int64(-0x8000000000000000))
 					e.XorRegReg(amd64.R10, amd64.R11)
 					storeValue(locs[bi.Res.ID], amd64.R10)
+
+				case *ir.AllocArrayInst:
+					if err := loadArrayIndex(bi.Length, amd64.RDI); err != nil {
+						return nil, err
+					}
+					e.MovRegImm64(amd64.RSI, amd64ArrayElementClass(bi.ElemType))
+					emitRuntimeCall("ts_array_new")
+					storeSSAValue(bi.Res, amd64.RAX)
+
+				case *ir.GetElementInst:
+					arr, err := loadOperand(bi.Array, amd64.RDI)
+					if err != nil {
+						return nil, err
+					}
+					if arr != amd64.RDI {
+						e.MovRegReg(amd64.RDI, arr)
+					}
+					if err := loadArrayIndex(bi.Index, amd64.RSI); err != nil {
+						return nil, err
+					}
+					emitRuntimeCall("ts_array_get")
+					storeSSAValue(bi.Res, amd64.RAX)
+
+				case *ir.SetElementInst:
+					arr, err := loadOperand(bi.Array, amd64.RDI)
+					if err != nil {
+						return nil, err
+					}
+					if arr != amd64.RDI {
+						e.MovRegReg(amd64.RDI, arr)
+					}
+					if err := loadArrayIndex(bi.Index, amd64.RSI); err != nil {
+						return nil, err
+					}
+					val, err := loadOperand(bi.Val, amd64.RDX)
+					if err != nil {
+						return nil, err
+					}
+					if val != amd64.RDX {
+						e.MovRegReg(amd64.RDX, val)
+					}
+					emitRuntimeCall("ts_array_set")
+
+				case *ir.ArrayLengthInst:
+					arr, err := loadOperand(bi.Array, amd64.RDI)
+					if err != nil {
+						return nil, err
+					}
+					if arr != amd64.RDI {
+						e.MovRegReg(amd64.RDI, arr)
+					}
+					emitRuntimeCall("ts_array_len")
+					e.MovQRegXMM(amd64.R10, amd64.XMM0)
+					storeSSAValue(bi.Res, amd64.R10)
+
+				case *ir.ArrayPushInst:
+					arr, err := loadOperand(bi.Array, amd64.RDI)
+					if err != nil {
+						return nil, err
+					}
+					if arr != amd64.RDI {
+						e.MovRegReg(amd64.RDI, arr)
+					}
+					val, err := loadOperand(bi.Val, amd64.RSI)
+					if err != nil {
+						return nil, err
+					}
+					if val != amd64.RSI {
+						e.MovRegReg(amd64.RSI, val)
+					}
+					emitRuntimeCall("ts_array_push")
+					e.MovQRegXMM(amd64.R10, amd64.XMM0)
+					storeSSAValue(bi.Res, amd64.R10)
+
+				case *ir.ArrayPopInst:
+					arr, err := loadOperand(bi.Array, amd64.RDI)
+					if err != nil {
+						return nil, err
+					}
+					if arr != amd64.RDI {
+						e.MovRegReg(amd64.RDI, arr)
+					}
+					emitRuntimeCall("ts_array_pop")
+					storeSSAValue(bi.Res, amd64.RAX)
 
 				case *ir.CallInst:
 					gprArg, xmmArg := 0, 0
@@ -1198,6 +1296,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
+
+	fnOffsets["ts_array_new"] = len(e.Code)
+	emitAMD64ArrayNew(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_array_get"] = len(e.Code)
+	emitAMD64ArrayGet(e)
+	fnOffsets["ts_array_set"] = len(e.Code)
+	emitAMD64ArraySet(e)
+	fnOffsets["ts_array_len"] = len(e.Code)
+	emitAMD64ArrayLength(e)
+	fnOffsets["ts_array_push"] = len(e.Code)
+	emitAMD64ArrayPush(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_array_pop"] = len(e.Code)
+	emitAMD64ArrayPop(e)
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
@@ -1556,6 +1667,7 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		e.MovRegImm64(amd64.R10, 0)
 		e.MovDerefReg(amd64.R13, amd64ObjectFlags, amd64.R10)
 		e.MovDerefReg(amd64.R13, amd64ObjectNextFree, amd64.R10)
+		e.MovDerefReg(amd64.R13, amd64ObjectType, amd64.R10)
 		e.MovRegReg(amd64.RAX, amd64.R13)
 		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
 		emitReturn()
@@ -1651,6 +1763,7 @@ func emitAMD64InitObjectHeader(e *amd64.Emitter, header, total amd64.Register) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(header, amd64ObjectFlags, amd64.R11)
 	e.MovDerefReg(header, amd64ObjectNextFree, amd64.R11)
+	e.MovDerefReg(header, amd64ObjectType, amd64.R11)
 }
 
 func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {

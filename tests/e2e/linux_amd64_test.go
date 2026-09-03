@@ -222,3 +222,23 @@ console.log(churn(keep));
 		expected: "keep-alive\n",
 	})
 }
+
+func TestLinuxAMD64NumberArrays(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "number_array_read_write_push_pop",
+		source: `
+function sum(xs: number[]): number {
+  let total = 0;
+  for (let i = 0; i < xs.length; i++) total = total + xs[i]!;
+  xs[1] = 10;
+  console.log(xs.push(20));
+  console.log(xs.length);
+  console.log(xs[1]);
+  console.log(xs.pop()!);
+  return total;
+}
+console.log(sum([1, 2, 3]));
+`,
+		expected: "4\n4\n10\n20\n6\n",
+	})
+}

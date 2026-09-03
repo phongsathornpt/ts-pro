@@ -8,7 +8,14 @@ import (
 )
 
 func isAMD64HeapRefType(t types.Type) bool {
-	return t != nil && t.Kind() == types.KindString
+	return t != nil && (t.Kind() == types.KindString || t.Kind() == types.KindArray || t.Kind() == types.KindObject)
+}
+
+func amd64ArrayElementClass(t types.Type) int64 {
+	if isAMD64HeapRefType(t) {
+		return 1
+	}
+	return 0
 }
 
 func amd64RootSlots(fn *ir.Function) map[int]int {
@@ -59,5 +66,11 @@ const (
 	amd64ObjectSize       int32 = 0
 	amd64ObjectFlags      int32 = 8
 	amd64ObjectNextFree   int32 = 16
+	amd64ObjectType       int32 = 24
 	amd64ObjectHeaderSize int32 = 32
+
+	amd64ObjectTypeAtomic    int64 = 0
+	amd64ObjectTypeArray     int64 = 1
+	amd64ObjectTypeArrayData int64 = 2
+	amd64ObjectTypeRefData   int64 = 3
 )
