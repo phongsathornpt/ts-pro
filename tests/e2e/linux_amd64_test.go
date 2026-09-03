@@ -433,3 +433,19 @@ console.log(once);
 		expected: "10\n1\n",
 	})
 }
+
+func TestLinuxAMD64StringEqualityByValue(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "string_equality_compares_bytes_not_addresses",
+		source: `
+let a = "keep-" + "alive";
+let b = "keep-" + "alive";
+let c = "different";
+console.log(a === b);
+console.log(a !== b);
+console.log(a === c);
+console.log(a !== c);
+`,
+		expected: "1\n0\n0\n1\n",
+	})
+}

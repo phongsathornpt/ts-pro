@@ -895,6 +895,29 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				switch bi := inst.(type) {
 				case *ir.BinaryInst:
 					dstLoc := locs[bi.Res.ID]
+					if bi.LHS.Type() == types.TypeString && bi.RHS.Type() == types.TypeString && (bi.Op == ir.OpEq || bi.Op == ir.OpNe) {
+						lhs, err := loadRawValue(bi.LHS, amd64.RDI)
+						if err != nil {
+							return nil, err
+						}
+						if lhs != amd64.RDI {
+							e.MovRegReg(amd64.RDI, lhs)
+						}
+						rhs, err := loadRawValue(bi.RHS, amd64.RSI)
+						if err != nil {
+							return nil, err
+						}
+						if rhs != amd64.RSI {
+							e.MovRegReg(amd64.RSI, rhs)
+						}
+						emitRuntimeCall("ts_string_eq")
+						if bi.Op == ir.OpNe {
+							e.TestRegReg(amd64.RAX, amd64.RAX)
+							e.Setcc(amd64.CondE, amd64.RAX)
+						}
+						storeSSAValue(bi.Res, amd64.RAX)
+						continue
+					}
 					if isNumberType(bi.LHS.Type()) || isNumberType(bi.RHS.Type()) {
 						lhsReg, err := loadOperand(bi.LHS, amd64.R10)
 						if err != nil {
@@ -1468,6 +1491,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64ArrayPush(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_array_pop"] = len(e.Code)
 	emitAMD64ArrayPop(e)
+
+	fnOffsets["ts_string_eq"] = len(e.Code)
+	emitAMD64StringEq(e)
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
