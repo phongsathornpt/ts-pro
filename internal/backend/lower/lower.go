@@ -723,7 +723,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 32)
+	e.SubRegImm32(amd64.RSP, 64)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -743,9 +743,17 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		ra := regalloc.New(len(amd64ScratchRegs))
 		locs := ra.Allocate(fn)
 		spillBytes := ra.StackFrameSlots() * 8
+		rootSlots := amd64RootSlots(fn)
+		rootFrameBytes := 0
+		rootFrameBaseOffset := int32(0)
+		if len(rootSlots) != 0 {
+			rootFrameBytes = 16 + len(rootSlots)*8
+			rootFrameBaseOffset = -int32(40 + spillBytes + rootFrameBytes)
+		}
+		localBytes := spillBytes + rootFrameBytes
 		// After CALL, push RBP + five callee-saved registers leaves RSP at 8 mod 16.
 		// Choose a frame size that is 8 mod 16 so call sites remain 16-byte aligned.
-		frameSize := int32(((spillBytes + 23) &^ 15) - 8)
+		frameSize := int32(((localBytes + 23) &^ 15) - 8)
 		spillOffset := func(loc regalloc.Location) int32 {
 			return int32(-48 - loc.StackSlot*8)
 		}
@@ -766,6 +774,19 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				return
 			}
 			e.MovDerefReg(amd64.RBP, spillOffset(loc), src)
+		}
+		storeSSAValue := func(v *ir.Value, src amd64.Register) {
+			storeValue(locs[v.ID], src)
+			if slot, ok := rootSlots[v.ID]; ok {
+				e.MovDerefReg(amd64.RBP, rootFrameBaseOffset+16+int32(slot*8), src)
+			}
+		}
+		leaveRootFrame := func() {
+			if len(rootSlots) == 0 {
+				return
+			}
+			e.MovRegDeref(amd64.R10, amd64.RBP, rootFrameBaseOffset)
+			e.MovDerefReg(amd64.R15, 16, amd64.R10)
 		}
 
 		loadOperand := func(op ir.Operand, scratch amd64.Register) (amd64.Register, error) {
@@ -797,6 +818,20 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		e.Push(amd64.R15)
 		e.SubRegImm32(amd64.RSP, frameSize)
 
+		if len(rootSlots) != 0 {
+			e.MovRegReg(amd64.R10, amd64.RBP)
+			e.SubRegImm32(amd64.R10, -rootFrameBaseOffset)
+			e.MovRegDeref(amd64.R11, amd64.R15, 16)
+			e.MovDerefReg(amd64.R10, 0, amd64.R11)
+			e.MovRegImm64(amd64.R11, int64(len(rootSlots)))
+			e.MovDerefReg(amd64.R10, 8, amd64.R11)
+			e.MovRegImm64(amd64.R11, 0)
+			for i := 0; i < len(rootSlots); i++ {
+				e.MovDerefReg(amd64.R10, int32(16+i*8), amd64.R11)
+			}
+			e.MovDerefReg(amd64.R15, 16, amd64.R10)
+		}
+
 		// Classify incoming SysV parameters. Number values use the SSE class;
 		// references/booleans use the integer class. Overflow arguments are read
 		// from the caller stack in source order.
@@ -805,21 +840,21 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 			if isNumberType(param.Type()) {
 				if xmmParam < len(amd64NumberParamRegs) {
 					e.MovQRegXMM(amd64.R10, amd64NumberParamRegs[xmmParam])
-					storeValue(locs[param.ID], amd64.R10)
+					storeSSAValue(param, amd64.R10)
 					xmmParam++
 				} else {
 					e.MovRegDeref(amd64.R10, amd64.RBP, int32(16+stackParam*8))
-					storeValue(locs[param.ID], amd64.R10)
+					storeSSAValue(param, amd64.R10)
 					stackParam++
 				}
 				continue
 			}
 			if gprParam < len(amd64ParamRegs) {
-				storeValue(locs[param.ID], amd64ParamRegs[gprParam])
+				storeSSAValue(param, amd64ParamRegs[gprParam])
 				gprParam++
 			} else {
 				e.MovRegDeref(amd64.R10, amd64.RBP, int32(16+stackParam*8))
-				storeValue(locs[param.ID], amd64.R10)
+				storeSSAValue(param, amd64.R10)
 				stackParam++
 			}
 		}
@@ -1002,9 +1037,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					if bi.Res != nil {
 						if isNumberType(bi.Res.Type()) {
 							e.MovQRegXMM(amd64.R10, amd64.XMM0)
-							storeValue(locs[bi.Res.ID], amd64.R10)
+							storeSSAValue(bi.Res, amd64.R10)
 						} else {
-							storeValue(locs[bi.Res.ID], amd64.RAX)
+							storeSSAValue(bi.Res, amd64.RAX)
 						}
 					}
 
@@ -1036,7 +1071,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 					}
 
-					// Epilogue: restore callee-saved registers and RBP
+					// Unlink the precise root frame before restoring the machine frame.
+					leaveRootFrame()
 					e.AddRegImm32(amd64.RSP, frameSize)
 					e.Pop(amd64.R15)
 					e.Pop(amd64.R14)
@@ -1100,25 +1136,24 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					for _, phi := range term.Target.Phis {
 						for _, inc := range phi.Incoming {
 							if inc.Block == bb {
-								dstLoc := locs[phi.Res.ID]
 								if v, ok := inc.Value.(*ir.Value); ok {
 									srcReg := loadValue(v, amd64.R10)
-									storeValue(dstLoc, srcReg)
+									storeSSAValue(phi.Res, srcReg)
 								} else if c, ok := inc.Value.(ir.ConstNumber); ok {
 									e.MovRegImm64(amd64.R10, numberBits(c.Value))
-									storeValue(dstLoc, amd64.R10)
+									storeSSAValue(phi.Res, amd64.R10)
 								} else if c, ok := inc.Value.(ir.ConstBool); ok {
 									if c.Value {
 										e.MovRegImm64(amd64.R10, 1)
 									} else {
 										e.MovRegImm64(amd64.R10, 0)
 									}
-									storeValue(dstLoc, amd64.R10)
+									storeSSAValue(phi.Res, amd64.R10)
 								} else if c, ok := inc.Value.(ir.ConstString); ok {
 									strOffset := len(e.Code)
 									e.LeaRipRel32(amd64.R10, 0)
 									strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: amd64.R10, str: c.Value})
-									storeValue(dstLoc, amd64.R10)
+									storeSSAValue(phi.Res, amd64.R10)
 								}
 							}
 						}
@@ -1428,8 +1463,8 @@ func emitAMD64PrintBool(e *amd64.Emitter) {
 }
 
 func emitAMD64RuntimeInit(e *amd64.Emitter) {
-	// R15 points at a 32-byte process-lifetime runtime context. Seed it with a
-	// 1 MiB RW arena: [0]=cursor, [8]=end.
+	// Runtime context (R15): cursor, end, precise-root head, chunk head,
+	// free-list head, collection count, reclaimed bytes, mapped bytes.
 	e.MovRegImm64(amd64.RDI, 0)
 	e.MovRegImm64(amd64.RSI, 1<<20)
 	e.MovRegImm64(amd64.RDX, 3)
@@ -1438,32 +1473,62 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R9, 0)
 	e.MovRegImm64(amd64.RAX, 9)
 	e.Syscall()
-	e.MovDerefReg(amd64.R15, 0, amd64.RAX)
+
+	// First mapping doubles as the first chunk. Objects begin after its 32-byte
+	// chunk header and each object has its own 32-byte header.
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.RAX, amd64ChunkNext, amd64.R11)
 	e.MovRegReg(amd64.R10, amd64.RAX)
 	e.AddRegImm32(amd64.R10, 1<<20)
-	e.MovDerefReg(amd64.R15, 8, amd64.R10)
+	e.MovDerefReg(amd64.RAX, amd64ChunkEnd, amd64.R10)
+	e.MovRegReg(amd64.R11, amd64.RAX)
+	e.AddRegImm32(amd64.R11, amd64ChunkSize)
+	e.MovDerefReg(amd64.RAX, amd64ChunkUsed, amd64.R11)
+
+	e.MovDerefReg(amd64.R15, amd64RTCursor, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTEnd, amd64.R10)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTChunkHead, amd64.RAX)
+	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTCollections, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTReclaimed, amd64.R11)
+	e.MovRegImm64(amd64.R11, 1<<20)
+	e.MovDerefReg(amd64.R15, amd64RTMappedBytes, amd64.R11)
 	e.Ret()
 }
 
 func emitAMD64Alloc(e *amd64.Emitter) {
-	// Keep the aligned request in callee-saved RBX across a potential mmap.
+	// RBX holds the aligned total object size, including the 32-byte header.
 	e.Push(amd64.RBX)
 	e.MovRegReg(amd64.RBX, amd64.RDI)
-	e.AddRegImm32(amd64.RBX, 15)
+	e.AddRegImm32(amd64.RBX, amd64ObjectHeaderSize+15)
 	e.MovRegImm64(amd64.R11, -16)
 	e.AndRegReg(amd64.RBX, amd64.R11)
 
-	// Fast bump allocation from the current arena.
-	e.MovRegDeref(amd64.RAX, amd64.R15, 0)
+	// Fast bump allocation from the current chunk.
+	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTCursor)
 	e.MovRegReg(amd64.R10, amd64.RAX)
 	e.AddRegReg(amd64.R10, amd64.RBX)
-	e.MovRegDeref(amd64.R11, amd64.R15, 8)
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTEnd)
 	e.CmpRegReg(amd64.R10, amd64.R11)
-	fast := len(e.Code)
-	e.JccRel32(amd64.CondBE, 0)
+	refill := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
 
-	// Refill with max(request, 1 MiB).
+	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
+	e.MovDerefReg(amd64.R15, amd64RTCursor, amd64.R10)
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
+	e.MovDerefReg(amd64.R11, amd64ChunkUsed, amd64.R10)
+	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+	e.Pop(amd64.RBX)
+	e.Ret()
+
+	refillLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[refill+2:], uint32(int32(refillLabel-(refill+6))))
+
+	// Refill with max(1 MiB, object size + chunk header).
 	e.MovRegReg(amd64.RSI, amd64.RBX)
+	e.AddRegImm32(amd64.RSI, amd64ChunkSize)
 	e.CmpRegImm32(amd64.RSI, 1<<20)
 	large := len(e.Code)
 	e.JccRel32(amd64.CondGE, 0)
@@ -1478,21 +1543,38 @@ func emitAMD64Alloc(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RAX, 9)
 	e.Syscall()
 
-	// First object starts at the new mapping base; publish the remaining arena.
+	// Link the new chunk at the head of the chunk list.
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
+	e.MovDerefReg(amd64.RAX, amd64ChunkNext, amd64.R11)
 	e.MovRegReg(amd64.R10, amd64.RAX)
-	e.AddRegReg(amd64.R10, amd64.RBX)
-	e.MovDerefReg(amd64.R15, 0, amd64.R10)
+	e.AddRegReg(amd64.R10, amd64.RSI)
+	e.MovDerefReg(amd64.RAX, amd64ChunkEnd, amd64.R10)
 	e.MovRegReg(amd64.R11, amd64.RAX)
-	e.AddRegReg(amd64.R11, amd64.RSI)
-	e.MovDerefReg(amd64.R15, 8, amd64.R11)
-	e.Pop(amd64.RBX)
-	e.Ret()
+	e.AddRegImm32(amd64.R11, amd64ChunkSize)
+	e.MovRegReg(amd64.R10, amd64.R11)
+	e.AddRegReg(amd64.R10, amd64.RBX)
+	e.MovDerefReg(amd64.RAX, amd64ChunkUsed, amd64.R10)
+	e.MovDerefReg(amd64.R15, amd64RTChunkHead, amd64.RAX)
+	e.MovDerefReg(amd64.R15, amd64RTCursor, amd64.R10)
+	e.MovRegDeref(amd64.R10, amd64.RAX, amd64ChunkEnd)
+	e.MovDerefReg(amd64.R15, amd64RTEnd, amd64.R10)
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTMappedBytes)
+	e.AddRegReg(amd64.R10, amd64.RSI)
+	e.MovDerefReg(amd64.R15, amd64RTMappedBytes, amd64.R10)
 
-	fastPath := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[fast+2:], uint32(int32(fastPath-(fast+6))))
-	e.MovDerefReg(amd64.R15, 0, amd64.R10)
+	// Initialize the first object in the new chunk and return its payload.
+	e.MovRegReg(amd64.RAX, amd64.R11)
+	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
+	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
 	e.Pop(amd64.RBX)
 	e.Ret()
+}
+
+func emitAMD64InitObjectHeader(e *amd64.Emitter, header, total amd64.Register) {
+	e.MovDerefReg(header, amd64ObjectSize, total)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(header, amd64ObjectFlags, amd64.R11)
+	e.MovDerefReg(header, amd64ObjectNextFree, amd64.R11)
 }
 
 func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {
@@ -1503,25 +1585,42 @@ func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
 	e.Push(amd64.R15)
-	e.SubRegImm32(amd64.RSP, 8)
+	// 32-byte temporary precise-root frame plus 8 bytes of ABI padding.
+	e.SubRegImm32(amd64.RSP, 40)
 
 	e.MovRegReg(amd64.RBX, amd64.RDI)
 	e.MovRegReg(amd64.R12, amd64.RSI)
 	e.MovRegDeref(amd64.R13, amd64.RBX, 0)
 	e.MovRegDeref(amd64.R14, amd64.R12, 0)
+
+	// Link a temporary precise-root frame for the two input strings. These are
+	// live across ts_alloc, where a collection may run.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 2)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R12)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
 	e.MovRegReg(amd64.RDI, amd64.R13)
 	e.AddRegReg(amd64.RDI, amd64.R14)
 	e.AddRegImm32(amd64.RDI, 8)
 	callAt := len(e.Code)
 	e.CallRel32(int32(allocOffset - (callAt + 5)))
-	e.MovRegReg(amd64.R15, amd64.RAX)
+
+	// Collection cannot occur again in this helper. Unlink the temporary root
+	// frame and reuse its second root slot to keep the result pointer.
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 24, amd64.RAX)
 
 	e.MovRegReg(amd64.R11, amd64.R13)
 	e.AddRegReg(amd64.R11, amd64.R14)
-	e.MovDerefReg(amd64.R15, 0, amd64.R11)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 24)
+	e.MovDerefReg(amd64.R10, 0, amd64.R11)
 
 	// dst = result + 8, src = a + 8
-	e.MovRegReg(amd64.R10, amd64.R15)
 	e.AddRegImm32(amd64.R10, 8)
 	e.MovRegReg(amd64.R8, amd64.RBX)
 	e.AddRegImm32(amd64.R8, 8)
@@ -1562,8 +1661,8 @@ func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {
 	afterB := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[skipB+2:], uint32(int32(afterB-(skipB+6))))
 
-	e.MovRegReg(amd64.RAX, amd64.R15)
-	e.AddRegImm32(amd64.RSP, 8)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 24)
+	e.AddRegImm32(amd64.RSP, 40)
 	e.Pop(amd64.R15)
 	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)
