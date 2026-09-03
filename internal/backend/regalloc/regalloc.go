@@ -175,6 +175,42 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 						endMap[v.ID] = step
 					}
 				}
+			case *ir.AllocArrayInst:
+				if v, ok := i.Length.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.GetElementInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				if v, ok := i.Index.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.SetElementInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				if v, ok := i.Index.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.ArrayLengthInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.ArrayPushInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.ArrayPopInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
 			}
 		}
 

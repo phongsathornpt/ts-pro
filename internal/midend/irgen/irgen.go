@@ -443,6 +443,24 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return ir.ConstString{Value: e.Value}
 	case *ast.BoolLit:
 		return ir.ConstBool{Value: e.Value}
+	case *ast.ArrayLit:
+		arrType := types.NewArray(types.TypeAny)
+		if g.semaResult != nil {
+			if t, ok := g.semaResult.Types[e].(*types.ArrayType); ok {
+				arrType = t
+			}
+		}
+		res := g.currentFn.NewValue("arr", arrType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
+			Res: res, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(len(e.Elements))},
+		})
+		for i, el := range e.Elements {
+			val := g.lowerExpr(el)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
+				Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: val,
+			})
+		}
+		return res
 	case *ast.IdentExpr:
 		if op, exists := g.locals[e.Name]; exists {
 			return op
@@ -568,7 +586,47 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		target := g.lowerExpr(e.Target)
 		return target
+	case *ast.IndexExpr:
+		array := g.lowerExpr(e.Target)
+		index := g.lowerExpr(e.Index)
+		resultType := types.TypeAny
+		if g.semaResult != nil {
+			if t, ok := g.semaResult.Types[e]; ok && t != nil {
+				resultType = t
+			}
+		}
+		res := g.currentFn.NewValue("elem", resultType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
+		return res
+	case *ast.MemberExpr:
+		if arrType, ok := g.semaResult.Types[e.Object].(*types.ArrayType); ok && e.Property == "length" {
+			_ = arrType
+			array := g.lowerExpr(e.Object)
+			res := g.currentFn.NewValue("len", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: res, Array: array})
+			return res
+		}
+		return ir.ConstNumber{Value: 0}
 	case *ast.CallExpr:
+		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if arrType, ok := g.semaResult.Types[mem.Object].(*types.ArrayType); ok {
+				array := g.lowerExpr(mem.Object)
+				switch mem.Property {
+				case "push":
+					if len(e.Args) != 1 {
+						return ir.ConstNumber{Value: 0}
+					}
+					val := g.lowerExpr(e.Args[0])
+					res := g.currentFn.NewValue("len", types.TypeNumber)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: res, Array: array, Val: val})
+					return res
+				case "pop":
+					res := g.currentFn.NewValue("elem", arrType.Elem)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPopInst{Res: res, Array: array})
+					return res
+				}
+			}
+		}
 		calleeName := "unknown"
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			calleeName = ident.Name
@@ -605,6 +663,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		})
 		return resVal
 	case *ast.AssignExpr:
+		if idx, ok := e.Left.(*ast.IndexExpr); ok {
+			array := g.lowerExpr(idx.Target)
+			index := g.lowerExpr(idx.Index)
+			rhs := g.lowerExpr(e.Right)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: rhs})
+			return rhs
+		}
 		rhs := g.lowerExpr(e.Right)
 		if ident, ok := e.Left.(*ast.IdentExpr); ok {
 			g.locals[ident.Name] = rhs

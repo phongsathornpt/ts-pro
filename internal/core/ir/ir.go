@@ -115,6 +115,34 @@ type (
 		Length   Operand
 	}
 
+	GetElementInst struct {
+		Res   *Value
+		Array Operand
+		Index Operand
+	}
+
+	SetElementInst struct {
+		Array Operand
+		Index Operand
+		Val   Operand
+	}
+
+	ArrayLengthInst struct {
+		Res   *Value
+		Array Operand
+	}
+
+	ArrayPushInst struct {
+		Res   *Value
+		Array Operand
+		Val   Operand
+	}
+
+	ArrayPopInst struct {
+		Res   *Value
+		Array Operand
+	}
+
 	PhiIncoming struct {
 		Block *BasicBlock
 		Value Operand
@@ -210,6 +238,31 @@ func (i *AllocArrayInst) instructionNode() {}
 func (i *AllocArrayInst) Result() *Value   { return i.Res }
 func (i *AllocArrayInst) String() string {
 	return fmt.Sprintf("%s = alloc_array %s[%s]", i.Res, i.ElemType, i.Length)
+}
+func (i *GetElementInst) instructionNode() {}
+func (i *GetElementInst) Result() *Value   { return i.Res }
+func (i *GetElementInst) String() string {
+	return fmt.Sprintf("%s = getelem %s[%s]", i.Res, i.Array, i.Index)
+}
+func (i *SetElementInst) instructionNode() {}
+func (i *SetElementInst) Result() *Value   { return nil }
+func (i *SetElementInst) String() string {
+	return fmt.Sprintf("setelem %s[%s] = %s", i.Array, i.Index, i.Val)
+}
+func (i *ArrayLengthInst) instructionNode() {}
+func (i *ArrayLengthInst) Result() *Value   { return i.Res }
+func (i *ArrayLengthInst) String() string {
+	return fmt.Sprintf("%s = array_len %s", i.Res, i.Array)
+}
+func (i *ArrayPushInst) instructionNode() {}
+func (i *ArrayPushInst) Result() *Value   { return i.Res }
+func (i *ArrayPushInst) String() string {
+	return fmt.Sprintf("%s = array_push %s, %s", i.Res, i.Array, i.Val)
+}
+func (i *ArrayPopInst) instructionNode() {}
+func (i *ArrayPopInst) Result() *Value   { return i.Res }
+func (i *ArrayPopInst) String() string {
+	return fmt.Sprintf("%s = array_pop %s", i.Res, i.Array)
 }
 func (i *PhiInst) instructionNode() {}
 func (i *PhiInst) Result() *Value   { return i.Res }

@@ -166,6 +166,42 @@ func deadCodeElim(fn *ir.Function) bool {
 						uses[v.ID]++
 					}
 				}
+			case *ir.AllocArrayInst:
+				if v, ok := i.Length.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.GetElementInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				if v, ok := i.Index.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.SetElementInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				if v, ok := i.Index.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.ArrayLengthInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.ArrayPushInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				if v, ok := i.Val.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.ArrayPopInst:
+				if v, ok := i.Array.(*ir.Value); ok {
+					uses[v.ID]++
+				}
 			}
 		}
 		if bb.Terminator != nil {
@@ -188,7 +224,8 @@ func deadCodeElim(fn *ir.Function) bool {
 		for _, inst := range bb.Instructions {
 			res := inst.Result()
 			// Keep calls or instructions with side effects
-			if _, isCall := inst.(*ir.CallInst); isCall {
+			switch inst.(type) {
+			case *ir.CallInst, *ir.SetElementInst, *ir.ArrayPushInst, *ir.ArrayPopInst:
 				retained = append(retained, inst)
 				continue
 			}

@@ -136,3 +136,34 @@ console.log(greet("TypeScript 7"));
 	}
 	t.Logf("Strings Dump:\n%s", irProg.Dump())
 }
+
+func TestIRGenArrays(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("arrays.ts", []byte(`
+function mutate(xs: number[]): number {
+  xs[1] = 10;
+  xs.push(20);
+  return xs.length + xs[0] + xs.pop();
+}
+console.log(mutate([1, 2, 3]));
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	for _, want := range []string{"alloc_array", "setelem", "getelem", "array_len", "array_push", "array_pop"} {
+		if !strings.Contains(dump, want) {
+			t.Fatalf("expected %q in IR:\n%s", want, dump)
+		}
+	}
+}
