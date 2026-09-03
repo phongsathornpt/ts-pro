@@ -457,6 +457,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			op = ir.OpGt
 		case token.GtEq:
 			op = ir.OpGe
+		case token.AmpAmp:
+			op = ir.OpAnd
+		case token.PipePipe:
+			op = ir.OpOr
 		}
 		resVal := g.currentFn.NewValue("t", types.TypeNumber)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
@@ -490,6 +494,26 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 				return currVal
 			}
+		} else if e.Op == token.Minus {
+			target := g.lowerExpr(e.Target)
+			resVal := g.currentFn.NewValue("neg", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+				Res: resVal,
+				Op:  ir.OpSub,
+				LHS: ir.ConstNumber{Value: 0},
+				RHS: target,
+			})
+			return resVal
+		} else if e.Op == token.Bang {
+			target := g.lowerExpr(e.Target)
+			resVal := g.currentFn.NewValue("not", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+				Res: resVal,
+				Op:  ir.OpEq,
+				LHS: target,
+				RHS: ir.ConstNumber{Value: 0},
+			})
+			return resVal
 		}
 		target := g.lowerExpr(e.Target)
 		return target

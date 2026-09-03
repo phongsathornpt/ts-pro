@@ -135,7 +135,12 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 							lhsReg = arm64ScratchRegs[srcLoc.Reg]
 						}
 					} else if cLHS, ok := bi.LHS.(ir.ConstNumber); ok {
-						e.Movz(arm64.X8, uint16(cLHS.Value))
+						if cLHS.Value < 0 {
+							e.Movz(arm64.X8, uint16(-cLHS.Value))
+							e.Sub(arm64.X8, arm64.XZR, arm64.X8)
+						} else {
+							e.Movz(arm64.X8, uint16(cLHS.Value))
+						}
 						lhsReg = arm64.X8
 					}
 
@@ -147,7 +152,12 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 							rhsReg = arm64ScratchRegs[rhsLoc.Reg]
 						}
 					} else if cRHS, ok := bi.RHS.(ir.ConstNumber); ok {
-						e.Movz(arm64.X16, uint16(cRHS.Value))
+						if cRHS.Value < 0 {
+							e.Movz(arm64.X16, uint16(-cRHS.Value))
+							e.Sub(arm64.X16, arm64.XZR, arm64.X16)
+						} else {
+							e.Movz(arm64.X16, uint16(cRHS.Value))
+						}
 						rhsReg = arm64.X16
 					}
 
@@ -160,6 +170,14 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 						e.Mul(dstReg, lhsReg, rhsReg)
 					case ir.OpDiv:
 						e.Sdiv(dstReg, lhsReg, rhsReg)
+					case ir.OpMod:
+						e.Sdiv(arm64.X17, lhsReg, rhsReg)
+						e.Mul(arm64.X18, arm64.X17, rhsReg)
+						e.Sub(dstReg, lhsReg, arm64.X18)
+					case ir.OpAnd:
+						e.And(dstReg, lhsReg, rhsReg)
+					case ir.OpOr:
+						e.Orr(dstReg, lhsReg, rhsReg)
 					case ir.OpLt:
 						e.Cmp(lhsReg, rhsReg)
 						e.Cset(dstReg, arm64.CondLT)
@@ -190,7 +208,12 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 									e.MovReg(targetParam, arm64ScratchRegs[argLoc.Reg])
 								}
 							} else if cArg, ok := arg.(ir.ConstNumber); ok {
-								e.Movz(targetParam, uint16(cArg.Value))
+								if cArg.Value < 0 {
+									e.Movz(targetParam, uint16(-cArg.Value))
+									e.Sub(targetParam, arm64.XZR, targetParam)
+								} else {
+									e.Movz(targetParam, uint16(cArg.Value))
+								}
 							} else if sArg, ok := arg.(ir.ConstString); ok {
 								strOffset := len(e.Code)
 								e.Adr(targetParam, 0)
@@ -231,7 +254,12 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 								}
 							}
 						} else if c, ok := term.Val.(ir.ConstNumber); ok {
-							e.Movz(arm64.X0, uint16(c.Value))
+							if c.Value < 0 {
+								e.Movz(arm64.X0, uint16(-c.Value))
+								e.Sub(arm64.X0, arm64.XZR, arm64.X0)
+							} else {
+								e.Movz(arm64.X0, uint16(c.Value))
+							}
 						} else if s, ok := term.Val.(ir.ConstString); ok {
 							strOffset := len(e.Code)
 							e.Adr(arm64.X0, 0)
@@ -301,7 +329,12 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 											}
 										}
 									} else if c, ok := inc.Value.(ir.ConstNumber); ok {
-										e.Movz(dstReg, uint16(c.Value))
+										if c.Value < 0 {
+											e.Movz(dstReg, uint16(-c.Value))
+											e.Sub(dstReg, arm64.XZR, dstReg)
+										} else {
+											e.Movz(dstReg, uint16(c.Value))
+										}
 									} else if s, ok := inc.Value.(ir.ConstString); ok {
 										strOffset := len(e.Code)
 										e.Adr(dstReg, 0)
@@ -419,6 +452,16 @@ func emitARM64PrintVal(e *arm64.Emitter) {
 	e.Movz(arm64.X2, 10) // '\n'
 	e.Strb(arm64.X2, arm64.X1, 0)
 
+	// Sign handling: X5 = 1 if negative, 0 otherwise
+	e.Movz(arm64.X5, 0)
+	e.Cmp(arm64.X0, arm64.XZR)
+	geOffset := len(e.Code)
+	e.BCond(arm64.CondGE, 0)
+	e.Movz(arm64.X5, 1)
+	e.Sub(arm64.X0, arm64.XZR, arm64.X0) // X0 = -X0
+	notNegOffset := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[geOffset:], 0x54000000|((uint32(int32((notNegOffset-geOffset)/4)&0x7FFFF)<<5)|uint32(arm64.CondGE)))
+
 	// Check if X0 == 0
 	cbnzOffset := len(e.Code)
 	e.Cbnz(arm64.X0, 0) // placeholder fixup to loop
@@ -456,6 +499,15 @@ func emitARM64PrintVal(e *arm64.Emitter) {
 	binary.LittleEndian.PutUint32(e.Code[jumpToPrintOffset:], 0x14000000|(uint32(int32((printOffset-jumpToPrintOffset)/4))&0x03FFFFFF))
 	// Patch cbzOffset:
 	binary.LittleEndian.PutUint32(e.Code[cbzOffset:], 0xB4000000|(uint32(int32((printOffset-cbzOffset)/4)&0x7FFFF)<<5)|uint32(arm64.X0))
+
+	// Prepend '-' if X5 != 0
+	cbzSignOffset := len(e.Code)
+	e.Cbz(arm64.X5, 0)
+	e.SubImm(arm64.X1, arm64.X1, 1)
+	e.Movz(arm64.X2, 45) // '-'
+	e.Strb(arm64.X2, arm64.X1, 0)
+	afterSignOffset := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[cbzSignOffset:], 0xB4000000|(uint32(int32((afterSignOffset-cbzSignOffset)/4)&0x7FFFF)<<5)|uint32(arm64.X5))
 
 	// Print syscall:
 	// Length = (SP + 31) - X1
@@ -701,6 +753,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					case ir.OpNe:
 						e.CmpRegReg(dstReg, rhsReg)
 						e.Setcc(amd64.CondNE, dstReg)
+					case ir.OpAnd:
+						e.AndRegReg(dstReg, rhsReg)
+					case ir.OpOr:
+						e.OrRegReg(dstReg, rhsReg)
 					}
 
 				case *ir.CallInst:

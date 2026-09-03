@@ -200,7 +200,7 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 				// If target was visited before bb, this is a loop backedge!
 				if tStart, ok := bbStart[t.Target.Name]; ok && tStart < bbStart[bb.Name] {
 					for valID, start := range startMap {
-						if start < tStart && endMap[valID] >= tStart {
+						if start <= tStart && endMap[valID] >= tStart {
 							if endMap[valID] < step {
 								endMap[valID] = step
 							}

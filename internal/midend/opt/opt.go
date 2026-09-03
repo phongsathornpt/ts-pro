@@ -66,6 +66,16 @@ func constantFold(fn *ir.Function) bool {
 						} else {
 							valid = false
 						}
+					case ir.OpMod:
+						if int64(c2.Value) != 0 {
+							res = float64(int64(c1.Value) % int64(c2.Value))
+						} else {
+							valid = false
+						}
+					case ir.OpAnd:
+						res = float64(int64(c1.Value) & int64(c2.Value))
+					case ir.OpOr:
+						res = float64(int64(c1.Value) | int64(c2.Value))
 					default:
 						valid = false
 					}
@@ -78,11 +88,22 @@ func constantFold(fn *ir.Function) bool {
 				bi.LHS = lhs
 				bi.RHS = rhs
 				newInsts = append(newInsts, bi)
+			case *ir.CallInst:
+				for i, arg := range bi.Args {
+					bi.Args[i] = resolveConst(arg, constMap)
+				}
+				newInsts = append(newInsts, bi)
 			default:
 				newInsts = append(newInsts, inst)
 			}
 		}
 		bb.Instructions = newInsts
+
+		for _, phi := range bb.Phis {
+			for i, inc := range phi.Incoming {
+				phi.Incoming[i].Value = resolveConst(inc.Value, constMap)
+			}
+		}
 
 		// Fold branch if condition is constant
 		if br, ok := bb.Terminator.(*ir.BranchTerm); ok {
@@ -95,6 +116,8 @@ func constantFold(fn *ir.Function) bool {
 				}
 				changed = true
 			}
+		} else if ret, ok := bb.Terminator.(*ir.ReturnTerm); ok && ret.Val != nil {
+			ret.Val = resolveConst(ret.Val, constMap)
 		}
 	}
 

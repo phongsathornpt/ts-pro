@@ -438,6 +438,9 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
+		if objType != nil && objType != types.TypeAny {
+			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
+		}
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
 	default:

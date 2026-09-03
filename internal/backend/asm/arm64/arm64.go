@@ -39,7 +39,8 @@ const (
 	X28 Register = 28
 	X29 Register = 29 // FP
 	X30 Register = 30 // LR
-	SP  Register = 31 // SP / XZR
+	SP  Register = 31 // SP
+	XZR Register = 31 // XZR
 )
 
 // Cond represents condition codes for B.cond.

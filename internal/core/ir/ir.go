@@ -138,6 +138,8 @@ const (
 	OpLe
 	OpGt
 	OpGe
+	OpAnd
+	OpOr
 )
 
 func (op BinaryOp) String() string {
@@ -164,6 +166,10 @@ func (op BinaryOp) String() string {
 		return "gt"
 	case OpGe:
 		return "ge"
+	case OpAnd:
+		return "and"
+	case OpOr:
+		return "or"
 	default:
 		return "op"
 	}
