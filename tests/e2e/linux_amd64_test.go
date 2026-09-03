@@ -1332,3 +1332,18 @@ console.log(join(anyTask));
 		expected: "42\n42\n1\ntask-string\n42\n42\n42\n",
 	})
 }
+
+func TestLinuxAMD64SpawnBlockClosureCaptures(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "spawn_block_closure_captures",
+		source: `
+const message = "captured";
+const task = spawn((): void => { console.log(message); });
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+join(task);
+console.log("done");
+`,
+		expected: "captured\ndone\n",
+	})
+}

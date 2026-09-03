@@ -747,14 +747,158 @@ func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct
 	return names
 }
 
+func (g *generator) collectBlockClosureCaptures(block *ast.BlockStmt, params map[string]struct{}) []string {
+	locals := make(map[string]struct{}, len(params))
+	for name := range params {
+		locals[name] = struct{}{}
+	}
+	var collectDecls func(ast.Stmt)
+	collectDecls = func(stmt ast.Stmt) {
+		if stmt == nil {
+			return
+		}
+		switch n := stmt.(type) {
+		case *ast.VarDeclStmt:
+			for _, d := range n.Declarations {
+				locals[d.Name] = struct{}{}
+			}
+		case *ast.ForOfStmt:
+			locals[n.Name] = struct{}{}
+			collectDecls(n.Body)
+		case *ast.ForStmt:
+			collectDecls(n.Init)
+			collectDecls(n.Body)
+		case *ast.BlockStmt:
+			for _, child := range n.Statements {
+				collectDecls(child)
+			}
+		case *ast.IfStmt:
+			collectDecls(n.Then)
+			collectDecls(n.Else)
+		case *ast.WhileStmt:
+			collectDecls(n.Body)
+		case *ast.DoWhileStmt:
+			collectDecls(n.Body)
+		case *ast.SwitchStmt:
+			for _, c := range n.Cases {
+				for _, child := range c.Statements {
+					collectDecls(child)
+				}
+			}
+		case *ast.FunctionDecl:
+			locals[n.Name] = struct{}{}
+		}
+	}
+	collectDecls(block)
+
+	found := make(map[string]struct{})
+	var walkExpr func(ast.Expr)
+	var walkStmt func(ast.Stmt)
+	walkExpr = func(e ast.Expr) {
+		if e == nil {
+			return
+		}
+		switch n := e.(type) {
+		case *ast.IdentExpr:
+			if _, local := locals[n.Name]; local {
+				return
+			}
+			if _, outer := g.locals[n.Name]; outer {
+				found[n.Name] = struct{}{}
+			}
+		case *ast.BinaryExpr:
+			walkExpr(n.Left)
+			walkExpr(n.Right)
+		case *ast.UnaryExpr:
+			walkExpr(n.Target)
+		case *ast.CallExpr:
+			walkExpr(n.Callee)
+			for _, a := range n.Args {
+				walkExpr(a)
+			}
+		case *ast.MemberExpr:
+			walkExpr(n.Object)
+		case *ast.IndexExpr:
+			walkExpr(n.Target)
+			walkExpr(n.Index)
+		case *ast.ArrayLit:
+			for _, el := range n.Elements {
+				walkExpr(el)
+			}
+		case *ast.SpreadExpr:
+			walkExpr(n.Value)
+		case *ast.ObjectLit:
+			for _, prop := range n.Properties {
+				walkExpr(prop.Value)
+			}
+		case *ast.AssignExpr:
+			walkExpr(n.Left)
+			walkExpr(n.Right)
+		case *ast.TernaryExpr:
+			walkExpr(n.Cond)
+			walkExpr(n.Then)
+			walkExpr(n.Else)
+		case *ast.ArrowFuncExpr, *ast.FunctionExpr:
+			// Nested functions own their capture analysis.
+		}
+	}
+	walkStmt = func(stmt ast.Stmt) {
+		if stmt == nil {
+			return
+		}
+		switch n := stmt.(type) {
+		case *ast.BlockStmt:
+			for _, child := range n.Statements {
+				walkStmt(child)
+			}
+		case *ast.VarDeclStmt:
+			for _, d := range n.Declarations {
+				walkExpr(d.Init)
+			}
+		case *ast.ExprStmt:
+			walkExpr(n.Expr)
+		case *ast.ReturnStmt:
+			walkExpr(n.Value)
+		case *ast.IfStmt:
+			walkExpr(n.Cond)
+			walkStmt(n.Then)
+			walkStmt(n.Else)
+		case *ast.WhileStmt:
+			walkExpr(n.Cond)
+			walkStmt(n.Body)
+		case *ast.DoWhileStmt:
+			walkStmt(n.Body)
+			walkExpr(n.Cond)
+		case *ast.ForStmt:
+			walkStmt(n.Init)
+			walkExpr(n.Cond)
+			walkExpr(n.Post)
+			walkStmt(n.Body)
+		case *ast.ForOfStmt:
+			walkExpr(n.Iterable)
+			walkStmt(n.Body)
+		case *ast.SwitchStmt:
+			walkExpr(n.Expr)
+			for _, c := range n.Cases {
+				walkExpr(c.Test)
+				for _, child := range c.Statements {
+					walkStmt(child)
+				}
+			}
+		case *ast.FunctionDecl:
+			// Nested declarations own their body.
+		}
+	}
+	walkStmt(block)
+	names := make([]string, 0, len(found))
+	for name := range found {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
-	if !e.IsExprBody {
-		return g.failExpr("block-body arrow functions are not yet supported by native closure lowering")
-	}
-	body, ok := e.Body.(ast.Expr)
-	if !ok {
-		return g.failExpr("arrow expression body has unsupported node %T", e.Body)
-	}
 	fnType, ok := g.semanticType(e).(*types.FunctionType)
 	if !ok {
 		return g.failExpr("arrow function is missing a resolved function type")
@@ -763,7 +907,20 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	for _, p := range e.Params {
 		paramSet[p.Name] = struct{}{}
 	}
-	captureNames := g.collectArrowCaptures(body, paramSet)
+	var captureNames []string
+	if e.IsExprBody {
+		body, ok := e.Body.(ast.Expr)
+		if !ok {
+			return g.failExpr("arrow expression body has unsupported node %T", e.Body)
+		}
+		captureNames = g.collectArrowCaptures(body, paramSet)
+	} else {
+		body, ok := e.Body.(*ast.BlockStmt)
+		if !ok {
+			return g.failExpr("arrow block body has unsupported node %T", e.Body)
+		}
+		captureNames = g.collectBlockClosureCaptures(body, paramSet)
+	}
 	captureOps := make([]ir.Operand, 0, len(captureNames))
 	var refMask uint64
 	for i, name := range captureNames {
@@ -804,9 +961,21 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		lifted.Params = append(lifted.Params, v)
 		g.locals[p.Name] = v
 	}
-	ret := g.lowerExpr(body)
-	if g.currentBB.Terminator == nil {
-		g.currentBB.Terminator = &ir.ReturnTerm{Val: ret}
+	if e.IsExprBody {
+		body := e.Body.(ast.Expr)
+		ret := g.lowerExpr(body)
+		ret = g.coerceJSValueBoundary(ret, g.semanticType(body), fnType.Return)
+		if g.currentBB.Terminator == nil {
+			g.currentBB.Terminator = &ir.ReturnTerm{Val: ret}
+		}
+	} else {
+		body := e.Body.(*ast.BlockStmt)
+		for _, stmt := range body.Statements {
+			g.lowerStatement(stmt)
+		}
+		if g.currentBB.Terminator == nil {
+			g.currentBB.Terminator = &ir.ReturnTerm{}
+		}
 	}
 	g.prog.Functions = append(g.prog.Functions, lifted)
 
