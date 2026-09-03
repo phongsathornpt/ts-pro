@@ -297,3 +297,68 @@ const bad = new Box("wrong");
 		t.Fatal("expected constructor argument mismatch")
 	}
 }
+
+func TestSemaClassInheritancePreservesBaseShapeAndMethodOwners(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("inheritance.ts", []byte(`
+class Base {
+  constructor(public x: number) {}
+  value(): number { return this.x; }
+}
+class Derived extends Base {
+  y: number = 2;
+  constructor(x: number) { super(x); }
+  sum(): number { return this.x + this.y; }
+}
+const derived: Base = new Derived(40);
+const sum: number = new Derived(40).sum();
+const value: number = new Derived(40).value();
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	base := result.Classes["Base"]
+	derived := result.Classes["Derived"]
+	if base == nil || derived == nil {
+		t.Fatalf("missing class metadata: base=%#v derived=%#v", base, derived)
+	}
+	if len(derived.Instance.FieldOrder) < 2 || derived.Instance.FieldOrder[0] != "x" || derived.Instance.FieldOrder[1] != "y" {
+		t.Fatalf("derived field order = %v, want base prefix [x y]", derived.Instance.FieldOrder)
+	}
+	if owner := derived.MethodOwners["value"]; owner != "Base" {
+		t.Fatalf("inherited value owner = %q, want Base", owner)
+	}
+	if owner := derived.MethodOwners["sum"]; owner != "Derived" {
+		t.Fatalf("sum owner = %q, want Derived", owner)
+	}
+	if !derived.Instance.AssignableTo(base.Instance) {
+		t.Fatal("derived instance must be structurally assignable to base instance")
+	}
+}
+
+func TestSemaClassOverrideReplacesMethodOwner(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("override.ts", []byte(`
+class Base { constructor(public value: number) {} score(): number { return this.value; } }
+class Derived extends Base { constructor(value: number) { super(value); } override score(): number { return this.value + 2; } }
+const item: Base = new Derived(40);
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	if got := result.Classes["Derived"].MethodOwners["score"]; got != "Derived" {
+		t.Fatalf("override owner = %q, want Derived", got)
+	}
+}

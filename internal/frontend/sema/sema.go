@@ -29,12 +29,15 @@ type Symbol struct {
 }
 
 type ClassInfo struct {
-	Name        string
-	Decl        *ast.ClassDecl
-	Instance    *types.ObjectType
-	Constructor *types.FunctionType
-	Methods     map[string]*types.FunctionType
-	BaseName    string
+	Name         string
+	Decl         *ast.ClassDecl
+	Instance     *types.ObjectType
+	Constructor  *types.FunctionType
+	Methods      map[string]*types.FunctionType
+	MethodOwners map[string]string
+	BaseName     string
+	Resolved     bool
+	Resolving    bool
 }
 
 type Scope struct {
@@ -152,7 +155,10 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 			continue
 		}
 		instance := types.NewObject(cls.Name)
-		info := &ClassInfo{Name: cls.Name, Decl: cls, Instance: instance, Methods: make(map[string]*types.FunctionType), BaseName: cls.Extends}
+		info := &ClassInfo{
+			Name: cls.Name, Decl: cls, Instance: instance,
+			Methods: make(map[string]*types.FunctionType), MethodOwners: make(map[string]string), BaseName: cls.Extends,
+		}
 		c.result.Classes[cls.Name] = info
 		sym := &Symbol{Name: cls.Name, Kind: SymClass, Type: instance, Node: cls}
 		if err := c.currentScope.Define(sym); err != nil {
@@ -199,13 +205,40 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 
 func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 	info := c.result.Classes[cls.Name]
-	if info == nil {
+	if info == nil || info.Resolved {
 		return
 	}
+	if info.Resolving {
+		c.error(cls.Span(), "TS2506", fmt.Sprintf("Class '%s' is referenced directly or indirectly in its own base expression.", cls.Name))
+		return
+	}
+	info.Resolving = true
+	defer func() { info.Resolving = false }()
+
+	if info.BaseName != "" {
+		base := c.result.Classes[info.BaseName]
+		if base == nil {
+			c.error(cls.Span(), "TS2304", fmt.Sprintf("Cannot find base class '%s'.", info.BaseName))
+		} else {
+			c.resolveClassInfo(base.Decl)
+			for _, name := range base.Instance.FieldOrder {
+				field := base.Instance.Fields[name]
+				info.Instance.AddField(name, field.Type, field.Optional)
+			}
+			for name, method := range base.Methods {
+				info.Methods[name] = method
+				owner := base.MethodOwners[name]
+				if owner == "" {
+					owner = base.Name
+				}
+				info.MethodOwners[name] = owner
+			}
+		}
+	}
+
 	if len(cls.TypeParams) > 0 {
-		// Generic class instantiation is handled in the dedicated class-generic phase.
-		// Keep unresolved class type variables as any for now without corrupting
-		// non-generic class metadata.
+		// Generic class specialization is a later phase. Non-generic hierarchy
+		// metadata remains exact, while generic members currently resolve through any.
 	}
 	for _, field := range cls.Fields {
 		if field.IsStatic {
@@ -238,11 +271,13 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 			info.Constructor = ft
 		} else {
 			info.Methods[method.Name] = ft
+			info.MethodOwners[method.Name] = cls.Name
 		}
 	}
 	if info.Constructor == nil {
 		info.Constructor = types.NewFunction(nil, types.TypeVoid)
 	}
+	info.Resolved = true
 }
 
 func (c *Checker) checkProgram(prog *ast.Program) {
