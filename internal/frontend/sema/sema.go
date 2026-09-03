@@ -978,6 +978,18 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		obj := types.NewObject("")
 		for _, prop := range e.Properties {
 			pType := c.checkExpr(prop.Value)
+			if prop.Spread {
+				source, ok := pType.(*types.ObjectType)
+				if !ok {
+					c.error(prop.SourceSpan, "TS2698", fmt.Sprintf("Spread types may only be created from closed object types, got '%s'.", pType))
+					continue
+				}
+				for _, name := range source.FieldOrder {
+					field := source.Fields[name]
+					obj.AddField(name, field.Type, field.Optional)
+				}
+				continue
+			}
 			obj.AddField(prop.Key, pType, false)
 		}
 		c.result.Types[e] = obj

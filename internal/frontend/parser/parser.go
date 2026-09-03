@@ -1119,14 +1119,23 @@ func (p *Parser) parsePrimary() ast.Expr {
 		var props []ast.PropertyAssignment
 		for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
 			loopStart := p.cursor
-			keyTok := p.expect(token.Ident)
-			p.expect(token.Colon)
-			val := p.parseExpression()
-			props = append(props, ast.PropertyAssignment{
-				SourceSpan: source.Span{Start: keyTok.Span.Start, End: val.Span().End},
-				Key:        keyTok.Text,
-				Value:      val,
-			})
+			if p.current().Kind == token.DotDotDot {
+				start := p.advance().Span.Start
+				val := p.parseExpression()
+				props = append(props, ast.PropertyAssignment{
+					SourceSpan: source.Span{Start: start, End: val.Span().End},
+					Value:      val, Spread: true,
+				})
+			} else {
+				keyTok := p.expect(token.Ident)
+				p.expect(token.Colon)
+				val := p.parseExpression()
+				props = append(props, ast.PropertyAssignment{
+					SourceSpan: source.Span{Start: keyTok.Span.Start, End: val.Span().End},
+					Key:        keyTok.Text,
+					Value:      val,
+				})
+			}
 			if !p.match(token.Comma) {
 				p.ensureProgress(loopStart, "object literal")
 				break

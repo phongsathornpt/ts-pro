@@ -138,6 +138,7 @@ type (
 		SourceSpan source.Span
 		Key        string
 		Value      Expr
+		Spread     bool
 	}
 
 	ObjectLit struct {

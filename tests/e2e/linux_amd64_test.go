@@ -732,3 +732,19 @@ for (const s of combined) { console.log(s); }
 		expected: "0\n10\n20\n30\n40\nfirst\nsecond\nthird\n",
 	})
 }
+
+func TestLinuxAMD64ObjectSpread(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "closed_object_spread_override_order",
+		source: `
+const defaults = { host: "localhost", port: 8080, secure: false };
+const custom = { port: 9000, secure: true };
+const config = { ...defaults, ...custom, env: "prod" };
+console.log(config.host);
+console.log(config.port);
+console.log(config.secure);
+console.log(config.env);
+`,
+		expected: "localhost\n9000\n1\nprod\n",
+	})
+}

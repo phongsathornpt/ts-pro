@@ -1611,6 +1611,21 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		for _, prop := range e.Properties {
+			if prop.Spread {
+				sourceType, ok := g.semanticType(prop.Value).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native object spread requires a closed object source")
+				}
+				source := g.lowerExpr(prop.Value)
+				sourceOffsets, _, _ := g.objectLayout(sourceType)
+				for _, name := range sourceType.FieldOrder {
+					field := sourceType.Fields[name]
+					value := g.currentFn.NewValue("spread_field", field.Type)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: value, Obj: source, Field: name, Offset: sourceOffsets[name]})
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: value})
+				}
+				continue
+			}
 			val := g.lowerExpr(prop.Value)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: prop.Key, Offset: offsets[prop.Key], Val: val})
 		}
