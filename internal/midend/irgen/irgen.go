@@ -398,6 +398,50 @@ func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand
 	return g.coerceStringType(t, op)
 }
 
+func restParamIndex(params []types.Param) int {
+	for i, param := range params {
+		if param.Rest {
+			return i
+		}
+	}
+	return -1
+}
+
+func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionType) []ir.Operand {
+	if fnType == nil {
+		return args
+	}
+	restIndex := restParamIndex(fnType.Params)
+	if restIndex < 0 {
+		return args
+	}
+	if restIndex >= len(fnType.Params) {
+		return args
+	}
+	arrType, ok := fnType.Params[restIndex].Type.(*types.ArrayType)
+	if !ok {
+		g.failExpr("rest parameter %q has non-array native type %s", fnType.Params[restIndex].Name, fnType.Params[restIndex].Type)
+		return args
+	}
+	if len(args) < restIndex {
+		g.failExpr("call is missing %d fixed arguments before rest parameter", restIndex-len(args))
+		return args
+	}
+	restCount := len(args) - restIndex
+	rest := g.currentFn.NewValue("rest", arrType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
+		Res: rest, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(restCount)},
+	})
+	for i, value := range args[restIndex:] {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
+			Array: rest, Index: ir.ConstNumber{Value: float64(i)}, Val: value,
+		})
+	}
+	packed := append([]ir.Operand(nil), args[:restIndex]...)
+	packed = append(packed, rest)
+	return packed
+}
+
 func isNumberSemanticType(t types.Type) bool {
 	if t == nil {
 		return false
@@ -1759,6 +1803,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				for _, arg := range e.Args {
 					args = append(args, g.lowerExpr(arg))
 				}
+				args = g.packRestOperands(args, fnType)
 				res := g.currentFn.NewValue("ret", fnType.Return)
 				paramTypes := make([]types.Type, len(fnType.Params))
 				for i := range fnType.Params {
@@ -1819,7 +1864,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			if decl := g.functionDecls[ident.Name]; decl != nil {
-				for i := len(args); i < len(decl.Params); i++ {
+				fixedLimit := len(decl.Params)
+				for i, param := range decl.Params {
+					if param.Rest {
+						fixedLimit = i
+						break
+					}
+				}
+				for i := len(args); i < fixedLimit; i++ {
 					p := decl.Params[i]
 					if p.Default != nil {
 						args = append(args, g.lowerExpr(p.Default))
@@ -1833,6 +1885,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 			}
 		}
+		args = g.packRestOperands(args, callType)
 		var paramTypes []types.Type
 		if callType != nil && !isConsoleLogCall(e.Callee) && !strings.HasPrefix(calleeName, "ts_") {
 			paramTypes = make([]types.Type, len(callType.Params))

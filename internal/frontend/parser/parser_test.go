@@ -133,26 +133,23 @@ func TestParseObjectTypeAlias(t *testing.T) {
 	}
 }
 
-func TestParserUnsupportedSyntaxAlwaysMakesProgress(t *testing.T) {
-	cases := map[string]string{
-		"rest_parameter": `function sum(...values: number[]): number { return 0; }`,
+func TestParseRestParameter(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("rest.ts", []byte(`function sum(prefix: string, ...values: number[]): number { return 0; }`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
 	}
-	for name, src := range cases {
-		t.Run(name, func(t *testing.T) {
-			fs := source.NewFileSet()
-			file := fs.AddFile(name+".ts", []byte(src))
-			p := New(file)
-			prog, diags := p.Parse()
-			if prog == nil {
-				t.Fatal("parser returned nil program")
-			}
-			if !diags.HasErrors() {
-				t.Fatal("unsupported syntax must produce diagnostics until lowering support is added")
-			}
-			if p.current().Kind != token.EOF {
-				t.Fatalf("parser stopped before EOF at %s", p.current().Kind)
-			}
-		})
+	fn, ok := prog.Statements[0].(*ast.FunctionDecl)
+	if !ok || len(fn.Params) != 2 {
+		t.Fatalf("unexpected function: %#v", prog.Statements[0])
+	}
+	if fn.Params[0].Rest || !fn.Params[1].Rest {
+		t.Fatalf("rest flags = [%v %v], want [false true]", fn.Params[0].Rest, fn.Params[1].Rest)
+	}
+	if p.current().Kind != token.EOF {
+		t.Fatalf("parser stopped before EOF at %s", p.current().Kind)
 	}
 }
 

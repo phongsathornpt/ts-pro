@@ -312,6 +312,7 @@ type Param struct {
 	Name     string
 	Type     Type
 	Optional bool
+	Rest     bool
 }
 
 type FunctionType struct {
@@ -336,7 +337,11 @@ func (f *FunctionType) String() string {
 		if p.Optional {
 			opt = "?"
 		}
-		parts = append(parts, fmt.Sprintf("%s%s: %s", p.Name, opt, p.Type.String()))
+		rest := ""
+		if p.Rest {
+			rest = "..."
+		}
+		parts = append(parts, fmt.Sprintf("%s%s%s: %s", rest, p.Name, opt, p.Type.String()))
 	}
 	typeParams := ""
 	if len(f.TypeParams) > 0 {
@@ -359,7 +364,7 @@ func (f *FunctionType) Equals(other Type) bool {
 		}
 	}
 	for i := range f.Params {
-		if !f.Params[i].Type.Equals(o.Params[i].Type) {
+		if f.Params[i].Rest != o.Params[i].Rest || !f.Params[i].Type.Equals(o.Params[i].Type) {
 			return false
 		}
 	}

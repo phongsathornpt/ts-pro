@@ -209,6 +209,7 @@ type Param struct {
 	Name                string
 	Type                TypeNode
 	Optional            bool
+	Rest                bool
 	Default             Expr
 	Visibility          string
 	Readonly            bool

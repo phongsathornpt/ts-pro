@@ -292,7 +292,7 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 			if pt == nil {
 				pt = types.TypeAny
 			}
-			params[i] = types.Param{Name: p.Name, Type: pt, Optional: p.Optional}
+			params[i] = types.Param{Name: p.Name, Type: pt, Optional: p.Optional, Rest: p.Rest}
 			if method.Name == "constructor" && p.IsParameterProperty {
 				info.Instance.AddField(p.Name, pt, p.Optional)
 			}
@@ -817,7 +817,7 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			if pt == nil {
 				pt = types.TypeAny
 			}
-			params = append(params, types.Param{Name: param.Name, Type: pt, Optional: param.Optional})
+			params = append(params, types.Param{Name: param.Name, Type: pt, Optional: param.Optional, Rest: param.Rest})
 		}
 
 		parentScope := c.currentScope
@@ -906,11 +906,23 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 
 		for i, argType := range argTypes {
+			var expected types.Type
 			if i < len(effective.Params) {
-				expected := effective.Params[i].Type
-				if !argType.AssignableTo(expected) {
-					c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.", argType, expected))
+				param := effective.Params[i]
+				if param.Rest {
+					if arr, ok := param.Type.(*types.ArrayType); ok {
+						expected = arr.Elem
+					}
+				} else {
+					expected = param.Type
 				}
+			} else if len(effective.Params) > 0 && effective.Params[len(effective.Params)-1].Rest {
+				if arr, ok := effective.Params[len(effective.Params)-1].Type.(*types.ArrayType); ok {
+					expected = arr.Elem
+				}
+			}
+			if expected != nil && !argType.AssignableTo(expected) {
+				c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.", argType, expected))
 			}
 		}
 		if len(fnType.TypeParams) > 0 {
@@ -1066,10 +1078,16 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 		if p.Optional {
 			pType = types.NewUnion(pType, types.TypeUndefined)
 		}
+		if p.Rest {
+			if _, ok := pType.(*types.ArrayType); !ok {
+				c.error(p.SourceSpan, "TS2370", "A rest parameter must be of an array type.")
+			}
+		}
 		params = append(params, types.Param{
 			Name:     p.Name,
 			Type:     pType,
 			Optional: p.Optional,
+			Rest:     p.Rest,
 		})
 	}
 	retType := c.resolveTypeNode(fn.ReturnType)
@@ -1147,7 +1165,7 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			if pt == nil {
 				pt = types.TypeAny
 			}
-			params = append(params, types.Param{Name: p.Name, Type: pt, Optional: p.Optional})
+			params = append(params, types.Param{Name: p.Name, Type: pt, Optional: p.Optional, Rest: p.Rest})
 		}
 		ret := c.resolveTypeNode(t.ReturnType)
 		if ret == nil {

@@ -337,6 +337,7 @@ func (p *Parser) parseParams() []ast.Param {
 			}
 		}
 	paramModifiersDone:
+		rest := p.match(token.DotDotDot)
 		paramTok := p.expect(token.Ident)
 		optional := p.match(token.Question)
 		var typeNode ast.TypeNode
@@ -349,7 +350,7 @@ func (p *Parser) parseParams() []ast.Param {
 		}
 		params = append(params, ast.Param{
 			SourceSpan: source.Span{Start: start, End: paramTok.Span.End},
-			Name:       paramTok.Text, Type: typeNode, Optional: optional, Default: defExpr,
+			Name:       paramTok.Text, Type: typeNode, Optional: optional, Rest: rest, Default: defExpr,
 			Visibility: visibility, Readonly: readonly, IsParameterProperty: visibility != "" || readonly,
 		})
 		if !p.match(token.Comma) {

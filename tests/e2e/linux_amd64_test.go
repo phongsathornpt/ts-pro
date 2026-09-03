@@ -693,3 +693,26 @@ func TestLinuxAMD64TemplateInterpolation(t *testing.T) {
 		expected: "alice:42:true:Dr.\nbob:10:false:undefined\nvalue=0.1, square=9\n",
 	})
 }
+
+func TestLinuxAMD64RestParameters(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "typed_rest_parameter_array_packing",
+		source: `
+function sumAll(...nums: number[]): number {
+  let total = 0;
+  for (const n of nums) { total = total + n; }
+  return total;
+}
+function formatList(prefix: string, ...items: string[]): string {
+  let out = prefix;
+  for (const item of items) { out = out + ":" + item; }
+  return out;
+}
+console.log(sumAll(10, 20, 30));
+console.log(sumAll());
+console.log(formatList("items", "a", "b", "c"));
+console.log(formatList("empty"));
+`,
+		expected: "60\n0\nitems:a:b:c\nempty\n",
+	})
+}
