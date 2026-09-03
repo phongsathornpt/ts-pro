@@ -1644,3 +1644,35 @@ console.log(join(nested()));
 		expected: "99\noverride\nouter-finally\n42\ninner\ninner-finally\nmiddle\nfinal-finally\n7\n",
 	})
 }
+
+func TestLinuxAMD64PromiseResolveRejectAdoption(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_resolve_reject_adoption",
+		source: `
+async function probe(): Promise<string> {
+  const original: Promise<string> = Promise.resolve("root-" + "value");
+  const adopted: Promise<string> = Promise.resolve(original);
+  const first: string = await original;
+  let churn = "";
+  for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+  const second: string = await adopted;
+  return first + ":" + second;
+}
+async function rejected(): Promise<number> {
+  try { return await Promise.reject<number>("reject-root"); }
+  catch (error: any) { console.log(error); return 42; }
+}
+async function repeated(): Promise<number> {
+  let p: Promise<number> = Promise.resolve(21);
+  const a = await p;
+  p = Promise.resolve(p);
+  const b = await p;
+  return a + b;
+}
+console.log(join(probe()));
+console.log(join(rejected()));
+console.log(join(repeated()));
+`,
+		expected: "root-value:root-value\nreject-root\n42\n42\n",
+	})
+}

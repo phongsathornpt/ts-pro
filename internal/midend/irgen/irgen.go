@@ -1190,6 +1190,77 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	return res
 }
 
+func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
+	ident, ok := member.Object.(*ast.IdentExpr)
+	if !ok || ident.Name != "Promise" || (member.Property != "resolve" && member.Property != "reject") {
+		return nil, false
+	}
+	if len(e.Args) != 1 {
+		return g.failExpr("Promise.%s expects one argument", member.Property), true
+	}
+	taskType, ok := g.semanticType(e).(*types.ObjectType)
+	if !ok {
+		return g.failExpr("Promise.%s is missing task result type", member.Property), true
+	}
+	inner := g.semaResult.TaskResults[taskType.Name]
+	if inner == nil {
+		inner = types.TypeAny
+	}
+	if member.Property == "resolve" {
+		if argObj, ok := g.semanticType(e.Args[0]).(*types.ObjectType); ok {
+			if _, isTask := g.semaResult.TaskResults[argObj.Name]; isTask {
+				return g.lowerExpr(e.Args[0]), true
+			}
+		}
+	}
+
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	closureType := types.NewFunction(nil, inner)
+	liftedName := fmt.Sprintf("$promise%d", g.arrowCounter)
+	g.arrowCounter++
+	var capture ir.Operand
+	var captureType types.Type
+	if member.Property == "resolve" {
+		capture = g.lowerExpr(e.Args[0])
+		captureType = g.semanticType(e.Args[0])
+		capture = g.coerceJSValueBoundary(capture, captureType, inner)
+		captureType = inner
+	} else {
+		capture = g.lowerExpr(e.Args[0])
+		capture = g.boxJSValue(capture, g.semanticType(e.Args[0]))
+		captureType = types.TypeAny
+	}
+
+	lifted := ir.NewFunction(liftedName, inner)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", closureType)
+	lifted.Params = append(lifted.Params, env)
+	captured := lifted.NewValue("promise_value", captureType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: captured, Closure: env, Index: 0})
+	if member.Property == "resolve" {
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: captured}
+	} else {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{captured}, ParamTypes: []types.Type{types.TypeAny}})
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+	}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+
+	closure := g.currentFn.NewValue("promise_closure", closureType)
+	var refMask uint64
+	if irHeapRefType(captureType) {
+		refMask = 1
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: liftedName, Captures: []ir.Operand{capture}, RefMask: refMask})
+	task := g.currentFn.NewValue("promise_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	return task, true
+}
+
 func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	fnType, ok := g.semanticType(e).(*types.FunctionType)
 	if !ok {
@@ -3545,6 +3616,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
+		if member, ok := e.Callee.(*ast.MemberExpr); ok {
+			if promise, handled := g.lowerPromiseStaticCall(e, member); handled {
+				return promise
+			}
+		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
 			case "taskGroup":

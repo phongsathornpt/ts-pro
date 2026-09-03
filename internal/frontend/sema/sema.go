@@ -1281,6 +1281,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = fnType
 		return fnType
 	case *ast.CallExpr:
+		if member, ok := e.Callee.(*ast.MemberExpr); ok {
+			if result, handled := c.checkPromiseStaticCall(e, member); handled {
+				return result
+			}
+		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
 			case "taskGroup":
@@ -1791,6 +1796,63 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 	return types.NewGenericFunction(typeParams, params, retType)
 }
 
+func (c *Checker) newPromiseType(inner types.Type) *types.ObjectType {
+	if inner == nil {
+		inner = types.TypeAny
+	}
+	name := fmt.Sprintf("$Promise$%d", c.taskTypeCount)
+	c.taskTypeCount++
+	obj := types.NewObject(name)
+	c.result.TaskResults[name] = inner
+	return obj
+}
+
+func (c *Checker) promiseResultType(t types.Type) (types.Type, bool) {
+	obj, ok := t.(*types.ObjectType)
+	if !ok {
+		return nil, false
+	}
+	inner, ok := c.result.TaskResults[obj.Name]
+	return inner, ok
+}
+
+func (c *Checker) checkPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
+	ident, ok := member.Object.(*ast.IdentExpr)
+	if !ok || ident.Name != "Promise" {
+		return nil, false
+	}
+	if member.Property != "resolve" && member.Property != "reject" {
+		return nil, false
+	}
+	if len(e.Args) != 1 {
+		c.error(e.Span(), "TS2554", fmt.Sprintf("Promise.%s expects exactly one argument.", member.Property))
+		c.result.Types[e] = types.TypeAny
+		return types.TypeAny, true
+	}
+	argType := c.checkExpr(e.Args[0])
+	var inner types.Type
+	if len(e.TypeArgs) > 0 {
+		if len(e.TypeArgs) != 1 {
+			c.error(e.Span(), "TS2558", "Promise builtin expects one type argument.")
+		}
+		inner = c.resolveTypeNode(e.TypeArgs[0])
+	} else if member.Property == "resolve" {
+		if adopted, ok := c.promiseResultType(argType); ok {
+			inner = adopted
+		} else {
+			inner = argType
+		}
+	} else {
+		inner = types.TypeAny
+	}
+	pt := c.newPromiseType(inner)
+	c.result.Types[member.Object] = types.TypeAny
+	c.result.Types[member] = types.TypeAny
+	c.result.Types[e.Callee] = types.TypeAny
+	c.result.Types[e] = pt
+	return pt, true
+}
+
 func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 	if node == nil {
 		return nil
@@ -1820,6 +1882,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeAny
 		}
 	case *ast.TypeRefNode:
+		if (t.Name == "Promise" || t.Name == "PromiseLike") && len(t.TypeArgs) == 1 {
+			return c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))
+		}
 		if tv := c.resolveTypeParam(t.Name); tv != nil {
 			return tv
 		}
