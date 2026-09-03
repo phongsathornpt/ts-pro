@@ -201,3 +201,30 @@ const cmp = 1 < 2;
 		t.Fatalf("comparison must remain binary <, got %T %#v", cmpDecl.Declarations[0].Init, cmpDecl.Declarations[0].Init)
 	}
 }
+
+func TestParseTypedArrowExpressionAndFunctionType(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("arrow.ts", []byte(`
+const offset = 5;
+const add = (x: number): number => x + offset;
+const funcs: Array<(x: number) => number> = [add];
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	arrowDecl := prog.Statements[1].(*ast.VarDeclStmt)
+	arrow, ok := arrowDecl.Declarations[0].Init.(*ast.ArrowFuncExpr)
+	if !ok || len(arrow.Params) != 1 || arrow.ReturnType == nil || !arrow.IsExprBody {
+		t.Fatalf("unexpected arrow expression: %T %#v", arrowDecl.Declarations[0].Init, arrowDecl.Declarations[0].Init)
+	}
+	funcsDecl := prog.Statements[2].(*ast.VarDeclStmt)
+	arr, ok := funcsDecl.Declarations[0].Type.(*ast.TypeRefNode)
+	if !ok || arr.Name != "Array" || len(arr.TypeArgs) != 1 {
+		t.Fatalf("unexpected Array function type: %T %#v", funcsDecl.Declarations[0].Type, funcsDecl.Declarations[0].Type)
+	}
+	if _, ok := arr.TypeArgs[0].(*ast.FunctionTypeNode); !ok {
+		t.Fatalf("expected function type argument, got %T", arr.TypeArgs[0])
+	}
+}

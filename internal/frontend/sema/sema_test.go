@@ -85,3 +85,37 @@ console.log(points[0].name);
 		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
 	}
 }
+
+func TestSemaTypedArrowFunction(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("arrow.ts", []byte(`
+const offset = 5;
+const add: (x: number) => number = (x: number): number => x + offset;
+const result: number = add(7);
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+}
+
+func TestSemaArrowReturnMismatch(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("arrow-bad.ts", []byte(`
+const bad = (x: number): string => x + 1;
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if !result.Diagnostics.HasErrors() {
+		t.Fatal("expected arrow return type mismatch")
+	}
+}

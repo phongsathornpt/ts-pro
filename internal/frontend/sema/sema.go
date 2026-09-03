@@ -375,6 +375,58 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		c.result.Types[e] = targetType
 		return targetType
+	case *ast.ArrowFuncExpr:
+		params := make([]types.Param, 0, len(e.Params))
+		for _, param := range e.Params {
+			pt := c.resolveTypeNode(param.Type)
+			if pt == nil {
+				pt = types.TypeAny
+			}
+			params = append(params, types.Param{Name: param.Name, Type: pt, Optional: param.Optional})
+		}
+
+		parentScope := c.currentScope
+		parentFnRet := c.currentFnRet
+		c.currentScope = NewScope(parentScope)
+		defer func() {
+			c.currentScope = parentScope
+			c.currentFnRet = parentFnRet
+		}()
+		for i, param := range e.Params {
+			_ = c.currentScope.Define(&Symbol{Name: param.Name, Kind: SymParam, Type: params[i].Type, Node: e})
+		}
+
+		declaredReturn := c.resolveTypeNode(e.ReturnType)
+		var returnType types.Type
+		if e.IsExprBody {
+			bodyExpr, ok := e.Body.(ast.Expr)
+			if !ok {
+				returnType = types.TypeAny
+			} else {
+				bodyType := c.checkExpr(bodyExpr)
+				returnType = bodyType
+				if declaredReturn != nil {
+					if !bodyType.AssignableTo(declaredReturn) {
+						c.error(bodyExpr.Span(), "TS2322", fmt.Sprintf("Type '%s' is not assignable to return type '%s'.", bodyType, declaredReturn))
+					}
+					returnType = declaredReturn
+				}
+			}
+		} else {
+			if declaredReturn == nil {
+				declaredReturn = types.TypeVoid
+			}
+			c.currentFnRet = declaredReturn
+			if block, ok := e.Body.(*ast.BlockStmt); ok {
+				for _, stmt := range block.Statements {
+					c.checkStatement(stmt)
+				}
+			}
+			returnType = declaredReturn
+		}
+		fnType := types.NewFunction(params, returnType)
+		c.result.Types[e] = fnType
+		return fnType
 	case *ast.CallExpr:
 		calleeType := c.checkExpr(e.Callee)
 		fnType, ok := calleeType.(*types.FunctionType)
@@ -556,6 +608,20 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			members = append(members, c.resolveTypeNode(m))
 		}
 		return types.NewUnion(members...)
+	case *ast.FunctionTypeNode:
+		params := make([]types.Param, 0, len(t.Params))
+		for _, p := range t.Params {
+			pt := c.resolveTypeNode(p.Type)
+			if pt == nil {
+				pt = types.TypeAny
+			}
+			params = append(params, types.Param{Name: p.Name, Type: pt, Optional: p.Optional})
+		}
+		ret := c.resolveTypeNode(t.ReturnType)
+		if ret == nil {
+			ret = types.TypeVoid
+		}
+		return types.NewFunction(params, ret)
 	default:
 		return types.TypeAny
 	}

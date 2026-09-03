@@ -613,6 +613,72 @@ func (p *Parser) parseUnary() ast.Expr {
 	}
 }
 
+func (p *Parser) tryParseArrowExpr() (ast.Expr, bool) {
+	startCursor := p.cursor
+	startDiags := len(p.diagnostics)
+	start := p.current().Span.Start
+
+	if !p.match(token.LParen) {
+		return nil, false
+	}
+	params := p.parseParams()
+	if p.current().Kind != token.RParen {
+		p.cursor = startCursor
+		p.diagnostics = p.diagnostics[:startDiags]
+		return nil, false
+	}
+	p.advance()
+
+	var retType ast.TypeNode
+	if p.match(token.Colon) {
+		retType = p.parseType()
+	}
+	if !p.match(token.Arrow) {
+		p.cursor = startCursor
+		p.diagnostics = p.diagnostics[:startDiags]
+		return nil, false
+	}
+
+	var body ast.Node
+	isExprBody := true
+	if p.current().Kind == token.LBrace {
+		body = p.parseBlock()
+		isExprBody = false
+	} else {
+		body = p.parseExpression()
+	}
+	return &ast.ArrowFuncExpr{
+		SourceSpan: source.Span{Start: start, End: body.Span().End},
+		Params:     params, ReturnType: retType, Body: body, IsExprBody: isExprBody,
+	}, true
+}
+
+func (p *Parser) tryParseFunctionType() (ast.TypeNode, bool) {
+	startCursor := p.cursor
+	startDiags := len(p.diagnostics)
+	start := p.current().Span.Start
+	if !p.match(token.LParen) {
+		return nil, false
+	}
+	params := p.parseParams()
+	if p.current().Kind != token.RParen {
+		p.cursor = startCursor
+		p.diagnostics = p.diagnostics[:startDiags]
+		return nil, false
+	}
+	p.advance()
+	if !p.match(token.Arrow) {
+		p.cursor = startCursor
+		p.diagnostics = p.diagnostics[:startDiags]
+		return nil, false
+	}
+	ret := p.parseType()
+	return &ast.FunctionTypeNode{
+		SourceSpan: source.Span{Start: start, End: ret.Span().End},
+		Params:     params, ReturnType: ret,
+	}, true
+}
+
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 
@@ -723,6 +789,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		return &ast.UndefinedLit{SourceSpan: tok.Span}
 	case token.LParen:
+		if arrow, ok := p.tryParseArrowExpr(); ok {
+			return arrow
+		}
 		p.advance()
 		expr := p.parseExpression()
 		p.expect(token.RParen)
@@ -831,12 +900,16 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 		rbracket := p.expect(token.RBracket)
 		node = &ast.TupleTypeNode{SourceSpan: source.Span{Start: lbracket.Span.Start, End: rbracket.Span.End}, Elements: elems}
 	case token.LParen:
-		p.advance()
-		inner := p.parseType()
-		p.expect(token.RParen)
-		// Parentheses are type-level grouping only; retain the inner node while
-		// allowing suffixes such as (number | string)[].
-		node = inner
+		if fnType, ok := p.tryParseFunctionType(); ok {
+			node = fnType
+		} else {
+			p.advance()
+			inner := p.parseType()
+			p.expect(token.RParen)
+			// Parentheses are type-level grouping only; retain the inner node while
+			// allowing suffixes such as (number | string)[].
+			node = inner
+		}
 	case token.LBrace:
 		lbrace := p.advance()
 		var fields []ast.InterfaceField
