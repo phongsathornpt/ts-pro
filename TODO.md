@@ -2,6 +2,21 @@
 
 Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
+## Current pure-Go Linux AMD64 backend
+
+- [x] Explicit `linux/amd64` target validation; unsupported target pairs fail instead of silently falling back.
+- [x] Linux ELF64 process entry stub (`_start`) separated from generated TypeScript functions.
+- [x] SysV AMD64 register argument passing for the first six arguments plus real register-allocation spill slots.
+- [x] Strict function/basic-block fixups; unresolved calls and branches fail lowering.
+- [x] Integer-bootstrap arithmetic, comparisons, division/modulo, branching, recursion, loops, and top-level execution.
+- [x] Linux syscall runtime bootstrap for integer/string printing, anonymous mmap allocation, and string concatenation.
+- [x] Explicit Linux AMD64 E2E suite that validates ELF output on every host and executes natively on Linux AMD64.
+- [ ] Move TypeScript `number` from the current integer bootstrap representation to IEEE-754 F64/XMM lowering.
+- [ ] Implement SysV stack-passed arguments beyond the first six integer-class arguments.
+- [ ] Lower `&&` / `||` with JavaScript short-circuit/value semantics instead of integer AND/OR.
+- [ ] Replace per-allocation mmap string storage with the canonical native heap/GC integration.
+- [ ] Add a macOS Linux-AMD64 execution runner (Docker/VM wrapper) in addition to compile/ELF validation; native Linux CI remains authoritative.
+
 ## Architecture invariant
 
 - [x] Enforce the target language split: **TypeScript 7 implements the compiler; Go implements the native runtime/native libraries only**.

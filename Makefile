@@ -1,13 +1,16 @@
 GO ?= go
 BIN ?= build/ts-pro
 
-.PHONY: fmt test vet build pure-go-build check doctor clean
+.PHONY: fmt test test-linux-amd64 vet build pure-go-build check doctor clean
 
 fmt:
 	$(GO) fmt ./...
 
 test:
 	CGO_ENABLED=0 $(GO) test ./...
+
+test-linux-amd64:
+	CGO_ENABLED=0 $(GO) test ./tests/e2e -run '^TestLinuxAMD64ExplicitTarget$$' -count=1
 
 vet:
 	CGO_ENABLED=0 $(GO) vet ./...
