@@ -685,6 +685,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		return types.TypeAny
 	case *ast.MemberExpr:
 		objType := c.checkExpr(e.Object)
+		if _, ok := objType.(*types.TupleType); ok {
+			if e.Property == "length" {
+				c.result.Types[e] = types.TypeNumber
+				return types.TypeNumber
+			}
+			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on tuple type '%s'.", e.Property, objType))
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
 		if arr, ok := objType.(*types.ArrayType); ok {
 			switch e.Property {
 			case "length":

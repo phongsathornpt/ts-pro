@@ -3,6 +3,7 @@ package irgen
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
@@ -31,7 +32,7 @@ func irHeapRefType(t types.Type) bool {
 		return false
 	}
 	switch t.Kind() {
-	case types.KindString, types.KindArray, types.KindObject, types.KindFunction:
+	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
 		return true
 	case types.KindUnion:
 		if u, ok := t.(*types.UnionType); ok {
@@ -66,6 +67,23 @@ func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, s
 		}
 	}
 	return offsets, refMask, strings.Join(names, ",")
+}
+
+func (g *generator) tupleRefMask(t *types.TupleType) uint64 {
+	var mask uint64
+	for i, elem := range t.Elements {
+		if !irHeapRefType(elem) {
+			continue
+		}
+		if i >= 64 {
+			if g.err == nil {
+				g.err = fmt.Errorf("tuple reference element %d exceeds the 64-bit GC reference mask", i)
+			}
+			continue
+		}
+		mask |= uint64(1) << i
+	}
+	return mask
 }
 
 func (g *generator) failExpr(format string, args ...any) ir.Operand {
@@ -941,7 +959,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		arrType := types.NewArray(types.TypeAny)
 		if semantic := g.semanticType(e); semantic != nil {
 			if tuple, ok := semantic.(*types.TupleType); ok {
-				return g.failExpr("tuple literal lowering is not yet implemented for %s", tuple)
+				if len(tuple.Elements) != len(e.Elements) {
+					return g.failExpr("tuple literal has %d elements, expected %d", len(e.Elements), len(tuple.Elements))
+				}
+				res := g.currentFn.NewValue("tuple", tuple)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
+					Res: res, Shape: tuple.String(), FieldCount: len(tuple.Elements), RefMask: g.tupleRefMask(tuple),
+				})
+				for i, el := range e.Elements {
+					val := g.lowerExpr(el)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+						Obj: res, Field: strconv.Itoa(i), Offset: 16 + i*8, Val: val,
+					})
+				}
+				return res
 			}
 			if t, ok := semantic.(*types.ArrayType); ok {
 				arrType = t
@@ -1104,6 +1135,26 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.failExpr("unsupported unary operator %s", e.Op)
 	case *ast.IndexExpr:
+		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
+			lit, ok := e.Index.(*ast.NumberLit)
+			if !ok {
+				return g.failExpr("native tuple indexing currently requires a constant numeric index")
+			}
+			idx := int(lit.Value)
+			if float64(idx) != lit.Value || idx < 0 || idx >= len(tuple.Elements) {
+				return g.failExpr("tuple index %v is outside [0,%d)", lit.Value, len(tuple.Elements))
+			}
+			tupleVal := g.lowerExpr(e.Target)
+			resultType := tuple.Elements[idx]
+			if t := g.semanticType(e); t != nil {
+				resultType = t
+			}
+			res := g.currentFn.NewValue("tuple_elem", resultType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+				Res: res, Obj: tupleVal, Field: strconv.Itoa(idx), Offset: 16 + idx*8,
+			})
+			return res
+		}
 		array := g.lowerExpr(e.Target)
 		index := g.lowerExpr(e.Index)
 		resultType := types.TypeAny
@@ -1114,6 +1165,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
 		return res
 	case *ast.MemberExpr:
+		if tuple, ok := g.semanticType(e.Object).(*types.TupleType); ok && e.Property == "length" {
+			return ir.ConstNumber{Value: float64(len(tuple.Elements))}
+		}
 		if _, ok := g.semanticType(e.Object).(*types.ArrayType); ok && e.Property == "length" {
 			array := g.lowerExpr(e.Object)
 			res := g.currentFn.NewValue("len", types.TypeNumber)
@@ -1256,6 +1310,30 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 		}
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
+			if tuple, isTuple := g.semanticType(idx.Target).(*types.TupleType); isTuple {
+				lit, ok := idx.Index.(*ast.NumberLit)
+				if !ok {
+					return g.failExpr("native tuple assignment currently requires a constant numeric index")
+				}
+				i := int(lit.Value)
+				if float64(i) != lit.Value || i < 0 || i >= len(tuple.Elements) {
+					return g.failExpr("tuple assignment index %v is outside [0,%d)", lit.Value, len(tuple.Elements))
+				}
+				tupleVal := g.lowerExpr(idx.Target)
+				field := strconv.Itoa(i)
+				offset := 16 + i*8
+				if e.Op == token.Eq {
+					rhs := g.lowerExpr(e.Right)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: tupleVal, Field: field, Offset: offset, Val: rhs})
+					return rhs
+				}
+				current := g.currentFn.NewValue("tuple_old", tuple.Elements[i])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: current, Obj: tupleVal, Field: field, Offset: offset})
+				rhs := g.lowerExpr(e.Right)
+				value := g.lowerAssignmentValue(e, current, rhs)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: tupleVal, Field: field, Offset: offset, Val: value})
+				return value
+			}
 			array := g.lowerExpr(idx.Target)
 			index := g.lowerExpr(idx.Index)
 			if e.Op == token.Eq {

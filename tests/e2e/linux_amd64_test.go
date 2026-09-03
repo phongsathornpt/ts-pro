@@ -517,3 +517,23 @@ console.log(identity("inferred"));
 		expected: "42\nhello\n7\ninferred\n",
 	})
 }
+
+func TestLinuxAMD64GenericTupleSpecialization(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "generic_tuple_specialization",
+		source: `
+function pair<A, B>(first: A, second: B): [A, B] { return [first, second]; }
+const p = pair<string, number>("answer", 42);
+console.log(p[0]);
+console.log(p[1]);
+console.log(p.length);
+p[1] += 8;
+console.log(p[1]);
+const keep = pair("keep-" + "alive", 7);
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(keep[0]);
+console.log(keep[1]);
+`,
+		expected: "answer\n42\n2\n50\nkeep-alive\n7\n",
+	})
+}
