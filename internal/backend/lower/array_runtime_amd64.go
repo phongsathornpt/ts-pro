@@ -127,30 +127,145 @@ func emitAMD64ArrayGet(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func emitAMD64ArraySet(e *amd64.Emitter) {
-	// RDI=array, RSI=index, RDX=raw element. MVP grows logical length only while
-	// index remains within capacity; push handles backing-store growth.
-	e.MovRegDeref(amd64.R10, amd64.RDI, amd64ArrayCapacity)
-	e.CmpRegReg(amd64.RSI, amd64.R10)
-	done := len(e.Code)
+func emitAMD64ArraySet(e *amd64.Emitter, allocOffset int) {
+	// RDI=array, RSI=index, RDX=raw element. Grow the backing store when a
+	// non-negative index exceeds capacity, preserving the array and a reference
+	// element across a collection triggered by the allocation.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 32)
+
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegReg(amd64.R12, amd64.RSI)
+	e.MovRegReg(amd64.R13, amd64.RDX)
+
+	// Negative numeric indices are not array elements in JavaScript. Property
+	// lowering is a separate path; keep this element intrinsic side-effect free.
+	e.CmpRegImm32(amd64.R12, 0)
+	negative := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+
+	e.MovRegDeref(amd64.R14, amd64.RBX, amd64ArrayCapacity)
+	e.CmpRegReg(amd64.R12, amd64.R14)
+	haveCapacity := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+
+	// Find the smallest doubled capacity that contains index.
+	growCap := len(e.Code)
+	e.AddRegReg(amd64.R14, amd64.R14)
+	e.CmpRegReg(amd64.R12, amd64.R14)
+	growAgain := len(e.Code)
 	e.JccRel32(amd64.CondAE, 0)
-	e.MovRegDeref(amd64.R10, amd64.RDI, amd64ArrayData)
-	e.MovRegReg(amd64.R11, amd64.RSI)
+	binary.LittleEndian.PutUint32(e.Code[growAgain+2:], uint32(int32(growCap-(growAgain+6))))
+
+	// Root the stable array identity. Reference arrays also root the incoming
+	// element until it has been published into the new backing store.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R11, 1)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R11)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R13)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ArrayElemKind)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	scalarRootCount := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R11, 2)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R11)
+	scalarRootCountLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[scalarRootCount+2:], uint32(int32(scalarRootCountLabel-(scalarRootCount+6))))
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	// Allocate and type the replacement backing store.
+	e.MovRegReg(amd64.RDI, amd64.R14)
+	e.AddRegReg(amd64.RDI, amd64.RDI)
+	e.AddRegReg(amd64.RDI, amd64.RDI)
+	e.AddRegReg(amd64.RDI, amd64.RDI)
+	callData := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callData + 5)))
+	e.MovRegReg(amd64.R9, amd64.RAX)
+
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ArrayElemKind)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	growScalar := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	emitAMD64SetObjectType(e, amd64.R9, amd64ObjectTypeRefData)
+	growTypeDoneJump := len(e.Code)
+	e.JmpRel32(0)
+	growScalarLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[growScalar+2:], uint32(int32(growScalarLabel-(growScalar+6))))
+	emitAMD64SetObjectType(e, amd64.R9, amd64ObjectTypeArrayData)
+	growTypeDone := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[growTypeDoneJump+1:], uint32(int32(growTypeDone-(growTypeDoneJump+5))))
+
+	// Clear the complete replacement store so skipped slots do not retain stale
+	// pointers from a reclaimed block, then copy the live old prefix.
+	e.MovRegReg(amd64.R10, amd64.R9)
+	e.MovRegReg(amd64.R11, amd64.R14)
+	e.MovRegImm64(amd64.RAX, 0)
+	zeroLoop := len(e.Code)
+	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	e.SubRegImm32(amd64.R11, 1)
+	zeroBack := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
+
+	e.MovRegDeref(amd64.R8, amd64.RBX, amd64ArrayData)
+	e.MovRegReg(amd64.R10, amd64.R9)
+	e.MovRegDeref(amd64.R11, amd64.RBX, amd64ArrayLength)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	copyDoneIfZero := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	copyLoop := len(e.Code)
+	e.MovRegDeref(amd64.RAX, amd64.R8, 0)
+	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R8, 8)
+	e.AddRegImm32(amd64.R10, 8)
+	e.SubRegImm32(amd64.R11, 1)
+	copyBack := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	binary.LittleEndian.PutUint32(e.Code[copyBack+2:], uint32(int32(copyLoop-(copyBack+6))))
+	copyDone := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[copyDoneIfZero+2:], uint32(int32(copyDone-(copyDoneIfZero+6))))
+
+	e.MovDerefReg(amd64.RBX, amd64ArrayData, amd64.R9)
+	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+
+	haveCapacityLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[haveCapacity+2:], uint32(int32(haveCapacityLabel-(haveCapacity+6))))
+
+	// Store the element and extend logical length when necessary.
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ArrayData)
+	e.MovRegReg(amd64.R11, amd64.R12)
 	e.AddRegReg(amd64.R11, amd64.R11)
 	e.AddRegReg(amd64.R11, amd64.R11)
 	e.AddRegReg(amd64.R11, amd64.R11)
 	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovDerefReg(amd64.R10, 0, amd64.RDX)
-	e.MovRegDeref(amd64.R10, amd64.RDI, amd64ArrayLength)
-	e.CmpRegReg(amd64.RSI, amd64.R10)
+	e.MovDerefReg(amd64.R10, 0, amd64.R13)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ArrayLength)
+	e.CmpRegReg(amd64.R12, amd64.R10)
 	lengthOK := len(e.Code)
 	e.JccRel32(amd64.CondB, 0)
-	e.MovRegReg(amd64.R10, amd64.RSI)
+	e.MovRegReg(amd64.R10, amd64.R12)
 	e.AddRegImm32(amd64.R10, 1)
-	e.MovDerefReg(amd64.RDI, amd64ArrayLength, amd64.R10)
+	e.MovDerefReg(amd64.RBX, amd64ArrayLength, amd64.R10)
 	end := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[lengthOK+2:], uint32(int32(end-(lengthOK+6))))
-	binary.LittleEndian.PutUint32(e.Code[done+2:], uint32(int32(end-(done+6))))
+	binary.LittleEndian.PutUint32(e.Code[negative+2:], uint32(int32(end-(negative+6))))
+
+	e.AddRegImm32(amd64.RSP, 32)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
 	e.Ret()
 }
 

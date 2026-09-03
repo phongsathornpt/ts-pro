@@ -1313,7 +1313,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_array_get"] = len(e.Code)
 	emitAMD64ArrayGet(e)
 	fnOffsets["ts_array_set"] = len(e.Code)
-	emitAMD64ArraySet(e)
+	emitAMD64ArraySet(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_array_len"] = len(e.Code)
 	emitAMD64ArrayLength(e)
 	fnOffsets["ts_array_push"] = len(e.Code)

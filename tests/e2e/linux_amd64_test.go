@@ -279,3 +279,33 @@ console.log(refs.length);
 		expected: "5\n1\n5\n5\nkeep-alive\ne\n4\n",
 	})
 }
+
+func TestLinuxAMD64ArrayIndexedWriteGrowsCapacity(t *testing.T) {
+	cases := []linuxAMD64Case{
+		{
+			name: "number_array_indexed_write_growth",
+			source: `
+let xs: number[] = [1, 2];
+xs[8] = 9;
+console.log(xs.length);
+console.log(xs[0]);
+console.log(xs[8]);
+`,
+			expected: "9\n1\n9\n",
+		},
+		{
+			name: "reference_array_large_index_growth_preserves_value",
+			source: `
+let xs: string[] = ["seed"];
+let keep = "keep-" + "alive";
+xs[200000] = keep;
+console.log(xs.length);
+console.log(xs[200000]);
+`,
+			expected: "200001\nkeep-alive\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { runLinuxAMD64(t, tc) })
+	}
+}
