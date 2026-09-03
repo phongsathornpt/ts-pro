@@ -543,6 +543,10 @@ func (p *Parser) parsePostfix() ast.Expr {
 				Target:     expr,
 				Prefix:     false,
 			}
+		case token.Bang:
+			// TypeScript postfix non-null assertion is erased at runtime. Consume it
+			// here so member/index/call postfix parsing can continue normally.
+			p.advance()
 		case token.LParen:
 			// Call
 			p.advance()

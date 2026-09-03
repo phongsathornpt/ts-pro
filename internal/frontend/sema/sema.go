@@ -427,8 +427,41 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		c.result.Types[e] = obj
 		return obj
+	case *ast.IndexExpr:
+		targetType := c.checkExpr(e.Target)
+		indexType := c.checkExpr(e.Index)
+		if indexType != types.TypeNumber && indexType != types.TypeAny {
+			c.error(e.Index.Span(), "TS7015", "Array index expression must be a number.")
+		}
+		if arr, ok := targetType.(*types.ArrayType); ok {
+			c.result.Types[e] = arr.Elem
+			return arr.Elem
+		}
+		if targetType != types.TypeAny {
+			c.error(e.Span(), "TS7053", fmt.Sprintf("Element implicitly has an 'any' type because type '%s' has no numeric index signature.", targetType))
+		}
+		c.result.Types[e] = types.TypeAny
+		return types.TypeAny
 	case *ast.MemberExpr:
 		objType := c.checkExpr(e.Object)
+		if arr, ok := objType.(*types.ArrayType); ok {
+			switch e.Property {
+			case "length":
+				c.result.Types[e] = types.TypeNumber
+				return types.TypeNumber
+			case "push":
+				t := types.NewFunction([]types.Param{{Name: "value", Type: arr.Elem}}, types.TypeNumber)
+				c.result.Types[e] = t
+				return t
+			case "pop":
+				t := types.NewFunction(nil, arr.Elem)
+				c.result.Types[e] = t
+				return t
+			}
+			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
 		if o, ok := objType.(*types.ObjectType); ok {
 			if f, exists := o.Fields[e.Property]; exists {
 				c.result.Types[e] = f.Type
