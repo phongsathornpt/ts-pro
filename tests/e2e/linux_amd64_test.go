@@ -1407,3 +1407,29 @@ console.log(channelTryRecvOr(strings, "fallback"));
 		expected: "1\n0\n42\n7\n1\nkeep-alive\nfallback\n",
 	})
 }
+func TestLinuxAMD64BlockingBufferedAndRendezvousChannels(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "blocking_buffered_and_rendezvous_channels",
+		source: `
+const buffered = channel<number>(1);
+channelSend(buffered, 1);
+const consumer = spawn((): void => { console.log(channelRecv(buffered)); });
+channelSend(buffered, 2);
+join(consumer);
+console.log(channelRecv(buffered));
+
+const rendezvous = channel<string>(0);
+const held = "keep-" + "alive";
+const sender = spawn((): void => { channelSend(rendezvous, held); });
+const churner = spawn((): void => {
+  let churn = "";
+  for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+});
+const receiver = spawn((): string => channelRecv(rendezvous));
+console.log(join(receiver));
+join(sender);
+join(churner);
+`,
+		expected: "1\n2\nkeep-alive\n",
+	})
+}

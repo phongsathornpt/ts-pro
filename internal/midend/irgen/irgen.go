@@ -3232,6 +3232,38 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				res := g.currentFn.NewValue("channel", channelType)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_channel_new", Args: []ir.Operand{capacity}, ParamTypes: []types.Type{types.TypeNumber}})
 				return res
+			case "channelSend":
+				if len(e.Args) != 2 {
+					return g.failExpr("native channelSend expects channel and value")
+				}
+				ch := g.lowerExpr(e.Args[0])
+				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native channelSend is missing channel type")
+				}
+				if _, ok := g.semaResult.ChannelElements[chType.Name]; !ok {
+					return g.failExpr("native channelSend is missing element metadata")
+				}
+				value := g.lowerExpr(e.Args[1])
+				value = g.boxJSValue(value, g.semanticType(e.Args[1]))
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_channel_send", Args: []ir.Operand{ch, value}, ParamTypes: []types.Type{chType, types.TypeAny}})
+				return nil
+			case "channelRecv":
+				if len(e.Args) != 1 {
+					return g.failExpr("native channelRecv expects one channel")
+				}
+				ch := g.lowerExpr(e.Args[0])
+				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native channelRecv is missing channel type")
+				}
+				elem, ok := g.semaResult.ChannelElements[chType.Name]
+				if !ok {
+					return g.failExpr("native channelRecv is missing element metadata")
+				}
+				boxed := g.currentFn.NewValue("channel_recv", types.TypeAny)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boxed, Callee: "ts_channel_recv", Args: []ir.Operand{ch}, ParamTypes: []types.Type{chType}})
+				return g.coerceJSValueBoundary(boxed, types.TypeAny, elem)
 			case "channelTrySend":
 				if len(e.Args) != 2 {
 					return g.failExpr("native channelTrySend expects channel and value")

@@ -430,6 +430,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	markChannelDataCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markChannelDataCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64ChannelPending)
+	markChannelPendingCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markChannelPendingCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
 	traceChannelDone := len(e.Code)
 	e.JmpRel32(0)
 

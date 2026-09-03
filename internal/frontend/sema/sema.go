@@ -1252,6 +1252,47 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e.Callee] = types.TypeAny
 				c.result.Types[e] = channelType
 				return channelType
+			case "channelSend":
+				if len(e.Args) != 2 {
+					c.error(e.Span(), "TS2554", "channelSend expects channel and value.")
+					c.result.Types[e] = types.TypeVoid
+					return types.TypeVoid
+				}
+				chType := c.checkExpr(e.Args[0])
+				obj, ok := chType.(*types.ObjectType)
+				elem, known := types.Type(nil), false
+				if ok {
+					elem, known = c.result.ChannelElements[obj.Name]
+				}
+				valueType := c.checkExpr(e.Args[1])
+				if !known {
+					c.error(e.Args[0].Span(), "TS2345", "channelSend expects a channel handle.")
+				} else if !valueType.AssignableTo(elem) {
+					c.error(e.Args[1].Span(), "TS2345", fmt.Sprintf("Type '%s' is not assignable to channel element type '%s'.", valueType, elem))
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
+			case "channelRecv":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "channelRecv expects one channel.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				chType := c.checkExpr(e.Args[0])
+				obj, ok := chType.(*types.ObjectType)
+				elem, known := types.Type(nil), false
+				if ok {
+					elem, known = c.result.ChannelElements[obj.Name]
+				}
+				if !known {
+					c.error(e.Args[0].Span(), "TS2345", "channelRecv expects a channel handle.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = elem
+				return elem
 			case "channelTrySend":
 				if len(e.Args) != 2 {
 					c.error(e.Span(), "TS2554", "channelTrySend expects channel and value.")
