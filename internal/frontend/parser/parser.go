@@ -1137,7 +1137,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 					Value:      val, Spread: true,
 				})
 			} else {
-				keyTok := p.expect(token.Ident)
+				var keyTok token.Token
+				if p.current().Kind == token.Ident || p.current().Kind == token.String {
+					keyTok = p.advance()
+				} else {
+					keyTok = p.expect(token.Ident)
+				}
 				p.expect(token.Colon)
 				val := p.parseExpression()
 				props = append(props, ast.PropertyAssignment{

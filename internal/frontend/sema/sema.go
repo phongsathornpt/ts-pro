@@ -1093,7 +1093,22 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.IndexExpr:
 		targetType := c.checkExpr(e.Target)
 		indexType := c.checkExpr(e.Index)
-		if indexType != types.TypeNumber && indexType != types.TypeAny {
+		if object, ok := targetType.(*types.ObjectType); ok {
+			if key, ok := e.Index.(*ast.StringLit); ok {
+				if field, exists := object.Fields[key.Value]; exists {
+					fieldType := field.Type
+					if field.Optional {
+						fieldType = types.NewUnion(fieldType, types.TypeUndefined)
+					}
+					c.result.Types[e] = fieldType
+					return fieldType
+				}
+				c.error(e.Span(), "TS7053", fmt.Sprintf("Property '%s' does not exist on type '%s'.", key.Value, targetType))
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
+		}
+		if targetType != types.TypeAny && indexType != types.TypeNumber && indexType != types.TypeAny {
 			c.error(e.Index.Span(), "TS7015", "Array index expression must be a number.")
 		}
 		if tuple, ok := targetType.(*types.TupleType); ok {

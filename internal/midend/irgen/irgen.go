@@ -644,10 +644,38 @@ func consolePrinterForType(t types.Type) (string, bool) {
 	}
 }
 
+func (g *generator) staticStringKey(expr ast.Expr) (string, bool) {
+	switch key := expr.(type) {
+	case *ast.StringLit:
+		return key.Value, true
+	case *ast.IdentExpr:
+		if op, ok := g.locals[key.Name]; ok {
+			if value, ok := op.(ir.ConstString); ok {
+				return value.Value, true
+			}
+		}
+	}
+	return "", false
+}
+
 func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 	t := g.semanticType(expr)
 	if t == nil {
 		t = types.TypeAny
+	}
+	if t == types.TypeAny {
+		value := g.lowerExpr(expr)
+		if actual := value.Type(); actual != nil && actual != types.TypeAny {
+			if callee, ok := consolePrinterForType(actual); ok {
+				if actual == types.TypeUndefined || actual == types.TypeNull {
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee})
+					return nil
+				}
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee, Args: []ir.Operand{value}, ParamTypes: []types.Type{actual}})
+				return nil
+			}
+		}
+		return g.failExpr("console.log native printing is not implemented for any without concrete provenance")
 	}
 	if callee, ok := consolePrinterForType(t); ok {
 		if t == types.TypeUndefined || t == types.TypeNull {
@@ -1968,6 +1996,24 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.failExpr("unsupported unary operator %s", e.Op)
 	case *ast.IndexExpr:
+		if key, ok := g.staticStringKey(e.Index); ok {
+			target := g.lowerExpr(e.Target)
+			if object, ok := target.Type().(*types.ObjectType); ok {
+				offsets, _, _ := g.objectLayout(object)
+				offset, exists := offsets[key]
+				if !exists {
+					return g.failExpr("object shape has no computed field %q", key)
+				}
+				resultType := object.Fields[key].Type
+				if semantic := g.semanticType(e); semantic != nil && semantic != types.TypeAny {
+					resultType = semantic
+				}
+				res := g.currentFn.NewValue("computed_field", resultType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: target, Field: key, Offset: offset})
+				return res
+			}
+			return g.failExpr("native string-key indexing requires a closed object with concrete provenance")
+		}
 		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
 			lit, ok := e.Index.(*ast.NumberLit)
 			if !ok {
@@ -2241,6 +2287,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 		}
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
+			if key, ok := g.staticStringKey(idx.Index); ok {
+				target := g.lowerExpr(idx.Target)
+				if object, ok := target.Type().(*types.ObjectType); ok {
+					offsets, _, _ := g.objectLayout(object)
+					offset, exists := offsets[key]
+					if !exists {
+						return g.failExpr("object shape has no writable computed field %q", key)
+					}
+					fieldType := object.Fields[key].Type
+					if e.Op == token.Eq {
+						rhs := g.lowerExpr(e.Right)
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: target, Field: key, Offset: offset, Val: rhs})
+						return rhs
+					}
+					current := g.currentFn.NewValue("computed_old", fieldType)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: current, Obj: target, Field: key, Offset: offset})
+					rhs := g.lowerExpr(e.Right)
+					value := g.lowerAssignmentValue(e, current, rhs)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: target, Field: key, Offset: offset, Val: value})
+					return value
+				}
+				return g.failExpr("native string-key assignment requires a closed object with concrete provenance")
+			}
 			if tuple, isTuple := g.semanticType(idx.Target).(*types.TupleType); isTuple {
 				lit, ok := idx.Index.(*ast.NumberLit)
 				if !ok {

@@ -807,3 +807,29 @@ console.log(s2.kind);
 		expected: "localhost\n8080\n1\nremote\nundefined\nundefined\ncircle\nsquare\n",
 	})
 }
+
+func TestLinuxAMD64ComputedPropertyKeys(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "computed_property_keys_with_concrete_provenance",
+		source: `
+interface User { id: number; name: string; }
+const u: User = { id: 101, name: "Alice" };
+console.log(u["id"]);
+console.log(u["name"]);
+const k = "name";
+const u2: any = u;
+console.log(u2[k]);
+u2["id"] = 202;
+console.log(u2["id"]);
+const headers = { "content-type": "application/json", accept: "text/html" };
+console.log(headers["content-type"]);
+console.log(headers["accept"]);
+const arr = [10, 20, 30];
+const idx: any = 1;
+console.log(arr[idx]);
+arr[idx] = 99;
+console.log(arr[idx]);
+`,
+		expected: "101\nAlice\nAlice\n202\napplication/json\ntext/html\n20\n99\n",
+	})
+}
