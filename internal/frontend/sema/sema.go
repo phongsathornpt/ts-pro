@@ -196,6 +196,10 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		c.checkDoWhile(s)
 	case *ast.ForStmt:
 		c.checkFor(s)
+	case *ast.SwitchStmt:
+		c.checkSwitch(s)
+	case *ast.BreakStmt, *ast.ContinueStmt:
+		// Control-flow legality is enforced during native lowering for now.
 	case *ast.ReturnStmt:
 		c.checkReturn(s)
 	case *ast.ExprStmt:
@@ -350,6 +354,18 @@ func (c *Checker) checkWhile(s *ast.WhileStmt) {
 func (c *Checker) checkDoWhile(s *ast.DoWhileStmt) {
 	c.checkStatement(s.Body)
 	c.checkExpr(s.Cond)
+}
+
+func (c *Checker) checkSwitch(s *ast.SwitchStmt) {
+	c.checkExpr(s.Expr)
+	for _, clause := range s.Cases {
+		if clause.Test != nil {
+			c.checkExpr(clause.Test)
+		}
+		for _, stmt := range clause.Statements {
+			c.checkStatement(stmt)
+		}
+	}
 }
 
 func (c *Checker) checkFor(s *ast.ForStmt) {

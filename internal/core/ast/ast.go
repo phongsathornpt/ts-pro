@@ -299,6 +299,18 @@ type (
 		Body       Stmt
 	}
 
+	SwitchCase struct {
+		SourceSpan source.Span
+		Test       Expr // nil for default
+		Statements []Stmt
+	}
+
+	SwitchStmt struct {
+		SourceSpan source.Span
+		Expr       Expr
+		Cases      []SwitchCase
+	}
+
 	ReturnStmt struct {
 		SourceSpan source.Span
 		Value      Expr
@@ -340,6 +352,8 @@ func (s *DoWhileStmt) Span() source.Span   { return s.SourceSpan }
 func (s *DoWhileStmt) stmtNode()           {}
 func (s *ForStmt) Span() source.Span       { return s.SourceSpan }
 func (s *ForStmt) stmtNode()               {}
+func (s *SwitchStmt) Span() source.Span    { return s.SourceSpan }
+func (s *SwitchStmt) stmtNode()            {}
 func (s *ReturnStmt) Span() source.Span    { return s.SourceSpan }
 func (s *ReturnStmt) stmtNode()            {}
 func (s *BreakStmt) Span() source.Span     { return s.SourceSpan }

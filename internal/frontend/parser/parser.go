@@ -141,6 +141,12 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseDoWhile()
 	case token.KwFor:
 		return p.parseFor()
+	case token.KwSwitch:
+		return p.parseSwitch()
+	case token.KwBreak:
+		return p.parseBreak()
+	case token.KwContinue:
+		return p.parseContinue()
 	case token.LBrace:
 		return p.parseBlock()
 	default:
@@ -496,6 +502,56 @@ func (p *Parser) parseDoWhile() *ast.DoWhileStmt {
 		SourceSpan: source.Span{Start: kw.Span.Start, End: rparen.Span.End},
 		Body:       body, Cond: cond,
 	}
+}
+
+func (p *Parser) parseBreak() *ast.BreakStmt {
+	tok := p.advance()
+	p.match(token.Semicolon)
+	return &ast.BreakStmt{SourceSpan: tok.Span}
+}
+
+func (p *Parser) parseContinue() *ast.ContinueStmt {
+	tok := p.advance()
+	p.match(token.Semicolon)
+	return &ast.ContinueStmt{SourceSpan: tok.Span}
+}
+
+func (p *Parser) parseSwitch() *ast.SwitchStmt {
+	kw := p.advance()
+	p.expect(token.LParen)
+	expr := p.parseExpression()
+	p.expect(token.RParen)
+	p.expect(token.LBrace)
+	var cases []ast.SwitchCase
+	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		loopStart := p.cursor
+		var test ast.Expr
+		start := p.current().Span.Start
+		if p.match(token.KwCase) {
+			test = p.parseExpression()
+			p.expect(token.Colon)
+		} else if p.match(token.KwDefault) {
+			p.expect(token.Colon)
+		} else {
+			p.error(p.current().Span, "expected case or default in switch")
+			p.advance()
+			p.ensureProgress(loopStart, "switch clause")
+			continue
+		}
+		var stmts []ast.Stmt
+		for p.current().Kind != token.KwCase && p.current().Kind != token.KwDefault && p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+			stmtStart := p.cursor
+			if stmt := p.parseStatement(); stmt != nil {
+				stmts = append(stmts, stmt)
+			}
+			p.ensureProgress(stmtStart, "switch clause statement")
+		}
+		end := p.current().Span.Start
+		cases = append(cases, ast.SwitchCase{SourceSpan: source.Span{Start: start, End: end}, Test: test, Statements: stmts})
+		p.ensureProgress(loopStart, "switch clause")
+	}
+	rbrace := p.expect(token.RBrace)
+	return &ast.SwitchStmt{SourceSpan: source.Span{Start: kw.Span.Start, End: rbrace.Span.End}, Expr: expr, Cases: cases}
 }
 
 func (p *Parser) parseFor() *ast.ForStmt {

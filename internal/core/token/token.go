@@ -34,6 +34,9 @@ const (
 	KwWhile
 	KwDo
 	KwFor
+	KwSwitch
+	KwCase
+	KwDefault
 	KwBreak
 	KwContinue
 	KwClass
@@ -129,6 +132,9 @@ var tokens = [...]string{
 	KwWhile:      "while",
 	KwDo:         "do",
 	KwFor:        "for",
+	KwSwitch:     "switch",
+	KwCase:       "case",
+	KwDefault:    "default",
 	KwBreak:      "break",
 	KwContinue:   "continue",
 	KwClass:      "class",
@@ -233,6 +239,9 @@ var keywords = map[string]Kind{
 	"while":      KwWhile,
 	"do":         KwDo,
 	"for":        KwFor,
+	"switch":     KwSwitch,
+	"case":       KwCase,
+	"default":    KwDefault,
 	"break":      KwBreak,
 	"continue":   KwContinue,
 	"class":      KwClass,

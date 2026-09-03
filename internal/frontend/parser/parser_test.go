@@ -228,3 +228,31 @@ const funcs: Array<(x: number) => number> = [add];
 		t.Fatalf("expected function type argument, got %T", arr.TypeArgs[0])
 	}
 }
+
+func TestParseSwitchCasesAndBreak(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("switch.ts", []byte(`
+switch (value) {
+  case 1:
+    console.log("one");
+    break;
+  default:
+    console.log("other");
+}
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	sw, ok := prog.Statements[0].(*ast.SwitchStmt)
+	if !ok || len(sw.Cases) != 2 {
+		t.Fatalf("unexpected switch AST: %T %#v", prog.Statements[0], prog.Statements[0])
+	}
+	if _, ok := sw.Cases[0].Statements[len(sw.Cases[0].Statements)-1].(*ast.BreakStmt); !ok {
+		t.Fatalf("expected trailing break in first case")
+	}
+	if sw.Cases[1].Test != nil {
+		t.Fatal("default clause must have nil test")
+	}
+}

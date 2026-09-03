@@ -376,6 +376,16 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		g.lowerDoWhile(s)
 	case *ast.ForStmt:
 		g.lowerFor(s)
+	case *ast.SwitchStmt:
+		g.lowerSwitch(s)
+	case *ast.BreakStmt:
+		if g.err == nil {
+			g.err = fmt.Errorf("break outside supported switch lowering")
+		}
+	case *ast.ContinueStmt:
+		if g.err == nil {
+			g.err = fmt.Errorf("continue lowering is not implemented")
+		}
 	}
 }
 
@@ -420,6 +430,14 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 			walk(node.Cond)
 			walk(node.Post)
 			walk(node.Body)
+		case *ast.SwitchStmt:
+			walk(node.Expr)
+			for _, clause := range node.Cases {
+				walk(clause.Test)
+				for _, stmt := range clause.Statements {
+					walk(stmt)
+				}
+			}
 		}
 	}
 	walk(stmt)
@@ -622,6 +640,66 @@ func (g *generator) lowerWhile(s *ast.WhileStmt) {
 	}
 
 	g.currentBB = exitBB
+}
+
+func (g *generator) lowerSwitch(s *ast.SwitchStmt) {
+	discr := g.lowerExpr(s.Expr)
+	tempName := fmt.Sprintf("$switch%d", g.arrowCounter)
+	g.arrowCounter++
+	g.locals[tempName] = discr
+
+	var defaultClause *ast.SwitchCase
+	for i, clause := range s.Cases {
+		if clause.Test == nil && i != len(s.Cases)-1 {
+			if g.err == nil {
+				g.err = fmt.Errorf("native switch lowering currently requires default to be the final clause")
+			}
+			return
+		}
+	}
+	var chain ast.Stmt
+	for i := len(s.Cases) - 1; i >= 0; i-- {
+		clause := s.Cases[i]
+		stmts := append([]ast.Stmt(nil), clause.Statements...)
+		terminated := false
+		if len(stmts) > 0 {
+			switch stmts[len(stmts)-1].(type) {
+			case *ast.BreakStmt:
+				stmts = stmts[:len(stmts)-1]
+				terminated = true
+			case *ast.ReturnStmt:
+				terminated = true
+			}
+		}
+		if !terminated && i != len(s.Cases)-1 {
+			if g.err == nil {
+				g.err = fmt.Errorf("switch fallthrough is not yet supported in native lowering")
+			}
+			return
+		}
+		block := &ast.BlockStmt{SourceSpan: clause.SourceSpan, Statements: stmts}
+		if clause.Test == nil {
+			if defaultClause != nil {
+				if g.err == nil {
+					g.err = fmt.Errorf("switch contains multiple default clauses")
+				}
+				return
+			}
+			copyClause := clause
+			defaultClause = &copyClause
+			chain = block
+			continue
+		}
+		left := &ast.IdentExpr{SourceSpan: s.Expr.Span(), Name: tempName}
+		cond := &ast.BinaryExpr{SourceSpan: clause.SourceSpan, Left: left, Op: token.EqEqEq, Right: clause.Test}
+		g.semaResult.Types[left] = discr.Type()
+		g.semaResult.Types[cond] = types.TypeBoolean
+		chain = &ast.IfStmt{SourceSpan: clause.SourceSpan, Cond: cond, Then: block, Else: chain}
+	}
+	if chain != nil {
+		g.lowerStatement(chain)
+	}
+	delete(g.locals, tempName)
 }
 
 func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {

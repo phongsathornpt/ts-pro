@@ -449,3 +449,34 @@ console.log(a !== c);
 		expected: "1\n0\n0\n1\n",
 	})
 }
+
+func TestLinuxAMD64SwitchControlFlow(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "closed_switch_number_and_string_cases",
+		source: `
+function classify(value: number): string {
+  switch (value) {
+    case 1: return "one";
+    case 2: return "two";
+    default: return "other";
+  }
+}
+function action(value: string): number {
+  let score = 0;
+  switch (value) {
+    case "start": score = 100; break;
+    case "pause": score = 50; break;
+    default: score = -1; break;
+  }
+  return score;
+}
+console.log(classify(0));
+console.log(classify(1));
+console.log(classify(2));
+console.log(action("start"));
+console.log(action("pause"));
+console.log(action("unknown"));
+`,
+		expected: "other\none\ntwo\n100\n50\n-1\n",
+	})
+}

@@ -249,3 +249,34 @@ function apply(base: number): number {
 		}
 	}
 }
+
+func TestIRGenRejectsSwitchFallthrough(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("switch-fallthrough.ts", []byte(`
+function f(x: number): number {
+  let out = 0;
+  switch (x) {
+    case 1:
+      out = 1;
+    case 2:
+      out = 2;
+      break;
+    default:
+      out = 3;
+  }
+  return out;
+}
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", semaResult.Diagnostics.Format(fs))
+	}
+	if _, err := Generate(prog, semaResult); err == nil || !strings.Contains(err.Error(), "fallthrough") {
+		t.Fatalf("expected explicit switch fallthrough rejection, got %v", err)
+	}
+}
