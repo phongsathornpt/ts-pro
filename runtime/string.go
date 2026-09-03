@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"math"
 	"os"
 	"unsafe"
 )
@@ -23,6 +24,9 @@ func nativeStringBytes(raw unsafe.Pointer) []byte {
 }
 
 func stringNew(data unsafe.Pointer, length uint64) unsafe.Pointer {
+	if length > uint64(math.MaxInt-int(nativeStringHeaderSize)) {
+		nativeAbort("string length overflow")
+	}
 	n := uintptr(length)
 	raw := heapAllocAtomic(nativeStringHeaderSize + n)
 	*(*uint64)(raw) = length

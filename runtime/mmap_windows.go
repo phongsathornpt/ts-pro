@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"math"
 	"os"
 	"runtime"
 	"syscall"
@@ -24,6 +25,9 @@ func nativeMap(size uintptr) (unsafe.Pointer, []byte) {
 		size = 1
 	}
 	page := uintptr(os.Getpagesize())
+	if size > ^uintptr(0)-page || size > uintptr(math.MaxInt)-page {
+		nativeAbort("mmap size overflow")
+	}
 	mapped := (size + page - 1) &^ (page - 1)
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	virtualAlloc := kernel32.NewProc("VirtualAlloc")
