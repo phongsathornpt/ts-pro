@@ -14,19 +14,20 @@ import (
 )
 
 type generator struct {
-	semaResult       *sema.Result
-	prog             *ir.Program
-	currentFn        *ir.Function
-	currentBB        *ir.BasicBlock
-	locals           map[string]ir.Operand
-	err              error
-	arrowCounter     int
-	genericDecls     map[string]*ast.FunctionDecl
-	genericSpecs     map[string]string
-	genericSpecCount int
-	typeBindings     map[*types.TypeVar]types.Type
-	currentClass     *sema.ClassInfo
-	classTags        map[string]int
+	semaResult        *sema.Result
+	prog              *ir.Program
+	currentFn         *ir.Function
+	currentBB         *ir.BasicBlock
+	locals            map[string]ir.Operand
+	err               error
+	arrowCounter      int
+	genericDecls      map[string]*ast.FunctionDecl
+	genericSpecs      map[string]string
+	genericSpecCount  int
+	typeBindings      map[*types.TypeVar]types.Type
+	currentClass      *sema.ClassInfo
+	classTags         map[string]int
+	emittedClassSpecs map[string]bool
 }
 
 func irHeapRefType(t types.Type) bool {
@@ -462,8 +463,7 @@ func classConstructorDecl(cls *ast.ClassDecl) *ast.ClassMethod {
 	return nil
 }
 
-func (g *generator) lowerClassFunction(cls *ast.ClassDecl, method *ast.ClassMethod, fnType *types.FunctionType, name string, constructor bool) (*ir.Function, error) {
-	info := g.semaResult.Classes[cls.Name]
+func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo, method *ast.ClassMethod, fnType *types.FunctionType, name string, constructor bool) (*ir.Function, error) {
 	if info == nil || info.Instance == nil {
 		return nil, fmt.Errorf("class %q is missing semantic metadata", cls.Name)
 	}
@@ -588,7 +588,7 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 	}()
 
 	ctorDecl := classConstructorDecl(cls)
-	ctor, err := g.lowerClassFunction(cls, ctorDecl, info.Constructor, classConstructorName(cls.Name), true)
+	ctor, err := g.lowerClassFunction(cls, info, ctorDecl, info.Constructor, classConstructorName(info.Name), true)
 	if err != nil {
 		return err
 	}
@@ -600,8 +600,45 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 			continue
 		}
 		fnType := info.Methods[method.Name]
-		fn, err := g.lowerClassFunction(cls, method, fnType, classMethodName(cls.Name, method.Name), false)
+		fn, err := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
 		if err != nil {
+			return err
+		}
+		g.prog.Functions = append(g.prog.Functions, fn)
+	}
+	return nil
+}
+
+func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
+	if info == nil || info.GenericBase == "" {
+		return nil
+	}
+	if g.emittedClassSpecs[info.Name] {
+		return nil
+	}
+	g.emittedClassSpecs[info.Name] = true
+	outerFn, outerBB, outerLocals, outerBindings, outerClass := g.currentFn, g.currentBB, g.locals, g.typeBindings, g.currentClass
+	defer func() {
+		g.currentFn, g.currentBB, g.locals, g.typeBindings, g.currentClass = outerFn, outerBB, outerLocals, outerBindings, outerClass
+	}()
+	g.typeBindings = info.TypeBindings
+	cls := info.Decl
+	ctorDecl := classConstructorDecl(cls)
+	ctor, err := g.lowerClassFunction(cls, info, ctorDecl, info.Constructor, classConstructorName(info.Name), true)
+	if err != nil {
+		delete(g.emittedClassSpecs, info.Name)
+		return err
+	}
+	g.prog.Functions = append(g.prog.Functions, ctor)
+	for i := range cls.Methods {
+		method := &cls.Methods[i]
+		if method.Name == "constructor" || method.IsStatic {
+			continue
+		}
+		fnType := info.Methods[method.Name]
+		fn, err := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
+		if err != nil {
+			delete(g.emittedClassSpecs, info.Name)
 			return err
 		}
 		g.prog.Functions = append(g.prog.Functions, fn)
@@ -612,11 +649,12 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 // Generate lowers an AST program and its semantic facts into SSA IR.
 func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error) {
 	g := &generator{
-		semaResult:   semaResult,
-		prog:         &ir.Program{},
-		genericDecls: make(map[string]*ast.FunctionDecl),
-		genericSpecs: make(map[string]string),
-		classTags:    make(map[string]int),
+		semaResult:        semaResult,
+		prog:              &ir.Program{},
+		genericDecls:      make(map[string]*ast.FunctionDecl),
+		genericSpecs:      make(map[string]string),
+		classTags:         make(map[string]int),
+		emittedClassSpecs: make(map[string]bool),
 	}
 	classNames := make([]string, 0, len(semaResult.Classes))
 	for name := range semaResult.Classes {
@@ -1273,26 +1311,32 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.SuperExpr:
 		return g.failExpr("super lowering is reserved for the inheritance phase")
 	case *ast.NewExpr:
-		info := g.semaResult.Classes[e.ClassName]
+		info := g.semaResult.GenericClasses[e]
+		if info == nil {
+			info = g.semaResult.Classes[e.ClassName]
+		}
 		if info == nil || info.Instance == nil {
 			return g.failExpr("cannot lower new %s without class metadata", e.ClassName)
 		}
-		if len(info.Decl.TypeParams) > 0 {
-			return g.failExpr("generic class %s requires concrete class specialization", e.ClassName)
+		if len(info.TypeParams) > 0 {
+			return g.failExpr("generic class %s is missing a concrete semantic specialization", e.ClassName)
+		}
+		if err := g.ensureClassSpecialization(info); err != nil {
+			return g.failExpr("emit class specialization %s: %v", info.Name, err)
 		}
 		offsets, refMask, shape := g.objectLayout(info.Instance)
 		obj := g.currentFn.NewValue("instance", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
 			Res: obj, Shape: shape, FieldCount: len(offsets) + 1, RefMask: refMask,
 		})
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: "$class", Offset: 16, Val: ir.ConstNumber{Value: float64(g.classTag(e.ClassName))}})
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: "$class", Offset: 16, Val: ir.ConstNumber{Value: float64(g.classTag(info.Name))}})
 		args := make([]ir.Operand, 0, len(e.Args)+1)
 		args = append(args, obj)
 		for _, arg := range e.Args {
 			args = append(args, g.lowerExpr(arg))
 		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Callee: classConstructorName(e.ClassName), Args: args,
+			Callee: classConstructorName(info.Name), Args: args,
 		})
 		return obj
 	case *ast.ArrayLit:

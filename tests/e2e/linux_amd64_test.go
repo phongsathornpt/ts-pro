@@ -592,3 +592,34 @@ console.log(readName(item));
 		expected: "42\nkeep-alive\n",
 	})
 }
+
+func TestLinuxAMD64GenericClasses(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "generic_class_specialization",
+		source: `
+class Box<T> {
+  value: T;
+  constructor(v: T) { this.value = v; }
+  get(): T { return this.value; }
+}
+class Stack<T> {
+  items: T[];
+  constructor() { this.items = []; }
+  pushItem(item: T): void { this.items.push(item); }
+  popItem(): T | undefined { return this.items.pop(); }
+  size(): number { return this.items.length; }
+}
+const n = new Box<number>(42);
+const s = new Box<string>("keep-" + "alive");
+const stack = new Stack<number>();
+stack.pushItem(10);
+stack.pushItem(20);
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(n.get());
+console.log(s.get());
+console.log(stack.size());
+console.log(stack.popItem());
+`,
+		expected: "42\nkeep-alive\n2\n20\n",
+	})
+}
