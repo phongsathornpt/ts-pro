@@ -1527,3 +1527,32 @@ join(parent);
 		expected: "trace-42\ntrace-42\n",
 	})
 }
+func TestLinuxAMD64TaskGroups(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "task_groups",
+		source: `
+const group = taskGroup();
+const values = channel<number>(2);
+const a = groupSpawn(group, (): number => { channelSend(values, 1); return 10; });
+const b = groupSpawn(group, (): number => { channelSend(values, 2); return 20; });
+groupJoin(group);
+console.log(channelRecv(values));
+console.log(channelRecv(values));
+console.log(join(a) + join(b));
+
+const cancelled = taskGroup();
+const gate = channel<number>(2);
+const done = channel<number>(2);
+const ca = groupSpawn(cancelled, (): void => { channelRecv(gate); if (taskCancelled()) { channelSend(done, 1); return; } });
+const cb = groupSpawn(cancelled, (): void => { channelRecv(gate); if (taskCancelled()) { channelSend(done, 2); return; } });
+groupCancel(cancelled);
+channelSend(gate, 1);
+channelSend(gate, 1);
+groupJoin(cancelled);
+console.log(channelRecv(done) + channelRecv(done));
+join(ca);
+join(cb);
+`,
+		expected: "1\n2\n30\n3\n",
+	})
+}

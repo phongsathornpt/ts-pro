@@ -94,6 +94,7 @@ type Result struct {
 	BuiltinCollections map[string]*BuiltinCollectionInfo
 	TaskResults        map[string]types.Type
 	ChannelElements    map[string]types.Type
+	TaskGroupType      *types.ObjectType
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
@@ -1233,6 +1234,51 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.CallExpr:
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "taskGroup":
+				if len(e.Args) != 0 {
+					c.error(e.Span(), "TS2554", "taskGroup expects no arguments.")
+				}
+				if c.result.TaskGroupType == nil {
+					c.result.TaskGroupType = types.NewObject("$TaskGroup")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = c.result.TaskGroupType
+				return c.result.TaskGroupType
+			case "groupSpawn":
+				if len(e.Args) != 2 {
+					c.error(e.Span(), "TS2554", "groupSpawn expects group and zero-argument function.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				groupType := c.checkExpr(e.Args[0])
+				if c.result.TaskGroupType == nil || !groupType.Equals(c.result.TaskGroupType) {
+					c.error(e.Args[0].Span(), "TS2345", "groupSpawn expects a task group.")
+				}
+				fnType, ok := c.checkExpr(e.Args[1]).(*types.FunctionType)
+				if !ok || len(fnType.Params) != 0 {
+					c.error(e.Args[1].Span(), "TS2345", "groupSpawn expects a zero-argument function.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				name := fmt.Sprintf("$Task$%d", c.taskTypeCount)
+				c.taskTypeCount++
+				taskType := types.NewObject(name)
+				c.result.TaskResults[name] = fnType.Return
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = taskType
+				return taskType
+			case "groupJoin", "groupCancel":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", ident.Name+" expects one task group.")
+				} else {
+					groupType := c.checkExpr(e.Args[0])
+					if c.result.TaskGroupType == nil || !groupType.Equals(c.result.TaskGroupType) {
+						c.error(e.Args[0].Span(), "TS2345", ident.Name+" expects a task group.")
+					}
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
 			case "channel":
 				if len(e.TypeArgs) != 1 {
 					c.error(e.Span(), "TS2558", "channel expects exactly one type argument.")

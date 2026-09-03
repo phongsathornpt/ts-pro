@@ -3220,6 +3220,48 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.CallExpr:
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "taskGroup":
+				if len(e.Args) != 0 {
+					return g.failExpr("native taskGroup expects no arguments")
+				}
+				groupType, ok := g.semanticType(e).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native taskGroup is missing type metadata")
+				}
+				res := g.currentFn.NewValue("task_group", groupType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_group_new"})
+				return res
+			case "groupSpawn":
+				if len(e.Args) != 2 {
+					return g.failExpr("native groupSpawn expects group and closure")
+				}
+				group := g.lowerExpr(e.Args[0])
+				closure := g.lowerExpr(e.Args[1])
+				taskType, ok := g.semanticType(e).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native groupSpawn is missing task type")
+				}
+				resultType, ok := g.semaResult.TaskResults[taskType.Name]
+				if !ok {
+					return g.failExpr("native groupSpawn is missing task result metadata")
+				}
+				res := g.currentFn.NewValue("group_task", taskType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_group_spawn", Args: []ir.Operand{group, closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
+				return res
+			case "groupJoin":
+				if len(e.Args) != 1 {
+					return g.failExpr("native groupJoin expects one group")
+				}
+				group := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_group_join", Args: []ir.Operand{group}})
+				return nil
+			case "groupCancel":
+				if len(e.Args) != 1 {
+					return g.failExpr("native groupCancel expects one group")
+				}
+				group := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_group_cancel", Args: []ir.Operand{group}})
+				return nil
 			case "channel":
 				if len(e.Args) != 1 {
 					return g.failExpr("native channel expects one capacity")

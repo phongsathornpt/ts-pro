@@ -234,6 +234,9 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeChannel))
 	isChannel := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeTaskGroup))
+	isTaskGroup := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	traceAfterChildrenJump := len(e.Code)
 	e.JmpRel32(0)
 
@@ -420,6 +423,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	markTaskContextCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markTaskContextCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskGroupNext)
+	markTaskGroupNextCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markTaskGroupNextCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
 
 	// A suspended task owns a precise-root chain on its private native stack.
 	// Walk those frames exactly like the active runtime root chain.
@@ -501,6 +508,15 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	traceTaskResultDone := len(e.Code)
 	e.JmpRel32(0)
 
+	traceTaskGroup := len(e.Code)
+	patchJcc(isTaskGroup, traceTaskGroup)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskGroupHead)
+	markTaskGroupHeadCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markTaskGroupHeadCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
+	traceTaskGroupDone := len(e.Code)
+	e.JmpRel32(0)
+
 	traceChannel := len(e.Code)
 	patchJcc(isChannel, traceChannel)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64ChannelData)
@@ -526,6 +542,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	patchJmp(traceTaskDone, traceChildrenDone)
 	patchJmp(traceTaskResultDone, traceChildrenDone)
 	patchJmp(traceChannelDone, traceChildrenDone)
+	patchJmp(traceTaskGroupDone, traceChildrenDone)
 	traceObjectNext := len(e.Code)
 	patchJcc(traceObjectNextJump, traceObjectNext)
 	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectSize)

@@ -111,4 +111,5 @@ const (
 	amd64ObjectTypeDynamicEntries int64 = 8
 	amd64ObjectTypeTask           int64 = 9
 	amd64ObjectTypeChannel        int64 = 10
+	amd64ObjectTypeTaskGroup      int64 = 11
 )
