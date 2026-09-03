@@ -388,6 +388,49 @@ func (g *generator) lowerWhile(s *ast.WhileStmt) {
 	g.currentBB = exitBB
 }
 
+func (g *generator) lowerLogicalExpr(e *ast.BinaryExpr) ir.Operand {
+	lhs := g.lowerExpr(e.Left)
+	lhsBB := g.currentBB
+	rhsBB := g.currentFn.NewBlock("logical_rhs")
+	shortBB := g.currentFn.NewBlock("logical_short")
+	joinBB := g.currentFn.NewBlock("logical_join")
+
+	if e.Op == token.AmpAmp {
+		lhsBB.Terminator = &ir.BranchTerm{Cond: lhs, Then: rhsBB, Else: shortBB}
+	} else {
+		lhsBB.Terminator = &ir.BranchTerm{Cond: lhs, Then: shortBB, Else: rhsBB}
+	}
+
+	g.currentBB = shortBB
+	shortVal := lhs
+	shortEnd := g.currentBB
+	shortEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = rhsBB
+	rhsVal := g.lowerExpr(e.Right)
+	rhsEnd := g.currentBB
+	if rhsEnd.Terminator == nil {
+		rhsEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	}
+
+	g.currentBB = joinBB
+	resultType := rhsVal.Type()
+	if g.semaResult != nil {
+		if t, ok := g.semaResult.Types[e]; ok && t != nil {
+			resultType = t
+		}
+	}
+	res := g.currentFn.NewValue("logical", resultType)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{
+		Res: res,
+		Incoming: []ir.PhiIncoming{
+			{Block: shortEnd, Value: shortVal},
+			{Block: rhsEnd, Value: rhsVal},
+		},
+	})
+	return res
+}
+
 func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	if expr == nil {
 		return nil
@@ -408,6 +451,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		v := g.currentFn.NewValue(e.Name, types.TypeNumber)
 		return v
 	case *ast.BinaryExpr:
+		if e.Op == token.AmpAmp || e.Op == token.PipePipe {
+			return g.lowerLogicalExpr(e)
+		}
+
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
 

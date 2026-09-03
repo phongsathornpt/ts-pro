@@ -47,3 +47,20 @@ console.log(0 || 0);
 		expected: "1\n1\n0\n1\n1\n1\n1\n0\n1\n0\n",
 	})
 }
+
+func TestE2E_Logical_ShortCircuit_ValueSemantics(t *testing.T) {
+	runHappy(t, happyCase{
+		name: "logical_short_circuit_value_semantics",
+		source: `
+function side(): number {
+  console.log(99);
+  return 7;
+}
+console.log(0 && side());
+console.log(1 || side());
+console.log(1 && side());
+console.log(0 || side());
+`,
+		expected: "0\n1\n99\n7\n99\n7\n",
+	})
+}
