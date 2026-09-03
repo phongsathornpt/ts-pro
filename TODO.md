@@ -15,7 +15,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Implement SysV stack-passed arguments beyond register capacity for both SSE (`number`) and integer/reference classes, including 10-number and 7-string E2E coverage.
 - [x] Lower `&&` / `||` with CFG short-circuit and operand-value Phi semantics instead of eager integer AND/OR.
 - [x] Replace per-allocation mmap string storage with a process-lifetime 16-byte-aligned arena, reserved R15 runtime context, and 1 MiB refill chunks; stress coverage crosses arena refill.
-- [ ] Add tracing/reclamation and precise roots to the Linux AMD64 native heap; the current arena intentionally reclaims only at process exit.
+- [x] Add precise shadow roots plus mark-sweep reclamation/free-list reuse for the current Linux AMD64 string heap; GC stress verifies live-root survival, reclaimed bytes, and 1 MiB mapped-memory reuse. Extend tracing descriptors when object/array heap lowering is introduced.
 - [x] Implement ECMAScript-style shortest-roundtrip NumberToString for Linux AMD64, including subnormals, exponent thresholds, hard 17-digit values, NaN/Infinity, and signed zero.
 - [x] Add a macOS Linux-AMD64 execution runner using Docker `--platform linux/amd64`; native Linux hosts execute the same suite directly.
 
