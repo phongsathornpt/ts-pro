@@ -807,6 +807,15 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				return scratch, fmt.Errorf("unsupported AMD64 operand %T", op)
 			}
 		}
+		loadRawValue := func(op ir.Operand, dst amd64.Register) (amd64.Register, error) {
+			if str, ok := op.(ir.ConstString); ok {
+				at := len(e.Code)
+				e.LeaRipRel32(dst, 0)
+				strFixups = append(strFixups, stringFixupAMD64{offset: at + 3, targetReg: dst, str: str.Value})
+				return dst, nil
+			}
+			return loadOperand(op, dst)
+		}
 		loadArrayIndex := func(op ir.Operand, dst amd64.Register) error {
 			src, err := loadOperand(op, amd64.R10)
 			if err != nil {
@@ -1016,7 +1025,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					if err := loadArrayIndex(bi.Index, amd64.RSI); err != nil {
 						return nil, err
 					}
-					val, err := loadOperand(bi.Val, amd64.RDX)
+					val, err := loadRawValue(bi.Val, amd64.RDX)
 					if err != nil {
 						return nil, err
 					}
@@ -1045,7 +1054,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
-					val, err := loadOperand(bi.Val, amd64.RSI)
+					val, err := loadRawValue(bi.Val, amd64.RSI)
 					if err != nil {
 						return nil, err
 					}
@@ -1283,8 +1292,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_runtime_init"] = len(e.Code)
 	emitAMD64RuntimeInit(e)
 
+	fnOffsets["ts_gc_mark_payload"] = len(e.Code)
+	emitAMD64GCMarkPayload(e)
 	fnOffsets["ts_gc_collect"] = len(e.Code)
-	emitAMD64GCCollect(e)
+	emitAMD64GCCollect(e, fnOffsets["ts_gc_mark_payload"])
 	fnOffsets["ts_gc_collections"] = len(e.Code)
 	emitAMD64GCMetricNumber(e, amd64RTCollections)
 	fnOffsets["ts_gc_reclaimed"] = len(e.Code)

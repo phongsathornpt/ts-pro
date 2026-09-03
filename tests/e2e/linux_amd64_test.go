@@ -242,3 +242,20 @@ console.log(sum([1, 2, 3]));
 		expected: "4\n4\n10\n20\n6\n",
 	})
 }
+
+func TestLinuxAMD64ReferenceArraysSurviveGC(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "reference_arrays_gc_graph",
+		source: `
+let xs: string[] = ["seed"];
+xs[0] = "keep-" + "alive";
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(xs[0]);
+let inner: string[] = ["nested-" + "alive"];
+let outer: string[][] = [inner];
+for (let i = 0; i < 50000; i++) { const garbage = "ef" + "gh"; }
+console.log(outer[0]![0]);
+`,
+		expected: "keep-alive\nnested-alive\n",
+	})
+}
