@@ -37,3 +37,12 @@ func TestAMD64RootSlotsTrackStringSSAValues(t *testing.T) {
 		t.Fatal("boolean value must not receive a heap root slot")
 	}
 }
+
+func TestAMD64HeapRefTypeRecognizesReferenceUnion(t *testing.T) {
+	if !isAMD64HeapRefType(types.NewUnion(types.TypeNumber, types.TypeString)) {
+		t.Fatal("number|string union must be reference-capable for conservative heap tracing")
+	}
+	if isAMD64HeapRefType(types.NewUnion(types.TypeNumber, types.TypeBoolean)) {
+		t.Fatal("number|boolean union must remain scalar")
+	}
+}

@@ -8,7 +8,22 @@ import (
 )
 
 func isAMD64HeapRefType(t types.Type) bool {
-	return t != nil && (t.Kind() == types.KindString || t.Kind() == types.KindArray || t.Kind() == types.KindObject)
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case types.KindString, types.KindArray, types.KindObject:
+		return true
+	case types.KindUnion:
+		if u, ok := t.(*types.UnionType); ok {
+			for _, member := range u.Members {
+				if isAMD64HeapRefType(member) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func amd64ArrayElementClass(t types.Type) int64 {

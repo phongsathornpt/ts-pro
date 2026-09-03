@@ -90,3 +90,24 @@ class Vector {
 		t.Errorf("unexpected class node: %+v", cls)
 	}
 }
+
+func TestParseParenthesizedUnionArrayType(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("union-array.ts", []byte(`const values: (number | string)[] = [1, "two"];`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	decl, ok := prog.Statements[0].(*ast.VarDeclStmt)
+	if !ok || len(decl.Declarations) != 1 {
+		t.Fatalf("unexpected declaration: %T", prog.Statements[0])
+	}
+	arr, ok := decl.Declarations[0].Type.(*ast.ArrayTypeNode)
+	if !ok {
+		t.Fatalf("expected array type, got %T", decl.Declarations[0].Type)
+	}
+	if _, ok := arr.ElemType.(*ast.UnionTypeNode); !ok {
+		t.Fatalf("expected union element type, got %T", arr.ElemType)
+	}
+}

@@ -678,28 +678,36 @@ func (p *Parser) parseType() ast.TypeNode {
 
 func (p *Parser) parsePrimaryType() ast.TypeNode {
 	tok := p.current()
+	var node ast.TypeNode
 	switch tok.Kind {
 	case token.Ident:
 		p.advance()
-		var node ast.TypeNode
 		switch tok.Text {
 		case "number", "string", "boolean", "void", "any", "never", "unknown":
 			node = &ast.PrimitiveTypeNode{SourceSpan: tok.Span, Kind: tok.Text}
 		default:
 			node = &ast.TypeRefNode{SourceSpan: tok.Span, Name: tok.Text}
 		}
-		// Array bracket suffix check: e.g. number[]
-		for p.match(token.LBracket) {
-			rbracket := p.expect(token.RBracket)
-			node = &ast.ArrayTypeNode{
-				SourceSpan: source.Span{Start: node.Span().Start, End: rbracket.Span.End},
-				ElemType:   node,
-			}
-		}
-		return node
+	case token.LParen:
+		lparen := p.advance()
+		inner := p.parseType()
+		rparen := p.expect(token.RParen)
+		// Parentheses are type-level grouping only; retain the inner node while
+		// allowing suffixes such as (number | string)[].
+		_ = lparen
+		_ = rparen
+		node = inner
 	default:
 		p.error(tok.Span, fmt.Sprintf("expected type annotation, got %s", tok.Kind))
 		p.advance()
 		return &ast.PrimitiveTypeNode{SourceSpan: tok.Span, Kind: "any"}
 	}
+	for p.match(token.LBracket) {
+		rbracket := p.expect(token.RBracket)
+		node = &ast.ArrayTypeNode{
+			SourceSpan: source.Span{Start: node.Span().Start, End: rbracket.Span.End},
+			ElemType:   node,
+		}
+	}
+	return node
 }
