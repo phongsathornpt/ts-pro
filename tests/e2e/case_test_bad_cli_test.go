@@ -41,6 +41,11 @@ func TestE2E_Bad_CLI(t *testing.T) {
 			expectedSub: "unknown command",
 		},
 		{
+			name:        "unsupported_linux_arch",
+			args:        []string{"build", "../../examples/basics/scalars.ts", "--target=linux-potato"},
+			expectedSub: "unsupported target: linux/potato",
+		},
+		{
 			name:        "unwritable_output_directory",
 			args:        []string{"build", "../../examples/basics/fib.ts", "-o", "/non_existent_dir_9999/bin"},
 			expectedSub: "write output binary",
