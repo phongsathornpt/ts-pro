@@ -36,6 +36,8 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 			expr.Dispatch = info.Dispatch
 			expr.ThenResolveJSValue = info.ResolveJSValue
 			expr.ThenRejectJSValue = info.RejectJSValue
+			expr.ThenResolveReturn = info.ResolveReturn
+			expr.ThenRejectReturn = info.RejectReturn
 		} else {
 			expr.Kind = ExprPromiseResolve
 		}
@@ -55,12 +57,20 @@ func (e *extractor) extractPromiseStaticCall(node tsast.Node, expr *Expr, name s
 }
 
 func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Expr, name string) (*Expr, error) {
-	if len(expr.Args) != 1 || expr.Args[0].Kind != ExprArray {
-		return nil, fmt.Errorf("%s at %d currently requires one array literal", name, node.Pos())
+	if len(expr.Args) != 1 {
+		return nil, fmt.Errorf("%s at %d requires one argument", name, node.Pos())
 	}
 	input := expr.Args[0]
+	if input.Kind == ExprIdentifier {
+		if arr, ok := e.arrayConstants[input.Symbol]; ok {
+			input = arr
+		}
+	}
+	if input.Kind != ExprArray {
+		return nil, fmt.Errorf("%s at %d requires an array literal or array variable", name, node.Pos())
+	}
 	if int(input.Type) >= len(e.result.Types) || e.result.Types[input.Type].Kind != TypeArray {
-		return nil, fmt.Errorf("%s at %d requires an array literal", name, node.Pos())
+		return nil, fmt.Errorf("%s at %d requires an array", name, node.Pos())
 	}
 	if name == "Promise.race" && len(input.Elements) == 0 {
 		return nil, fmt.Errorf("Promise.race at %d does not support an empty input until pending-forever Promise cleanup is modeled", node.Pos())
@@ -76,7 +86,7 @@ func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Exp
 	if name == "Promise.all" {
 		output := e.result.Types[outputPromise.ReturnType]
 		if output.Kind != TypeArray || int(output.Element) >= len(e.result.Types) {
-			return nil, fmt.Errorf("Promise.all at %d requires a homogeneous array result", node.Pos())
+			return nil, fmt.Errorf("Promise.all at %d requires a homogeneous array or tuple result", node.Pos())
 		}
 		resultType = output.Element
 		expr.Kind = ExprPromiseAll
@@ -89,6 +99,7 @@ func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Exp
 	default:
 		return nil, fmt.Errorf("%s at %d does not support Promise result type %q yet", name, node.Pos(), result.Name)
 	}
+	var elements []*Expr
 	for _, item := range input.Elements {
 		if int(item.Type) >= len(e.result.Types) {
 			return nil, fmt.Errorf("%s at %d has invalid input type", name, node.Pos())
@@ -98,13 +109,31 @@ func (e *extractor) extractPromiseAggregateStaticCall(node tsast.Node, expr *Exp
 			if !e.compatibleTaskResult(itemType.ReturnType, resultType) {
 				return nil, fmt.Errorf("%s at %d has incompatible Promise input", name, node.Pos())
 			}
+			elements = append(elements, item)
+			continue
+		}
+		if info, ok := e.structuralThenableInfo(item.Type, resultType); ok {
+			e.ensureSemanticType(TypeAny, "any")
+			elements = append(elements, &Expr{
+				Kind:               ExprPromiseThenable,
+				Type:               item.Type,
+				Args:               []*Expr{item},
+				FieldIndex:         uint32(info.Arity),
+				Dispatch:           info.Dispatch,
+				ThenResolveJSValue: info.ResolveJSValue,
+				ThenRejectJSValue:  info.RejectJSValue,
+				ThenResolveReturn:  info.ResolveReturn,
+				ThenRejectReturn:   info.RejectReturn,
+				Span:               item.Span,
+			})
 			continue
 		}
 		if !e.compatibleArrayElement(resultType, item.Type) {
 			return nil, fmt.Errorf("%s at %d has raw input incompatible with %s", name, node.Pos(), result.Name)
 		}
+		elements = append(elements, item)
 	}
-	expr.Args = append(expr.Args[:0], input.Elements...)
+	expr.Args = elements
 	expr.Callee = nil
 	return expr, nil
 }
@@ -123,6 +152,8 @@ type thenableInfo struct {
 	Dispatch       []DispatchTarget
 	ResolveJSValue bool
 	RejectJSValue  bool
+	ResolveReturn  TypeKind
+	RejectReturn   TypeKind
 }
 
 func (e *extractor) structuralThenableInfo(typeID, resultType TypeID) (thenableInfo, bool) {
@@ -201,6 +232,9 @@ func (e *extractor) thenableClass(typeID TypeID) (*classInfo, bool) {
 }
 
 func (e *extractor) thenableCallbackInfo(params []TypeID, resultType TypeID) (thenableInfo, bool) {
+	if len(params) == 3 {
+		params = params[1:]
+	}
 	if len(params) < 1 || len(params) > 2 {
 		return thenableInfo{}, false
 	}
@@ -212,36 +246,39 @@ func (e *extractor) thenableCallbackInfo(params []TypeID, resultType TypeID) (th
 	if !ok {
 		return thenableInfo{}, false
 	}
-	info := thenableInfo{Arity: len(params), ResolveJSValue: resolveJSValue}
+	resolveKind := TypeVoid
+	if int(resolveType.ReturnType) < len(e.result.Types) {
+		resolveKind = e.result.Types[resolveType.ReturnType].Kind
+	}
+	info := thenableInfo{Arity: len(params), ResolveJSValue: resolveJSValue, ResolveReturn: resolveKind}
 	if len(params) == 2 {
 		rejectType, ok := e.thenableCallbackFunction(params[1])
 		if !ok || len(rejectType.Params) != 1 || int(rejectType.Params[0]) >= len(e.result.Types) {
-			return thenableInfo{}, false
-		}
-		reasonKind := e.result.Types[rejectType.Params[0]].Kind
-		if reasonKind != TypeAny && reasonKind != TypeUnion && reasonKind != TypeUnknown {
 			return thenableInfo{}, false
 		}
 		rejectJSValue, ok := e.thenableCallbackReturn(rejectType.ReturnType)
 		if !ok {
 			return thenableInfo{}, false
 		}
+		rejectKind := TypeVoid
+		if int(rejectType.ReturnType) < len(e.result.Types) {
+			rejectKind = e.result.Types[rejectType.ReturnType].Kind
+		}
 		info.RejectJSValue = rejectJSValue
+		info.RejectReturn = rejectKind
 	}
 	return info, true
 }
 
 func (e *extractor) thenableCallbackReturn(typeID TypeID) (bool, bool) {
 	if int(typeID) >= len(e.result.Types) {
-		return false, false
+		return false, true
 	}
 	switch e.result.Types[typeID].Kind {
 	case TypeVoid:
 		return false, true
-	case TypeAny, TypeUnion, TypeParameter, TypeNull, TypeUndefined:
-		return true, true
 	default:
-		return false, false
+		return true, true
 	}
 }
 

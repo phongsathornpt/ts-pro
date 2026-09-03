@@ -69,6 +69,10 @@ const (
 	TypeChannel
 	TypeTaskGroup
 	TypeParameter
+	TypeMap
+	TypeSet
+	TypeDate
+	TypeRegExp
 )
 
 type Type struct {
@@ -96,10 +100,13 @@ type Shape struct {
 }
 
 type Parameter struct {
-	Symbol SymbolID
-	Name   string
-	Type   TypeID
-	Span   Span
+	Symbol      SymbolID
+	Name        string
+	Type        TypeID
+	Span        Span
+	Optional    bool
+	Rest        bool
+	Initializer *Expr
 }
 
 type Function struct {

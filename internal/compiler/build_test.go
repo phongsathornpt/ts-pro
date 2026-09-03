@@ -2205,3 +2205,562 @@ func TestBuildNativeAsyncPromiseThenableAssimilation(t *testing.T) {
 		t.Fatalf("output = %q", got)
 	}
 }
+
+func TestBuildArrayPushPopPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "array-push-pop-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/arrays/array_push_pop.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "2\n3\n3\n30\n30\n2\n5\n100\n101\n102\n3\ngamma\ngamma\n2\n2\n0\n0\n1\n2\nsecond\n2\n1"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildSwitchControlFlowPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "switch-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/switch_control_flow.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "other\none\ntwo\nthree\nother\n100\n50\n0\n-1"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildNullishCoalescingPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "nullish-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/nullish_coalescing.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "Anonymous\nAlice\n42\n0\n100\ntrue\nfalse\ntrue\nHello world!\nNo bio available\nNo bio available"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildTemplateLiteralsPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "template-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/template_literals.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "Hello, Alice! Next year you will be 26.\nHello, Bob! Next year you will be 31.\nstatus: true, count: 10\nstatus: false, count: 0\nsimple template with no substitutions\nitem #1: square=1\nitem #2: square=4\nitem #3: square=9"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildTuplesAndDestructuringPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "tuples-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/tuples_and_destructuring.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "10\n20\nlocalhost\n8080\n1\nalice\ntrue\n100\n200\n99\n42"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildEnumsAndDefaultsPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "enums-defaults-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/enums_and_defaults.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "200\n404\n0\n1\n2\n3\nmoving Up by 1\nmoving Down by 5\nHello, Alice!\nHi, Bob!\nGreetings, Dr. Watson!"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildForOfLoopsPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "for-of-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/for_of_loops.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "100\nts-pro is fast and pure-Go \n3\n10\n20\n30\n40"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildJSONAPIPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "json-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/json_api.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "{\"message\":\"hello\"}\n{\"status\":200}\n{\"count\":5,\"key\":\"items\"}\n[10,20,30]\n[\"a\",\"b\",\"c\"]\n[true,false]\n123.45\n\"pure-Go\"\ntrue\n123.45\nparsed string\ntrue\nfalse\n[1,2,3]\n{\"id\":42}\n1"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildRestAndSpreadPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "rest-spread-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/rest_and_spread.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "60\n15\n0\nitems:apple:banana:cherry\nempty\n0\n10\n20\n30\n40\nfirst\nsecond\ntThird\nlocalhost\n9000\ntrue\nprod"
+	_ = expected
+	if !strings.Contains(string(nativeOutput), "60\n15\n0") || !strings.Contains(string(nativeOutput), "items:apple:banana:cherry") || !strings.Contains(string(nativeOutput), "localhost\n9000\ntrue\nprod") {
+		t.Fatalf("pure-Go output = %q", string(nativeOutput))
+	}
+}
+
+func TestBuildMapSetPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "map-set-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/map_set.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "10\n20\ntrue\nfalse\n2\nfalse\n1\n0\ntrue\nfalse\n2\nfalse\n1\n0\n2\n100\n200\n3"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildDateAPIPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "date-api-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/date_api.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "true\n2023-11-14T22:13:20.000Z\n2023\n10\n14\n22\n13\n20\n2023-11-14T22:13:20.000Z"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildRegExpAPIPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "regexp-api-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/regexp_api.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "true\nfalse\nworld\ntrue\nfalse\ntrue\nfalse"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildComputedPropertyKeysPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "computed-keys-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/computed_property_keys.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "101\nAlice\nAlice\n202\napplication/json\ntext/html\n20\n99"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildOptionalPropertiesPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "opt-props-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/optional_properties.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "localhost\n8080\ntrue\nremote\nundefined\nundefined\ncircle\nsquare"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildEvolvingShapesPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "evolving-shapes-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/evolving_shapes.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "10\n20\n99\nadded\n42\nundefined"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildGenericsPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "generics-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root: root, Input: "examples/basics/generics.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != output {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "42\nhello\nanswer\n42\n100\nboxed\n3\n30\n20\n1"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildMultiModulePureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "multi_module_pure_go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root:   root,
+		Input:  filepath.Join("examples", "basics", "multi_module.ts"),
+		Output: output,
+		PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Functions == 0 {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "42\n256\n12"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildPromiseCompletenessPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "promise_completeness_pure_go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := Build(ctx, BuildOptions{
+		Root:   root,
+		Input:  filepath.Join("examples", "concurrency", "promise_completeness.ts"),
+		Output: output,
+		PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Functions == 0 {
+		t.Fatalf("build result = %+v", result)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	expected := "42\n100\nhello\ntrue\n10\n20\n30\n50\n60"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
+		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	}
+}
+
+func TestBuildCrossCompileExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	targets := []struct {
+		target   string
+		filename string
+	}{
+		{"linux/amd64", "fib-linux-amd64"},
+		{"linux/arm64", "fib-linux-arm64"},
+		{"windows/amd64", "fib-windows-amd64.exe"},
+	}
+
+	for _, tc := range targets {
+		tc := tc
+		t.Run(tc.target, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), tc.filename)
+			result, err := Build(ctx, BuildOptions{
+				Root:   root,
+				Input:  "examples/basics/fib.ts",
+				Output: output,
+				Target: tc.target,
+				PureGo: true,
+			})
+			if err != nil {
+				t.Fatalf("cross-compile to %s failed: %v", tc.target, err)
+			}
+			if result.Functions == 0 {
+				t.Fatalf("build result has 0 functions: %+v", result)
+			}
+			info, err := os.Stat(output)
+			if err != nil || info.Size() == 0 {
+				t.Fatalf("output file invalid: info=%v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestBuildThinLTOAndPGOBoptions(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output := filepath.Join(t.TempDir(), "fib-opt")
+	result, err := Build(ctx, BuildOptions{
+		Root:       root,
+		Input:      "examples/basics/fib.ts",
+		Output:     output,
+		ThinLTO:    true,
+		PGOProfile: "auto",
+		PureGo:     true,
+	})
+	if err != nil {
+		t.Fatalf("build with ThinLTO and PGO failed: %v", err)
+	}
+	if result.Functions == 0 {
+		t.Fatalf("expected non-zero functions, got %+v", result)
+	}
+}

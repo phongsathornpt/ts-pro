@@ -75,7 +75,7 @@ func (f *functionLowerer) lowerExprAs(expr *frontend.Expr, target frontend.TypeI
 		kind = hir.UnboxBoolean
 	case frontend.TypeArray:
 		kind = hir.UnboxArray
-	case frontend.TypeObject:
+	case frontend.TypeObject, frontend.TypePromise, frontend.TypeTask:
 		kind = hir.UnboxObject
 	case frontend.TypeFunction:
 		kind = hir.UnboxFunction

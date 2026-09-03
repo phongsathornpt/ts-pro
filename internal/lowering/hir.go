@@ -187,6 +187,8 @@ func lowerTypeKind(kind frontend.TypeKind) (hir.TypeKind, error) {
 		return hir.TypeTaskGroup, nil
 	case frontend.TypeParameter:
 		return hir.TypeParameter, nil
+	case frontend.TypeMap, frontend.TypeSet, frontend.TypeDate, frontend.TypeRegExp:
+		return hir.TypeAny, nil
 	default:
 		return hir.TypeInvalid, fmt.Errorf("semantic type kind %d is not supported by the HIR MVP", kind)
 	}

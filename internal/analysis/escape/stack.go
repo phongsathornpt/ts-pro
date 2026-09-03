@@ -1,6 +1,10 @@
 package escape
 
-import "github.com/phongsathornpt/ts-pro/internal/mir"
+import (
+	"sort"
+
+	"github.com/phongsathornpt/ts-pro/internal/mir"
+)
 
 type StackObjectResult map[mir.FunctionID]map[mir.ValueID]bool
 
@@ -79,30 +83,39 @@ func safeSingleOriginAliases(fn mir.Function) map[mir.ValueID]mir.ValueID {
 		changed = false
 		for _, block := range fn.Blocks {
 			for _, inst := range block.Instructions {
-				phi, ok := inst.Op.(mir.Phi)
-				if !ok || len(phi.Incoming) == 0 {
-					continue
-				}
-				var origin mir.ValueID
-				valid := true
-				for i, incoming := range phi.Incoming {
-					candidate, ok := aliases[incoming.Value]
-					if !ok {
-						valid = false
-						break
+				switch op := inst.Op.(type) {
+				case mir.FieldAddr:
+					if origin, ok := aliases[op.Object]; ok {
+						if current, exists := aliases[inst.Result]; !exists || current != origin {
+							aliases[inst.Result] = origin
+							changed = true
+						}
 					}
-					if i == 0 {
-						origin = candidate
-					} else if candidate != origin {
-						valid = false
-						break
+				case mir.Phi:
+					if len(op.Incoming) == 0 {
+						continue
 					}
-				}
-				if valid {
-					current, ok := aliases[inst.Result]
-					if !ok || current != origin {
-						aliases[inst.Result] = origin
-						changed = true
+					var origin mir.ValueID
+					valid := true
+					for i, incoming := range op.Incoming {
+						candidate, ok := aliases[incoming.Value]
+						if !ok {
+							valid = false
+							break
+						}
+						if i == 0 {
+							origin = candidate
+						} else if candidate != origin {
+							valid = false
+							break
+						}
+					}
+					if valid {
+						current, ok := aliases[inst.Result]
+						if !ok || current != origin {
+							aliases[inst.Result] = origin
+							changed = true
+						}
 					}
 				}
 			}
@@ -121,16 +134,22 @@ func stackUnsafeAliasOrigins(fn mir.Function) map[mir.ValueID]bool {
 		}
 	}
 	propagateAliases(fn, prov)
-	safe := safeSingleOriginAliases(fn)
 	blocked := make(map[mir.ValueID]bool)
 	for _, block := range fn.Blocks {
 		for _, inst := range block.Instructions {
-			if _, ok := inst.Op.(mir.Phi); !ok {
+			phi, ok := inst.Op.(mir.Phi)
+			if !ok {
 				continue
 			}
-			for origin := range prov[inst.Result] {
-				safeOrigin, ok := safe[inst.Result]
-				if !ok || safeOrigin != origin {
+			mixedOrUnknown := false
+			for _, incoming := range phi.Incoming {
+				if len(prov[incoming.Value]) == 0 {
+					mixedOrUnknown = true
+					break
+				}
+			}
+			if mixedOrUnknown {
+				for origin := range prov[inst.Result] {
 					blocked[origin] = true
 				}
 			}
@@ -147,6 +166,41 @@ func StackObjectAliases(module mir.Module, stack StackObjectResult) map[mir.Func
 		for value, origin := range aliases {
 			if value != origin && stack.Contains(fn.ID, origin) {
 				selected[value] = origin
+			}
+		}
+		result[fn.ID] = selected
+	}
+	return result
+}
+
+func StackObjectProvenances(module mir.Module, stack StackObjectResult) map[mir.FunctionID]map[mir.ValueID][]mir.ValueID {
+	result := make(map[mir.FunctionID]map[mir.ValueID][]mir.ValueID, len(module.Functions))
+	for _, fn := range module.Functions {
+		prov := make(provenance)
+		for _, block := range fn.Blocks {
+			for _, inst := range block.Instructions {
+				if allocationKind(inst.Op) != AllocationInvalid {
+					prov[inst.Result] = valueSet{inst.Result: {}}
+				}
+			}
+		}
+		propagateAliases(fn, prov)
+		selected := make(map[mir.ValueID][]mir.ValueID)
+		for value, set := range prov {
+			if len(set) > 1 {
+				var origins []mir.ValueID
+				allStack := true
+				for origin := range set {
+					if !stack.Contains(fn.ID, origin) {
+						allStack = false
+						break
+					}
+					origins = append(origins, origin)
+				}
+				if allStack && len(origins) > 1 {
+					sort.Slice(origins, func(i, j int) bool { return origins[i] < origins[j] })
+					selected[value] = origins
+				}
 			}
 		}
 		result[fn.ID] = selected
@@ -178,6 +232,8 @@ func stackBlockedValues(fn mir.Function) map[mir.ValueID]bool {
 					blockOrigins(field)
 				}
 			case mir.FieldSet:
+				blockOrigins(op.Value)
+			case mir.PtrStore:
 				blockOrigins(op.Value)
 			case mir.ClosureNew:
 				for _, capture := range op.Captures {

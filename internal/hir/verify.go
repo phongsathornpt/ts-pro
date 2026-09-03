@@ -254,6 +254,59 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 				checkValue(op.Array)
 				checkValue(op.Index)
 				checkValue(op.Value)
+			case ArrayPushOp:
+				checkValue(op.Array)
+				checkValue(op.Value)
+			case ArrayPopOp:
+				checkValue(op.Array)
+			case ArrayConcatOp:
+				for _, arr := range op.Arrays {
+					checkValue(arr)
+				}
+			case StringTemplateOp:
+				for _, part := range op.Parts {
+					checkValue(part)
+				}
+			case JSONStringifyOp:
+				checkValue(op.Value)
+			case JSONParseOp:
+				checkValue(op.Value)
+			case MapOp:
+				if op.Kind != MapOpNew {
+					checkValue(op.Map)
+				}
+				if op.Kind == MapOpGet || op.Kind == MapOpSet || op.Kind == MapOpHas || op.Kind == MapOpDelete {
+					checkValue(op.Key)
+				}
+				if op.Kind == MapOpSet {
+					checkValue(op.Value)
+				}
+			case SetOp:
+				if op.Kind != SetOpNew {
+					checkValue(op.Set)
+				}
+				if op.Kind == SetOpAdd || op.Kind == SetOpHas || op.Kind == SetOpDelete {
+					checkValue(op.Item)
+				}
+			case DateOp:
+				if op.Kind != DateOpNow && op.Kind != DateOpNew {
+					checkValue(op.Date)
+				}
+				if op.Kind == DateOpNew && op.Arg != 0 {
+					checkValue(op.Arg)
+				}
+			case RegExpOp:
+				if op.Kind == RegExpOpNew {
+					checkValue(op.Pattern)
+					if op.Flags != 0 {
+						checkValue(op.Flags)
+					}
+				} else {
+					checkValue(op.RegExp)
+					if op.Kind == RegExpOpTest {
+						checkValue(op.String)
+					}
+				}
 			case ObjectNewOp:
 				if int(op.Shape) >= len(m.Shapes) {
 					add(fmt.Sprintf("object allocation references unknown shape s%d", op.Shape))
@@ -283,6 +336,13 @@ func (m Module) verifyFunction(function *Function, functionIDs map[FunctionID]st
 					add(fmt.Sprintf("dynamic field store v%d has empty name", instruction.Result))
 				}
 				checkValue(op.Object)
+				checkValue(op.Value)
+			case DynamicIndexGetOp:
+				checkValue(op.Object)
+				checkValue(op.Index)
+			case DynamicIndexSetOp:
+				checkValue(op.Object)
+				checkValue(op.Index)
 				checkValue(op.Value)
 			case FieldGetOp:
 				checkValue(op.Object)

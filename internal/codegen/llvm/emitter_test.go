@@ -482,6 +482,50 @@ func TestEmitSingleOriginStackAliasSynchronizesReferenceFieldRoot(t *testing.T) 
 	}
 }
 
+func TestEmitMultiOriginStackAliasSynchronizesReferenceFieldRoots(t *testing.T) {
+	module := mir.Module{
+		Name:   "stack-ref-multi-alias",
+		Shapes: []mir.Shape{{ID: 0, Name: "Holder", Fields: []mir.ShapeField{{Name: "value", Repr: mir.ReprStringRef}}}},
+		Functions: []mir.Function{{ID: 0, Name: "alias", Params: []mir.Param{{Value: 9, Name: "flag", Repr: mir.ReprBool}}, ReturnRepr: mir.ReprVoid, Entry: 0, Blocks: []mir.Block{
+			{ID: 0, Instructions: []mir.Instruction{
+				{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+				{Result: 4, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+			}, Terminator: mir.Branch{Condition: 9, Then: 1, Else: 2}},
+			{ID: 1, Terminator: mir.Jump{Target: 3}},
+			{ID: 2, Terminator: mir.Jump{Target: 3}},
+			{ID: 3, Instructions: []mir.Instruction{
+				{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 1, Value: 0}, {Block: 2, Value: 4}}}},
+				{Result: 2, Repr: mir.ReprStringRef, Op: mir.ConstString{Value: "alias"}},
+				{Result: 3, Repr: mir.ReprStringRef, Op: mir.FieldSet{Object: 1, Shape: 0, Field: 0, Value: 2}},
+			}, Terminator: mir.Return{}},
+		}}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "%v0 = alloca %tsnative_shape_s0") || !strings.Contains(text, "%v4 = alloca %tsnative_shape_s0") {
+		t.Fatalf("both multi-origin aliased objects should be stack allocated:\n%s", text)
+	}
+	if strings.Contains(text, "call void @tsnative_gc_store_ref(ptr %v1") {
+		t.Fatalf("multi-origin stack alias incorrectly used heap write barrier:\n%s", text)
+	}
+	tc, err := toolchain.DiscoverClang()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	ll, obj := filepath.Join(dir, "stack-ref-multi-alias.ll"), filepath.Join(dir, "stack-ref-multi-alias.o")
+	if err := os.WriteFile(ll, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tc.CompileLLVM(ctx, ll, obj, "-O2"); err != nil {
+		t.Fatalf("compile multi-origin stack alias LLVM: %v\nIR:\n%s", err, text)
+	}
+}
+
 func TestEmitReferenceFieldStoreUsesGCBarrier(t *testing.T) {
 	result := mir.ValueID(0)
 	module := mir.Module{
@@ -1252,5 +1296,39 @@ func TestEmitObjectBoxCarriesShapeMetadata(t *testing.T) {
 	}
 	if !strings.Contains(text, "call ptr @tsnative_jsvalue_box_object_shape(ptr %v1, i32 0)") {
 		t.Fatalf("object box did not carry shape metadata:\n%s", text)
+	}
+}
+
+func TestEmitInteriorPointerFieldAddrAndPtrLoadStore(t *testing.T) {
+	module := mir.Module{
+		Name:   "interior-pointer",
+		Shapes: []mir.Shape{{ID: 0, Name: "Counter", Fields: []mir.ShapeField{{Name: "val", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{
+			ID: 0, Name: "test", ReturnRepr: mir.ReprF64, Entry: 0,
+			Blocks: []mir.Block{{
+				ID: 0,
+				Instructions: []mir.Instruction{
+					{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+					{Result: 1, Repr: mir.ReprRawPtr, Op: mir.FieldAddr{Object: 0, Shape: 0, Field: 0}},
+					{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 99}},
+					{Result: 3, Repr: mir.ReprVoid, Op: mir.PtrStore{Ptr: 1, Value: 2}},
+					{Result: 4, Repr: mir.ReprF64, Op: mir.PtrLoad{Ptr: 1, Repr: mir.ReprF64}},
+				},
+				Terminator: mir.Return{Value: valueIDPtr(4)},
+			}},
+		}},
+	}
+	text, err := llvmcodegen.Emit(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "getelementptr inbounds %tsnative_shape_s0, ptr %v0, i32 0, i32 0") {
+		t.Fatalf("expected interior pointer getelementptr in emitted text:\n%s", text)
+	}
+	if !strings.Contains(text, "store double 9.900000e+01, ptr %v1") {
+		t.Fatalf("expected store through interior pointer in emitted text:\n%s", text)
+	}
+	if !strings.Contains(text, "load double, ptr %v1") {
+		t.Fatalf("expected load through interior pointer in emitted text:\n%s", text)
 	}
 }

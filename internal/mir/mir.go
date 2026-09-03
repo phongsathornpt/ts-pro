@@ -23,6 +23,7 @@ const (
 	ReprTaskGroupRef
 	ReprTagged
 	ReprJSValue
+	ReprRawPtr
 )
 
 type ShapeField struct {
@@ -198,6 +199,9 @@ const (
 	DynamicJSNotEqual
 	DynamicJSStrictEqual
 	DynamicJSStrictNotEqual
+	DynamicJSNullishCoalesce
+	DynamicJSLogicalOr
+	DynamicJSLogicalAnd
 )
 
 type DynamicBinaryJSValue struct {
@@ -259,14 +263,94 @@ type ArrayNewF64 struct{ Elements []ValueID }
 type ArrayLengthF64 struct{ Array ValueID }
 type ArrayGetF64 struct{ Array, Index ValueID }
 type ArraySetF64 struct{ Array, Index, Value ValueID }
+type ArrayPushF64 struct{ Array, Value ValueID }
+type ArrayPopF64 struct{ Array ValueID }
 type ArrayNewBool struct{ Elements []ValueID }
 type ArrayLengthBool struct{ Array ValueID }
 type ArrayGetBool struct{ Array, Index ValueID }
 type ArraySetBool struct{ Array, Index, Value ValueID }
+type ArrayPushBool struct{ Array, Value ValueID }
+type ArrayPopBool struct{ Array ValueID }
 type ArrayNewRef struct{ Elements []ValueID }
 type ArrayLengthRef struct{ Array ValueID }
 type ArrayGetRef struct{ Array, Index ValueID }
 type ArraySetRef struct{ Array, Index, Value ValueID }
+type ArrayPushRef struct{ Array, Value ValueID }
+type ArrayPopRef struct{ Array ValueID }
+type ArrayConcatF64 struct{ Arrays []ValueID }
+type ArrayConcatBool struct{ Arrays []ValueID }
+type ArrayConcatRef struct{ Arrays []ValueID }
+type StringInterpolate struct{ Parts []ValueID }
+type JSONStringify struct{ Value ValueID }
+type JSONParse struct{ Value ValueID }
+type MapOpKind uint8
+const (
+	MapOpNew MapOpKind = iota
+	MapOpGet
+	MapOpSet
+	MapOpHas
+	MapOpDelete
+	MapOpClear
+	MapOpSize
+)
+
+type MapOp struct {
+	Kind  MapOpKind
+	Map   ValueID
+	Key   ValueID
+	Value ValueID
+}
+
+type SetOpKind uint8
+const (
+	SetOpNew SetOpKind = iota
+	SetOpAdd
+	SetOpHas
+	SetOpDelete
+	SetOpClear
+	SetOpSize
+)
+
+type SetOp struct {
+	Kind SetOpKind
+	Set  ValueID
+	Item ValueID
+}
+
+type DateOpKind uint8
+const (
+	DateOpNow DateOpKind = iota
+	DateOpNew
+	DateOpGetTime
+	DateOpToISOString
+	DateOpGetFullYear
+	DateOpGetMonth
+	DateOpGetDate
+	DateOpGetHours
+	DateOpGetMinutes
+	DateOpGetSeconds
+)
+
+type DateOp struct {
+	Kind DateOpKind
+	Date ValueID
+	Arg  ValueID
+}
+
+type RegExpOpKind uint8
+const (
+	RegExpOpNew RegExpOpKind = iota
+	RegExpOpTest
+	RegExpOpSource
+)
+
+type RegExpOp struct {
+	Kind    RegExpOpKind
+	RegExp  ValueID
+	Pattern ValueID
+	Flags   ValueID
+	String  ValueID
+}
 type ObjectNew struct {
 	Shape  ShapeID
 	Fields []ValueID
@@ -283,6 +367,19 @@ type FieldGet struct {
 	Shape  ShapeID
 	Field  uint32
 }
+type FieldAddr struct {
+	Object ValueID
+	Shape  ShapeID
+	Field  uint32
+}
+type PtrLoad struct {
+	Ptr  ValueID
+	Repr Repr
+}
+type PtrStore struct {
+	Ptr   ValueID
+	Value ValueID
+}
 type DynamicFieldGet struct {
 	Object ValueID
 	Field  string
@@ -290,6 +387,15 @@ type DynamicFieldGet struct {
 type DynamicFieldSet struct {
 	Object ValueID
 	Field  string
+	Value  ValueID
+}
+type DynamicIndexGet struct {
+	Object ValueID
+	Index  ValueID
+}
+type DynamicIndexSet struct {
+	Object ValueID
+	Index  ValueID
 	Value  ValueID
 }
 type ClosureNew struct {
@@ -317,6 +423,8 @@ type PromiseThenable struct {
 	Cases            []DispatchCase
 	ResolveReturnsJS bool
 	RejectReturnsJS  bool
+	ResolveReturn    Repr
+	RejectReturn     Repr
 }
 type PromiseReject struct {
 	Reason ValueID
@@ -379,20 +487,38 @@ func (ArrayNewF64) isOperation()          {}
 func (ArrayLengthF64) isOperation()       {}
 func (ArrayGetF64) isOperation()          {}
 func (ArraySetF64) isOperation()          {}
+func (ArrayPushF64) isOperation()         {}
+func (ArrayPopF64) isOperation()          {}
 func (ArrayNewBool) isOperation()         {}
 func (ArrayLengthBool) isOperation()      {}
 func (ArrayGetBool) isOperation()         {}
 func (ArraySetBool) isOperation()         {}
+func (ArrayPushBool) isOperation()        {}
+func (ArrayPopBool) isOperation()         {}
 func (ArrayNewRef) isOperation()          {}
 func (ArrayLengthRef) isOperation()       {}
 func (ArrayGetRef) isOperation()          {}
 func (ArraySetRef) isOperation()          {}
+func (ArrayPushRef) isOperation()         {}
+func (ArrayPopRef) isOperation()          {}
+func (ArrayConcatF64) isOperation()       {}
+func (ArrayConcatBool) isOperation()      {}
+func (ArrayConcatRef) isOperation()       {}
+func (StringInterpolate) isOperation()    {}
+func (JSONStringify) isOperation()         {}
+func (JSONParse) isOperation()             {}
+func (MapOp) isOperation()                 {}
+func (SetOp) isOperation()                 {}
+func (DateOp) isOperation()                {}
+func (RegExpOp) isOperation()              {}
 func (ObjectNew) isOperation()            {}
 func (ObjectAlloc) isOperation()          {}
 func (FieldSet) isOperation()             {}
 func (FieldGet) isOperation()             {}
 func (DynamicFieldGet) isOperation()      {}
 func (DynamicFieldSet) isOperation()      {}
+func (DynamicIndexGet) isOperation()      {}
+func (DynamicIndexSet) isOperation()      {}
 func (ClosureNew) isOperation()           {}
 func (ClosureCall) isOperation()          {}
 func (TaskSpawn) isOperation()            {}
@@ -439,6 +565,9 @@ func (BoxJSValue) isOperation()           {}
 func (UnboxJSValue) isOperation()         {}
 func (DynamicAddJSValue) isOperation()    {}
 func (DynamicBinaryJSValue) isOperation() {}
+func (FieldAddr) isOperation()            {}
+func (PtrLoad) isOperation()              {}
+func (PtrStore) isOperation()             {}
 
 type Terminator interface{ isTerminator() }
 

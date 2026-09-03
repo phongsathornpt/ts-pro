@@ -138,3 +138,46 @@ func TestStackObjectsKeepsAcyclicPreheaderCandidate(t *testing.T) {
 		t.Fatal("acyclic preheader allocation was unnecessarily rejected")
 	}
 }
+
+func TestStackObjectsAcceptsMultiOriginAliasedReferenceObject(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "ref", Repr: mir.ReprObjectRef}}}},
+		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			objectAlloc(0),
+			{Result: 2, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+			{Result: 1, Repr: mir.ReprObjectRef, Op: mir.Phi{Incoming: []mir.PhiIncoming{{Block: 0, Value: 0}, {Block: 0, Value: 2}}}},
+		}, Terminator: mir.Return{}}}}},
+	}
+	stack := StackObjects(module, Analyze(module))
+	if !stack.Contains(0, 0) || !stack.Contains(0, 2) {
+		t.Fatalf("both multi-origin allocations should be stack allocated: v0=%v, v2=%v", stack.Contains(0, 0), stack.Contains(0, 2))
+	}
+	provs := StackObjectProvenances(module, stack)[0][1]
+	if len(provs) != 2 || provs[0] != 0 || provs[1] != 2 {
+		t.Fatalf("stack provenances v1 = %v; want [v0, v2]", provs)
+	}
+}
+
+func TestStackObjectsSupportsInteriorPointerAddressTaking(t *testing.T) {
+	module := mir.Module{
+		Shapes: []mir.Shape{{ID: 0, Fields: []mir.ShapeField{{Name: "count", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{ID: 0, Entry: 0, Blocks: []mir.Block{{ID: 0, Instructions: []mir.Instruction{
+			objectAlloc(0),
+			{Result: 1, Repr: mir.ReprRawPtr, Op: mir.FieldAddr{Object: 0, Shape: 0, Field: 0}},
+			{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 42}},
+			{Result: 3, Repr: mir.ReprVoid, Op: mir.PtrStore{Ptr: 1, Value: 2}},
+			{Result: 4, Repr: mir.ReprF64, Op: mir.PtrLoad{Ptr: 1, Repr: mir.ReprF64}},
+		}, Terminator: mir.Return{}}}}},
+	}
+	if err := module.Verify(); err != nil {
+		t.Fatalf("verify module: %v", err)
+	}
+	stack := StackObjects(module, Analyze(module))
+	if !stack.Contains(0, 0) {
+		t.Fatal("object with interior pointer address taking should be stack allocated")
+	}
+	aliases := StackObjectAliases(module, stack)[0]
+	if aliases[1] != 0 {
+		t.Fatalf("interior pointer v1 alias = %v; want v0", aliases[1])
+	}
+}

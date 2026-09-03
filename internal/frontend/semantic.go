@@ -17,9 +17,12 @@ const (
 	ExprArray
 	ExprIndex
 	ExprArrayLength
+	ExprArrayPush
+	ExprArrayPop
 	ExprObject
 	ExprFieldGet
 	ExprDynamicFieldGet
+	ExprDynamicIndexGet
 	ExprClosure
 	ExprNewClass
 	ExprTaskSpawn
@@ -44,6 +47,36 @@ const (
 	ExprChannelSend
 	ExprChannelRecv
 	ExprSleep
+	ExprTemplateLiteral
+	ExprJSONStringify
+	ExprJSONParse
+	ExprArrayConcat
+	ExprMapNew
+	ExprMapGet
+	ExprMapSet
+	ExprMapHas
+	ExprMapDelete
+	ExprMapClear
+	ExprMapSize
+	ExprSetNew
+	ExprSetAdd
+	ExprSetHas
+	ExprSetDelete
+	ExprSetClear
+	ExprSetSize
+	ExprDateNow
+	ExprDateNew
+	ExprDateGetTime
+	ExprDateToISOString
+	ExprDateGetFullYear
+	ExprDateGetMonth
+	ExprDateGetDate
+	ExprDateGetHours
+	ExprDateGetMinutes
+	ExprDateGetSeconds
+	ExprRegExpNew
+	ExprRegExpTest
+	ExprRegExpSource
 )
 
 type IntrinsicKind uint8
@@ -71,6 +104,9 @@ const (
 	BinaryNotEqual
 	BinaryStrictEqual
 	BinaryStrictNotEqual
+	BinaryNullishCoalesce
+	BinaryLogicalOr
+	BinaryLogicalAnd
 )
 
 type DispatchTarget struct {
@@ -110,6 +146,8 @@ type Expr struct {
 	Dispatch           []DispatchTarget
 	ThenResolveJSValue bool
 	ThenRejectJSValue  bool
+	ThenResolveReturn  TypeKind
+	ThenRejectReturn   TypeKind
 	ConcreteType       TypeID
 	ConcreteKnown      bool
 	TaskShared         bool
@@ -134,6 +172,7 @@ const (
 	StmtClosureBind
 	StmtFieldAssign
 	StmtDynamicFieldAssign
+	StmtDynamicIndexSet
 	StmtArrayAssign
 )
 

@@ -209,11 +209,21 @@ func (e *extractor) compatibleTaskResult(left, right TypeID) bool {
 		return false
 	}
 	l, r := e.result.Types[left], e.result.Types[right]
+	if l.Kind == TypeAny || r.Kind == TypeAny || l.Kind == TypeUnknown || r.Kind == TypeUnknown {
+		return true
+	}
+	if r.Kind == TypeUnion {
+		for _, memberID := range r.Members {
+			if e.compatibleTaskResult(left, memberID) {
+				return true
+			}
+		}
+	}
 	if l.Kind != r.Kind {
 		return false
 	}
 	switch l.Kind {
-	case TypeVoid, TypeNumber, TypeString, TypeBoolean, TypeNull, TypeUndefined:
+	case TypeVoid, TypeNumber, TypeString, TypeBoolean, TypeNull, TypeUndefined, TypeObject, TypeArray:
 		return true
 	default:
 		return false

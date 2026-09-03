@@ -25,6 +25,7 @@ func (e *extractor) finalizeConstructorSignature(info *classInfo) error {
 	e.pending = append(e.pending, pendingFunctionBody{
 		Function: functionID, Node: info.ConstructorNode,
 		This: &thisCopy, Constructor: info,
+		FileName: e.currentFile(),
 	})
 	return nil
 }

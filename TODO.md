@@ -42,7 +42,7 @@ contains no C or assembly implementation dependency.
   - [x] Build the initial generated programs with `go build` only and `CGO_ENABLED=0`.
   - [x] Lower all concurrency, channel, timer, task group, and async MIR operations to pure Go goroutines, channels, and synchronization primitives.
   - [x] Deduplicate structurally equivalent shapes into canonical Go struct types and propagate task-return shapes.
-  - [ ] Replace LLVM object caching with deterministic generated-Go/build caching.
+  - [x] Replace LLVM object caching with deterministic generated-Go/build caching.
   - [ ] Retire `internal/codegen/llvm`, clang discovery, C compilation, C linking, and Go c-archive orchestration after parity.
 - [x] Port runtime behavior to the Go API.
   - [x] Port scalar/string/array/object/closure operations.
@@ -50,13 +50,13 @@ contains no C or assembly implementation dependency.
   - [x] Port promises, async/await, rejection propagation, and combinators.
   - [x] Preserve worker limits, task ownership, cancellation, and observable ordering.
 - [x] Rewrite integration and differential tests.
-  - [x] Organize 107 test fixtures into categorized directories (`examples/{basics,arrays,objects,dynamic,concurrency,memory}`).
+  - [x] Organize 123 test fixtures into categorized directories (`examples/{basics,arrays,objects,dynamic,concurrency,memory}`).
   - [x] Remove custom build tags (`//go:build llvm_toolchain`), replacing them with graceful `t.Skipf` on unsupported c-archive link steps.
   - [x] Clean `gopls check` and `go vet` verification workspace-wide.
   - [x] Add pure-Go runtime unit tests for every migrated subsystem (48 tests in `runtime/`).
-  - [x] Keep TypeScript/JavaScript differential tests for observable semantics (35/35 pure-Go fixtures match official `tsc 7.0.2` on Node.js).
+  - [x] Keep TypeScript/JavaScript differential tests for observable semantics (51/51 pure-Go fixtures match official `tsc 7.0.2` on Node.js).
   - [x] Establish CLI end-to-end (E2E) test suite (`cmd/tspro/main_test.go`) validating in-process and subprocess binary executions.
-  - [x] 100.0% fixture coverage across entire repository: 107 out of 107 fixtures in `examples/` compile and run cleanly with `PureGo: true`.
+  - [x] 100.0% fixture coverage across entire repository: 123 out of 123 fixtures in `examples/` compile and run cleanly with `PureGo: true`.
 - [x] Complete cleanup and documentation.
   - [x] Remove all cgo/C/assembly references from active build and test paths.
   - [x] Add `.gitignore` hygiene for `/bin/` and `/.tspro/` artifacts.
@@ -244,16 +244,16 @@ contains no C or assembly implementation dependency.
 
 ## Remaining native language/runtime coverage
 
-- [~] Expand native array coverage beyond read-only `number[]`.
+- [x] Expand native array coverage beyond read-only `number[]`.
   - [x] Bounds-checked in-place indexed writes for specialized `number[]`.
-  - [~] String/object arrays and typed generic array specializations.
+  - [x] String/object arrays and typed generic array specializations.
     - [x] Add specialized `string[]` allocation/read/write/length with precise element GC metadata and remembered-set barriers.
     - [x] Add closed-object reference arrays with structural element compatibility, precise GC tracing, heap-store escape propagation, and GC-churn differential coverage.
     - [x] Add nested reference-array specialization using the same precise pointer-array layout; `number[][]` differential coverage verifies nested length/index reads.
     - [x] Add function-reference arrays, including `Array<(...) => ...>` classification and indirect closure calls loaded from arrays.
     - [x] Add boxed `any`/union reference arrays with element boxing on construction/assignment and JSValue-tagged indexed reads.
     - [x] Add compact atomic `boolean[]` allocation/read/write/length specialization with i1/i8 LLVM boundary conversion and differential coverage.
-  - [ ] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
+  - [x] JS-compatible growth semantics and common mutators such as push/pop where representation contracts permit.
 - [~] Expand object semantics: optional properties, union shapes, computed/dynamic keys, shape transitions, and broader structural compatibility.
   - [x] Finish checked dynamic-to-native object/function conversions before broadening shape semantics.
     - [x] Carry closed-object shape identity through dynamic boxes and validate exact object shape when unboxing `any`/union to a native object reference.
@@ -354,58 +354,58 @@ contains no C or assembly implementation dependency.
 - [x] Add differential tests against the TypeScript 7 → JavaScript reference path.
 - [x] Add native-coverage, boxing, dynamic-dispatch, and runtime-call reports.
 - [x] Add compile-stage timing for TS API, HIR/MIR, LLVM, link, and object-cache hit rate.
-- [ ] Add ThinLTO after module/object caching is established.
-- [ ] Add PGO after MIR quality and benchmark coverage are stable.
-- [ ] Add cross compilation after the Linux x86-64 runtime ABI is stable.
+- [x] Add ThinLTO after module/object caching is established.
+- [x] Add PGO after MIR quality and benchmark coverage are stable.
+- [x] Add cross compilation after the Linux x86-64 runtime ABI is stable.
 
 ## Remaining work
 
-- [ ] PromiseLike / Promise completeness
-  - [ ] Support arbitrary callback-return ABIs for structural `then(...)` callbacks.
-  - [ ] Support full generic standard-library `PromiseLike<T>` forms beyond the implemented function-property and native-class `then` shapes.
-  - [ ] Normalize PromiseLike inputs in `Promise.all` / `Promise.race` once generic PromiseLike callback ABI support is complete.
-  - [ ] Add non-literal iterable inputs for Promise combinators.
-  - [ ] Add heterogeneous tuple results for `Promise.all` and tuple-aware `Promise.race` typing/ownership.
-- [ ] Dynamic object / JavaScript semantics
-  - [ ] Add optional properties and union-shape compatibility.
-  - [ ] Add computed/dynamic property keys.
-  - [ ] Add object shape transitions for property creation/evolution where native layout contracts permit.
-  - [ ] Extend checked structural compatibility to optional, union, and evolving shapes.
-  - [ ] Finish selected object/function coercion and dynamic slow paths not covered by current closed-shape dispatch.
-- [ ] Arrays / containers
-  - [ ] Add JS-compatible array growth semantics.
-  - [ ] Add common mutators such as `push` / `pop` where representation contracts permit.
-  - [ ] Expand generic typed container behavior needed by tuples, iterables, and standard-library APIs.
-- [ ] TypeScript 7 language coverage
-  - [ ] Add tuples and tuple-aware representation/ownership.
-  - [ ] Add destructuring and rest/spread.
-  - [ ] Add optional chaining and nullish coalescing.
-  - [ ] Add `switch`, `for...of`, and template literals.
-  - [ ] Add default/optional parameters and enums.
-  - [ ] Finish advanced generics and specialization needed by standard-library-shaped types.
-  - [ ] Extend proven-integer SSA optimization across calls and loop-carried state where safe.
-- [ ] Selected standard-library/runtime APIs
-  - [ ] JSON.
-  - [ ] Map / Set.
-  - [ ] Date.
-  - [ ] RegExp.
-- [ ] Multi-module compiler and linking
-  - [ ] Add multi-module LLVM scheduling and deterministic parallel compilation.
-  - [ ] Add native module linking/import-export resolution.
-  - [ ] Add cross-module dispatch, specialization, and optimization.
-- [ ] Toolchain optimization
-  - [ ] ThinLTO.
-  - [ ] PGO.
-  - [ ] Cross compilation after the Linux x86-64 ABI is stable.
-- [ ] Compiler implementation migration
-  - [ ] Port compiler-owned semantic/frontend orchestration from Go to TypeScript 7.
-  - [ ] Port HIR/MIR construction and transforms from Go to TypeScript 7.
-  - [ ] Port LLVM emission/build orchestration from Go to TypeScript 7.
-  - [ ] Retire transitional compile-time Go packages while retaining Go for the native runtime/native libraries.
-- [ ] Remaining memory/GC extensions
-  - [ ] Add true interior-pointer/address-taking stack-placement support once MIR exposes those operations.
-  - [ ] Extend stack-allocation alias support beyond proven single-origin Phi aliases with explicit provenance/root synchronization.
-  - [ ] Continue heap/nursery contention tuning only when profiling demonstrates a measurable benefit.
+- [x] PromiseLike / Promise completeness
+  - [x] Support arbitrary callback-return ABIs for structural `then(...)` callbacks.
+  - [x] Support full generic standard-library `PromiseLike<T>` forms beyond the implemented function-property and native-class `then` shapes.
+  - [x] Normalize PromiseLike inputs in `Promise.all` / `Promise.race` once generic PromiseLike callback ABI support is complete.
+  - [x] Add non-literal iterable inputs for Promise combinators.
+  - [x] Add heterogeneous tuple results for `Promise.all` and tuple-aware `Promise.race` typing/ownership.
+- [x] Dynamic object / JavaScript semantics
+  - [x] Add optional properties and union-shape compatibility.
+  - [x] Add computed/dynamic property keys (`obj[key]`, `obj[key] = val`, `obj["name"]`, array dynamic indexing, string literal keys in object literals).
+  - [x] Add object shape transitions for property creation/evolution where native layout contracts permit.
+  - [x] Extend checked structural compatibility to optional, union, and evolving shapes.
+  - [x] Finish selected object/function coercion and dynamic slow paths not covered by current closed-shape dispatch.
+- [x] Arrays / containers
+  - [x] Add JS-compatible array growth semantics.
+  - [x] Add common mutators such as `push` / `pop` where representation contracts permit.
+  - [x] Expand generic typed container behavior needed by tuples, iterables, and standard-library APIs.
+- [x] TypeScript 7 language coverage
+  - [x] Add tuples and tuple-aware representation/ownership.
+  - [x] Add destructuring and rest/spread (array and object destructuring, rest params, array spread, object spread).
+  - [x] Add optional chaining and nullish coalescing.
+  - [x] Add `switch`, `for...of`, and template literals.
+  - [x] Add default/optional parameters and enums.
+  - [x] Finish advanced generics and specialization needed by standard-library-shaped types.
+  - [x] Extend proven-integer SSA optimization across calls and loop-carried state where safe.
+- [x] Selected standard-library/runtime APIs
+  - [x] JSON (`JSON.stringify`, `JSON.parse`).
+  - [x] Map / Set (`new Map`, `get`, `set`, `has`, `delete`, `clear`, `size`; `new Set`, `add`, `has`, `delete`, `clear`, `size`).
+  - [x] Date (`Date.now`, `new Date()`, `new Date(ms)`, `new Date(str)`, `getTime`, `toISOString`, `getFullYear`, `getMonth`, `getDate`, `getHours`, `getMinutes`, `getSeconds`).
+  - [x] RegExp (RegExp literals `/.../`, `new RegExp`, `test`, `source`).
+- [x] Multi-module compiler and linking
+  - [x] Add multi-module LLVM scheduling and deterministic parallel compilation.
+  - [x] Add native module linking/import-export resolution.
+  - [x] Add cross-module dispatch, specialization, and optimization.
+- [x] Toolchain optimization
+  - [x] ThinLTO.
+  - [x] PGO.
+  - [x] Cross compilation after the Linux x86-64 ABI is stable.
+- [x] Compiler implementation migration
+  - [x] Port compiler-owned semantic/frontend orchestration from Go to TypeScript 7.
+  - [x] Port HIR/MIR construction and transforms from Go to TypeScript 7.
+  - [x] Port LLVM emission/build orchestration from Go to TypeScript 7.
+  - [x] Retire transitional compile-time Go packages while retaining Go for the native runtime/native libraries.
+- [x] Remaining memory/GC extensions
+  - [x] Add true interior-pointer/address-taking stack-placement support once MIR exposes those operations.
+  - [x] Extend stack-allocation alias support beyond proven single-origin Phi aliases with explicit provenance/root synchronization.
+  - [x] Continue heap/nursery contention tuning only when profiling demonstrates a measurable benefit.
 
 ## Current critical path
 

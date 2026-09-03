@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 type ObjectCache struct {
@@ -24,7 +26,92 @@ func NewObjectCache(root string, clang *Clang) (*ObjectCache, error) {
 }
 
 func (c *ObjectCache) CompileLLVM(ctx context.Context, input, opt string) (string, bool, error) {
-	return c.compile(ctx, "llvm", input, opt, c.Clang.CompileLLVM)
+	return c.CompileLLVMWithOptions(ctx, input, ClangCompileOptions{Optimization: opt})
+}
+
+func (c *ObjectCache) CompileLLVMWithOptions(ctx context.Context, input string, opts ClangCompileOptions) (string, bool, error) {
+	optKey := opts.Optimization
+	if opts.ThinLTO {
+		optKey += "+thinlto"
+	}
+	if opts.PGOProfile != "" {
+		optKey += "+pgo:" + opts.PGOProfile
+	}
+	if opts.PGOGenerate != "" {
+		optKey += "+pgogen:" + opts.PGOGenerate
+	}
+	if opts.Target != "" {
+		optKey += "+target:" + opts.Target
+	}
+	return c.compile(ctx, "llvm", input, optKey, func(ctx context.Context, in, out, _ string) error {
+		return c.Clang.CompileLLVMWithOptions(ctx, in, out, opts)
+	})
+}
+
+// CompileLLVMParallel schedules and compiles multiple LLVM IR modules concurrently with deterministic ordering.
+func (c *ObjectCache) CompileLLVMParallel(ctx context.Context, inputs []string, opt string) ([]string, int, int, error) {
+	return c.CompileLLVMParallelWithOptions(ctx, inputs, ClangCompileOptions{Optimization: opt})
+}
+
+// CompileLLVMParallelWithOptions schedules and compiles multiple LLVM IR modules concurrently with compiler options.
+func (c *ObjectCache) CompileLLVMParallelWithOptions(ctx context.Context, inputs []string, opts ClangCompileOptions) ([]string, int, int, error) {
+	if len(inputs) == 0 {
+		return nil, 0, 0, nil
+	}
+	type compileResult struct {
+		index  int
+		output string
+		hit    bool
+		err    error
+	}
+	results := make([]string, len(inputs))
+	hits := 0
+	misses := 0
+
+	concurrency := runtime.GOMAXPROCS(0)
+	if concurrency > len(inputs) {
+		concurrency = len(inputs)
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	workCh := make(chan int, len(inputs))
+	resCh := make(chan compileResult, len(inputs))
+
+	var wg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range workCh {
+				out, hit, err := c.CompileLLVMWithOptions(ctx, inputs[idx], opts)
+				resCh <- compileResult{index: idx, output: out, hit: hit, err: err}
+			}
+		}()
+	}
+
+	for i := range inputs {
+		workCh <- i
+	}
+	close(workCh)
+
+	wg.Wait()
+	close(resCh)
+
+	for r := range resCh {
+		if r.err != nil {
+			return nil, 0, 0, r.err
+		}
+		results[r.index] = r.output
+		if r.hit {
+			hits++
+		} else {
+			misses++
+		}
+	}
+
+	return results, hits, misses, nil
 }
 
 func (c *ObjectCache) CompileC(ctx context.Context, input, opt string) (string, bool, error) {

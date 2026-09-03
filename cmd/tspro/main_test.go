@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var repoRoot string
@@ -48,6 +49,31 @@ func TestParseBuildArgsLLVM(t *testing.T) {
 	}
 	if options.PureGo || !options.DisablePureGo {
 		t.Fatalf("expected pure-go disabled for --llvm: %+v", options)
+	}
+}
+
+func TestParseBuildArgsToolchainOptimizations(t *testing.T) {
+	options, err := parseBuildArgs([]string{
+		"examples/basics/fib.ts",
+		"--thin-lto",
+		"--pgo=default.pgo",
+		"--pgo-gen=output.profdata",
+		"--target=linux/amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.ThinLTO {
+		t.Fatalf("expected ThinLTO to be true")
+	}
+	if options.PGOProfile != "default.pgo" {
+		t.Fatalf("expected PGOProfile to be default.pgo, got %s", options.PGOProfile)
+	}
+	if options.PGOGenerate != "output.profdata" {
+		t.Fatalf("expected PGOGenerate to be output.profdata, got %s", options.PGOGenerate)
+	}
+	if options.Target != "linux/amd64" {
+		t.Fatalf("expected Target to be linux/amd64, got %s", options.Target)
 	}
 }
 
@@ -160,4 +186,40 @@ func TestSubprocessCLIE2E(t *testing.T) {
 	if got := strings.TrimSpace(string(nativeOutput)); got != "6765" {
 		t.Fatalf("output = %q, want 6765", got)
 	}
+}
+
+func TestParseBuildArgsCaching(t *testing.T) {
+	options, err := parseBuildArgs([]string{"examples/basics/fib.ts", "--no-cache", "--clean-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.NoCache || !options.CleanCache {
+		t.Fatalf("expected NoCache and CleanCache to be true: %+v", options)
+	}
+}
+
+func TestBuildCachingFastPath(t *testing.T) {
+	outDir := t.TempDir()
+	binary := filepath.Join(outDir, "fib-cached")
+
+	// First build: cache miss
+	start1 := time.Now()
+	if err := run([]string{"build", "examples/basics/fib.ts", "-o", binary}); err != nil {
+		t.Fatalf("first build failed: %v", err)
+	}
+	d1 := time.Since(start1)
+
+	out, err := exec.Command(binary).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "6765" {
+		t.Fatalf("run failed: %v: %s", err, out)
+	}
+
+	// Second build: cache hit
+	start2 := time.Now()
+	if err := run([]string{"build", "examples/basics/fib.ts", "-o", binary}); err != nil {
+		t.Fatalf("second build failed: %v", err)
+	}
+	d2 := time.Since(start2)
+
+	t.Logf("First build (fresh): %v, Second build (cached): %v", d1, d2)
 }

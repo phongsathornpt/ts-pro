@@ -80,7 +80,7 @@ func Emit(module mir.Module) (string, error) {
 	}
 	body.WriteString("}\n")
 
-	if g.usesJSConvert || g.usesJSAdd || g.usesDynamicField {
+	if g.usesJSConvert || g.usesJSAdd || g.usesDynamicField || g.usesFieldHelpers {
 		g.usesJSConvert = true
 		g.usesFmt = true
 		g.usesMath = true
@@ -91,8 +91,13 @@ func Emit(module mir.Module) (string, error) {
 
 	var source strings.Builder
 	source.WriteString("package main\n\n")
-	if g.usesFmt || g.usesMath || g.usesRuntime || g.usesSync || g.usesTime || g.usesReflect {
+	if g.usesFmt || g.usesMath || g.usesRuntime || g.usesSync || g.usesTime || g.usesReflect || g.usesJSON || g.usesRegExp {
 		source.WriteString("import (\n")
+		if g.usesJSON {
+			source.WriteString("\t\"encoding/json\"\n")
+			source.WriteString("\t\"strconv\"\n")
+			source.WriteString("\t\"strings\"\n")
+		}
 		if g.usesFmt {
 			source.WriteString("\t\"fmt\"\n")
 		}
@@ -110,6 +115,9 @@ func Emit(module mir.Module) (string, error) {
 		}
 		if g.usesTime {
 			source.WriteString("\t\"time\"\n")
+		}
+		if g.usesRegExp {
+			source.WriteString("\t\"regexp\"\n")
 		}
 		source.WriteString(")\n\n")
 	}
@@ -212,7 +220,36 @@ func tsToBool(v any) bool {
 			rArgs[i] = reflect.Zero(targetType)
 		} else {
 			val := reflect.ValueOf(arg)
-			if val.Type().AssignableTo(targetType) {
+			if val.Kind() == reflect.Func && targetType.Kind() == reflect.Func && !val.Type().AssignableTo(targetType) {
+				adapter := reflect.MakeFunc(targetType, func(in []reflect.Value) []reflect.Value {
+					numIn := val.Type().NumIn()
+					var subArgs []reflect.Value
+					for j := 0; j < numIn && j < len(in); j++ {
+						expectedParam := val.Type().In(j)
+						if in[j].Type().AssignableTo(expectedParam) {
+							subArgs = append(subArgs, in[j])
+						} else if in[j].Type().ConvertibleTo(expectedParam) {
+							subArgs = append(subArgs, in[j].Convert(expectedParam))
+						} else {
+							subArgs = append(subArgs, in[j])
+						}
+					}
+					out := val.Call(subArgs)
+					if targetType.NumOut() == 0 {
+						return nil
+					}
+					ret := make([]reflect.Value, targetType.NumOut())
+					for j := range ret {
+						if j < len(out) && out[j].Type().AssignableTo(targetType.Out(j)) {
+							ret[j] = out[j]
+						} else {
+							ret[j] = reflect.Zero(targetType.Out(j))
+						}
+					}
+					return ret
+				})
+				rArgs[i] = adapter
+			} else if val.Type().AssignableTo(targetType) {
 				rArgs[i] = val
 			} else if val.Type().ConvertibleTo(targetType) {
 				rArgs[i] = val.Convert(targetType)
@@ -238,6 +275,41 @@ func tsToBool(v any) bool {
 	}
 	if g.usesFieldHelpers {
 		g.emitFieldHelpers(&source)
+	}
+	if g.usesNullishCoalesce {
+		source.WriteString("func tsNullishCoalesce(a, b any) any {\n\tif a != nil {\n\t\treturn a\n\t}\n\treturn b\n}\n\n")
+	}
+	if g.usesLogicalOps {
+		source.WriteString("func tsLogicalOr(a, b any) any {\n\tif tsToBool(a) {\n\t\treturn a\n\t}\n\treturn b\n}\n\n")
+		source.WriteString("func tsLogicalAnd(a, b any) any {\n\tif !tsToBool(a) {\n\t\treturn a\n\t}\n\treturn b\n}\n\n")
+	}
+	if g.usesJSON {
+		g.emitJSONHelpers(&source)
+	}
+	if g.usesMap {
+		source.WriteString("type tsMap struct {\n\tdata map[any]any\n}\nfunc tsMapNew() any { return &tsMap{data: make(map[any]any)} }\nfunc tsMapSet(m, k, v any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data[k] = v\n\t}\n\treturn m\n}\nfunc tsMapGet(m, k any) any {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn tm.data[k]\n\t}\n\treturn nil\n}\nfunc tsMapHas(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\t_, ok := tm.data[k]\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsMapDelete(m, k any) bool {\n\tif tm, ok := m.(*tsMap); ok {\n\t\t_, ok := tm.data[k]\n\t\tdelete(tm.data, k)\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsMapClear(m any) {\n\tif tm, ok := m.(*tsMap); ok {\n\t\ttm.data = make(map[any]any)\n\t}\n}\nfunc tsMapSize(m any) float64 {\n\tif tm, ok := m.(*tsMap); ok {\n\t\treturn float64(len(tm.data))\n\t}\n\treturn 0\n}\n\n")
+	}
+	if g.usesSet {
+		source.WriteString("type tsSet struct {\n\tdata map[any]bool\n}\nfunc tsSetNew() any { return &tsSet{data: make(map[any]bool)} }\nfunc tsSetAdd(s, v any) any {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data[v] = true\n\t}\n\treturn s\n}\nfunc tsSetHas(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\treturn ts.data[v]\n\t}\n\treturn false\n}\nfunc tsSetDelete(s, v any) bool {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tok := ts.data[v]\n\t\tdelete(ts.data, v)\n\t\treturn ok\n\t}\n\treturn false\n}\nfunc tsSetClear(s any) {\n\tif ts, ok := s.(*tsSet); ok {\n\t\tts.data = make(map[any]bool)\n\t}\n}\nfunc tsSetSize(s any) float64 {\n\tif ts, ok := s.(*tsSet); ok {\n\t\treturn float64(len(ts.data))\n\t}\n\treturn 0\n}\n\n")
+	}
+	if g.usesDate {
+		source.WriteString("type tsDate struct {\n\tt time.Time\n}\n\n" +
+			"func tsDateNow() float64 {\n\treturn float64(time.Now().UnixMilli())\n}\n\n" +
+			"func tsDateNew(arg ...any) *tsDate {\n\tif len(arg) == 0 || arg[0] == nil {\n\t\treturn &tsDate{t: time.Now().UTC()}\n\t}\n\tswitch v := arg[0].(type) {\n\tcase float64:\n\t\treturn &tsDate{t: time.UnixMilli(int64(v)).UTC()}\n\tcase int:\n\t\treturn &tsDate{t: time.UnixMilli(int64(v)).UTC()}\n\tcase int64:\n\t\treturn &tsDate{t: time.UnixMilli(v).UTC()}\n\tcase string:\n\t\tlayouts := []string{\n\t\t\ttime.RFC3339Nano,\n\t\t\ttime.RFC3339,\n\t\t\t\"2006-01-02T15:04:05.000Z07:00\",\n\t\t\t\"2006-01-02T15:04:05\",\n\t\t\t\"2006-01-02\",\n\t\t}\n\t\tfor _, l := range layouts {\n\t\t\tif t, err := time.Parse(l, v); err == nil {\n\t\t\t\treturn &tsDate{t: t.UTC()}\n\t\t\t}\n\t\t}\n\t\treturn &tsDate{t: time.Now().UTC()}\n\tdefault:\n\t\treturn &tsDate{t: time.Now().UTC()}\n\t}\n}\n\n" +
+			"func tsDateGetTime(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.UnixMilli())\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateToISOString(d any) string {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn td.t.UTC().Format(\"2006-01-02T15:04:05.000Z\")\n\t}\n\treturn \"\"\n}\n\n" +
+			"func tsDateGetFullYear(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Year())\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateGetMonth(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Month() - 1)\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateGetDate(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Day())\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateGetHours(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Hour())\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateGetMinutes(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Minute())\n\t}\n\treturn 0\n}\n\n" +
+			"func tsDateGetSeconds(d any) float64 {\n\tif td, ok := d.(*tsDate); ok {\n\t\treturn float64(td.t.Second())\n\t}\n\treturn 0\n}\n\n")
+	}
+	if g.usesRegExp {
+		source.WriteString("type tsRegExp struct {\n\tre *regexp.Regexp\n\tsource string\n\tflags string\n\tglobal bool\n}\n\n" +
+			"func tsRegExpNew(pattern any, flags ...any) *tsRegExp {\n\tpatStr := tsToString(pattern)\n\tflagStr := \"\"\n\tif len(flags) > 0 && flags[0] != nil {\n\t\tflagStr = tsToString(flags[0])\n\t}\n\tgoPat := patStr\n\tprefix := \"\"\n\tglobal := false\n\tfor _, f := range flagStr {\n\t\tswitch f {\n\t\tcase 'i':\n\t\t\tprefix += \"i\"\n\t\tcase 'm':\n\t\t\tprefix += \"m\"\n\t\tcase 's':\n\t\t\tprefix += \"s\"\n\t\tcase 'g':\n\t\t\tglobal = true\n\t\t}\n\t}\n\tif prefix != \"\" {\n\t\tgoPat = \"(?\" + prefix + \")\" + goPat\n\t}\n\tcompiled, err := regexp.Compile(goPat)\n\tif err != nil {\n\t\tcompiled = regexp.MustCompile(regexp.QuoteMeta(patStr))\n\t}\n\treturn &tsRegExp{re: compiled, source: patStr, flags: flagStr, global: global}\n}\n\n" +
+			"func tsRegExpTest(r any, s any) bool {\n\tif tr, ok := r.(*tsRegExp); ok {\n\t\treturn tr.re.MatchString(tsToString(s))\n\t}\n\treturn false\n}\n\n" +
+			"func tsRegExpSource(r any) string {\n\tif tr, ok := r.(*tsRegExp); ok {\n\t\treturn tr.source\n\t}\n\treturn \"\"\n}\n\n")
 	}
 	source.WriteString(body.String())
 
@@ -267,8 +339,15 @@ type generator struct {
 	usesDynamicCall  bool
 	usesDynamicField bool
 	usesClassTag     bool
-	usesFieldHelpers bool
-	usesExceptions   bool
+	usesFieldHelpers    bool
+	usesExceptions      bool
+	usesNullishCoalesce bool
+	usesLogicalOps      bool
+	usesJSON            bool
+	usesMap             bool
+	usesSet             bool
+	usesDate            bool
+	usesRegExp          bool
 }
 
 func (g *generator) canonicalShape(id mir.ShapeID) mir.ShapeID {
@@ -443,6 +522,7 @@ func (g *generator) emitShapeTypes(out *strings.Builder) error {
 		emitted[canon] = true
 		fmt.Fprintf(out, "type %s struct {\n", goShapeName(canon))
 		fmt.Fprintf(out, "\tclassTag uint32\n")
+		fmt.Fprintf(out, "\tdynamicFields map[string]any\n")
 		for index, field := range shape.Fields {
 			typ, err := g.goTypeForValue(field.Repr, field.ObjectShape, field.HasObjectShape)
 			if err != nil {
@@ -472,6 +552,126 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		assign(strconv.Quote(op.Value))
 	case mir.StringConcat:
 		assign(operand(op.Left) + " + " + operand(op.Right))
+	case mir.StringInterpolate:
+		g.usesJSConvert = true
+		if len(op.Parts) == 0 {
+			assign(`""`)
+		} else {
+			parts := make([]string, len(op.Parts))
+			for i, p := range op.Parts {
+				parts[i] = fmt.Sprintf("tsToString(%s)", operand(p))
+			}
+			assign(strings.Join(parts, " + "))
+		}
+	case mir.JSONStringify:
+		g.usesJSON = true
+		assign(fmt.Sprintf("tsJSONStringify(%s)", operand(op.Value)))
+	case mir.JSONParse:
+		g.usesJSON = true
+		expr := fmt.Sprintf("tsJSONParse(%s)", operand(op.Value))
+		switch inst.Repr {
+		case mir.ReprF64:
+			assign(fmt.Sprintf("%s.(float64)", expr))
+		case mir.ReprBool:
+			assign(fmt.Sprintf("%s.(bool)", expr))
+		case mir.ReprStringRef:
+			assign(fmt.Sprintf("%s.(string)", expr))
+		case mir.ReprArrayRef:
+			assign(fmt.Sprintf("%s.([]any)", expr))
+		default:
+			assign(expr)
+		}
+	case mir.MapOp:
+		g.usesMap = true
+		switch op.Kind {
+		case mir.MapOpNew:
+			assign("tsMapNew()")
+		case mir.MapOpSet:
+			assign(fmt.Sprintf("tsMapSet(%s, %s, %s)", operand(op.Map), operand(op.Key), operand(op.Value)))
+		case mir.MapOpGet:
+			getExpr := fmt.Sprintf("tsMapGet(%s, %s)", operand(op.Map), operand(op.Key))
+			switch inst.Repr {
+			case mir.ReprF64:
+				g.usesJSConvert = true
+				assign(fmt.Sprintf("tsToFloat(%s)", getExpr))
+			case mir.ReprBool:
+				g.usesJSConvert = true
+				assign(fmt.Sprintf("tsToBool(%s)", getExpr))
+			case mir.ReprStringRef:
+				g.usesJSConvert = true
+				assign(fmt.Sprintf("tsToString(%s)", getExpr))
+			default:
+				assign(getExpr)
+			}
+		case mir.MapOpHas:
+			assign(fmt.Sprintf("tsMapHas(%s, %s)", operand(op.Map), operand(op.Key)))
+		case mir.MapOpDelete:
+			assign(fmt.Sprintf("tsMapDelete(%s, %s)", operand(op.Map), operand(op.Key)))
+		case mir.MapOpClear:
+			fmt.Fprintf(out, "\ttsMapClear(%s)\n", operand(op.Map))
+		case mir.MapOpSize:
+			assign(fmt.Sprintf("tsMapSize(%s)", operand(op.Map)))
+		}
+	case mir.SetOp:
+		g.usesSet = true
+		switch op.Kind {
+		case mir.SetOpNew:
+			assign("tsSetNew()")
+		case mir.SetOpAdd:
+			assign(fmt.Sprintf("tsSetAdd(%s, %s)", operand(op.Set), operand(op.Item)))
+		case mir.SetOpHas:
+			assign(fmt.Sprintf("tsSetHas(%s, %s)", operand(op.Set), operand(op.Item)))
+		case mir.SetOpDelete:
+			assign(fmt.Sprintf("tsSetDelete(%s, %s)", operand(op.Set), operand(op.Item)))
+		case mir.SetOpClear:
+			fmt.Fprintf(out, "\ttsSetClear(%s)\n", operand(op.Set))
+		case mir.SetOpSize:
+			assign(fmt.Sprintf("tsSetSize(%s)", operand(op.Set)))
+		}
+	case mir.DateOp:
+		g.usesDate = true
+		g.usesTime = true
+		switch op.Kind {
+		case mir.DateOpNow:
+			assign("tsDateNow()")
+		case mir.DateOpNew:
+			if op.Arg != 0 {
+				assign(fmt.Sprintf("tsDateNew(%s)", operand(op.Arg)))
+			} else {
+				assign("tsDateNew()")
+			}
+		case mir.DateOpGetTime:
+			assign(fmt.Sprintf("tsDateGetTime(%s)", operand(op.Date)))
+		case mir.DateOpToISOString:
+			assign(fmt.Sprintf("tsDateToISOString(%s)", operand(op.Date)))
+		case mir.DateOpGetFullYear:
+			assign(fmt.Sprintf("tsDateGetFullYear(%s)", operand(op.Date)))
+		case mir.DateOpGetMonth:
+			assign(fmt.Sprintf("tsDateGetMonth(%s)", operand(op.Date)))
+		case mir.DateOpGetDate:
+			assign(fmt.Sprintf("tsDateGetDate(%s)", operand(op.Date)))
+		case mir.DateOpGetHours:
+			assign(fmt.Sprintf("tsDateGetHours(%s)", operand(op.Date)))
+		case mir.DateOpGetMinutes:
+			assign(fmt.Sprintf("tsDateGetMinutes(%s)", operand(op.Date)))
+		case mir.DateOpGetSeconds:
+			assign(fmt.Sprintf("tsDateGetSeconds(%s)", operand(op.Date)))
+		}
+	case mir.RegExpOp:
+		g.usesRegExp = true
+		g.usesJSConvert = true
+		switch op.Kind {
+		case mir.RegExpOpNew:
+			if op.Flags != 0 {
+				assign(fmt.Sprintf("tsRegExpNew(%s, %s)", operand(op.Pattern), operand(op.Flags)))
+			} else {
+				assign(fmt.Sprintf("tsRegExpNew(%s)", operand(op.Pattern)))
+			}
+		case mir.RegExpOpTest:
+			assign(fmt.Sprintf("tsRegExpTest(%s, %s)", operand(op.RegExp), operand(op.String)))
+		case mir.RegExpOpSource:
+			assign(fmt.Sprintf("tsRegExpSource(%s)", operand(op.RegExp)))
+		}
 	case mir.FloatBinary:
 		operator, ok := floatOperator(op.Operator)
 		if !ok {
@@ -514,6 +714,24 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 	case mir.ArraySetF64:
 		fmt.Fprintf(out, "\t%s.([]float64)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
 		assign(operand(op.Value))
+	case mir.ArrayPushF64:
+		fmt.Fprintf(out, "\t%s = append(%s.([]float64), %s)\n", operand(op.Array), operand(op.Array), operand(op.Value))
+		assign(fmt.Sprintf("float64(len(%s.([]float64)))", operand(op.Array)))
+	case mir.ArrayPopF64:
+		fmt.Fprintf(out, "\tif arr := %s.([]float64); len(arr) > 0 {\n", operand(op.Array))
+		fmt.Fprintf(out, "\t\t%s = arr[len(arr)-1]\n", result)
+		fmt.Fprintf(out, "\t\t%s = arr[:len(arr)-1]\n", operand(op.Array))
+		fmt.Fprintf(out, "\t}\n")
+	case mir.ArrayConcatF64:
+		if len(op.Arrays) == 0 {
+			assign("[]float64{}")
+		} else {
+			expr := fmt.Sprintf("append([]float64(nil), %s.([]float64)...)", operand(op.Arrays[0]))
+			for _, arr := range op.Arrays[1:] {
+				expr = fmt.Sprintf("append(%s, %s.([]float64)...)", expr, operand(arr))
+			}
+			assign(expr)
+		}
 	case mir.ObjectNew:
 		canon := g.canonicalShape(op.Shape)
 		shape, ok := g.shapes[canon]
@@ -576,7 +794,31 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		}
 		fieldName := goFieldName(op.Field)
 		if valueHasShapes[op.Object] && valueShapes[op.Object] == canon {
-			assign(fmt.Sprintf("%s.%s", operand(op.Object), fieldName))
+			fieldExpr := fmt.Sprintf("%s.%s", operand(op.Object), fieldName)
+			if field.Repr != inst.Repr && field.Repr == mir.ReprJSValue {
+				switch inst.Repr {
+				case mir.ReprF64:
+					g.usesJSConvert = true
+					fieldExpr = fmt.Sprintf("tsToF64(%s)", fieldExpr)
+				case mir.ReprI32:
+					g.usesJSConvert = true
+					fieldExpr = fmt.Sprintf("int32(tsToF64(%s))", fieldExpr)
+				case mir.ReprI64:
+					g.usesJSConvert = true
+					fieldExpr = fmt.Sprintf("int64(tsToF64(%s))", fieldExpr)
+				case mir.ReprStringRef:
+					g.usesJSConvert = true
+					fieldExpr = fmt.Sprintf("tsToString(%s)", fieldExpr)
+				case mir.ReprBool:
+					fieldExpr = fmt.Sprintf("%s.(bool)", fieldExpr)
+				case mir.ReprObjectRef:
+					if valueHasShapes[inst.Result] {
+						fCanon := g.canonicalShape(valueShapes[inst.Result])
+						fieldExpr = fmt.Sprintf("%s.(*%s)", fieldExpr, goShapeName(fCanon))
+					}
+				}
+			}
+			assign(fieldExpr)
 		} else {
 			g.usesFieldHelpers = true
 			switch field.Repr {
@@ -595,6 +837,21 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 				}
 			}
 		}
+	case mir.FieldAddr:
+		fieldName := goFieldName(op.Field)
+		assign(fmt.Sprintf("&%s.%s", operand(op.Object), fieldName))
+	case mir.PtrLoad:
+		typ, _ := g.goType(op.Repr)
+		if typ == "" {
+			typ = "any"
+		}
+		assign(fmt.Sprintf("*%s.(*%s)", operand(op.Ptr), typ))
+	case mir.PtrStore:
+		typ, _ := g.goType(valueTypes[op.Value])
+		if typ == "" {
+			typ = "any"
+		}
+		fmt.Fprintf(out, "\t*%s.(*%s) = %s\n", operand(op.Ptr), typ, operand(op.Value))
 	case mir.Call:
 		callee, ok := g.functions[op.Callee]
 		if !ok {
@@ -605,12 +862,56 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 		}
 		args := make([]string, len(op.Args))
 		for i, arg := range op.Args {
-			args[i] = operand(arg)
+			argStr := operand(arg)
+			paramRepr := callee.Params[i].Repr
+			argRepr := valueTypes[arg]
+			if paramRepr != argRepr && argRepr == mir.ReprJSValue {
+				switch paramRepr {
+				case mir.ReprF64:
+					g.usesJSConvert = true
+					argStr = fmt.Sprintf("tsToF64(%s)", argStr)
+				case mir.ReprI32:
+					g.usesJSConvert = true
+					argStr = fmt.Sprintf("int32(tsToF64(%s))", argStr)
+				case mir.ReprI64:
+					g.usesJSConvert = true
+					argStr = fmt.Sprintf("int64(tsToF64(%s))", argStr)
+				case mir.ReprStringRef:
+					g.usesJSConvert = true
+					argStr = fmt.Sprintf("tsToString(%s)", argStr)
+				case mir.ReprBool:
+					argStr = fmt.Sprintf("%s.(bool)", argStr)
+				}
+			}
+			args[i] = argStr
 		}
 		call := fmt.Sprintf("%s(%s)", goFunctionName(op.Callee), strings.Join(args, ", "))
 		if inst.Repr == mir.ReprVoid {
 			fmt.Fprintf(out, "\t%s\n", call)
 		} else {
+			if callee.ReturnRepr != inst.Repr && callee.ReturnRepr == mir.ReprJSValue {
+				switch inst.Repr {
+				case mir.ReprF64:
+					g.usesJSConvert = true
+					call = fmt.Sprintf("tsToF64(%s)", call)
+				case mir.ReprI32:
+					g.usesJSConvert = true
+					call = fmt.Sprintf("int32(tsToF64(%s))", call)
+				case mir.ReprI64:
+					g.usesJSConvert = true
+					call = fmt.Sprintf("int64(tsToF64(%s))", call)
+				case mir.ReprStringRef:
+					g.usesJSConvert = true
+					call = fmt.Sprintf("tsToString(%s)", call)
+				case mir.ReprBool:
+					call = fmt.Sprintf("%s.(bool)", call)
+				case mir.ReprObjectRef:
+					if valueHasShapes[inst.Result] {
+						canon := g.canonicalShape(valueShapes[inst.Result])
+						call = fmt.Sprintf("%s.(*%s)", call, goShapeName(canon))
+					}
+				}
+			}
 			assign(call)
 		}
 	case mir.IntrinsicCall:
@@ -641,6 +942,24 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 	case mir.ArraySetBool:
 		fmt.Fprintf(out, "\t%s.([]bool)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
 		assign(operand(op.Value))
+	case mir.ArrayPushBool:
+		fmt.Fprintf(out, "\t%s = append(%s.([]bool), %s)\n", operand(op.Array), operand(op.Array), operand(op.Value))
+		assign(fmt.Sprintf("float64(len(%s.([]bool)))", operand(op.Array)))
+	case mir.ArrayPopBool:
+		fmt.Fprintf(out, "\tif arr := %s.([]bool); len(arr) > 0 {\n", operand(op.Array))
+		fmt.Fprintf(out, "\t\t%s = arr[len(arr)-1]\n", result)
+		fmt.Fprintf(out, "\t\t%s = arr[:len(arr)-1]\n", operand(op.Array))
+		fmt.Fprintf(out, "\t}\n")
+	case mir.ArrayConcatBool:
+		if len(op.Arrays) == 0 {
+			assign("[]bool{}")
+		} else {
+			expr := fmt.Sprintf("append([]bool(nil), %s.([]bool)...)", operand(op.Arrays[0]))
+			for _, arr := range op.Arrays[1:] {
+				expr = fmt.Sprintf("append(%s, %s.([]bool)...)", expr, operand(arr))
+			}
+			assign(expr)
+		}
 	case mir.ArrayNewRef:
 		elements := make([]string, len(op.Elements))
 		for i, element := range op.Elements {
@@ -659,6 +978,29 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 	case mir.ArraySetRef:
 		fmt.Fprintf(out, "\t%s.([]any)[int(%s)] = %s\n", operand(op.Array), operand(op.Index), operand(op.Value))
 		assign(operand(op.Value))
+	case mir.ArrayPushRef:
+		fmt.Fprintf(out, "\t%s = append(%s.([]any), %s)\n", operand(op.Array), operand(op.Array), operand(op.Value))
+		assign(fmt.Sprintf("float64(len(%s.([]any)))", operand(op.Array)))
+	case mir.ArrayPopRef:
+		fmt.Fprintf(out, "\tif arr := %s.([]any); len(arr) > 0 {\n", operand(op.Array))
+		targetType, _ := g.goTypeForValue(inst.Repr, valueShapes[inst.Result], valueHasShapes[inst.Result])
+		if targetType != "" && targetType != "any" {
+			fmt.Fprintf(out, "\t\t%s = arr[len(arr)-1].(%s)\n", result, targetType)
+		} else {
+			fmt.Fprintf(out, "\t\t%s = arr[len(arr)-1]\n", result)
+		}
+		fmt.Fprintf(out, "\t\t%s = arr[:len(arr)-1]\n", operand(op.Array))
+		fmt.Fprintf(out, "\t}\n")
+	case mir.ArrayConcatRef:
+		if len(op.Arrays) == 0 {
+			assign("[]any{}")
+		} else {
+			expr := fmt.Sprintf("append([]any(nil), %s.([]any)...)", operand(op.Arrays[0]))
+			for _, arr := range op.Arrays[1:] {
+				expr = fmt.Sprintf("append(%s, %s.([]any)...)", expr, operand(arr))
+			}
+			assign(expr)
+		}
 	case mir.ConstJSValue:
 		assign("nil")
 	case mir.BoxJSValue:
@@ -702,6 +1044,32 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 			assign(fmt.Sprintf("%s == %s", operand(op.Left), operand(op.Right)))
 		case mir.DynamicJSNotEqual, mir.DynamicJSStrictNotEqual:
 			assign(fmt.Sprintf("%s != %s", operand(op.Left), operand(op.Right)))
+		case mir.DynamicJSNullishCoalesce, mir.DynamicJSLogicalOr, mir.DynamicJSLogicalAnd:
+			fnName := "tsNullishCoalesce"
+			if op.Operator == mir.DynamicJSLogicalOr {
+				fnName = "tsLogicalOr"
+				g.usesLogicalOps = true
+				g.usesJSConvert = true
+			} else if op.Operator == mir.DynamicJSLogicalAnd {
+				fnName = "tsLogicalAnd"
+				g.usesLogicalOps = true
+				g.usesJSConvert = true
+			} else {
+				g.usesNullishCoalesce = true
+			}
+			callStr := fmt.Sprintf("%s(%s, %s)", fnName, operand(op.Left), operand(op.Right))
+			switch inst.Repr {
+			case mir.ReprF64:
+				g.usesJSConvert = true
+				assign(fmt.Sprintf("tsToF64(%s)", callStr))
+			case mir.ReprStringRef:
+				assign(fmt.Sprintf("%s.(string)", callStr))
+			case mir.ReprBool:
+				g.usesJSConvert = true
+				assign(fmt.Sprintf("tsToBool(%s)", callStr))
+			default:
+				assign(callStr)
+			}
 		default:
 			return unsupportedInstruction(fn, block, inst, "dynamic binary operator")
 		}
@@ -858,21 +1226,51 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 			resParamType = "any"
 		}
 
-		if op.ResolveReturnsJS {
-			fmt.Fprintf(out, "\t%s := func(v %s) any { %s.Do(func() { %s.val = v; close(%s.done) }); return nil }\n",
-				resolveName, resParamType, onceVar, taskVar, taskVar)
-		} else {
-			fmt.Fprintf(out, "\t%s := func(v %s) { %s.Do(func() { %s.val = v; close(%s.done) }) }\n",
-				resolveName, resParamType, onceVar, taskVar, taskVar)
+		resolveRetType := ""
+		resolveRetVal := ""
+		switch op.ResolveReturn {
+		case mir.ReprF64:
+			resolveRetType = " float64"
+			resolveRetVal = " return 0"
+		case mir.ReprBool:
+			resolveRetType = " bool"
+			resolveRetVal = " return false"
+		case mir.ReprStringRef:
+			resolveRetType = " string"
+			resolveRetVal = ` return ""`
+		case mir.ReprJSValue:
+			resolveRetType = " any"
+			resolveRetVal = " return nil"
 		}
+		if op.ResolveReturnsJS && resolveRetType == "" {
+			resolveRetType = " any"
+			resolveRetVal = " return nil"
+		}
+		fmt.Fprintf(out, "\t%s := func(v %s)%s { %s.Do(func() { %s.val = v; close(%s.done) });%s }\n",
+			resolveName, resParamType, resolveRetType, onceVar, taskVar, taskVar, resolveRetVal)
 
-		if op.RejectReturnsJS {
-			fmt.Fprintf(out, "\t%s := func(e any) any { %s.Do(func() { %s.err = e; close(%s.done) }); return nil }\n",
-				rejectName, onceVar, taskVar, taskVar)
-		} else {
-			fmt.Fprintf(out, "\t%s := func(e any) { %s.Do(func() { %s.err = e; close(%s.done) }) }\n",
-				rejectName, onceVar, taskVar, taskVar)
+		rejectRetType := ""
+		rejectRetVal := ""
+		switch op.RejectReturn {
+		case mir.ReprF64:
+			rejectRetType = " float64"
+			rejectRetVal = " return 0"
+		case mir.ReprBool:
+			rejectRetType = " bool"
+			rejectRetVal = " return false"
+		case mir.ReprStringRef:
+			rejectRetType = " string"
+			rejectRetVal = ` return ""`
+		case mir.ReprJSValue:
+			rejectRetType = " any"
+			rejectRetVal = " return nil"
 		}
+		if op.RejectReturnsJS && rejectRetType == "" {
+			rejectRetType = " any"
+			rejectRetVal = " return nil"
+		}
+		fmt.Fprintf(out, "\t%s := func(e any)%s { %s.Do(func() { %s.err = e; close(%s.done) });%s }\n",
+			rejectName, rejectRetType, onceVar, taskVar, taskVar, rejectRetVal)
 
 		cbArgs := []string{resolveName}
 		if op.Arity == 2 {
@@ -1015,6 +1413,17 @@ func (g *generator) emitInstruction(out *strings.Builder, fn mir.Function, block
 	case mir.DynamicFieldSet:
 		g.usesDynamicField = true
 		fmt.Fprintf(out, "\ttsDynamicFieldSet(%s, %q, %s)\n", operand(op.Object), op.Field, operand(op.Value))
+		if inst.Repr != mir.ReprVoid {
+			assign(operand(op.Value))
+		}
+	case mir.DynamicIndexGet:
+		g.usesDynamicField = true
+		g.usesJSConvert = true
+		assign(fmt.Sprintf("tsDynamicIndexGet(%s, %s)", operand(op.Object), operand(op.Index)))
+	case mir.DynamicIndexSet:
+		g.usesDynamicField = true
+		g.usesJSConvert = true
+		fmt.Fprintf(out, "\ttsDynamicIndexSet(%s, %s, %s)\n", operand(op.Object), operand(op.Index), operand(op.Value))
 		if inst.Repr != mir.ReprVoid {
 			assign(operand(op.Value))
 		}
@@ -1275,7 +1684,7 @@ func (g *generator) goType(repr mir.Repr) (string, error) {
 		g.usesSync = true
 		g.usesTaskGroups = true
 		return "*tsTaskGroup", nil
-	case mir.ReprTagged, mir.ReprJSValue:
+	case mir.ReprTagged, mir.ReprJSValue, mir.ReprRawPtr:
 		return "any", nil
 	default:
 		return "", fmt.Errorf("representation %d is not supported by the pure-Go backend", repr)
@@ -1295,7 +1704,7 @@ func zeroValue(repr mir.Repr) string {
 	case mir.ReprStringRef:
 		return `""`
 	case mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef,
-		mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprTagged, mir.ReprJSValue:
+		mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprTagged, mir.ReprJSValue, mir.ReprRawPtr:
 		return "nil"
 	default:
 		return "0"
@@ -1407,14 +1816,15 @@ func (g *generator) emitDynamicFieldHelpers(source *strings.Builder) {
 			continue
 		}
 		emitted[canon] = true
-		if len(shape.Fields) == 0 {
-			continue
+		fmt.Fprintf(source, "\tcase *%s:\n", goShapeName(canon))
+		if len(shape.Fields) > 0 {
+			source.WriteString("\t\tswitch field {\n")
+			for index, f := range shape.Fields {
+				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\treturn o.%s\n", f.Name, goFieldName(uint32(index)))
+			}
+			source.WriteString("\t\t}\n")
 		}
-		fmt.Fprintf(source, "\tcase *%s:\n\t\tswitch field {\n", goShapeName(canon))
-		for index, f := range shape.Fields {
-			fmt.Fprintf(source, "\t\tcase %q:\n\t\t\treturn o.%s\n", f.Name, goFieldName(uint32(index)))
-		}
-		source.WriteString("\t\t}\n")
+		source.WriteString("\t\tif o.dynamicFields != nil {\n\t\t\tif v, ok := o.dynamicFields[field]; ok {\n\t\t\t\treturn v\n\t\t\t}\n\t\t}\n")
 	}
 	source.WriteString("\t}\n\treturn nil\n}\n\n")
 
@@ -1426,29 +1836,53 @@ func (g *generator) emitDynamicFieldHelpers(source *strings.Builder) {
 			continue
 		}
 		emitted[canon] = true
-		if len(shape.Fields) == 0 {
-			continue
-		}
-		fmt.Fprintf(source, "\tcase *%s:\n\t\tswitch field {\n", goShapeName(canon))
-		for index, f := range shape.Fields {
-			fname := goFieldName(uint32(index))
-			switch f.Repr {
-			case mir.ReprF64, mir.ReprI32, mir.ReprI64:
-				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = tsToF64(val)\n", f.Name, fname)
-			case mir.ReprBool:
-				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val.(bool)\n", f.Name, fname)
-			case mir.ReprStringRef:
-				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val.(string)\n", f.Name, fname)
-			case mir.ReprObjectRef:
-				fieldCanon := g.canonicalShape(f.ObjectShape)
-				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\tif v, ok := val.(*%s); ok { o.%s = v } else if v, ok := val.(any); ok && v != nil { o.%s = v.(*%s) }\n", f.Name, goShapeName(fieldCanon), fname, fname, goShapeName(fieldCanon))
-			default:
-				fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val\n", f.Name, fname)
+		fmt.Fprintf(source, "\tcase *%s:\n", goShapeName(canon))
+		if len(shape.Fields) > 0 {
+			source.WriteString("\t\tswitch field {\n")
+			for index, f := range shape.Fields {
+				fname := goFieldName(uint32(index))
+				switch f.Repr {
+				case mir.ReprF64, mir.ReprI32, mir.ReprI64:
+					fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = tsToF64(val)\n\t\t\treturn\n", f.Name, fname)
+				case mir.ReprBool:
+					fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val.(bool)\n\t\t\treturn\n", f.Name, fname)
+				case mir.ReprStringRef:
+					fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val.(string)\n\t\t\treturn\n", f.Name, fname)
+				case mir.ReprObjectRef:
+					fieldCanon := g.canonicalShape(f.ObjectShape)
+					fmt.Fprintf(source, "\t\tcase %q:\n\t\t\tif v, ok := val.(*%s); ok { o.%s = v } else if v, ok := val.(any); ok && v != nil { o.%s = v.(*%s) }\n\t\t\treturn\n", f.Name, goShapeName(fieldCanon), fname, fname, goShapeName(fieldCanon))
+				default:
+					fmt.Fprintf(source, "\t\tcase %q:\n\t\t\to.%s = val\n\t\t\treturn\n", f.Name, fname)
+				}
 			}
+			source.WriteString("\t\t}\n")
 		}
-		source.WriteString("\t\t}\n")
+		source.WriteString("\t\tif o.dynamicFields == nil {\n\t\t\to.dynamicFields = make(map[string]any)\n\t\t}\n\t\to.dynamicFields[field] = val\n")
 	}
 	source.WriteString("\t}\n}\n\n")
+
+	source.WriteString("func tsDynamicIndexGet(obj any, key any) any {\n" +
+		"\tif obj == nil {\n\t\treturn nil\n\t}\n" +
+		"\tswitch a := obj.(type) {\n" +
+		"\tcase []float64:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\treturn a[idx]\n\t\t}\n\t\treturn nil\n" +
+		"\tcase []string:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\treturn a[idx]\n\t\t}\n\t\treturn nil\n" +
+		"\tcase []bool:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\treturn a[idx]\n\t\t}\n\t\treturn nil\n" +
+		"\tcase []any:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\treturn a[idx]\n\t\t}\n\t\treturn nil\n" +
+		"\tcase map[string]any:\n\t\treturn a[tsToString(key)]\n" +
+		"\t}\n" +
+		"\treturn tsDynamicFieldGet(obj, tsToString(key))\n" +
+		"}\n\n" +
+		"func tsDynamicIndexSet(obj any, key any, val any) {\n" +
+		"\tif obj == nil {\n\t\treturn\n\t}\n" +
+		"\tswitch a := obj.(type) {\n" +
+		"\tcase []float64:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\ta[idx] = tsToF64(val)\n\t\t}\n\t\treturn\n" +
+		"\tcase []string:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\ta[idx] = tsToString(val)\n\t\t}\n\t\treturn\n" +
+		"\tcase []bool:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\ta[idx] = val.(bool)\n\t\t}\n\t\treturn\n" +
+		"\tcase []any:\n\t\tidx := int(tsToF64(key))\n\t\tif idx >= 0 && idx < len(a) {\n\t\t\ta[idx] = val\n\t\t}\n\t\treturn\n" +
+		"\tcase map[string]any:\n\t\ta[tsToString(key)] = val\n\t\treturn\n" +
+		"\t}\n" +
+		"\ttsDynamicFieldSet(obj, tsToString(key), val)\n" +
+		"}\n\n")
 }
 
 func (g *generator) emitFieldHelpers(source *strings.Builder) {
@@ -1656,19 +2090,10 @@ func (g *generator) emitFieldHelpers(source *strings.Builder) {
 			canon := g.canonicalShape(shape.ID)
 			if emitted[canon] { continue }
 			emitted[canon] = true
-			hasFields := false
-			for _, f := range shape.Fields {
-				if f.Repr != mir.ReprF64 && f.Repr != mir.ReprI32 && f.Repr != mir.ReprI64 && f.Repr != mir.ReprBool && f.Repr != mir.ReprStringRef {
-					hasFields = true
-					break
-				}
-			}
-			if !hasFields { continue }
+			if len(shape.Fields) == 0 { continue }
 			fmt.Fprintf(source, "\tcase *%s:\n\t\tswitch fieldIndex {\n", goShapeName(canon))
-			for index, f := range shape.Fields {
-				if f.Repr != mir.ReprF64 && f.Repr != mir.ReprI32 && f.Repr != mir.ReprI64 && f.Repr != mir.ReprBool && f.Repr != mir.ReprStringRef {
-					fmt.Fprintf(source, "\t\tcase %d: return o.%s\n", index, goFieldName(uint32(index)))
-				}
+			for index := range shape.Fields {
+				fmt.Fprintf(source, "\t\tcase %d: return o.%s\n", index, goFieldName(uint32(index)))
 			}
 			source.WriteString("\t\t}\n")
 		}
@@ -1680,27 +2105,68 @@ func (g *generator) emitFieldHelpers(source *strings.Builder) {
 			canon := g.canonicalShape(shape.ID)
 			if emitted[canon] { continue }
 			emitted[canon] = true
-			hasFields := false
-			for _, f := range shape.Fields {
-				if f.Repr != mir.ReprF64 && f.Repr != mir.ReprI32 && f.Repr != mir.ReprI64 && f.Repr != mir.ReprBool && f.Repr != mir.ReprStringRef {
-					hasFields = true
-					break
-				}
-			}
-			if !hasFields { continue }
+			if len(shape.Fields) == 0 { continue }
 			fmt.Fprintf(source, "\tcase *%s:\n\t\tswitch fieldIndex {\n", goShapeName(canon))
 			for index, f := range shape.Fields {
-				if f.Repr != mir.ReprF64 && f.Repr != mir.ReprI32 && f.Repr != mir.ReprI64 && f.Repr != mir.ReprBool && f.Repr != mir.ReprStringRef {
-					if f.Repr == mir.ReprObjectRef && f.HasObjectShape {
+				fname := goFieldName(uint32(index))
+				switch f.Repr {
+				case mir.ReprF64, mir.ReprI32, mir.ReprI64:
+					fmt.Fprintf(source, "\t\tcase %d: o.%s = tsToF64(val)\n", index, fname)
+				case mir.ReprBool:
+					fmt.Fprintf(source, "\t\tcase %d: o.%s = val.(bool)\n", index, fname)
+				case mir.ReprStringRef:
+					fmt.Fprintf(source, "\t\tcase %d: o.%s = val.(string)\n", index, fname)
+				case mir.ReprObjectRef:
+					if f.HasObjectShape {
 						fieldCanon := g.canonicalShape(f.ObjectShape)
-						fmt.Fprintf(source, "\t\tcase %d: if v, ok := val.(*%s); ok { o.%s = v } else if v, ok := val.(any); ok && v != nil { o.%s = v.(*%s) }\n", index, goShapeName(fieldCanon), goFieldName(uint32(index)), goFieldName(uint32(index)), goShapeName(fieldCanon))
+						fmt.Fprintf(source, "\t\tcase %d: if v, ok := val.(*%s); ok { o.%s = v } else if v, ok := val.(any); ok && v != nil { o.%s = v.(*%s) }\n", index, goShapeName(fieldCanon), fname, fname, goShapeName(fieldCanon))
 					} else {
-						fmt.Fprintf(source, "\t\tcase %d: o.%s = val\n", index, goFieldName(uint32(index)))
+						fmt.Fprintf(source, "\t\tcase %d: o.%s = val\n", index, fname)
 					}
+				default:
+					fmt.Fprintf(source, "\t\tcase %d: o.%s = val\n", index, fname)
 				}
 			}
 			source.WriteString("\t\t}\n")
 		}
 		source.WriteString("\t}\n}\n\n")
 	}
+}
+
+func (g *generator) emitJSONHelpers(source *strings.Builder) {
+	emitted := make(map[mir.ShapeID]bool)
+	shapes := append([]mir.Shape(nil), g.module.Shapes...)
+	sort.Slice(shapes, func(i, j int) bool { return shapes[i].ID < shapes[j].ID })
+
+	source.WriteString("func tsJSONStringify(v any) string {\n\tif v == nil { return \"null\" }\n\tswitch val := v.(type) {\n")
+	for _, shape := range shapes {
+		canon := g.canonicalShape(shape.ID)
+		if emitted[canon] {
+			continue
+		}
+		emitted[canon] = true
+		fmt.Fprintf(source, "\tcase *%s:\n", goShapeName(canon))
+		if len(shape.Fields) == 0 {
+			source.WriteString("\t\treturn \"{}\"\n")
+			continue
+		}
+		source.WriteString("\t\treturn \"{\" + ")
+		for index, f := range shape.Fields {
+			if index > 0 {
+				source.WriteString(" + \",\" + ")
+			}
+			fmt.Fprintf(source, "%q + tsJSONStringify(val.%s)", strconv.Quote(f.Name)+":", goFieldName(uint32(index)))
+		}
+		source.WriteString(" + \"}\"\n")
+	}
+	source.WriteString("\tcase []float64:\n\t\tparts := make([]string, len(val))\n\t\tfor i, item := range val { parts[i] = strconv.FormatFloat(item, 'f', -1, 64) }\n\t\treturn \"[\" + strings.Join(parts, \",\") + \"]\"\n")
+	source.WriteString("\tcase []string:\n\t\tparts := make([]string, len(val))\n\t\tfor i, item := range val { parts[i] = strconv.Quote(item) }\n\t\treturn \"[\" + strings.Join(parts, \",\") + \"]\"\n")
+	source.WriteString("\tcase []bool:\n\t\tparts := make([]string, len(val))\n\t\tfor i, item := range val { parts[i] = strconv.FormatBool(item) }\n\t\treturn \"[\" + strings.Join(parts, \",\") + \"]\"\n")
+	source.WriteString("\tcase []any:\n\t\tparts := make([]string, len(val))\n\t\tfor i, item := range val { parts[i] = tsJSONStringify(item) }\n\t\treturn \"[\" + strings.Join(parts, \",\") + \"]\"\n")
+	source.WriteString("\tcase float64:\n\t\treturn strconv.FormatFloat(val, 'f', -1, 64)\n")
+	source.WriteString("\tcase string:\n\t\treturn strconv.Quote(val)\n")
+	source.WriteString("\tcase bool:\n\t\treturn strconv.FormatBool(val)\n")
+	source.WriteString("\tdefault:\n\t\tb, err := json.Marshal(val)\n\t\tif err != nil { return \"{}\" }\n\t\treturn string(b)\n\t}\n}\n\n")
+
+	source.WriteString("func tsJSONParse(s string) any {\n\tvar v any\n\tif err := json.Unmarshal([]byte(s), &v); err != nil {\n\t\treturn nil\n\t}\n\treturn v\n}\n\n")
 }

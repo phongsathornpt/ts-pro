@@ -125,6 +125,34 @@ func TestEmitPureGoArrays(t *testing.T) {
 	}
 }
 
+func TestEmitPureGoInteriorPointer(t *testing.T) {
+	entry := mir.FunctionID(0)
+	module := mir.Module{
+		Name:   "pure-go-interior-ptr",
+		Entry:  &entry,
+		Shapes: []mir.Shape{{ID: 0, Name: "Counter", Fields: []mir.ShapeField{{Name: "val", Repr: mir.ReprF64}}}},
+		Functions: []mir.Function{{
+			ID: 0, Name: "main", ReturnRepr: mir.ReprVoid, Entry: 0,
+			Blocks: []mir.Block{{
+				ID: 0,
+				Instructions: []mir.Instruction{
+					{Result: 0, Repr: mir.ReprObjectRef, Op: mir.ObjectAlloc{Shape: 0}},
+					{Result: 1, Repr: mir.ReprRawPtr, Op: mir.FieldAddr{Object: 0, Shape: 0, Field: 0}},
+					{Result: 2, Repr: mir.ReprF64, Op: mir.ConstF64{Value: 123}},
+					{Result: 3, Repr: mir.ReprVoid, Op: mir.PtrStore{Ptr: 1, Value: 2}},
+					{Result: 4, Repr: mir.ReprF64, Op: mir.PtrLoad{Ptr: 1, Repr: mir.ReprF64}},
+					{Result: 5, Repr: mir.ReprVoid, Op: mir.IntrinsicCall{Intrinsic: mir.IntrinsicConsoleLogF64, Args: []mir.ValueID{4}}},
+				},
+				Terminator: mir.Return{},
+			}},
+		}},
+	}
+	output := runEmittedModule(t, module)
+	if got := strings.TrimSpace(output); got != "123" {
+		t.Fatalf("output = %q, want %q", got, "123")
+	}
+}
+
 func TestEmitPureGoDynamicJSValues(t *testing.T) {
 	entry := mir.FunctionID(0)
 	module := mir.Module{

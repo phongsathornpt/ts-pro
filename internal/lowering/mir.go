@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	rangeanalysis "github.com/phongsathornpt/ts-pro/internal/analysis/range"
+	"github.com/phongsathornpt/ts-pro/internal/frontend"
 	"github.com/phongsathornpt/ts-pro/internal/hir"
 	"github.com/phongsathornpt/ts-pro/internal/mir"
 )
@@ -191,6 +192,9 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 			hir.BinaryGreaterThan: mir.DynamicJSGreaterThan, hir.BinaryGreaterEqual: mir.DynamicJSGreaterEqual,
 			hir.BinaryEqual: mir.DynamicJSEqual, hir.BinaryNotEqual: mir.DynamicJSNotEqual,
 			hir.BinaryStrictEqual: mir.DynamicJSStrictEqual, hir.BinaryStrictNotEqual: mir.DynamicJSStrictNotEqual,
+			hir.BinaryNullishCoalesce: mir.DynamicJSNullishCoalesce,
+			hir.BinaryLogicalOr:       mir.DynamicJSLogicalOr,
+			hir.BinaryLogicalAnd:      mir.DynamicJSLogicalAnd,
 		}[op.Operator]
 		if operator == mir.DynamicJSInvalid {
 			return mir.Instruction{}, fmt.Errorf("unsupported dynamic binary operator %d", op.Operator)
@@ -276,6 +280,80 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		default:
 			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
 		}
+	case hir.ArrayPushOp:
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayPushF64{Array: mir.ValueID(op.Array), Value: mir.ValueID(op.Value)}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayPushBool{Array: mir.ValueID(op.Array), Value: mir.ValueID(op.Value)}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayPushRef{Array: mir.ValueID(op.Array), Value: mir.ValueID(op.Value)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
+	case hir.ArrayPopOp:
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayPopF64{Array: mir.ValueID(op.Array)}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayPopBool{Array: mir.ValueID(op.Array)}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayPopRef{Array: mir.ValueID(op.Array)}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
+	case hir.ArrayConcatOp:
+		arrays := make([]mir.ValueID, len(op.Arrays))
+		for i, arr := range op.Arrays {
+			arrays[i] = mir.ValueID(arr)
+		}
+		switch op.Element {
+		case hir.ArrayElementF64:
+			result.Op = mir.ArrayConcatF64{Arrays: arrays}
+		case hir.ArrayElementBool:
+			result.Op = mir.ArrayConcatBool{Arrays: arrays}
+		case hir.ArrayElementRef:
+			result.Op = mir.ArrayConcatRef{Arrays: arrays}
+		default:
+			return mir.Instruction{}, fmt.Errorf("unsupported array element specialization %d", op.Element)
+		}
+	case hir.StringTemplateOp:
+		parts := make([]mir.ValueID, len(op.Parts))
+		for i, part := range op.Parts {
+			parts[i] = mir.ValueID(part)
+		}
+		result.Op = mir.StringInterpolate{Parts: parts}
+	case hir.JSONStringifyOp:
+		result.Op = mir.JSONStringify{Value: mir.ValueID(op.Value)}
+	case hir.JSONParseOp:
+		result.Op = mir.JSONParse{Value: mir.ValueID(op.Value)}
+	case hir.MapOp:
+		result.Op = mir.MapOp{
+			Kind:  mir.MapOpKind(op.Kind),
+			Map:   mir.ValueID(op.Map),
+			Key:   mir.ValueID(op.Key),
+			Value: mir.ValueID(op.Value),
+		}
+	case hir.SetOp:
+		result.Op = mir.SetOp{
+			Kind: mir.SetOpKind(op.Kind),
+			Set:  mir.ValueID(op.Set),
+			Item: mir.ValueID(op.Item),
+		}
+	case hir.DateOp:
+		result.Op = mir.DateOp{
+			Kind: mir.DateOpKind(op.Kind),
+			Date: mir.ValueID(op.Date),
+			Arg:  mir.ValueID(op.Arg),
+		}
+	case hir.RegExpOp:
+		result.Op = mir.RegExpOp{
+			Kind:    mir.RegExpOpKind(op.Kind),
+			RegExp:  mir.ValueID(op.RegExp),
+			Pattern: mir.ValueID(op.Pattern),
+			Flags:   mir.ValueID(op.Flags),
+			String:  mir.ValueID(op.String),
+		}
 	case hir.ObjectNewOp:
 		fields := make([]mir.ValueID, len(op.Fields))
 		for i, value := range op.Fields {
@@ -292,6 +370,10 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		result.Op = mir.DynamicFieldGet{Object: mir.ValueID(op.Object), Field: op.Field}
 	case hir.DynamicFieldSetOp:
 		result.Op = mir.DynamicFieldSet{Object: mir.ValueID(op.Object), Field: op.Field, Value: mir.ValueID(op.Value)}
+	case hir.DynamicIndexGetOp:
+		result.Op = mir.DynamicIndexGet{Object: mir.ValueID(op.Object), Index: mir.ValueID(op.Index)}
+	case hir.DynamicIndexSetOp:
+		result.Op = mir.DynamicIndexSet{Object: mir.ValueID(op.Object), Index: mir.ValueID(op.Index), Value: mir.ValueID(op.Value)}
 	case hir.ClosureNewOp:
 		captures := make([]mir.ValueID, len(op.Captures))
 		for i, capture := range op.Captures {
@@ -321,7 +403,16 @@ func lowerMIRInstruction(source hir.Instruction, ranges rangeanalysis.FunctionRe
 		for i, target := range op.Cases {
 			cases[i] = mir.DispatchCase{ClassTag: target.ClassTag, Callee: mir.FunctionID(target.Callee)}
 		}
-		result.Op = mir.PromiseThenable{Thenable: mir.ValueID(op.Thenable), Result: resultRepr, Arity: op.Arity, Cases: cases, ResolveReturnsJS: op.ResolveReturnsJS, RejectReturnsJS: op.RejectReturnsJS}
+		result.Op = mir.PromiseThenable{
+			Thenable:         mir.ValueID(op.Thenable),
+			Result:           resultRepr,
+			Arity:            op.Arity,
+			Cases:            cases,
+			ResolveReturnsJS: op.ResolveReturnsJS,
+			RejectReturnsJS:  op.RejectReturnsJS,
+			ResolveReturn:    typeKindToRepr(frontend.TypeKind(op.ResolveReturn)),
+			RejectReturn:     typeKindToRepr(frontend.TypeKind(op.RejectReturn)),
+		}
 	case hir.PromiseAllF64Op:
 		promises := make([]mir.ValueID, len(op.Promises))
 		for i, value := range op.Promises {
@@ -619,5 +710,24 @@ func lowerIntegerBinaryOperator(op hir.BinaryOperator) (mir.FloatBinaryOp, error
 		return mir.FloatDiv, nil
 	default:
 		return 0, fmt.Errorf("unsupported proven integer operator %d", op)
+	}
+}
+
+func typeKindToRepr(kind frontend.TypeKind) mir.Repr {
+	switch kind {
+	case frontend.TypeNumber:
+		return mir.ReprF64
+	case frontend.TypeBoolean:
+		return mir.ReprBool
+	case frontend.TypeString:
+		return mir.ReprStringRef
+	case frontend.TypeAny, frontend.TypeUnknown, frontend.TypeUnion, frontend.TypeParameter:
+		return mir.ReprJSValue
+	case frontend.TypeObject:
+		return mir.ReprObjectRef
+	case frontend.TypeArray:
+		return mir.ReprArrayRef
+	default:
+		return mir.ReprVoid
 	}
 }

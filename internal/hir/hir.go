@@ -171,6 +171,95 @@ type ArraySetOp struct {
 	Array, Index, Value ValueID
 	Element             ArrayElementKind
 }
+type ArrayPushOp struct {
+	Array, Value ValueID
+	Element      ArrayElementKind
+}
+type ArrayPopOp struct {
+	Array   ValueID
+	Element ArrayElementKind
+}
+type ArrayConcatOp struct {
+	Arrays  []ValueID
+	Element ArrayElementKind
+}
+type StringTemplateOp struct {
+	Parts []ValueID
+}
+type JSONStringifyOp struct {
+	Value ValueID
+}
+type JSONParseOp struct {
+	Value ValueID
+}
+type MapOpKind uint8
+const (
+	MapOpNew MapOpKind = iota
+	MapOpGet
+	MapOpSet
+	MapOpHas
+	MapOpDelete
+	MapOpClear
+	MapOpSize
+)
+
+type MapOp struct {
+	Kind  MapOpKind
+	Map   ValueID
+	Key   ValueID
+	Value ValueID
+}
+
+type SetOpKind uint8
+const (
+	SetOpNew SetOpKind = iota
+	SetOpAdd
+	SetOpHas
+	SetOpDelete
+	SetOpClear
+	SetOpSize
+)
+
+type SetOp struct {
+	Kind SetOpKind
+	Set  ValueID
+	Item ValueID
+}
+
+type DateOpKind uint8
+const (
+	DateOpNow DateOpKind = iota
+	DateOpNew
+	DateOpGetTime
+	DateOpToISOString
+	DateOpGetFullYear
+	DateOpGetMonth
+	DateOpGetDate
+	DateOpGetHours
+	DateOpGetMinutes
+	DateOpGetSeconds
+)
+
+type DateOp struct {
+	Kind DateOpKind
+	Date ValueID
+	Arg  ValueID
+}
+
+type RegExpOpKind uint8
+const (
+	RegExpOpNew RegExpOpKind = iota
+	RegExpOpTest
+	RegExpOpSource
+)
+
+type RegExpOp struct {
+	Kind    RegExpOpKind
+	RegExp  ValueID
+	Pattern ValueID
+	Flags   ValueID
+	String  ValueID
+}
 type ObjectNewOp struct {
 	Shape  ShapeID
 	Fields []ValueID
@@ -194,6 +283,15 @@ type DynamicFieldGetOp struct {
 type DynamicFieldSetOp struct {
 	Object ValueID
 	Field  string
+	Value  ValueID
+}
+type DynamicIndexGetOp struct {
+	Object ValueID
+	Index  ValueID
+}
+type DynamicIndexSetOp struct {
+	Object ValueID
+	Index  ValueID
 	Value  ValueID
 }
 type ClosureNewOp struct {
@@ -230,6 +328,8 @@ type PromiseThenableOp struct {
 	Cases            []DispatchCase
 	ResolveReturnsJS bool
 	RejectReturnsJS  bool
+	ResolveReturn    uint8
+	RejectReturn     uint8
 }
 type PromiseRejectOp struct {
 	Reason ValueID
@@ -304,12 +404,24 @@ func (ArrayNewOp) isOperation()          {}
 func (ArrayLengthOp) isOperation()       {}
 func (ArrayGetOp) isOperation()          {}
 func (ArraySetOp) isOperation()          {}
+func (ArrayPushOp) isOperation()         {}
+func (ArrayPopOp) isOperation()          {}
+func (ArrayConcatOp) isOperation()       {}
+func (StringTemplateOp) isOperation()    {}
+func (JSONStringifyOp) isOperation()     {}
+func (JSONParseOp) isOperation()         {}
+func (MapOp) isOperation()               {}
+func (SetOp) isOperation()               {}
+func (DateOp) isOperation()              {}
+func (RegExpOp) isOperation()            {}
 func (ObjectNewOp) isOperation()         {}
 func (ObjectAllocOp) isOperation()       {}
 func (FieldSetOp) isOperation()          {}
 func (FieldGetOp) isOperation()          {}
 func (DynamicFieldGetOp) isOperation()   {}
 func (DynamicFieldSetOp) isOperation()   {}
+func (DynamicIndexGetOp) isOperation()   {}
+func (DynamicIndexSetOp) isOperation()   {}
 func (ClosureNewOp) isOperation()        {}
 func (ClosureCallOp) isOperation()       {}
 func (TaskSpawnOp) isOperation()         {}
@@ -382,6 +494,9 @@ const (
 	BinaryNotEqual
 	BinaryStrictEqual
 	BinaryStrictNotEqual
+	BinaryNullishCoalesce
+	BinaryLogicalOr
+	BinaryLogicalAnd
 )
 
 type Terminator interface {

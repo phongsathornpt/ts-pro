@@ -11,6 +11,10 @@ func (n Node) UnaryOperatorKind() (uint32, bool) {
 	case KindPrefixUnaryExpression:
 		idx := (n.Data() >> 24) & 7
 		switch idx {
+		case 0:
+			return KindPlusToken, true
+		case 1:
+			return KindMinusToken, true
 		case 4:
 			return KindPlusPlusToken, true
 		case 5:

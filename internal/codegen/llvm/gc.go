@@ -14,14 +14,20 @@ type stackFieldRoot struct {
 }
 
 type gcRootLayout struct {
-	slots        map[mir.ValueID]int
-	stackFields  map[stackFieldRoot]int
-	stackAliases map[mir.ValueID]mir.ValueID
-	count        int
+	slots            map[mir.ValueID]int
+	stackFields      map[stackFieldRoot]int
+	stackAliases     map[mir.ValueID]mir.ValueID
+	stackProvenances map[mir.ValueID][]mir.ValueID
+	count            int
 }
 
-func buildGCRootLayout(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, stackObjects map[mir.ValueID]bool, stackAliases map[mir.ValueID]mir.ValueID, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
-	layout := gcRootLayout{slots: map[mir.ValueID]int{}, stackFields: map[stackFieldRoot]int{}, stackAliases: stackAliases}
+func buildGCRootLayout(fn mir.Function, shapes map[mir.ShapeID]mir.Shape, stackObjects map[mir.ValueID]bool, stackAliases map[mir.ValueID]mir.ValueID, stackProvenances map[mir.ValueID][]mir.ValueID, scalarObjects map[mir.ValueID]escapeanalysis.ScalarObject) gcRootLayout {
+	layout := gcRootLayout{
+		slots:            map[mir.ValueID]int{},
+		stackFields:      map[stackFieldRoot]int{},
+		stackAliases:     stackAliases,
+		stackProvenances: stackProvenances,
+	}
 	add := func(value mir.ValueID, repr mir.Repr) {
 		if !isGCReference(repr) {
 			return
@@ -141,18 +147,25 @@ func (layout gcRootLayout) emitStackFieldSync(b *strings.Builder, inst mir.Instr
 		}
 	case mir.FieldSet:
 		object := op.Object
-		if origin, ok := layout.stackAliases[object]; ok {
-			object = origin
+		var origins []mir.ValueID
+		if provs, ok := layout.stackProvenances[object]; ok && len(provs) > 0 {
+			origins = provs
+		} else if origin, ok := layout.stackAliases[object]; ok {
+			origins = []mir.ValueID{origin}
+		} else {
+			origins = []mir.ValueID{object}
 		}
-		slot, ok := layout.stackFields[stackFieldRoot{object: object, field: op.Field}]
-		if !ok {
-			return nil
+		for _, origin := range origins {
+			slot, ok := layout.stackFields[stackFieldRoot{object: origin, field: op.Field}]
+			if !ok {
+				continue
+			}
+			value, err := operand(values, op.Value)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
 		}
-		value, err := operand(values, op.Value)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(b, "  store ptr %s, ptr %s\n", value, gcSlotName(slot))
 	}
 	return nil
 }

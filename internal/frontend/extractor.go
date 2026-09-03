@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ type pendingFunctionBody struct {
 	Node        tsast.Node
 	This        *SymbolID
 	Constructor *classInfo
+	FileName    string
 }
 
 type classFieldInitializer struct {
@@ -46,7 +48,9 @@ type extractor struct {
 	snapshot            uint64
 	project             string
 	fileName            string
+	currentFileName     string
 	sourceText          string
+	sources             map[string]SourceID
 	result              Snapshot
 	types               map[uint64]TypeID
 	symbols             map[uint64]SymbolID
@@ -58,12 +62,21 @@ type extractor struct {
 	closures            map[uint64]closureInfo
 	generics            map[uint64]genericInfo
 	specializations     map[string]FunctionID
+	enums               map[string]*enumInfo
+	importedFunctions   map[string]FunctionID
+	importedClasses     map[string]*classInfo
 	typeSubstitutions   map[uint64]TypeID
 	symbolSubstitutions map[uint64]SymbolID
 	pending             []pendingFunctionBody
 	currentThis         *SymbolID
 	currentFunction     *FunctionID
 	parameterAliases    map[string]SymbolID
+	arrayConstants      map[SymbolID]*Expr
+}
+
+type enumInfo struct {
+	Name    string
+	Members map[string]float64
 }
 
 func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, project, fileName string) (Snapshot, error) {
@@ -100,8 +113,24 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		closures:        map[uint64]closureInfo{},
 		generics:        map[uint64]genericInfo{},
 		specializations: map[string]FunctionID{},
+		enums:               map[string]*enumInfo{},
+		importedFunctions:   map[string]FunctionID{},
+		importedClasses:     map[string]*classInfo{},
+		arrayConstants:      map[SymbolID]*Expr{},
+		sources:             map[string]SourceID{abs: 0},
 	}
 	e.result.Sources = append(e.result.Sources, Source{ID: 0, URI: "file://" + filepath.ToSlash(abs), Path: abs})
+	e.ensureSemanticType(TypeVoid, "void")
+	e.ensureSemanticType(TypeBoolean, "boolean")
+
+	visitedModules := map[string]bool{abs: true}
+	for _, node := range file.Root().Children() {
+		if node.Kind() == tsast.KindImportDeclaration {
+			if err := e.processImport(node, visitedModules); err != nil {
+				return Snapshot{}, err
+			}
+		}
+	}
 
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
@@ -116,14 +145,19 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 			if err != nil {
 				return Snapshot{}, err
 			}
-			e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node})
+			e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node, FileName: abs})
 		case tsast.KindClassDeclaration:
 			if err := e.extractClassSignatures(node); err != nil {
+				return Snapshot{}, err
+			}
+		case tsast.KindEnumDeclaration:
+			if err := e.extractEnum(node); err != nil {
 				return Snapshot{}, err
 			}
 		}
 	}
 	for _, pending := range e.pending {
+		e.currentFileName = pending.FileName
 		e.currentThis = pending.This
 		current := pending.Function
 		e.currentFunction = &current
@@ -140,11 +174,12 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 		}
 		e.result.Functions[pending.Function].Body = body
 	}
+	e.currentFileName = abs
 	e.currentThis = nil
 	e.currentFunction = nil
 	for _, node := range file.Root().Children() {
 		switch node.Kind() {
-		case tsast.KindFunctionDeclaration, tsast.KindClassDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEndOfFile:
+		case tsast.KindFunctionDeclaration, tsast.KindClassDeclaration, tsast.KindInterfaceDeclaration, tsast.KindTypeAliasDeclaration, tsast.KindEnumDeclaration, tsast.KindEndOfFile, tsast.KindImportDeclaration, tsast.KindExportDeclaration, tsast.KindExportAssignment:
 			continue
 		case tsast.KindVariableStatement:
 			items, err := e.extractVariableStatement(node)
@@ -152,17 +187,238 @@ func ExtractFile(ctx context.Context, client *tsls.APIClient, snapshot uint64, p
 				return Snapshot{}, err
 			}
 			e.result.Entry = append(e.result.Entry, items...)
-		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindDoStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindBlock:
+		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindDoStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindForOfStatement, tsast.KindBlock, tsast.KindSwitchStatement:
 			stmt, err := e.extractStatement(node)
 			if err != nil {
 				return Snapshot{}, err
 			}
 			e.result.Entry = append(e.result.Entry, stmt)
 		default:
-			return Snapshot{}, fmt.Errorf("unsupported top-level native statement %s at %d", tsast.KindName(node.Kind()), node.Pos())
+			return Snapshot{}, fmt.Errorf("unsupported top-level native statement %s (kind=%d) at %d", tsast.KindName(node.Kind()), node.Kind(), node.Pos())
 		}
 	}
 	return e.result, nil
+}
+
+func (e *extractor) currentFile() string {
+	if e.currentFileName != "" {
+		return e.currentFileName
+	}
+	return e.fileName
+}
+
+func (e *extractor) processImport(node tsast.Node, visited map[string]bool) error {
+	specifier := ""
+	var clauseNode tsast.Node
+	for _, child := range node.Children() {
+		if child.Kind() == tsast.KindStringLiteral {
+			if txt, ok := child.Text(); ok {
+				specifier = strings.Trim(txt, `"'`+"`")
+			}
+		} else if child.Kind() == tsast.KindImportClause {
+			clauseNode = child
+		}
+	}
+	if specifier == "" {
+		if specifierNode, ok := node.NamedChild("moduleSpecifier"); ok {
+			if txt, ok := specifierNode.Text(); ok {
+				specifier = strings.Trim(txt, `"'`+"`")
+			}
+		}
+	}
+	if specifier == "" || !strings.HasPrefix(specifier, ".") {
+		return nil
+	}
+	targetDir := filepath.Dir(e.currentFile())
+	resolved := filepath.Join(targetDir, specifier)
+	if !strings.HasSuffix(resolved, ".ts") {
+		if _, err := os.Stat(resolved + ".ts"); err == nil {
+			resolved += ".ts"
+		} else if _, err := os.Stat(filepath.Join(resolved, "index.ts")); err == nil {
+			resolved = filepath.Join(resolved, "index.ts")
+		}
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return err
+	}
+	if visited[abs] {
+		return nil
+	}
+	visited[abs] = true
+
+	sourceID := SourceID(len(e.result.Sources))
+	e.sources[abs] = sourceID
+	e.result.Sources = append(e.result.Sources, Source{ID: sourceID, URI: "file://" + filepath.ToSlash(abs), Path: abs})
+
+	payload, err := e.client.GetSourceFile(e.ctx, e.snapshot, e.project, abs)
+	if err != nil {
+		return err
+	}
+	file, err := tsast.Decode(payload)
+	if err != nil {
+		return err
+	}
+
+	prevFile := e.currentFileName
+	e.currentFileName = abs
+
+	for _, child := range file.Root().Children() {
+		if child.Kind() == tsast.KindImportDeclaration {
+			if err := e.processImport(child, visited); err != nil {
+				return err
+			}
+		}
+	}
+
+	fileFnIDs := make(map[string]FunctionID)
+	fileClasses := make(map[string]*classInfo)
+
+	for _, child := range file.Root().Children() {
+		switch child.Kind() {
+		case tsast.KindFunctionDeclaration:
+			if hasTypeParameters(child) {
+				if err := e.registerGenericFunction(child); err != nil {
+					return err
+				}
+				continue
+			}
+			fnID, err := e.extractFunctionSignature(child)
+			if err != nil {
+				return err
+			}
+			if nameNode, ok := child.NamedChild("name"); ok {
+				if name, ok := nameNode.Text(); ok {
+					fileFnIDs[name] = fnID
+				}
+			} else {
+				for _, n := range child.Children() {
+					if n.Kind() == tsast.KindIdentifier {
+						if name, ok := n.Text(); ok {
+							fileFnIDs[name] = fnID
+							break
+						}
+					}
+				}
+			}
+			e.pending = append(e.pending, pendingFunctionBody{Function: fnID, Node: child, FileName: abs})
+		case tsast.KindClassDeclaration:
+			if err := e.extractClassSignatures(child); err != nil {
+				return err
+			}
+			for _, c := range e.classes {
+				fileClasses[c.Name] = c
+			}
+		case tsast.KindEnumDeclaration:
+			if err := e.extractEnum(child); err != nil {
+				return err
+			}
+		}
+	}
+
+	if clauseNode.Kind() == tsast.KindImportClause {
+		for _, child := range clauseNode.Children() {
+			if child.Kind() == tsast.KindIdentifier {
+				localName, _ := child.Text()
+				if localName != "" {
+					if fnID, ok := fileFnIDs[localName]; ok {
+						e.importedFunctions[localName] = fnID
+					}
+					if cls, ok := fileClasses[localName]; ok {
+						e.importedClasses[localName] = cls
+					}
+				}
+			} else if child.Kind() == tsast.KindNamedImports {
+				for _, specChild := range child.Children() {
+					if specChild.Kind() == tsast.KindImportSpecifier {
+						var idents []string
+						for _, idNode := range specChild.Children() {
+							if idNode.Kind() == tsast.KindIdentifier {
+								if txt, ok := idNode.Text(); ok {
+									idents = append(idents, txt)
+								}
+							}
+						}
+						localName := ""
+						remoteName := ""
+						if len(idents) == 1 {
+							localName = idents[0]
+							remoteName = idents[0]
+						} else if len(idents) >= 2 {
+							remoteName = idents[0]
+							localName = idents[1]
+						}
+						if localName != "" {
+							if fnID, ok := fileFnIDs[remoteName]; ok {
+								e.importedFunctions[localName] = fnID
+							}
+							if cls, ok := fileClasses[remoteName]; ok {
+								e.importedClasses[localName] = cls
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, child := range file.Root().Children() {
+		switch child.Kind() {
+		case tsast.KindVariableStatement:
+			items, err := e.extractVariableStatement(child)
+			if err != nil {
+				return err
+			}
+			e.result.Entry = append(e.result.Entry, items...)
+		case tsast.KindExpressionStatement, tsast.KindIfStatement, tsast.KindDoStatement, tsast.KindWhileStatement, tsast.KindForStatement, tsast.KindForOfStatement, tsast.KindBlock, tsast.KindSwitchStatement:
+			stmt, err := e.extractStatement(child)
+			if err != nil {
+				return err
+			}
+			e.result.Entry = append(e.result.Entry, stmt)
+		}
+	}
+
+	e.currentFileName = prevFile
+	return nil
+}
+
+func (e *extractor) extractEnum(node tsast.Node) error {
+	var nameNode tsast.Node
+	for _, child := range node.Children() {
+		if child.Kind() == tsast.KindIdentifier {
+			nameNode = child
+			break
+		}
+	}
+	if nameNode.Kind() == 0 {
+		return fmt.Errorf("enum at %d has no name", node.Pos())
+	}
+	enumName, _ := nameNode.Text()
+	info := &enumInfo{Name: enumName, Members: map[string]float64{}}
+	currentVal := float64(0)
+	for _, child := range node.Children() {
+		if child.Kind() != tsast.KindEnumMember {
+			continue
+		}
+		subs := child.Children()
+		if len(subs) == 0 {
+			continue
+		}
+		memberName, _ := subs[0].Text()
+		if len(subs) > 1 {
+			txt, ok := subs[1].Text()
+			if ok {
+				if v, err := strconv.ParseFloat(txt, 64); err == nil {
+					currentVal = v
+				}
+			}
+		}
+		info.Members[memberName] = currentVal
+		currentVal++
+	}
+	e.enums[enumName] = info
+	return nil
 }
 
 func (e *extractor) extractFunctionSignature(node tsast.Node) (FunctionID, error) {
@@ -171,7 +427,7 @@ func (e *extractor) extractFunctionSignature(node tsast.Node) (FunctionID, error
 		return 0, fmt.Errorf("function declaration at %d has no name", node.Pos())
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil {
 		return 0, err
 	}
@@ -226,7 +482,7 @@ func (e *extractor) extractParameter(node tsast.Node) (Parameter, error) {
 		return Parameter{}, fmt.Errorf("parameter at %d has no name", node.Pos())
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil {
 		return Parameter{}, err
 	}
@@ -239,7 +495,28 @@ func (e *extractor) extractParameter(node tsast.Node) (Parameter, error) {
 	}
 	symbolID := e.internSymbol(symbol, SymbolParameter, nameNode)
 	e.result.Symbols[symbolID].Type = typeID
-	return Parameter{Symbol: symbolID, Name: name, Type: typeID, Span: e.span(node)}, nil
+	param := Parameter{Symbol: symbolID, Name: name, Type: typeID, Span: e.span(node)}
+	if _, ok := node.NamedChild("questionToken"); ok {
+		param.Optional = true
+	}
+	if _, ok := node.NamedChild("dotDotDotToken"); ok {
+		param.Rest = true
+	} else {
+		for _, child := range node.Children() {
+			if child.Kind() == tsast.KindDotDotDotToken {
+				param.Rest = true
+				break
+			}
+		}
+	}
+	if initNode, ok := node.NamedChild("initializer"); ok {
+		initExpr, err := e.extractExpr(initNode)
+		if err != nil {
+			return Parameter{}, err
+		}
+		param.Initializer = initExpr
+	}
+	return param, nil
 }
 
 func (e *extractor) extractFunctionBody(node tsast.Node) ([]Statement, error) {
@@ -346,6 +623,8 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 		return e.extractDoWhile(node)
 	case tsast.KindForStatement:
 		return e.extractFor(node)
+	case tsast.KindForOfStatement:
+		return e.extractForOf(node)
 	case tsast.KindExpressionStatement:
 		exprNode, ok := node.NamedChild("expression")
 		if !ok {
@@ -359,9 +638,107 @@ func (e *extractor) extractStatement(node tsast.Node) (Statement, error) {
 			return Statement{}, err
 		}
 		return Statement{Kind: StmtExpr, Span: e.span(node), Expr: expr}, nil
+	case tsast.KindSwitchStatement:
+		return e.extractSwitch(node)
 	default:
 		return Statement{}, fmt.Errorf("unsupported native statement %s at %d", tsast.KindName(node.Kind()), node.Pos())
 	}
+}
+
+func (e *extractor) extractSwitch(node tsast.Node) (Statement, error) {
+	exprNode, ok := node.NamedChild("expression")
+	if !ok {
+		return Statement{}, fmt.Errorf("switch at %d has no expression", node.Pos())
+	}
+	subject, err := e.extractExpr(exprNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	caseBlock, ok := node.NamedChild("caseBlock")
+	if !ok {
+		return Statement{}, fmt.Errorf("switch at %d has no caseBlock", node.Pos())
+	}
+
+	type clauseItem struct {
+		isDefault bool
+		matchExpr *Expr
+		body      []Statement
+	}
+	var clauses []clauseItem
+	for _, child := range caseBlock.Children() {
+		switch child.Kind() {
+		case tsast.KindCaseClause:
+			subs := child.Children()
+			if len(subs) == 0 {
+				continue
+			}
+			matchExpr, err := e.extractExpr(subs[0])
+			if err != nil {
+				return Statement{}, err
+			}
+			var body []Statement
+			for _, stmtNode := range subs[1:] {
+				if stmtNode.Kind() == tsast.KindBreakStatement {
+					continue
+				}
+				s, err := e.extractStatement(stmtNode)
+				if err != nil {
+					return Statement{}, err
+				}
+				body = append(body, s)
+			}
+			clauses = append(clauses, clauseItem{isDefault: false, matchExpr: matchExpr, body: body})
+		case tsast.KindDefaultClause:
+			subs := child.Children()
+			var body []Statement
+			for _, stmtNode := range subs {
+				if stmtNode.Kind() == tsast.KindBreakStatement {
+					continue
+				}
+				s, err := e.extractStatement(stmtNode)
+				if err != nil {
+					return Statement{}, err
+				}
+				body = append(body, s)
+			}
+			clauses = append(clauses, clauseItem{isDefault: true, body: body})
+		}
+	}
+
+	var currentElse []Statement
+	for _, cl := range clauses {
+		if cl.isDefault {
+			currentElse = cl.body
+			break
+		}
+	}
+
+	for i := len(clauses) - 1; i >= 0; i-- {
+		cl := clauses[i]
+		if cl.isDefault {
+			continue
+		}
+		cond := &Expr{
+			Kind:     ExprBinary,
+			Operator: BinaryStrictEqual,
+			Left:     subject,
+			Right:    cl.matchExpr,
+			Type:     1,
+			Span:     e.span(node),
+		}
+		stmt := Statement{
+			Kind: StmtIf,
+			Span: e.span(node),
+			Expr: cond,
+			Then: cl.body,
+			Else: currentElse,
+		}
+		currentElse = []Statement{stmt}
+	}
+	if len(currentElse) > 0 {
+		return currentElse[0], nil
+	}
+	return Statement{Kind: StmtBlock, Span: e.span(node)}, nil
 }
 
 func (e *extractor) extractVariableStatement(node tsast.Node) ([]Statement, error) {
@@ -379,52 +756,270 @@ func (e *extractor) extractVariableDeclarationList(node tsast.Node) ([]Statement
 	}
 	result := make([]Statement, 0, len(declarations.ListElements()))
 	for _, declaration := range declarations.ListElements() {
-		stmt, err := e.extractVariableDeclaration(declaration)
+		stmts, err := e.extractVariableDeclaration(declaration)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, stmt)
+		result = append(result, stmts...)
 	}
 	return result, nil
 }
 
-func (e *extractor) extractVariableDeclaration(node tsast.Node) (Statement, error) {
-	nameNode, ok := node.NamedChild("name")
-	if !ok || nameNode.Kind() != tsast.KindIdentifier {
-		return Statement{}, fmt.Errorf("native variable at %d requires an identifier name", node.Pos())
-	}
-	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
-	if err != nil || symbol == nil {
-		if err == nil {
-			err = fmt.Errorf("variable %s has no TypeScript symbol", name)
+func (e *extractor) buildIndexRead(object *Expr, index int, span Span) (*Expr, error) {
+	numberType := e.ensureSemanticType(TypeNumber, "number")
+	elemType := numberType
+	if int(object.Type) < len(e.result.Types) {
+		objectType := e.result.Types[object.Type]
+		if objectType.Kind == TypeArray && int(objectType.Element) < len(e.result.Types) {
+			elemType = objectType.Element
 		}
-		return Statement{}, err
 	}
-	typeID, err := e.typeAt(nameNode)
-	if err != nil {
-		return Statement{}, err
+	return &Expr{
+		Kind:   ExprIndex,
+		Type:   elemType,
+		Object: object,
+		Index: &Expr{
+			Kind:   ExprNumber,
+			Type:   numberType,
+			Number: float64(index),
+			Span:   span,
+		},
+		Span: span,
+	}, nil
+}
+
+func (e *extractor) buildPropertyRead(object *Expr, name string, span Span) (*Expr, error) {
+	if int(object.Type) < len(e.result.Types) {
+		objectType := e.result.Types[object.Type]
+		if objectType.Kind == TypeObject && int(objectType.Shape) < len(e.result.Shapes) {
+			shape := e.result.Shapes[objectType.Shape]
+			for i, field := range shape.Fields {
+				if field.Name == name {
+					return &Expr{
+						Kind:       ExprFieldGet,
+						Type:       field.Type,
+						Object:     object,
+						Field:      name,
+						FieldIndex: uint32(i),
+						Span:       span,
+					}, nil
+				}
+			}
+		}
 	}
-	symbolID := e.internSymbol(symbol, SymbolVariable, nameNode)
-	e.result.Symbols[symbolID].Type = typeID
+	return &Expr{
+		Kind:   ExprDynamicFieldGet,
+		Object: object,
+		Field:  name,
+		Span:   span,
+	}, nil
+}
+
+func (e *extractor) extractVariableDeclaration(node tsast.Node) ([]Statement, error) {
+	nameNode, ok := node.NamedChild("name")
+	if !ok {
+		return nil, fmt.Errorf("native variable at %d has no name", node.Pos())
+	}
 	initializer, ok := node.NamedChild("initializer")
 	if !ok {
-		return Statement{}, fmt.Errorf("native variable %s requires an initializer", name)
+		return nil, fmt.Errorf("native variable at %d requires an initializer", node.Pos())
 	}
-	if initializer.Kind() == tsast.KindArrowFunction || initializer.Kind() == tsast.KindFunctionExpression {
-		closure, err := e.extractLocalClosure(name, symbol, initializer)
-		if err != nil {
-			return Statement{}, err
+
+	if nameNode.Kind() == tsast.KindIdentifier {
+		name, _ := nameNode.Text()
+		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
+		if err != nil || symbol == nil {
+			if err == nil {
+				err = fmt.Errorf("variable %s has no TypeScript symbol", name)
+			}
+			return nil, err
 		}
-		e.closures[symbol.ID] = closure
-		return Statement{Kind: StmtClosureBind, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID}, nil
+		typeID, err := e.typeAt(nameNode)
+		if err != nil {
+			return nil, err
+		}
+		symbolID := e.internSymbol(symbol, SymbolVariable, nameNode)
+		e.result.Symbols[symbolID].Type = typeID
+
+		if initializer.Kind() == tsast.KindArrowFunction || initializer.Kind() == tsast.KindFunctionExpression {
+			closure, err := e.extractLocalClosure(name, symbol, initializer)
+			if err != nil {
+				return nil, err
+			}
+			e.closures[symbol.ID] = closure
+			return []Statement{{Kind: StmtClosureBind, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID}}, nil
+		}
+		value, err := e.extractExpr(initializer)
+		if err != nil {
+			return nil, err
+		}
+		if value.Kind == ExprArray {
+			e.arrayConstants[symbolID] = value
+		}
+		e.recordConcreteClass(symbolID, value)
+		return []Statement{{Kind: StmtVar, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}}, nil
 	}
-	value, err := e.extractExpr(initializer)
-	if err != nil {
-		return Statement{}, err
+
+	if nameNode.Kind() == tsast.KindArrayBindingPattern || nameNode.Kind() == tsast.KindObjectBindingPattern {
+		rhs, err := e.extractExpr(initializer)
+		if err != nil {
+			return nil, err
+		}
+		var statements []Statement
+		rhsVar := rhs
+		if rhs.Kind != ExprIdentifier {
+			tempName := fmt.Sprintf("__destruct_tmp_%d", node.Pos())
+			tempSym := SymbolID(len(e.result.Symbols))
+			e.result.Symbols = append(e.result.Symbols, Symbol{
+				ID: tempSym, Name: tempName, Kind: SymbolVariable, Type: rhs.Type, Decl: e.span(node),
+			})
+			statements = append(statements, Statement{
+				Kind: StmtVar, Span: e.span(node), Symbol: tempSym, Name: tempName, Type: rhs.Type, Value: rhs,
+			})
+			rhsVar = &Expr{Kind: ExprIdentifier, Symbol: tempSym, Name: tempName, Type: rhs.Type, Span: e.span(node)}
+		}
+
+		if nameNode.Kind() == tsast.KindArrayBindingPattern {
+			for i, elem := range nameNode.Children() {
+				if elem.Kind() != tsast.KindBindingElement {
+					continue
+				}
+				var elemNameNode tsast.Node
+				if nameChild, ok := elem.NamedChild("name"); ok && nameChild.Kind() == tsast.KindIdentifier {
+					elemNameNode = nameChild
+				} else {
+					subs := elem.Children()
+					if len(subs) > 0 && subs[0].Kind() == tsast.KindIdentifier {
+						elemNameNode = subs[0]
+					} else {
+						continue
+					}
+				}
+				elemName, _ := elemNameNode.Text()
+				elemSymbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, elemNameNode.Handle(e.currentFile()))
+				if err != nil || elemSymbol == nil {
+					if err == nil {
+						err = fmt.Errorf("destructured variable %s has no TypeScript symbol", elemName)
+					}
+					return nil, err
+				}
+				elemType, err := e.typeAt(elemNameNode)
+				if err != nil {
+					return nil, err
+				}
+				elemSymbolID := e.internSymbol(elemSymbol, SymbolVariable, elemNameNode)
+				e.result.Symbols[elemSymbolID].Type = elemType
+
+				readExpr, err := e.buildIndexRead(rhsVar, i, e.span(elem))
+				if err != nil {
+					return nil, err
+				}
+				if elemType != 0 {
+					readExpr.Type = elemType
+				}
+				if initNode, ok := elem.NamedChild("initializer"); ok {
+					defaultExpr, err := e.extractExpr(initNode)
+					if err != nil {
+						return nil, err
+					}
+					readExpr = &Expr{
+						Kind:     ExprBinary,
+						Operator: BinaryNullishCoalesce,
+						Left:     readExpr,
+						Right:    defaultExpr,
+						Type:     elemType,
+						Span:     e.span(elem),
+					}
+				}
+				statements = append(statements, Statement{
+					Kind:   StmtVar,
+					Span:   e.span(elem),
+					Symbol: elemSymbolID,
+					Name:   elemName,
+					Type:   elemType,
+					Value:  readExpr,
+				})
+			}
+			return statements, nil
+		}
+
+		if nameNode.Kind() == tsast.KindObjectBindingPattern {
+			for _, elem := range nameNode.Children() {
+				if elem.Kind() != tsast.KindBindingElement {
+					continue
+				}
+				var elemNameNode tsast.Node
+				var propName string
+				if nameChild, ok := elem.NamedChild("name"); ok && nameChild.Kind() == tsast.KindIdentifier {
+					elemNameNode = nameChild
+					elemName, _ := elemNameNode.Text()
+					propName = elemName
+					if propChild, ok := elem.NamedChild("propertyName"); ok && propChild.Kind() == tsast.KindIdentifier {
+						propName, _ = propChild.Text()
+					}
+				} else {
+					subs := elem.Children()
+					if len(subs) == 1 && subs[0].Kind() == tsast.KindIdentifier {
+						elemNameNode = subs[0]
+						elemName, _ := elemNameNode.Text()
+						propName = elemName
+					} else if len(subs) >= 2 && subs[0].Kind() == tsast.KindIdentifier && subs[1].Kind() == tsast.KindIdentifier {
+						propName, _ = subs[0].Text()
+						elemNameNode = subs[1]
+					} else {
+						continue
+					}
+				}
+				elemName, _ := elemNameNode.Text()
+				elemSymbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, elemNameNode.Handle(e.currentFile()))
+				if err != nil || elemSymbol == nil {
+					if err == nil {
+						err = fmt.Errorf("destructured variable %s has no TypeScript symbol", elemName)
+					}
+					return nil, err
+				}
+				elemType, err := e.typeAt(elemNameNode)
+				if err != nil {
+					return nil, err
+				}
+				elemSymbolID := e.internSymbol(elemSymbol, SymbolVariable, elemNameNode)
+				e.result.Symbols[elemSymbolID].Type = elemType
+
+				readExpr, err := e.buildPropertyRead(rhsVar, propName, e.span(elem))
+				if err != nil {
+					return nil, err
+				}
+				if elemType != 0 {
+					readExpr.Type = elemType
+				}
+				if initNode, ok := elem.NamedChild("initializer"); ok {
+					defaultExpr, err := e.extractExpr(initNode)
+					if err != nil {
+						return nil, err
+					}
+					readExpr = &Expr{
+						Kind:     ExprBinary,
+						Operator: BinaryNullishCoalesce,
+						Left:     readExpr,
+						Right:    defaultExpr,
+						Type:     elemType,
+						Span:     e.span(elem),
+					}
+				}
+				statements = append(statements, Statement{
+					Kind:   StmtVar,
+					Span:   e.span(elem),
+					Symbol: elemSymbolID,
+					Name:   elemName,
+					Type:   elemType,
+					Value:  readExpr,
+				})
+			}
+			return statements, nil
+		}
 	}
-	e.recordConcreteClass(symbolID, value)
-	return Statement{Kind: StmtVar, Span: e.span(node), Symbol: symbolID, Name: name, Type: typeID, Value: value}, nil
+
+	return nil, fmt.Errorf("native variable at %d (name kind=%d %s) requires an identifier name", node.Pos(), nameNode.Kind(), tsast.KindName(nameNode.Kind()))
 }
 
 func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
@@ -447,7 +1042,7 @@ func (e *extractor) extractTryStatement(node tsast.Node) (Statement, error) {
 	if !ok || nameNode.Kind() != tsast.KindIdentifier {
 		return Statement{}, fmt.Errorf("catch clause at %d requires an identifier binding", catchClause.Pos())
 	}
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("catch binding has no TypeScript symbol")
@@ -601,6 +1196,143 @@ func (e *extractor) extractFor(node tsast.Node) (Statement, error) {
 	return stmt, nil
 }
 
+func (e *extractor) extractForOf(node tsast.Node) (Statement, error) {
+	children := node.Children()
+	var initNode, exprNode, bodyNode tsast.Node
+	if in, ok := node.NamedChild("initializer"); ok {
+		initNode = in
+	}
+	if ex, ok := node.NamedChild("expression"); ok {
+		exprNode = ex
+	}
+	if st, ok := node.NamedChild("statement"); ok {
+		bodyNode = st
+	}
+	if initNode.Kind() == 0 && len(children) >= 3 {
+		initNode = children[len(children)-3]
+	}
+	if exprNode.Kind() == 0 && len(children) >= 2 {
+		exprNode = children[len(children)-2]
+	}
+	if bodyNode.Kind() == 0 && len(children) >= 1 {
+		bodyNode = children[len(children)-1]
+	}
+	if initNode.Kind() == 0 || exprNode.Kind() == 0 || bodyNode.Kind() == 0 {
+		return Statement{}, fmt.Errorf("malformed for...of loop at %d", node.Pos())
+	}
+
+	iterable, err := e.extractExpr(exprNode)
+	if err != nil {
+		return Statement{}, err
+	}
+
+	numberType := e.ensureSemanticType(TypeNumber, "number")
+	boolType := e.ensureSemanticType(TypeBoolean, "boolean")
+
+	// 1. Assign iterable to temporary variable: const __for_of_arr_* = iterable;
+	arrTempName := fmt.Sprintf("__for_of_arr_%d", node.Pos())
+	arrTempSym := SymbolID(len(e.result.Symbols))
+	e.result.Symbols = append(e.result.Symbols, Symbol{
+		ID:   arrTempSym,
+		Name: arrTempName,
+		Kind: SymbolVariable,
+		Type: iterable.Type,
+		Decl: e.span(node),
+	})
+	arrVar := &Expr{Kind: ExprIdentifier, Symbol: arrTempSym, Name: arrTempName, Type: iterable.Type, Span: e.span(exprNode)}
+	arrStmt := Statement{Kind: StmtVar, Span: e.span(exprNode), Symbol: arrTempSym, Name: arrTempName, Type: iterable.Type, Value: iterable}
+
+	// 2. Loop index: let __for_of_idx_* = 0;
+	idxTempName := fmt.Sprintf("__for_of_idx_%d", node.Pos())
+	idxTempSym := SymbolID(len(e.result.Symbols))
+	e.result.Symbols = append(e.result.Symbols, Symbol{
+		ID:   idxTempSym,
+		Name: idxTempName,
+		Kind: SymbolVariable,
+		Type: numberType,
+		Decl: e.span(node),
+	})
+	idxVar := &Expr{Kind: ExprIdentifier, Symbol: idxTempSym, Name: idxTempName, Type: numberType, Span: e.span(node)}
+	idxInit := Statement{Kind: StmtVar, Span: e.span(node), Symbol: idxTempSym, Name: idxTempName, Type: numberType, Value: &Expr{Kind: ExprNumber, Number: 0, Type: numberType, Span: e.span(node)}}
+
+	// 3. Condition: __for_of_idx_* < __for_of_arr_*.length;
+	lenExpr := &Expr{Kind: ExprArrayLength, Object: arrVar, Type: numberType, Span: e.span(node)}
+	condExpr := &Expr{Kind: ExprBinary, Operator: BinaryLessThan, Left: idxVar, Right: lenExpr, Type: boolType, Span: e.span(node)}
+
+	// 4. Update: __for_of_idx_* = __for_of_idx_* + 1;
+	oneExpr := &Expr{Kind: ExprNumber, Number: 1, Type: numberType, Span: e.span(node)}
+	addExpr := &Expr{Kind: ExprBinary, Operator: BinaryAdd, Left: idxVar, Right: oneExpr, Type: numberType, Span: e.span(node)}
+	updateStmt := Statement{Kind: StmtAssign, Span: e.span(node), Symbol: idxTempSym, Name: idxTempName, Type: numberType, Value: addExpr}
+
+	// 5. Item variable declaration at start of loop body
+	var declNode tsast.Node
+	if initNode.Kind() == tsast.KindVariableDeclarationList {
+		for _, c := range initNode.Children() {
+			if c.Kind() == tsast.KindVariableDeclaration {
+				declNode = c
+				break
+			}
+		}
+	} else if initNode.Kind() == tsast.KindVariableDeclaration {
+		declNode = initNode
+	}
+	if declNode.Kind() == 0 {
+		return Statement{}, fmt.Errorf("unsupported for...of loop variable declaration at %d", initNode.Pos())
+	}
+
+	nameNode, ok := declNode.NamedChild("name")
+	if !ok {
+		subs := declNode.Children()
+		if len(subs) > 0 {
+			nameNode = subs[0]
+		}
+	}
+	if nameNode.Kind() == 0 {
+		return Statement{}, fmt.Errorf("for...of variable at %d has no name", declNode.Pos())
+	}
+
+	itemName, _ := nameNode.Text()
+	itemSymbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
+	if err != nil || itemSymbol == nil {
+		if err == nil {
+			err = fmt.Errorf("for...of variable %s has no TypeScript symbol", itemName)
+		}
+		return Statement{}, err
+	}
+	itemType, err := e.typeAt(nameNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	itemSymID := e.internSymbol(itemSymbol, SymbolVariable, nameNode)
+	e.result.Symbols[itemSymID].Type = itemType
+
+	readExpr := &Expr{Kind: ExprIndex, Object: arrVar, Index: idxVar, Type: itemType, Span: e.span(declNode)}
+	itemStmt := Statement{Kind: StmtVar, Span: e.span(declNode), Symbol: itemSymID, Name: itemName, Type: itemType, Value: readExpr}
+
+	loopEntry := cloneConcreteClasses(e.concreteClasses)
+	bodyStmts, err := e.extractStatementBody(bodyNode)
+	if err != nil {
+		return Statement{}, err
+	}
+	loopBody := append([]Statement{itemStmt}, bodyStmts...)
+	e.concreteClasses = mergeConcreteClasses(loopEntry, e.concreteClasses)
+
+	forStmt := Statement{
+		Kind:   StmtFor,
+		Span:   e.span(node),
+		Init:   []Statement{idxInit},
+		Expr:   condExpr,
+		Update: []Statement{updateStmt},
+		Then:   loopBody,
+	}
+
+	return Statement{
+		Kind: StmtBlock,
+		Span: e.span(node),
+		Then: []Statement{arrStmt, forStmt},
+	}, nil
+}
+
 func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
 	if node.Kind() == tsast.KindBinaryExpression {
 		opNode, ok := node.NamedChild("operatorToken")
@@ -642,7 +1374,7 @@ func (e *extractor) extractMutation(node tsast.Node) (Statement, bool, error) {
 
 func (e *extractor) buildAssignment(node, target, rhs tsast.Node, unary uint32) (Statement, bool, error) {
 	name, _ := target.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, target.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, target.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("assignment target %s has no TypeScript symbol", name)
@@ -717,7 +1449,7 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			expr.Symbol = alias
 			return expr, nil
 		}
-		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.fileName))
+		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.currentFile()))
 		if err != nil {
 			return nil, err
 		}
@@ -765,7 +1497,30 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		expr.String = text
 		return expr, nil
-	case tsast.KindArrowFunction, tsast.KindFunctionExpression:
+	case tsast.KindRegularExpressionLiteral:
+		text, ok := node.Text()
+		if !ok {
+			return nil, fmt.Errorf("regexp literal at %d has no text", node.Pos())
+		}
+		lastSlash := strings.LastIndex(text, "/")
+		if lastSlash <= 0 {
+			return nil, fmt.Errorf("invalid regular expression literal at %d: %s", node.Pos(), text)
+		}
+		pattern := text[1:lastSlash]
+		flags := text[lastSlash+1:]
+		stringType := e.ensureSemanticType(TypeString, "string")
+		regExpType := e.ensureSemanticType(TypeRegExp, "RegExp")
+		args := []*Expr{
+			{Kind: ExprString, String: pattern, Type: stringType, Span: e.span(node)},
+		}
+		if flags != "" {
+			args = append(args, &Expr{Kind: ExprString, String: flags, Type: stringType, Span: e.span(node)})
+		}
+		expr.Kind = ExprRegExpNew
+		expr.Args = args
+		expr.Type = regExpType
+		return expr, nil
+	case tsast.KindArrowFunction, tsast.KindFunctionExpression, tsast.KindMethodDeclaration:
 		info, err := e.extractLocalClosure("inline", nil, node)
 		if err != nil {
 			return nil, err
@@ -788,7 +1543,11 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("array literal at %d has no element list", node.Pos())
 		}
 		if int(typeID) >= len(e.result.Types) || e.result.Types[typeID].Kind != TypeArray {
-			return nil, fmt.Errorf("array literal at %d has non-array type", node.Pos())
+			t := Type{}
+			if int(typeID) < len(e.result.Types) {
+				t = e.result.Types[typeID]
+			}
+			return nil, fmt.Errorf("array literal at %d has non-array type: kind=%d name=%q", node.Pos(), t.Kind, t.Name)
 		}
 		arrayType := e.result.Types[typeID]
 		if int(arrayType.Element) >= len(e.result.Types) {
@@ -796,9 +1555,62 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		elementKind := e.result.Types[arrayType.Element].Kind
 		switch elementKind {
-		case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
+		case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise, TypeParameter, TypeNever:
 		default:
 			return nil, fmt.Errorf("native array at %d does not support %s elements yet", node.Pos(), e.result.Types[arrayType.Element].Name)
+		}
+		hasSpread := false
+		for _, elementNode := range elements.ListElements() {
+			if elementNode.Kind() == tsast.KindSpreadElement {
+				hasSpread = true
+				break
+			}
+		}
+		if hasSpread {
+			var chunks []*Expr
+			var currentLiterals []*Expr
+			for _, elementNode := range elements.ListElements() {
+				if elementNode.Kind() == tsast.KindSpreadElement {
+					if len(currentLiterals) > 0 {
+						chunks = append(chunks, &Expr{
+							Kind:     ExprArray,
+							Type:     typeID,
+							Elements: currentLiterals,
+							Span:     e.span(node),
+						})
+						currentLiterals = nil
+					}
+					exprNode, ok := elementNode.NamedChild("expression")
+					if !ok {
+						return nil, fmt.Errorf("spread element at %d has no expression", elementNode.Pos())
+					}
+					spreadArr, err := e.extractExpr(exprNode)
+					if err != nil {
+						return nil, err
+					}
+					chunks = append(chunks, spreadArr)
+				} else {
+					elem, err := e.extractExpr(elementNode)
+					if err != nil {
+						return nil, err
+					}
+					currentLiterals = append(currentLiterals, elem)
+				}
+			}
+			if len(currentLiterals) > 0 {
+				chunks = append(chunks, &Expr{
+					Kind:     ExprArray,
+					Type:     typeID,
+					Elements: currentLiterals,
+					Span:     e.span(node),
+				})
+			}
+			return &Expr{
+				Kind:     ExprArrayConcat,
+				Type:     typeID,
+				Elements: chunks,
+				Span:     e.span(node),
+			}, nil
 		}
 		for _, elementNode := range elements.ListElements() {
 			element, err := e.extractExpr(elementNode)
@@ -825,9 +1637,36 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		values := map[string]*Expr{}
 		for _, property := range propertiesNode.ListElements() {
+			if property.Kind() == tsast.KindSpreadAssignment {
+				exprNode, ok := property.NamedChild("expression")
+				if !ok {
+					return nil, fmt.Errorf("spread property at %d has no expression", property.Pos())
+				}
+				spreadObj, err := e.extractExpr(exprNode)
+				if err != nil {
+					return nil, err
+				}
+				if int(spreadObj.Type) < len(e.result.Types) && e.result.Types[spreadObj.Type].Kind == TypeObject {
+					srcShapeID := e.result.Types[spreadObj.Type].Shape
+					if int(srcShapeID) < len(e.result.Shapes) {
+						srcShape := e.result.Shapes[srcShapeID]
+						for fIdx, field := range srcShape.Fields {
+							values[field.Name] = &Expr{
+								Kind:       ExprFieldGet,
+								Object:     spreadObj,
+								Field:      field.Name,
+								FieldIndex: uint32(fIdx),
+								Type:       field.Type,
+								Span:       e.span(property),
+							}
+						}
+					}
+				}
+				continue
+			}
 			nameNode, ok := property.NamedChild("name")
-			if !ok || nameNode.Kind() != tsast.KindIdentifier {
-				return nil, fmt.Errorf("native object property at %d requires identifier name", property.Pos())
+			if !ok || (nameNode.Kind() != tsast.KindIdentifier && nameNode.Kind() != tsast.KindStringLiteral) {
+				return nil, fmt.Errorf("native object property at %d requires identifier or string literal name", property.Pos())
 			}
 			name, _ := nameNode.Text()
 			var value *Expr
@@ -841,6 +1680,8 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 				value, err = e.extractExpr(initializer)
 			case tsast.KindShorthandPropertyAssignment:
 				value, err = e.extractExpr(nameNode)
+			case tsast.KindMethodDeclaration:
+				value, err = e.extractExpr(property)
 			default:
 				return nil, fmt.Errorf("unsupported object property %s at %d", tsast.KindName(property.Kind()), property.Pos())
 			}
@@ -875,16 +1716,38 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		if int(object.Type) >= len(e.result.Types) || e.result.Types[object.Type].Kind != TypeArray {
-			return nil, fmt.Errorf("native element access at %d requires an array receiver", node.Pos())
+		if int(object.Type) < len(e.result.Types) {
+			objType := e.result.Types[object.Type]
+			if objType.Kind == TypeArray {
+				if int(objType.Element) >= len(e.result.Types) {
+					return nil, fmt.Errorf("native element access at %d has invalid array element type", node.Pos())
+				}
+				if int(index.Type) < len(e.result.Types) && (e.result.Types[index.Type].Kind == TypeAny || e.result.Types[index.Type].Kind == TypeUnion) {
+					expr.Kind, expr.Object, expr.Index = ExprDynamicIndexGet, object, index
+					expr.Type = e.ensureSemanticType(TypeAny, "any")
+					return expr, nil
+				}
+				expr.Type = objType.Element
+				expr.Kind, expr.Object, expr.Index = ExprIndex, object, index
+				return expr, nil
+			}
+			if objType.Kind == TypeObject && int(objType.Shape) < len(e.result.Shapes) && index.Kind == ExprString {
+				shape := e.result.Shapes[objType.Shape]
+				for i, field := range shape.Fields {
+					if field.Name == index.String {
+						expr.Kind, expr.Object, expr.Field, expr.FieldIndex = ExprFieldGet, object, field.Name, uint32(i)
+						expr.Type = field.Type
+						return expr, nil
+					}
+				}
+			}
+			if objType.Kind == TypeAny || objType.Kind == TypeUnion || objType.Kind == TypeObject {
+				expr.Kind, expr.Object, expr.Index = ExprDynamicIndexGet, object, index
+				expr.Type = e.ensureSemanticType(TypeAny, "any")
+				return expr, nil
+			}
 		}
-		arrayType := e.result.Types[object.Type]
-		if int(arrayType.Element) >= len(e.result.Types) {
-			return nil, fmt.Errorf("native element access at %d has invalid array element type", node.Pos())
-		}
-		expr.Type = arrayType.Element
-		expr.Kind, expr.Object, expr.Index = ExprIndex, object, index
-		return expr, nil
+		return nil, fmt.Errorf("native element access at %d requires an array or dynamic receiver", node.Pos())
 	case tsast.KindPropertyAccessExpression:
 		objectNode, ok := node.NamedChild("expression")
 		if !ok {
@@ -895,6 +1758,15 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 			return nil, fmt.Errorf("property access at %d has no name", node.Pos())
 		}
 		name, _ := nameNode.Text()
+		if objectNode.Kind() == tsast.KindIdentifier {
+			objName, _ := objectNode.Text()
+			if enumInfo, ok := e.enums[objName]; ok {
+				if val, ok := enumInfo.Members[name]; ok {
+					numberType := e.ensureSemanticType(TypeNumber, "number")
+					return &Expr{Kind: ExprNumber, Number: val, Type: numberType, Span: e.span(node)}, nil
+				}
+			}
+		}
 		object, err := e.extractExpr(objectNode)
 		if err != nil {
 			return nil, err
@@ -905,6 +1777,18 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		objectType := e.result.Types[object.Type]
 		if objectType.Kind == TypeArray && name == "length" {
 			expr.Kind, expr.Object = ExprArrayLength, object
+			return expr, nil
+		}
+		if objectType.Kind == TypeMap && name == "size" {
+			expr.Kind, expr.Object = ExprMapSize, object
+			return expr, nil
+		}
+		if objectType.Kind == TypeSet && name == "size" {
+			expr.Kind, expr.Object = ExprSetSize, object
+			return expr, nil
+		}
+		if objectType.Kind == TypeRegExp && name == "source" {
+			expr.Kind, expr.Object = ExprRegExpSource, object
 			return expr, nil
 		}
 		if objectType.Kind == TypeAny || objectType.Kind == TypeUnion {
@@ -960,8 +1844,74 @@ func (e *extractor) extractExpr(node tsast.Node) (*Expr, error) {
 		}
 		inner.Type, inner.Span = typeID, e.span(node)
 		return inner, nil
+	case tsast.KindPrefixUnaryExpression:
+		op, ok := node.UnaryOperatorKind()
+		if !ok {
+			return nil, fmt.Errorf("prefix unary expression at %d has unknown operator", node.Pos())
+		}
+		operandNode, ok := node.NamedChild("operand")
+		if !ok {
+			return nil, fmt.Errorf("prefix unary expression at %d has no operand", node.Pos())
+		}
+		operand, err := e.extractExpr(operandNode)
+		if err != nil {
+			return nil, err
+		}
+		if op == tsast.KindMinusToken {
+			zero := &Expr{Kind: ExprNumber, Number: 0, Type: operand.Type, Span: e.span(node)}
+			return &Expr{Kind: ExprBinary, Operator: BinarySub, Left: zero, Right: operand, Type: operand.Type, Span: e.span(node)}, nil
+		}
+		if op == tsast.KindPlusToken {
+			return operand, nil
+		}
+		return nil, fmt.Errorf("unsupported prefix unary operator %s at %d", tsast.KindName(op), node.Pos())
+	case tsast.KindNoSubstitutionTemplateLiteral:
+		text, _ := node.Text()
+		stringType := e.ensureSemanticType(TypeString, "string")
+		expr.Kind = ExprString
+		expr.Type = stringType
+		expr.String = text
+		return expr, nil
+	case tsast.KindTemplateExpression:
+		stringType := e.ensureSemanticType(TypeString, "string")
+		expr.Kind = ExprTemplateLiteral
+		expr.Type = stringType
+		children := node.Children()
+		if len(children) > 0 {
+			headText, _ := children[0].Text()
+			if len(headText) > 0 {
+				expr.Elements = append(expr.Elements, &Expr{
+					Kind:   ExprString,
+					Type:   stringType,
+					String: headText,
+					Span:   e.span(children[0]),
+				})
+			}
+			for _, spanNode := range children[1:] {
+				subs := spanNode.Children()
+				if len(subs) >= 1 {
+					subExpr, err := e.extractExpr(subs[0])
+					if err != nil {
+						return nil, err
+					}
+					expr.Elements = append(expr.Elements, subExpr)
+				}
+				if len(subs) >= 2 {
+					middleText, _ := subs[1].Text()
+					if len(middleText) > 0 {
+						expr.Elements = append(expr.Elements, &Expr{
+							Kind:   ExprString,
+							Type:   stringType,
+							String: middleText,
+							Span:   e.span(subs[1]),
+						})
+					}
+				}
+			}
+		}
+		return expr, nil
 	default:
-		return nil, fmt.Errorf("unsupported native expression %s at %d", tsast.KindName(node.Kind()), node.Pos())
+		return nil, fmt.Errorf("unsupported native expression %s (kind=%d) at %d", tsast.KindName(node.Kind()), node.Kind(), node.Pos())
 	}
 }
 
@@ -1003,8 +1953,14 @@ func (e *extractor) extractBinary(node tsast.Node, expr *Expr) (*Expr, error) {
 		op = BinaryStrictEqual
 	case tsast.KindExclamationEqualsEqualsToken:
 		op = BinaryStrictNotEqual
+	case tsast.KindQuestionQuestionToken:
+		op = BinaryNullishCoalesce
+	case tsast.KindBarBarToken:
+		op = BinaryLogicalOr
+	case tsast.KindAmpersandAmpersandToken:
+		op = BinaryLogicalAnd
 	default:
-		return nil, fmt.Errorf("unsupported binary operator %s at %d", tsast.KindName(opNode.Kind()), opNode.Pos())
+		return nil, fmt.Errorf("unsupported binary operator %s (kind=%d) at %d", tsast.KindName(opNode.Kind()), opNode.Kind(), opNode.Pos())
 	}
 	expr.Kind = ExprBinary
 	expr.Operator = op
@@ -1032,7 +1988,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			return nil, err
 		}
 		dynamicCallee := int(calleeType) < len(e.result.Types) && (e.result.Types[calleeType].Kind == TypeAny || e.result.Types[calleeType].Kind == TypeUnion)
-		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.fileName))
+		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, calleeNode.Handle(e.currentFile()))
 		if err != nil {
 			return nil, err
 		}
@@ -1050,11 +2006,16 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			}
 		}
 		if expr.CallTarget == nil && generic == nil && !isConcurrencyIntrinsic(calleeIdentifier) {
-			callee, err := e.extractExpr(calleeNode)
-			if err != nil {
-				return nil, err
+			if target, ok := e.importedFunctions[calleeIdentifier]; ok {
+				targetCopy := target
+				expr.CallTarget = &targetCopy
+			} else {
+				callee, err := e.extractExpr(calleeNode)
+				if err != nil {
+					return nil, err
+				}
+				expr.Callee = callee
 			}
-			expr.Callee = callee
 		}
 	case tsast.KindPropertyAccessExpression:
 		if isConsoleLog(calleeNode) {
@@ -1075,6 +2036,16 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 				expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeIdentifier, Span: e.span(calleeNode)}
 				break
 			}
+			if receiverName == "JSON" && (methodName == "stringify" || methodName == "parse") {
+				calleeIdentifier = "JSON." + methodName
+				expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeIdentifier, Span: e.span(calleeNode)}
+				break
+			}
+			if receiverName == "Date" && methodName == "now" {
+				calleeIdentifier = "Date.now"
+				expr.Callee = &Expr{Kind: ExprIdentifier, Name: calleeIdentifier, Span: e.span(calleeNode)}
+				break
+			}
 		}
 		if !nameOK || nameNode.Kind() != tsast.KindIdentifier {
 			return nil, fmt.Errorf("method call at %d has no method name", calleeNode.Pos())
@@ -1086,6 +2057,75 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 		name, _ := nameNode.Text()
 		if int(receiver.Type) < len(e.result.Types) {
 			kind := e.result.Types[receiver.Type].Kind
+			if kind == TypeArray && (name == "push" || name == "pop") {
+				if name == "push" {
+					expr.Kind = ExprArrayPush
+				} else {
+					expr.Kind = ExprArrayPop
+				}
+				expr.Object = receiver
+				break
+			}
+			if kind == TypeMap {
+				switch name {
+				case "get":
+					expr.Kind = ExprMapGet
+				case "set":
+					expr.Kind = ExprMapSet
+				case "has":
+					expr.Kind = ExprMapHas
+				case "delete":
+					expr.Kind = ExprMapDelete
+				case "clear":
+					expr.Kind = ExprMapClear
+				}
+				expr.Object = receiver
+				break
+			}
+			if kind == TypeSet {
+				switch name {
+				case "add":
+					expr.Kind = ExprSetAdd
+				case "has":
+					expr.Kind = ExprSetHas
+				case "delete":
+					expr.Kind = ExprSetDelete
+				case "clear":
+					expr.Kind = ExprSetClear
+				}
+				expr.Object = receiver
+				break
+			}
+			if kind == TypeDate {
+				switch name {
+				case "getTime":
+					expr.Kind = ExprDateGetTime
+				case "toISOString":
+					expr.Kind = ExprDateToISOString
+				case "getFullYear", "getUTCFullYear":
+					expr.Kind = ExprDateGetFullYear
+				case "getMonth", "getUTCMonth":
+					expr.Kind = ExprDateGetMonth
+				case "getDate", "getUTCDate":
+					expr.Kind = ExprDateGetDate
+				case "getHours", "getUTCHours":
+					expr.Kind = ExprDateGetHours
+				case "getMinutes", "getUTCMinutes":
+					expr.Kind = ExprDateGetMinutes
+				case "getSeconds", "getUTCSeconds":
+					expr.Kind = ExprDateGetSeconds
+				}
+				expr.Object = receiver
+				break
+			}
+			if kind == TypeRegExp {
+				switch name {
+				case "test":
+					expr.Kind = ExprRegExpTest
+				}
+				expr.Object = receiver
+				break
+			}
 			if kind == TypeAny || kind == TypeUnion {
 				if targets := e.dynamicMethodTargets(name); len(targets) != 0 {
 					expr.Kind = ExprDynamicMethodCall
@@ -1100,7 +2140,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 				break
 			}
 		}
-		method, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+		method, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 		if err != nil {
 			return nil, err
 		}
@@ -1147,11 +2187,74 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Args = append(expr.Args, arg)
 		}
 	}
+	if expr.CallTarget != nil && int(*expr.CallTarget) < len(e.result.Functions) {
+		target := e.result.Functions[*expr.CallTarget]
+		userArgCount := 0
+		if args, ok := node.NamedChild("arguments"); ok {
+			userArgCount = len(args.ListElements())
+		}
+		offset := len(expr.Args) - userArgCount
+		hasRest := len(target.Params) > 0 && target.Params[len(target.Params)-1].Rest
+		if hasRest {
+			restIdx := len(target.Params) - 1
+			restParam := target.Params[restIdx]
+			actualRestStart := restIdx + offset
+			if len(expr.Args) >= actualRestStart {
+				restElements := append([]*Expr(nil), expr.Args[actualRestStart:]...)
+				expr.Args = append(expr.Args[:actualRestStart], &Expr{
+					Kind:     ExprArray,
+					Elements: restElements,
+					Type:     restParam.Type,
+					Span:     expr.Span,
+				})
+			} else {
+				for i := len(expr.Args); i < actualRestStart; i++ {
+					p := target.Params[i-offset]
+					if p.Initializer != nil {
+						expr.Args = append(expr.Args, p.Initializer)
+					} else {
+						expr.Args = append(expr.Args, &Expr{Kind: ExprUndefined, Type: p.Type, Span: expr.Span})
+					}
+				}
+				expr.Args = append(expr.Args, &Expr{
+					Kind:     ExprArray,
+					Elements: nil,
+					Type:     restParam.Type,
+					Span:     expr.Span,
+				})
+			}
+		} else {
+			for i := userArgCount + offset; i < len(target.Params); i++ {
+				p := target.Params[i]
+				if p.Initializer != nil {
+					expr.Args = append(expr.Args, p.Initializer)
+				} else if p.Optional {
+					expr.Args = append(expr.Args, &Expr{Kind: ExprUndefined, Type: p.Type, Span: expr.Span})
+				}
+			}
+		}
+	}
 	if calleeIdentifier == "Promise.resolve" || calleeIdentifier == "Promise.reject" || calleeIdentifier == "Promise.all" || calleeIdentifier == "Promise.race" {
 		return e.extractPromiseStaticCall(node, expr, calleeIdentifier)
 	}
+	if calleeIdentifier == "JSON.stringify" || calleeIdentifier == "JSON.parse" {
+		return e.extractJSONCall(node, expr, calleeIdentifier)
+	}
+	if calleeIdentifier == "Date.now" {
+		expr.Kind = ExprDateNow
+		return expr, nil
+	}
 	if isConcurrencyIntrinsic(calleeIdentifier) {
 		return e.extractConcurrencyCall(node, expr, calleeIdentifier)
+	}
+	if expr.Kind == ExprArrayPush || expr.Kind == ExprArrayPop ||
+		expr.Kind == ExprMapGet || expr.Kind == ExprMapSet || expr.Kind == ExprMapHas || expr.Kind == ExprMapDelete || expr.Kind == ExprMapClear ||
+		expr.Kind == ExprSetAdd || expr.Kind == ExprSetHas || expr.Kind == ExprSetDelete || expr.Kind == ExprSetClear ||
+		expr.Kind == ExprDateNow || expr.Kind == ExprDateGetTime || expr.Kind == ExprDateToISOString ||
+		expr.Kind == ExprDateGetFullYear || expr.Kind == ExprDateGetMonth || expr.Kind == ExprDateGetDate ||
+		expr.Kind == ExprDateGetHours || expr.Kind == ExprDateGetMinutes || expr.Kind == ExprDateGetSeconds ||
+		expr.Kind == ExprRegExpNew || expr.Kind == ExprRegExpTest || expr.Kind == ExprRegExpSource {
+		return expr, nil
 	}
 	if expr.Kind == ExprDynamicMethodCall || (expr.Kind == ExprDynamicCall && expr.Object != nil && expr.Field != "") {
 		return expr, nil
@@ -1186,7 +2289,7 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 			expr.Intrinsic = IntrinsicConsoleLogF64
 		case TypeString:
 			expr.Intrinsic = IntrinsicConsoleLogString
-		case TypeAny, TypeUnion:
+		case TypeBoolean, TypeAny, TypeUnion:
 			expr.Intrinsic = IntrinsicConsoleLogJSValue
 		default:
 			return nil, fmt.Errorf("console.log native MVP does not support argument type %q at %d", e.result.Types[expr.Args[0].Type].Name, node.Pos())
@@ -1209,6 +2312,25 @@ func (e *extractor) extractCall(node tsast.Node, expr *Expr) (*Expr, error) {
 	return expr, nil
 }
 
+func (e *extractor) extractJSONCall(node tsast.Node, expr *Expr, callee string) (*Expr, error) {
+	if len(expr.Args) < 1 {
+		return nil, fmt.Errorf("%s requires at least one argument at %d", callee, node.Pos())
+	}
+	if callee == "JSON.stringify" {
+		expr.Kind = ExprJSONStringify
+		expr.Type = e.ensureSemanticType(TypeString, "string")
+		return expr, nil
+	}
+	if callee == "JSON.parse" {
+		expr.Kind = ExprJSONParse
+		if expr.Type == 0 {
+			expr.Type = e.ensureSemanticType(TypeAny, "any")
+		}
+		return expr, nil
+	}
+	return nil, fmt.Errorf("unsupported JSON API %s at %d", callee, node.Pos())
+}
+
 func isConsoleLog(node tsast.Node) bool {
 	object, ok := node.NamedChild("expression")
 	if !ok || object.Kind() != tsast.KindIdentifier {
@@ -1224,7 +2346,7 @@ func isConsoleLog(node tsast.Node) bool {
 }
 
 func (e *extractor) typeAt(node tsast.Node) (TypeID, error) {
-	info, err := e.client.GetTypeAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.fileName))
+	info, err := e.client.GetTypeAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.currentFile()))
 	if err != nil {
 		return 0, err
 	}
@@ -1277,8 +2399,12 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			resultText := "void"
 			if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 				resultText = strings.TrimSpace(text[len("TsnativeTask<") : len(text)-1])
-			} else if strings.HasPrefix(text, "Promise<") && strings.HasSuffix(text, ">") {
-				resultText = strings.TrimSpace(text[len("Promise<") : len(text)-1])
+			} else if (strings.HasPrefix(text, "Promise<") || strings.HasPrefix(text, "PromiseLike<")) && strings.HasSuffix(text, ">") {
+				prefix := "Promise<"
+				if strings.HasPrefix(text, "PromiseLike<") {
+					prefix = "PromiseLike<"
+				}
+				resultText = strings.TrimSpace(text[len(prefix) : len(text)-1])
 			}
 			switch resultText {
 			case "void":
@@ -1318,7 +2444,7 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 				return 0, elementErr
 			}
 			switch e.result.Types[elementID].Kind {
-			case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise:
+			case TypeNumber, TypeBoolean, TypeString, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypePromise, TypeParameter, TypeNever:
 				typ.Element = elementID
 			default:
 				return 0, fmt.Errorf("native array element type %q is not supported", e.result.Types[elementID].Name)
@@ -1333,7 +2459,11 @@ func (e *extractor) internAPIType(info *tsls.APIType) (TypeID, error) {
 			case "boolean[]":
 				typ.Element = e.ensureSemanticType(TypeBoolean, "boolean")
 			default:
-				return 0, fmt.Errorf("native array type %q is not supported", text)
+				if strings.HasPrefix(base, "[") && strings.HasSuffix(base, "]") {
+					typ.Element = e.ensureSemanticType(TypeAny, "any")
+				} else {
+					return 0, fmt.Errorf("native array type %q is not supported", text)
+				}
 			}
 		}
 	}
@@ -1420,7 +2550,7 @@ func (e *extractor) internObjectShape(info *tsls.APIType, name string) (ShapeID,
 	sort.Slice(properties, func(i, j int) bool { return properties[i].Name < properties[j].Name })
 	fields := make([]ShapeField, 0, len(properties))
 	for _, property := range properties {
-		if property.Flags&4 == 0 {
+		if property.Flags&(4|8192) == 0 {
 			continue
 		}
 		propertyType, err := e.client.GetTypeOfSymbol(e.ctx, e.snapshot, e.project, property.ID)
@@ -1473,17 +2603,31 @@ func classifyType(text string) TypeKind {
 		return TypeString
 	case "TsnativeTask":
 		return TypeTask
-	case "Promise":
+	case "Promise", "PromiseLike":
 		return TypePromise
 	case "TsnativeChannel":
 		return TypeChannel
 	case "TsnativeTaskGroup":
 		return TypeTaskGroup
+	case "Map":
+		return TypeMap
+	case "Set":
+		return TypeSet
+	case "Date":
+		return TypeDate
+	case "RegExp":
+		return TypeRegExp
+	}
+	if strings.HasPrefix(text, "Map<") && strings.HasSuffix(text, ">") {
+		return TypeMap
+	}
+	if strings.HasPrefix(text, "Set<") && strings.HasSuffix(text, ">") {
+		return TypeSet
 	}
 	if strings.HasPrefix(text, "TsnativeTask<") && strings.HasSuffix(text, ">") {
 		return TypeTask
 	}
-	if strings.HasPrefix(text, "Promise<") && strings.HasSuffix(text, ">") {
+	if (strings.HasPrefix(text, "Promise<") || strings.HasPrefix(text, "PromiseLike<")) && strings.HasSuffix(text, ">") {
 		return TypePromise
 	}
 	if strings.HasPrefix(text, "TsnativeChannel<") && strings.HasSuffix(text, ">") {
@@ -1512,6 +2656,9 @@ func classifyType(text string) TypeKind {
 		return TypeFunction
 	}
 	if strings.HasSuffix(arrayText, "[]") {
+		return TypeArray
+	}
+	if strings.HasPrefix(arrayText, "[") && strings.HasSuffix(arrayText, "]") {
 		return TypeArray
 	}
 	if strings.Contains(text, " | ") {
@@ -1572,7 +2719,7 @@ func (e *extractor) extractClassSignatures(node tsast.Node) error {
 		return fmt.Errorf("native class at %d requires an identifier name", node.Pos())
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("class %s has no TypeScript symbol", name)
@@ -1676,7 +2823,7 @@ func (e *extractor) extractMethodSignature(node tsast.Node, info *classInfo) err
 		return fmt.Errorf("method in %s requires an identifier name", info.Name)
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("method %s.%s has no TypeScript symbol", info.Name, name)
@@ -1709,7 +2856,7 @@ func (e *extractor) extractMethodSignature(node tsast.Node, info *classInfo) err
 	}
 	e.result.Functions = append(e.result.Functions, fn)
 	thisCopy := thisSymbol
-	e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node, This: &thisCopy})
+	e.pending = append(e.pending, pendingFunctionBody{Function: functionID, Node: node, This: &thisCopy, FileName: e.currentFile()})
 	return nil
 }
 
@@ -1729,7 +2876,48 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 	if !ok || callee.Kind() != tsast.KindIdentifier {
 		return nil, fmt.Errorf("native new at %d requires a class identifier", node.Pos())
 	}
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, callee.Handle(e.fileName))
+	calleeText, _ := callee.Text()
+	if calleeText == "Map" {
+		expr.Kind = ExprMapNew
+		return expr, nil
+	}
+	if calleeText == "Set" {
+		expr.Kind = ExprSetNew
+		return expr, nil
+	}
+	if calleeText == "Date" {
+		var args []*Expr
+		if arguments, ok := node.NamedChild("arguments"); ok {
+			for _, argNode := range arguments.ListElements() {
+				arg, err := e.extractExpr(argNode)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+			}
+		}
+		expr.Kind = ExprDateNew
+		expr.Args = args
+		return expr, nil
+	}
+	if calleeText == "RegExp" {
+		var args []*Expr
+		if arguments, ok := node.NamedChild("arguments"); ok {
+			for _, argNode := range arguments.ListElements() {
+				arg, err := e.extractExpr(argNode)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+			}
+		}
+		regExpType := e.ensureSemanticType(TypeRegExp, "RegExp")
+		expr.Kind = ExprRegExpNew
+		expr.Args = args
+		expr.Type = regExpType
+		return expr, nil
+	}
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, callee.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("new target at %d has no TypeScript symbol", node.Pos())
@@ -1738,7 +2926,11 @@ func (e *extractor) extractNew(node tsast.Node, expr *Expr) (*Expr, error) {
 	}
 	class, ok := e.classes[symbol.ID]
 	if !ok {
-		return nil, fmt.Errorf("new target %s is not a native class", symbol.Name)
+		if cls, ok := e.importedClasses[calleeText]; ok {
+			class = cls
+		} else {
+			return nil, fmt.Errorf("new target %s is not a native class", symbol.Name)
+		}
 	}
 	var args []*Expr
 	if arguments, ok := node.NamedChild("arguments"); ok {

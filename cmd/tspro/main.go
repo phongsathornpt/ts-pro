@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/phongsathornpt/ts-pro/internal/compiler"
@@ -112,34 +113,69 @@ func buildFile(args []string) error {
 func parseBuildArgs(args []string) (compiler.BuildOptions, error) {
 	options := compiler.BuildOptions{Root: ".", Optimization: "-O2", PureGo: true}
 	if len(args) == 0 {
-		return options, fmt.Errorf("usage: ts-pro build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--pure-go] [--llvm] [--report-performance]")
+		return options, fmt.Errorf("usage: ts-pro build <file.ts> [-o output] [-O0|-O1|-O2|-O3|-Oz] [-p tsconfig.json] [--pure-go] [--llvm] [--thin-lto] [--pgo=path] [--pgo-gen=path] [--target=triple] [--no-cache] [--clean-cache] [--report-performance]")
 	}
 	options.Input = args[0]
 	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "-o", "--output":
+		arg := args[i]
+		switch {
+		case arg == "-o" || arg == "--output":
 			i++
 			if i >= len(args) {
-				return options, fmt.Errorf("%s requires an output path", args[i-1])
+				return options, fmt.Errorf("%s requires an output path", arg)
 			}
 			options.Output = args[i]
-		case "-p", "--project":
+		case arg == "-p" || arg == "--project":
 			i++
 			if i >= len(args) {
-				return options, fmt.Errorf("%s requires a tsconfig path", args[i-1])
+				return options, fmt.Errorf("%s requires a tsconfig path", arg)
 			}
 			options.Config = args[i]
-		case "-O0", "-O1", "-O2", "-O3", "-Oz":
-			options.Optimization = args[i]
-		case "--pure-go":
+		case arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3" || arg == "-Oz":
+			options.Optimization = arg
+		case arg == "--pure-go":
 			options.PureGo = true
-		case "--llvm":
+		case arg == "--llvm":
 			options.PureGo = false
 			options.DisablePureGo = true
-		case "--report-performance":
+		case arg == "--thin-lto":
+			options.ThinLTO = true
+		case arg == "--pgo" || arg == "--pgo-profile":
+			i++
+			if i >= len(args) {
+				return options, fmt.Errorf("%s requires a profile path", arg)
+			}
+			options.PGOProfile = args[i]
+		case strings.HasPrefix(arg, "--pgo="):
+			options.PGOProfile = strings.TrimPrefix(arg, "--pgo=")
+		case strings.HasPrefix(arg, "--pgo-profile="):
+			options.PGOProfile = strings.TrimPrefix(arg, "--pgo-profile=")
+		case arg == "--pgo-gen" || arg == "--pgo-generate":
+			i++
+			if i >= len(args) {
+				return options, fmt.Errorf("%s requires a profile output path", arg)
+			}
+			options.PGOGenerate = args[i]
+		case strings.HasPrefix(arg, "--pgo-gen="):
+			options.PGOGenerate = strings.TrimPrefix(arg, "--pgo-gen=")
+		case strings.HasPrefix(arg, "--pgo-generate="):
+			options.PGOGenerate = strings.TrimPrefix(arg, "--pgo-generate=")
+		case arg == "--target":
+			i++
+			if i >= len(args) {
+				return options, fmt.Errorf("%s requires a target specification", arg)
+			}
+			options.Target = args[i]
+		case strings.HasPrefix(arg, "--target="):
+			options.Target = strings.TrimPrefix(arg, "--target=")
+		case arg == "--no-cache":
+			options.NoCache = true
+		case arg == "--clean-cache":
+			options.CleanCache = true
+		case arg == "--report-performance":
 			options.ReportPerformance = true
 		default:
-			return options, fmt.Errorf("unknown build option %q", args[i])
+			return options, fmt.Errorf("unknown build option %q", arg)
 		}
 	}
 	return options, nil

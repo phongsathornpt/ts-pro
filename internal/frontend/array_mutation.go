@@ -15,12 +15,7 @@ func (e *extractor) compatibleArrayElement(expected, actual TypeID) bool {
 	}
 	want, got := e.result.Types[expected], e.result.Types[actual]
 	if want.Kind == TypeAny {
-		switch got.Kind {
-		case TypeNumber, TypeString, TypeBoolean, TypeObject, TypeArray, TypeFunction, TypeAny, TypeUnion, TypeNull, TypeUndefined:
-			return true
-		default:
-			return false
-		}
+		return got.Kind != TypeInvalid && got.Kind != TypeNever
 	}
 	if want.Kind == TypeUnion {
 		for _, member := range want.Members {
@@ -95,7 +90,33 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 	}
 	arrayType := e.result.Types[array.Type]
 	if arrayType.Kind != TypeArray || int(arrayType.Element) >= len(e.result.Types) {
-		return Statement{}, true, fmt.Errorf("native indexed assignment requires a concrete array type")
+		if arrayType.Kind == TypeObject && int(arrayType.Shape) < len(e.result.Shapes) && index.Kind == ExprString {
+			shape := e.result.Shapes[arrayType.Shape]
+			for i, field := range shape.Fields {
+				if field.Name == index.String {
+					return Statement{
+						Kind:       StmtFieldAssign,
+						Object:     array,
+						Field:      field.Name,
+						FieldIndex: uint32(i),
+						Value:      value,
+						Type:       field.Type,
+						Span:       e.span(node),
+					}, true, nil
+				}
+			}
+		}
+		if arrayType.Kind == TypeAny || arrayType.Kind == TypeUnion || arrayType.Kind == TypeObject {
+			return Statement{
+				Kind:   StmtDynamicIndexSet,
+				Object: array,
+				Index:  index,
+				Value:  value,
+				Type:   e.ensureSemanticType(TypeAny, "any"),
+				Span:   e.span(node),
+			}, true, nil
+		}
+		return Statement{}, true, fmt.Errorf("native indexed assignment requires a concrete array or dynamic type")
 	}
 	elementKind := e.result.Types[arrayType.Element].Kind
 	switch elementKind {
@@ -104,6 +125,16 @@ func (e *extractor) buildArrayAssignment(node, target, rhs tsast.Node) (Statemen
 		return Statement{}, true, fmt.Errorf("native indexed assignment does not support %s[] yet", e.result.Types[arrayType.Element].Name)
 	}
 	if int(index.Type) >= len(e.result.Types) || e.result.Types[index.Type].Kind != TypeNumber {
+		if int(index.Type) < len(e.result.Types) && (e.result.Types[index.Type].Kind == TypeAny || e.result.Types[index.Type].Kind == TypeUnion) {
+			return Statement{
+				Kind:   StmtDynamicIndexSet,
+				Object: array,
+				Index:  index,
+				Value:  value,
+				Type:   e.ensureSemanticType(TypeAny, "any"),
+				Span:   e.span(node),
+			}, true, nil
+		}
 		return Statement{}, true, fmt.Errorf("native array index must be number")
 	}
 	if int(value.Type) >= len(e.result.Types) || !e.compatibleArrayElement(arrayType.Element, value.Type) {

@@ -320,6 +320,24 @@ func (f *functionLowerer) lowerStatement(stmt frontend.Statement) error {
 		}
 		f.emit(stmt.Type, hir.DynamicFieldSetOp{Object: object, Field: stmt.Field, Value: value})
 		return nil
+	case frontend.StmtDynamicIndexSet:
+		if stmt.Object == nil || stmt.Index == nil || stmt.Value == nil {
+			return fmt.Errorf("dynamic index assignment is incomplete")
+		}
+		object, err := f.lowerExpr(stmt.Object)
+		if err != nil {
+			return err
+		}
+		index, err := f.lowerExpr(stmt.Index)
+		if err != nil {
+			return err
+		}
+		value, err := f.lowerExprAs(stmt.Value, stmt.Type)
+		if err != nil {
+			return err
+		}
+		f.emit(stmt.Type, hir.DynamicIndexSetOp{Object: object, Index: index, Value: value})
+		return nil
 	case frontend.StmtFieldAssign:
 		if stmt.Object == nil || stmt.Value == nil {
 			return fmt.Errorf("field assignment %q is incomplete", stmt.Field)

@@ -121,6 +121,10 @@ func formatOperation(op Operation) string {
 		return fmt.Sprintf("dynamic.field.get v%d, %q", op.Object, op.Field)
 	case DynamicFieldSetOp:
 		return fmt.Sprintf("dynamic.field.set v%d, %q, v%d", op.Object, op.Field, op.Value)
+	case DynamicIndexGetOp:
+		return fmt.Sprintf("dynamic.index.get v%d, v%d", op.Object, op.Index)
+	case DynamicIndexSetOp:
+		return fmt.Sprintf("dynamic.index.set v%d, v%d, v%d", op.Object, op.Index, op.Value)
 	case ClosureNewOp:
 		captures := make([]string, len(op.Captures))
 		for i, capture := range op.Captures {
@@ -195,6 +199,30 @@ func formatOperation(op Operation) string {
 			name = "console.log.f64"
 		}
 		return fmt.Sprintf("intrinsic %s(%s)", name, strings.Join(args, ", "))
+	case ArrayConcatOp:
+		parts := make([]string, len(op.Arrays))
+		for i, arr := range op.Arrays {
+			parts[i] = fmt.Sprintf("v%d", arr)
+		}
+		return fmt.Sprintf("array.concat %s", strings.Join(parts, ", "))
+	case StringTemplateOp:
+		parts := make([]string, len(op.Parts))
+		for i, part := range op.Parts {
+			parts[i] = fmt.Sprintf("v%d", part)
+		}
+		return fmt.Sprintf("string.template %s", strings.Join(parts, ", "))
+	case JSONStringifyOp:
+		return fmt.Sprintf("json.stringify v%d", op.Value)
+	case JSONParseOp:
+		return fmt.Sprintf("json.parse v%d", op.Value)
+	case MapOp:
+		return fmt.Sprintf("map.op kind=%d map=v%d key=v%d val=v%d", op.Kind, op.Map, op.Key, op.Value)
+	case SetOp:
+		return fmt.Sprintf("set.op kind=%d set=v%d item=v%d", op.Kind, op.Set, op.Item)
+	case DateOp:
+		return fmt.Sprintf("date.op kind=%d date=v%d arg=v%d", op.Kind, op.Date, op.Arg)
+	case RegExpOp:
+		return fmt.Sprintf("regexp.op kind=%d re=v%d pat=v%d flags=v%d str=v%d", op.Kind, op.RegExp, op.Pattern, op.Flags, op.String)
 	default:
 		return "<invalid-op>"
 	}
@@ -246,7 +274,7 @@ func formatUnary(op UnaryOperator) string {
 }
 
 func formatBinary(op BinaryOperator) string {
-	names := map[BinaryOperator]string{BinaryAdd: "add", BinarySub: "sub", BinaryMul: "mul", BinaryDiv: "div", BinaryLessThan: "lt", BinaryLessEqual: "le", BinaryGreaterThan: "gt", BinaryGreaterEqual: "ge", BinaryEqual: "eq", BinaryNotEqual: "ne", BinaryStrictEqual: "seq", BinaryStrictNotEqual: "sne"}
+	names := map[BinaryOperator]string{BinaryAdd: "add", BinarySub: "sub", BinaryMul: "mul", BinaryDiv: "div", BinaryLessThan: "lt", BinaryLessEqual: "le", BinaryGreaterThan: "gt", BinaryGreaterEqual: "ge", BinaryEqual: "eq", BinaryNotEqual: "ne", BinaryStrictEqual: "seq", BinaryStrictNotEqual: "sne", BinaryNullishCoalesce: "coalesce", BinaryLogicalOr: "lor", BinaryLogicalAnd: "land"}
 	if name, ok := names[op]; ok {
 		return name
 	}

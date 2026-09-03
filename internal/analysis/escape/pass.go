@@ -133,6 +133,12 @@ func propagateAliases(fn mir.Function, prov provenance) {
 					for container := range prov[op.Object] {
 						changed = mergeOrigins(prov, inst.Result, fields[fieldProvenanceKey{container: container, field: op.Field}]) || changed
 					}
+				case mir.FieldAddr:
+					changed = mergeOrigins(prov, inst.Result, prov[op.Object]) || changed
+				case mir.PtrLoad:
+					changed = mergeOrigins(prov, inst.Result, prov[op.Ptr]) || changed
+				case mir.PtrStore:
+					changed = mergeOrigins(prov, op.Ptr, prov[op.Value]) || changed
 				}
 			}
 		}
@@ -227,6 +233,17 @@ func collectEscapeUses(fn mir.Function, prov provenance, infos FunctionResult, c
 					continue
 				}
 				containers := prov[op.Object]
+				if len(containers) == 0 {
+					markOrigins(infos, children, ReasonHeapStore)
+				} else {
+					addContainment(contained, containers, children)
+				}
+			case mir.PtrStore:
+				children := prov[op.Value]
+				if len(children) == 0 {
+					continue
+				}
+				containers := prov[op.Ptr]
 				if len(containers) == 0 {
 					markOrigins(infos, children, ReasonHeapStore)
 				} else {

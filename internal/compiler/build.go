@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,7 +30,13 @@ type BuildOptions struct {
 	Optimization      string
 	PureGo            bool
 	DisablePureGo     bool
+	NoCache           bool
+	CleanCache        bool
 	ReportPerformance bool
+	ThinLTO           bool
+	PGOProfile        string
+	PGOGenerate       string
+	Target            string
 }
 
 type BuildResult struct {
@@ -124,7 +131,14 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 		return BuildResult{}, fmt.Errorf("write LLVM IR: %w", err)
 	}
 	codegenStart := time.Now()
-	moduleObj, hit, err := cache.CompileLLVM(ctx, llPath, options.Optimization)
+	compileOpts := toolchain.ClangCompileOptions{
+		Optimization: options.Optimization,
+		ThinLTO:      options.ThinLTO,
+		PGOProfile:   options.PGOProfile,
+		PGOGenerate:  options.PGOGenerate,
+		Target:       options.Target,
+	}
+	moduleObj, hit, err := cache.CompileLLVMWithOptions(ctx, llPath, compileOpts)
 	if err != nil {
 		return BuildResult{}, err
 	}
@@ -143,7 +157,13 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
 	}
 	linkStart := time.Now()
-	if err := tc.Link(ctx, objects, options.Output); err != nil {
+	linkOpts := toolchain.ClangLinkOptions{
+		ThinLTO:     options.ThinLTO,
+		PGOProfile:  options.PGOProfile,
+		PGOGenerate: options.PGOGenerate,
+		Target:      options.Target,
+	}
+	if err := tc.LinkWithOptions(ctx, objects, options.Output, linkOpts); err != nil {
 		return BuildResult{}, err
 	}
 	timings.Link = time.Since(linkStart)
@@ -152,12 +172,46 @@ func Build(ctx context.Context, options BuildOptions) (BuildResult, error) {
 }
 
 func buildPureGo(ctx context.Context, options BuildOptions, module mir.Module, metrics BuildMetrics, timings BuildTimings, totalStart time.Time) (BuildResult, error) {
+	cacheDir := filepath.Join(options.Root, ".tspro", "cache")
+	if options.CleanCache {
+		_ = os.RemoveAll(cacheDir)
+	}
+
 	goStart := time.Now()
 	source, err := golangcodegen.Emit(module)
 	if err != nil {
 		return BuildResult{}, err
 	}
 	timings.Go = time.Since(goStart)
+
+	if err := toolchain.EnsureParent(options.Output); err != nil {
+		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
+	}
+
+	cacheKeyData := source
+	if options.PGOProfile != "" {
+		pgoData, _ := os.ReadFile(options.PGOProfile)
+		cacheKeyData += "\x00pgo:" + string(pgoData)
+	}
+	if options.Target != "" {
+		cacheKeyData += "\x00target:" + options.Target
+	}
+	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(cacheKeyData)))
+	cachedBinary := filepath.Join(cacheDir, cacheKey)
+
+	if !options.NoCache {
+		if info, err := os.Stat(cachedBinary); err == nil && info.Size() > 0 {
+			linkStart := time.Now()
+			if err := copyExecutable(cachedBinary, options.Output); err == nil {
+				metrics.CacheHits++
+				timings.Link = time.Since(linkStart)
+				timings.Total = time.Since(totalStart)
+				return BuildResult{Output: options.Output, Functions: len(module.Functions), Metrics: metrics, Timings: timings}, nil
+			}
+		}
+	}
+
+	metrics.CacheMisses++
 
 	goPath, err := exec.LookPath("go")
 	if err != nil {
@@ -174,19 +228,43 @@ func buildPureGo(ctx context.Context, options BuildOptions, module mir.Module, m
 	if err := os.WriteFile(filepath.Join(workDir, "main.go"), []byte(source), 0o644); err != nil {
 		return BuildResult{}, fmt.Errorf("write generated Go source: %w", err)
 	}
-	if err := toolchain.EnsureParent(options.Output); err != nil {
-		return BuildResult{}, fmt.Errorf("create output directory: %w", err)
-	}
+
 	linkStart := time.Now()
-	command := exec.CommandContext(ctx, goPath, "build", "-trimpath", "-buildvcs=false", "-o", options.Output, ".")
+	goArgs := []string{"build", "-trimpath", "-buildvcs=false"}
+	if options.PGOProfile != "" {
+		goArgs = append(goArgs, "-pgo="+options.PGOProfile)
+	}
+	goArgs = append(goArgs, "-o", options.Output, ".")
+	command := exec.CommandContext(ctx, goPath, goArgs...)
 	command.Dir = workDir
-	command.Env = append(os.Environ(), "CGO_ENABLED=0")
+	env := append(os.Environ(), "CGO_ENABLED=0")
+	if options.Target != "" {
+		parts := strings.Split(options.Target, "/")
+		if len(parts) == 2 {
+			env = append(env, "GOOS="+parts[0], "GOARCH="+parts[1])
+		}
+	}
+	command.Env = env
 	if output, runErr := command.CombinedOutput(); runErr != nil {
 		return BuildResult{}, fmt.Errorf("build generated pure-Go program: %w: %s", runErr, output)
 	}
 	timings.Link = time.Since(linkStart)
+
+	if !options.NoCache {
+		_ = os.MkdirAll(cacheDir, 0o755)
+		_ = copyExecutable(options.Output, cachedBinary)
+	}
+
 	timings.Total = time.Since(totalStart)
 	return BuildResult{Output: options.Output, Functions: len(module.Functions), Metrics: metrics, Timings: timings}, nil
+}
+
+func copyExecutable(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o755)
 }
 
 func normalizeOptions(options BuildOptions) (BuildOptions, error) {

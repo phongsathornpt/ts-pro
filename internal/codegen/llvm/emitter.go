@@ -17,9 +17,10 @@ type emitter struct {
 	stringGlobals map[string]string
 	closures      map[mir.FunctionID]closureDescriptor
 	escapes       escapeanalysis.Result
-	stackObjects  escapeanalysis.StackObjectResult
-	stackAliases  map[mir.FunctionID]map[mir.ValueID]mir.ValueID
-	scalarObjects escapeanalysis.ScalarObjectResult
+	stackObjects     escapeanalysis.StackObjectResult
+	stackAliases     map[mir.FunctionID]map[mir.ValueID]mir.ValueID
+	stackProvenances map[mir.FunctionID]map[mir.ValueID][]mir.ValueID
+	scalarObjects    escapeanalysis.ScalarObjectResult
 }
 
 func Emit(module mir.Module) (string, error) {
@@ -36,11 +37,14 @@ func EmitWithEscapeAnalysis(module mir.Module, escapes escapeanalysis.Result) (s
 		return "", err
 	}
 	stackObjects := escapeanalysis.StackObjects(module, escapes)
+	stackAliases := escapeanalysis.StackObjectAliases(module, stackObjects)
+	stackProvenances := escapeanalysis.StackObjectProvenances(module, stackObjects)
 	e := &emitter{
 		module: module, functions: map[mir.FunctionID]mir.Function{}, shapes: map[mir.ShapeID]mir.Shape{},
 		stringGlobals: map[string]string{}, closures: closures, escapes: escapes, stackObjects: stackObjects,
-		stackAliases:  escapeanalysis.StackObjectAliases(module, stackObjects),
-		scalarObjects: escapeanalysis.ScalarObjectsWithEscapeAnalysis(module, stackObjects, escapes),
+		stackAliases:     stackAliases,
+		stackProvenances: stackProvenances,
+		scalarObjects:    escapeanalysis.ScalarObjectsWithEscapeAnalysis(module, stackObjects, escapes),
 	}
 	for _, fn := range module.Functions {
 		e.functions[fn.ID] = fn
@@ -221,7 +225,7 @@ func (e *emitter) emitFunction(b *strings.Builder, fn mir.Function) error {
 		fmt.Fprintf(b, "%s %s", typ, paramOperand)
 	}
 	b.WriteString(") {\n")
-	gc := buildGCRootLayout(fn, e.shapes, e.stackObjects[fn.ID], e.stackAliases[fn.ID], e.scalarObjects[fn.ID])
+	gc := buildGCRootLayout(fn, e.shapes, e.stackObjects[fn.ID], e.stackAliases[fn.ID], e.stackProvenances[fn.ID], e.scalarObjects[fn.ID])
 	gc.emitPrologue(b, fn)
 	blocks := append([]mir.Block(nil), fn.Blocks...)
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].ID < blocks[j].ID })
@@ -439,6 +443,8 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  call void @tsnative_array_f64_set_checked(ptr %s, double %s, double %s)\n", array, index, value)
 		values[inst.Result] = value
 		return nil
+	case mir.ArrayPushF64, mir.ArrayPushBool, mir.ArrayPushRef, mir.ArrayPopF64, mir.ArrayPopBool, mir.ArrayPopRef, mir.ArrayConcatF64, mir.ArrayConcatBool, mir.ArrayConcatRef, mir.StringInterpolate, mir.JSONStringify, mir.JSONParse, mir.MapOp, mir.SetOp, mir.DateOp, mir.RegExpOp, mir.DynamicIndexGet, mir.DynamicIndexSet:
+		return fmt.Errorf("advanced features (array push/pop/concat, template literals, JSON, Map/Set, Date, RegExp, dynamic index) not supported in legacy LLVM backend; use pure-Go backend")
 	case mir.ArrayLengthBool:
 		array, err := operand(values, op.Array)
 		if err != nil {
@@ -492,6 +498,26 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		index, err := operand(values, op.Index)
 		if err != nil {
 			return err
+		}
+		if inst.Repr == mir.ReprF64 {
+			tmp := fmt.Sprintf("%s.boxed", valueName(inst.Result))
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_get(ptr %s, double %s)\n", tmp, array, index)
+			fmt.Fprintf(b, "  %s = call double @tsnative_jsvalue_unbox_f64(ptr %s)\n", valueName(inst.Result), tmp)
+			return nil
+		}
+		if inst.Repr == mir.ReprBool {
+			tmp := fmt.Sprintf("%s.boxed", valueName(inst.Result))
+			raw := fmt.Sprintf("%s.raw", valueName(inst.Result))
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_get(ptr %s, double %s)\n", tmp, array, index)
+			fmt.Fprintf(b, "  %s = call i8 @tsnative_jsvalue_unbox_bool(ptr %s)\n", raw, tmp)
+			fmt.Fprintf(b, "  %s = trunc i8 %s to i1\n", valueName(inst.Result), raw)
+			return nil
+		}
+		if inst.Repr == mir.ReprStringRef {
+			tmp := fmt.Sprintf("%s.boxed", valueName(inst.Result))
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_get(ptr %s, double %s)\n", tmp, array, index)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_unbox_string(ptr %s)\n", valueName(inst.Result), tmp)
+			return nil
 		}
 		fmt.Fprintf(b, "  %s = call ptr @tsnative_array_ref_get(ptr %s, double %s)\n", valueName(inst.Result), array, index)
 		return nil
@@ -848,7 +874,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 			if !op.Shared {
 				fmt.Fprintf(b, "  call void @tsnative_task_join_release(ptr %s)\n", task)
 			} else {
-				fmt.Fprintf(b, "  call i32 @tsnative_task_join(ptr %s)\n", task)
+				fmt.Fprintf(b, "  call i32 @tsnative_task_await_task(ptr %s)\n", task)
 			}
 		case mir.ReprBool:
 			name := valueName(inst.Result)
@@ -1175,6 +1201,52 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 		fmt.Fprintf(b, "  %s.ptr = getelementptr %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
 		fmt.Fprintf(b, "  %s = load %s, ptr %s.ptr\n", name, fieldType, name)
 		return nil
+	case mir.FieldAddr:
+		shape, ok := e.shapes[op.Shape]
+		if !ok {
+			return fmt.Errorf("unknown field shape s%d", op.Shape)
+		}
+		if int(op.Field) >= len(shape.Fields) {
+			return fmt.Errorf("invalid field %d for shape s%d", op.Field, op.Shape)
+		}
+		object, err := operand(values, op.Object)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		typeName := shapeTypeName(op.Shape)
+		fmt.Fprintf(b, "  %s = getelementptr inbounds %s, ptr %s, i32 0, i32 %d\n", name, typeName, object, shapeFieldIndex(shape, op.Field))
+		values[inst.Result] = name
+		return nil
+	case mir.PtrLoad:
+		ptr, err := operand(values, op.Ptr)
+		if err != nil {
+			return err
+		}
+		name := valueName(inst.Result)
+		typ, err := llvmType(op.Repr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  %s = load %s, ptr %s\n", name, typ, ptr)
+		values[inst.Result] = name
+		return nil
+	case mir.PtrStore:
+		ptr, err := operand(values, op.Ptr)
+		if err != nil {
+			return err
+		}
+		value, err := operand(values, op.Value)
+		if err != nil {
+			return err
+		}
+		reprs := buildValueReprs(fn)
+		valType, err := llvmType(reprs[op.Value])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "  store %s %s, ptr %s\n", valType, value, ptr)
+		return nil
 	case mir.Phi:
 		typ, err := llvmType(inst.Repr)
 		if err != nil {
@@ -1395,7 +1467,7 @@ func (e *emitter) emitInstruction(b *strings.Builder, fn mir.Function, inst mir.
 	case mir.DispatchCall:
 		return e.emitDispatchCall(b, inst, op, values)
 	case mir.IntrinsicCall:
-		return e.emitIntrinsicCall(b, inst, op, values)
+		return e.emitIntrinsicCall(b, fn, inst, op, values)
 	default:
 		return fmt.Errorf("unsupported MIR operation %T", inst.Op)
 	}
@@ -1405,13 +1477,26 @@ func (e *emitter) stackObjectOrigin(fn mir.FunctionID, value mir.ValueID) (mir.V
 	if e.stackObjects.Contains(fn, value) {
 		return value, true
 	}
-	origin, ok := e.stackAliases[fn][value]
-	return origin, ok
+	if origin, ok := e.stackAliases[fn][value]; ok {
+		return origin, true
+	}
+	if origins, ok := e.stackProvenances[fn][value]; ok && len(origins) > 0 {
+		return origins[0], true
+	}
+	return 0, false
 }
 
 func (e *emitter) isStackObject(fn mir.FunctionID, value mir.ValueID) bool {
-	_, ok := e.stackObjectOrigin(fn, value)
-	return ok
+	if e.stackObjects.Contains(fn, value) {
+		return true
+	}
+	if _, ok := e.stackAliases[fn][value]; ok {
+		return true
+	}
+	if origins, ok := e.stackProvenances[fn][value]; ok && len(origins) > 0 {
+		return true
+	}
+	return false
 }
 
 func (e *emitter) isHeapAllocationElided(fn mir.FunctionID, value mir.ValueID) bool {
@@ -1536,7 +1621,7 @@ func sameDispatchSignature(left, right mir.Function) bool {
 	return true
 }
 
-func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, call mir.IntrinsicCall, values map[mir.ValueID]string) error {
+func (e *emitter) emitIntrinsicCall(b *strings.Builder, fn mir.Function, inst mir.Instruction, call mir.IntrinsicCall, values map[mir.ValueID]string) error {
 	if inst.Repr != mir.ReprVoid || len(call.Args) != 1 {
 		return fmt.Errorf("console.log requires void result and one argument")
 	}
@@ -1544,12 +1629,24 @@ func (e *emitter) emitIntrinsicCall(b *strings.Builder, inst mir.Instruction, ca
 	if err != nil {
 		return err
 	}
+	reprs := buildValueReprs(fn)
 	switch call.Intrinsic {
 	case mir.IntrinsicConsoleLogF64:
 		fmt.Fprintf(b, "  call void @tsnative_console_log_f64(double %s)\n", arg)
 	case mir.IntrinsicConsoleLogString:
 		fmt.Fprintf(b, "  call void @tsnative_console_log_string(ptr %s)\n", arg)
 	case mir.IntrinsicConsoleLogJSValue:
+		argRepr := reprs[call.Args[0]]
+		if argRepr == mir.ReprBool {
+			boxed := fmt.Sprintf("%s.box", valueName(call.Args[0]))
+			fmt.Fprintf(b, "  %s.i8 = zext i1 %s to i8\n", boxed, arg)
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_bool(i8 %s.i8)\n", boxed, boxed)
+			arg = boxed
+		} else if argRepr == mir.ReprF64 {
+			boxed := fmt.Sprintf("%s.box", valueName(call.Args[0]))
+			fmt.Fprintf(b, "  %s = call ptr @tsnative_jsvalue_box_f64(double %s)\n", boxed, arg)
+			arg = boxed
+		}
 		fmt.Fprintf(b, "  call void @tsnative_console_log_jsvalue(ptr %s)\n", arg)
 	default:
 		return fmt.Errorf("unsupported intrinsic %d", call.Intrinsic)
@@ -1645,7 +1742,7 @@ func llvmType(repr mir.Repr) (string, error) {
 		return "i64", nil
 	case mir.ReprF64:
 		return "double", nil
-	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprJSValue:
+	case mir.ReprStringRef, mir.ReprArrayRef, mir.ReprObjectRef, mir.ReprFunctionRef, mir.ReprTaskRef, mir.ReprChannelRef, mir.ReprTaskGroupRef, mir.ReprJSValue, mir.ReprRawPtr:
 		return "ptr", nil
 	case mir.ReprTagged:
 		return "i64", nil

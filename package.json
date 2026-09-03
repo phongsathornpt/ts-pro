@@ -1,12 +1,19 @@
 {
   "name": "ts-pro",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "description": "Pinned TypeScript 7 frontend toolchain for ts-pro",
   "license": "MIT",
+  "bin": {
+    "tspro-ts": "./src/cli/main.ts"
+  },
   "scripts": {
     "tsc": "tsc",
-    "tsc:version": "tsc --version"
+    "tsc:version": "tsc --version",
+    "test:ts": "node src/compiler/build.test.ts",
+    "build:ts": "tsc --noEmit",
+    "cli": "node src/cli/main.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2"

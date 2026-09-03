@@ -23,7 +23,8 @@ func (n Node) Text() (string, bool) {
 			return "", false
 		}
 		index = n.Data() & stringIndexMask
-	case KindNumericLiteral, KindStringLiteral, KindSourceFile:
+	case KindNumericLiteral, KindStringLiteral, KindRegularExpressionLiteral, KindSourceFile,
+		KindNoSubstitutionTemplateLiteral, KindTemplateHead, KindTemplateMiddle, KindTemplateTail:
 		if n.dataType() != dataTypeExtended {
 			return "", false
 		}

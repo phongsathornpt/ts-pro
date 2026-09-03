@@ -196,12 +196,14 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if op.Operator == DynamicJSInvalid {
 					return fmt.Errorf("dynamic binary v%d has invalid operator", inst.Result)
 				}
-				want := ReprBool
-				if op.Operator == DynamicJSSub || op.Operator == DynamicJSMul || op.Operator == DynamicJSDiv {
-					want = ReprF64
-				}
-				if inst.Repr != want {
-					return fmt.Errorf("dynamic binary v%d has repr %d; want %d", inst.Result, inst.Repr, want)
+				if op.Operator != DynamicJSNullishCoalesce && op.Operator != DynamicJSLogicalOr && op.Operator != DynamicJSLogicalAnd {
+					want := ReprBool
+					if op.Operator == DynamicJSSub || op.Operator == DynamicJSMul || op.Operator == DynamicJSDiv {
+						want = ReprF64
+					}
+					if inst.Repr != want {
+						return fmt.Errorf("dynamic binary v%d has repr %d; want %d", inst.Result, inst.Repr, want)
+					}
 				}
 				if err := checkValue(op.Left); err != nil {
 					return err
@@ -347,7 +349,7 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return err
 				}
 			case ArrayGetRef:
-				if inst.Repr != ReprStringRef && inst.Repr != ReprObjectRef && inst.Repr != ReprArrayRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue {
+				if inst.Repr != ReprStringRef && inst.Repr != ReprObjectRef && inst.Repr != ReprArrayRef && inst.Repr != ReprFunctionRef && inst.Repr != ReprJSValue && inst.Repr != ReprF64 && inst.Repr != ReprBool {
 					return fmt.Errorf("reference array get v%d has non-reference repr %d", inst.Result, inst.Repr)
 				}
 				if err := checkValue(op.Array); err != nil {
@@ -395,6 +397,144 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Value); err != nil {
 					return err
 				}
+			case ArrayPushF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ArrayPushBool:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ArrayPushRef:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case ArrayPopF64:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+			case ArrayPopBool:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+			case ArrayPopRef:
+				if err := checkValue(op.Array); err != nil {
+					return err
+				}
+			case ArrayConcatF64:
+				if inst.Repr != ReprArrayRef {
+					return fmt.Errorf("array concat f64 v%d has repr %d; want %d", inst.Result, inst.Repr, ReprArrayRef)
+				}
+				for _, arr := range op.Arrays {
+					if err := checkValue(arr); err != nil {
+						return err
+					}
+				}
+			case ArrayConcatBool:
+				if inst.Repr != ReprArrayRef {
+					return fmt.Errorf("array concat bool v%d has repr %d; want %d", inst.Result, inst.Repr, ReprArrayRef)
+				}
+				for _, arr := range op.Arrays {
+					if err := checkValue(arr); err != nil {
+						return err
+					}
+				}
+			case ArrayConcatRef:
+				if inst.Repr != ReprArrayRef {
+					return fmt.Errorf("array concat ref v%d has repr %d; want %d", inst.Result, inst.Repr, ReprArrayRef)
+				}
+				for _, arr := range op.Arrays {
+					if err := checkValue(arr); err != nil {
+						return err
+					}
+				}
+			case StringInterpolate:
+				if inst.Repr != ReprStringRef {
+					return fmt.Errorf("string interpolate v%d has repr %d; want %d", inst.Result, inst.Repr, ReprStringRef)
+				}
+				for _, part := range op.Parts {
+					if err := checkValue(part); err != nil {
+						return err
+					}
+				}
+			case JSONStringify:
+				if inst.Repr != ReprStringRef {
+					return fmt.Errorf("json stringify v%d has repr %d; want %d", inst.Result, inst.Repr, ReprStringRef)
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case JSONParse:
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case MapOp:
+				if op.Kind != MapOpNew {
+					if err := checkValue(op.Map); err != nil {
+						return err
+					}
+				}
+				if op.Kind == MapOpGet || op.Kind == MapOpSet || op.Kind == MapOpHas || op.Kind == MapOpDelete {
+					if err := checkValue(op.Key); err != nil {
+						return err
+					}
+				}
+				if op.Kind == MapOpSet {
+					if err := checkValue(op.Value); err != nil {
+						return err
+					}
+				}
+			case SetOp:
+				if op.Kind != SetOpNew {
+					if err := checkValue(op.Set); err != nil {
+						return err
+					}
+				}
+				if op.Kind == SetOpAdd || op.Kind == SetOpHas || op.Kind == SetOpDelete {
+					if err := checkValue(op.Item); err != nil {
+						return err
+					}
+				}
+			case DateOp:
+				if op.Kind != DateOpNow && op.Kind != DateOpNew {
+					if err := checkValue(op.Date); err != nil {
+						return err
+					}
+				}
+				if op.Kind == DateOpNew && op.Arg != 0 {
+					if err := checkValue(op.Arg); err != nil {
+						return err
+					}
+				}
+			case RegExpOp:
+				if op.Kind == RegExpOpNew {
+					if err := checkValue(op.Pattern); err != nil {
+						return err
+					}
+					if op.Flags != 0 {
+						if err := checkValue(op.Flags); err != nil {
+							return err
+						}
+					}
+				} else {
+					if err := checkValue(op.RegExp); err != nil {
+						return err
+					}
+					if op.Kind == RegExpOpTest {
+						if err := checkValue(op.String); err != nil {
+							return err
+						}
+					}
+				}
 			case ObjectNew:
 				shape, ok := shapes[op.Shape]
 				if !ok {
@@ -426,6 +566,34 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 				if err := checkValue(op.Value); err != nil {
 					return err
 				}
+			case FieldAddr:
+				shape, ok := shapes[op.Shape]
+				if !ok {
+					return fmt.Errorf("field addr v%d references unknown shape s%d", inst.Result, op.Shape)
+				}
+				if int(op.Field) >= len(shape.Fields) {
+					return fmt.Errorf("field addr v%d references invalid field %d of shape s%d", inst.Result, op.Field, op.Shape)
+				}
+				if err := checkValue(op.Object); err != nil {
+					return err
+				}
+				if inst.Repr != ReprRawPtr {
+					return fmt.Errorf("field addr v%d must produce ReprRawPtr", inst.Result)
+				}
+			case PtrLoad:
+				if err := checkValue(op.Ptr); err != nil {
+					return err
+				}
+				if inst.Repr != op.Repr {
+					return fmt.Errorf("ptr load v%d representation mismatch: inst %v != op %v", inst.Result, inst.Repr, op.Repr)
+				}
+			case PtrStore:
+				if err := checkValue(op.Ptr); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
 			case DynamicFieldGet:
 				if op.Field == "" {
 					return fmt.Errorf("dynamic field access v%d has empty name", inst.Result)
@@ -444,6 +612,23 @@ func verifyUses(fn Function, functions map[FunctionID]struct{}, shapes map[Shape
 					return fmt.Errorf("dynamic field store v%d must produce JSValue", inst.Result)
 				}
 				if err := checkValue(op.Object); err != nil {
+					return err
+				}
+				if err := checkValue(op.Value); err != nil {
+					return err
+				}
+			case DynamicIndexGet:
+				if err := checkValue(op.Object); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
+					return err
+				}
+			case DynamicIndexSet:
+				if err := checkValue(op.Object); err != nil {
+					return err
+				}
+				if err := checkValue(op.Index); err != nil {
 					return err
 				}
 				if err := checkValue(op.Value); err != nil {

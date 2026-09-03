@@ -22,10 +22,12 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "lib": ["ESNext"],
     "types": []
   },
   "include": [
+    "src/**/*.ts",
     "examples/**/*.ts",
     "types/**/*.d.ts"
   ],

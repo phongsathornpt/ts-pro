@@ -21,7 +21,7 @@ func (f *functionLowerer) channelElementKind(channelType frontend.TypeID) (front
 		return typ.Element, hir.ChannelElementF64, nil
 	case frontend.TypeBoolean:
 		return typ.Element, hir.ChannelElementBool, nil
-	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined:
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeNull, frontend.TypeUndefined, frontend.TypePromise, frontend.TypeTask, frontend.TypeMap, frontend.TypeSet, frontend.TypeDate, frontend.TypeRegExp:
 		return typ.Element, hir.ChannelElementRef, nil
 	default:
 		return typ.Element, hir.ChannelElementInvalid, fmt.Errorf("channel element type %q has no native channel representation", f.module.source.Types[typ.Element].Name)
@@ -41,7 +41,7 @@ func (f *functionLowerer) arrayElementKind(arrayType frontend.TypeID) (hir.Array
 		return hir.ArrayElementF64, nil
 	case frontend.TypeBoolean:
 		return hir.ArrayElementBool, nil
-	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion:
+	case frontend.TypeString, frontend.TypeObject, frontend.TypeArray, frontend.TypeFunction, frontend.TypeAny, frontend.TypeUnion, frontend.TypeParameter, frontend.TypeNever, frontend.TypePromise, frontend.TypeTask, frontend.TypeChannel, frontend.TypeTaskGroup, frontend.TypeMap, frontend.TypeSet, frontend.TypeDate, frontend.TypeRegExp:
 		return hir.ArrayElementRef, nil
 	default:
 		return hir.ArrayElementInvalid, fmt.Errorf("array element type %q has no native specialization", f.module.source.Types[typ.Element].Name)
@@ -134,6 +134,301 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.ArrayLengthOp{Array: array, Element: element}), nil
+	case frontend.ExprArrayPush:
+		array, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		element, err := f.arrayElementKind(expr.Object.Type)
+		if err != nil {
+			return 0, err
+		}
+		var lastResult hir.ValueID
+		for _, arg := range expr.Args {
+			val, err := f.lowerExpr(arg)
+			if err != nil {
+				return 0, err
+			}
+			lastResult = f.emit(expr.Type, hir.ArrayPushOp{Array: array, Value: val, Element: element})
+		}
+		if len(expr.Args) == 0 {
+			// push with no args returns array length
+			lastResult = f.emit(expr.Type, hir.ArrayLengthOp{Array: array, Element: element})
+		}
+		if expr.Object.Kind == frontend.ExprFieldGet {
+			if int(expr.Object.Object.Type) < len(f.module.source.Types) {
+				shape := f.module.source.Types[expr.Object.Object.Type].Shape
+				obj, err := f.lowerExpr(expr.Object.Object)
+				if err == nil {
+					voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+					if ok {
+						f.emit(voidType, hir.FieldSetOp{
+							Object: obj,
+							Shape:  hir.NewShapeID(uint32(shape)),
+							Field:  expr.Object.FieldIndex,
+							Value:  array,
+						})
+					}
+				}
+			}
+		}
+		return lastResult, nil
+	case frontend.ExprArrayPop:
+		array, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		element, err := f.arrayElementKind(expr.Object.Type)
+		if err != nil {
+			return 0, err
+		}
+		popResult := f.emit(expr.Type, hir.ArrayPopOp{Array: array, Element: element})
+		if expr.Object.Kind == frontend.ExprFieldGet {
+			if int(expr.Object.Object.Type) < len(f.module.source.Types) {
+				shape := f.module.source.Types[expr.Object.Object.Type].Shape
+				obj, err := f.lowerExpr(expr.Object.Object)
+				if err == nil {
+					voidType, ok := findFrontendType(f.module.source, frontend.TypeVoid)
+					if ok {
+						f.emit(voidType, hir.FieldSetOp{
+							Object: obj,
+							Shape:  hir.NewShapeID(uint32(shape)),
+							Field:  expr.Object.FieldIndex,
+							Value:  array,
+						})
+					}
+				}
+			}
+		}
+		return popResult, nil
+	case frontend.ExprArrayConcat:
+		element, err := f.arrayElementKind(expr.Type)
+		if err != nil {
+			return 0, err
+		}
+		arrays := make([]hir.ValueID, 0, len(expr.Elements))
+		for _, elem := range expr.Elements {
+			arr, err := f.lowerExpr(elem)
+			if err != nil {
+				return 0, err
+			}
+			arrays = append(arrays, arr)
+		}
+		return f.emit(expr.Type, hir.ArrayConcatOp{Arrays: arrays, Element: element}), nil
+	case frontend.ExprTemplateLiteral:
+		parts := make([]hir.ValueID, 0, len(expr.Elements))
+		for _, elem := range expr.Elements {
+			val, err := f.lowerExpr(elem)
+			if err != nil {
+				return 0, err
+			}
+			parts = append(parts, val)
+		}
+		return f.emit(expr.Type, hir.StringTemplateOp{Parts: parts}), nil
+	case frontend.ExprJSONStringify:
+		val, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.JSONStringifyOp{Value: val}), nil
+	case frontend.ExprJSONParse:
+		val, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.JSONParseOp{Value: val}), nil
+	case frontend.ExprMapNew:
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpNew}), nil
+	case frontend.ExprMapGet:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		k, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpGet, Map: m, Key: k}), nil
+	case frontend.ExprMapSet:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		k, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		v, err := f.lowerExpr(expr.Args[1])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpSet, Map: m, Key: k, Value: v}), nil
+	case frontend.ExprMapHas:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		k, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpHas, Map: m, Key: k}), nil
+	case frontend.ExprMapDelete:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		k, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpDelete, Map: m, Key: k}), nil
+	case frontend.ExprMapClear:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpClear, Map: m}), nil
+	case frontend.ExprMapSize:
+		m, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.MapOp{Kind: hir.MapOpSize, Map: m}), nil
+	case frontend.ExprSetNew:
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpNew}), nil
+	case frontend.ExprSetAdd:
+		s, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		item, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpAdd, Set: s, Item: item}), nil
+	case frontend.ExprSetHas:
+		s, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		item, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpHas, Set: s, Item: item}), nil
+	case frontend.ExprSetDelete:
+		s, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		item, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpDelete, Set: s, Item: item}), nil
+	case frontend.ExprSetClear:
+		s, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpClear, Set: s}), nil
+	case frontend.ExprSetSize:
+		s, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.SetOp{Kind: hir.SetOpSize, Set: s}), nil
+	case frontend.ExprDateNow:
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpNow}), nil
+	case frontend.ExprDateNew:
+		var argVal hir.ValueID
+		if len(expr.Args) > 0 {
+			a, err := f.lowerExpr(expr.Args[0])
+			if err != nil {
+				return 0, err
+			}
+			argVal = a
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpNew, Arg: argVal}), nil
+	case frontend.ExprDateGetTime:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetTime, Date: d}), nil
+	case frontend.ExprDateToISOString:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpToISOString, Date: d}), nil
+	case frontend.ExprDateGetFullYear:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetFullYear, Date: d}), nil
+	case frontend.ExprDateGetMonth:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetMonth, Date: d}), nil
+	case frontend.ExprDateGetDate:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetDate, Date: d}), nil
+	case frontend.ExprDateGetHours:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetHours, Date: d}), nil
+	case frontend.ExprDateGetMinutes:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetMinutes, Date: d}), nil
+	case frontend.ExprDateGetSeconds:
+		d, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DateOp{Kind: hir.DateOpGetSeconds, Date: d}), nil
+	case frontend.ExprRegExpNew:
+		patVal, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		var flagsVal hir.ValueID
+		if len(expr.Args) > 1 {
+			fl, err := f.lowerExpr(expr.Args[1])
+			if err != nil {
+				return 0, err
+			}
+			flagsVal = fl
+		}
+		return f.emit(expr.Type, hir.RegExpOp{Kind: hir.RegExpOpNew, Pattern: patVal, Flags: flagsVal}), nil
+	case frontend.ExprRegExpTest:
+		reVal, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		strVal, err := f.lowerExpr(expr.Args[0])
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.RegExpOp{Kind: hir.RegExpOpTest, RegExp: reVal, String: strVal}), nil
+	case frontend.ExprRegExpSource:
+		reVal, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.RegExpOp{Kind: hir.RegExpOpSource, RegExp: reVal}), nil
 	case frontend.ExprIndex:
 		array, err := f.lowerExpr(expr.Object)
 		if err != nil {
@@ -201,6 +496,16 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 			return 0, err
 		}
 		return f.emit(expr.Type, hir.DynamicFieldGetOp{Object: object, Field: expr.Field}), nil
+	case frontend.ExprDynamicIndexGet:
+		object, err := f.lowerExpr(expr.Object)
+		if err != nil {
+			return 0, err
+		}
+		index, err := f.lowerExpr(expr.Index)
+		if err != nil {
+			return 0, err
+		}
+		return f.emit(expr.Type, hir.DynamicIndexGetOp{Object: object, Index: index}), nil
 	case frontend.ExprPromiseResolve:
 		resultType, resultKind, err := f.promiseResultKind(expr.Type)
 		if err != nil {
@@ -240,7 +545,16 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		for _, target := range expr.Dispatch {
 			cases = append(cases, hir.DispatchCase{ClassTag: target.ClassTag, Callee: hir.NewFunctionID(uint32(target.Function))})
 		}
-		return f.emit(expr.Type, hir.PromiseThenableOp{Thenable: thenable, Result: resultKind, Arity: uint8(expr.FieldIndex), Cases: cases, ResolveReturnsJS: expr.ThenResolveJSValue, RejectReturnsJS: expr.ThenRejectJSValue}), nil
+		return f.emit(expr.Type, hir.PromiseThenableOp{
+			Thenable:         thenable,
+			Result:           resultKind,
+			Arity:            uint8(expr.FieldIndex),
+			Cases:            cases,
+			ResolveReturnsJS: expr.ThenResolveJSValue,
+			RejectReturnsJS:  expr.ThenRejectJSValue,
+			ResolveReturn:    uint8(expr.ThenResolveReturn),
+			RejectReturn:     uint8(expr.ThenRejectReturn),
+		}), nil
 	case frontend.ExprPromiseAll, frontend.ExprPromiseRace:
 		if int(expr.Type) >= len(f.module.source.Types) || f.module.source.Types[expr.Type].Kind != frontend.TypePromise {
 			return 0, fmt.Errorf("Promise aggregate has invalid semantic result type")
@@ -527,11 +841,20 @@ func (f *functionLowerer) lowerBinary(expr *frontend.Expr) (hir.ValueID, error) 
 		op = hir.BinaryStrictEqual
 	case frontend.BinaryStrictNotEqual:
 		op = hir.BinaryStrictNotEqual
+	case frontend.BinaryNullishCoalesce:
+		op = hir.BinaryNullishCoalesce
+	case frontend.BinaryLogicalOr:
+		op = hir.BinaryLogicalOr
+	case frontend.BinaryLogicalAnd:
+		op = hir.BinaryLogicalAnd
 	default:
 		return 0, fmt.Errorf("unsupported semantic binary operator %d", expr.Operator)
 	}
 	dynamicType := frontend.TypeID(0)
 	dynamic := false
+	if op == hir.BinaryNullishCoalesce || op == hir.BinaryLogicalOr || op == hir.BinaryLogicalAnd {
+		dynamic = true
+	}
 	for _, operand := range []*frontend.Expr{expr.Left, expr.Right} {
 		if operand == nil || int(operand.Type) >= len(f.module.source.Types) {
 			continue

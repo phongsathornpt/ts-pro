@@ -20,7 +20,7 @@ func (e *extractor) registerGenericFunction(node tsast.Node) error {
 		return fmt.Errorf("generic function at %d requires a name", node.Pos())
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		if err == nil {
 			err = fmt.Errorf("generic function %s has no TypeScript symbol", name)
@@ -86,11 +86,11 @@ func (e *extractor) specializeGenericParameter(node tsast.Node, concrete TypeID)
 		return Parameter{}, nil, nil, fmt.Errorf("generic parameter at %d requires an identifier", node.Pos())
 	}
 	name, _ := nameNode.Text()
-	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || symbol == nil {
 		return Parameter{}, nil, nil, fmt.Errorf("generic parameter %s symbol: %w", name, err)
 	}
-	apiType, err := e.client.GetTypeAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+	apiType, err := e.client.GetTypeAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 	if err != nil || apiType == nil {
 		return Parameter{}, nil, nil, fmt.Errorf("generic parameter %s type: %w", name, err)
 	}

@@ -51,7 +51,7 @@ func (e *extractor) extractLocalClosure(name string, variable *tsls.APISymbol, n
 				return closureInfo{}, err
 			}
 			explicit = append(explicit, param)
-			symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.fileName))
+			symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, nameNode.Handle(e.currentFile()))
 			if err != nil {
 				return closureInfo{}, err
 			}
@@ -121,7 +121,7 @@ func (e *extractor) collectClosureCaptures(body tsast.Node, excluded map[uint64]
 			captured[*e.currentThis] = struct{}{}
 		}
 		if node.Kind() == tsast.KindIdentifier {
-			symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.fileName))
+			symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, node.Handle(e.currentFile()))
 			if err != nil {
 				return err
 			}

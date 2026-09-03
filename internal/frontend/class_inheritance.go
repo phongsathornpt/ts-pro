@@ -27,7 +27,7 @@ func (e *extractor) resolveBaseClass(node tsast.Node, info *classInfo) error {
 		if !ok || expression.Kind() != tsast.KindIdentifier {
 			return fmt.Errorf("class %s extends a non-identifier base", info.Name)
 		}
-		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, expression.Handle(e.fileName))
+		symbol, err := e.client.GetSymbolAtLocation(e.ctx, e.snapshot, e.project, expression.Handle(e.currentFile()))
 		if err != nil || symbol == nil {
 			if err == nil {
 				err = fmt.Errorf("base class of %s has no TypeScript symbol", info.Name)
