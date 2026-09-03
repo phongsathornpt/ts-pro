@@ -756,7 +756,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 64)
+	e.SubRegImm32(amd64.RSP, 80)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1590,8 +1590,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
 	fnOffsets["ts_task_spawn"] = len(e.Code)
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_task_run_one"] = len(e.Code)
+	emitAMD64TaskRunOne(e)
 	fnOffsets["ts_task_join"] = len(e.Code)
-	emitAMD64TaskJoin(e)
+	emitAMD64TaskJoin(e, fnOffsets["ts_task_run_one"])
+	fnOffsets["ts_task_yield"] = len(e.Code)
+	emitAMD64TaskYield(e, fnOffsets["ts_task_run_one"])
 
 	fnOffsets["ts_number_to_string"] = len(e.Code)
 	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])
@@ -2028,7 +2032,8 @@ func emitAMD64BoolToString(e *amd64.Emitter, allocOffset int) {
 
 func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	// Runtime context (R15): cursor, end, precise-root head, chunk head,
-	// free-list head, collection count, reclaimed bytes, mapped bytes.
+	// free-list head, collection count, reclaimed bytes, mapped bytes, and
+	// cooperative task queue head/tail.
 	e.MovRegImm64(amd64.RDI, 0)
 	e.MovRegImm64(amd64.RSI, 1<<20)
 	e.MovRegImm64(amd64.RDX, 3)
@@ -2059,6 +2064,9 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovDerefReg(amd64.R15, amd64RTReclaimed, amd64.R11)
 	e.MovRegImm64(amd64.R11, 1<<20)
 	e.MovDerefReg(amd64.R15, amd64RTMappedBytes, amd64.R11)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
+	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
 	e.Ret()
 }
 

@@ -3239,6 +3239,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}},
 				})
 				return res
+			case "yieldNow":
+				if len(e.Args) != 0 {
+					return g.failExpr("native yieldNow expects no arguments")
+				}
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
+				return nil
 			case "join":
 				if len(e.Args) != 1 {
 					return g.failExpr("native join expects exactly one task")

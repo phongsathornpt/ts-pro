@@ -1252,6 +1252,13 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e.Callee] = types.TypeAny
 				c.result.Types[e] = taskType
 				return taskType
+			case "yieldNow":
+				if len(e.Args) != 0 {
+					c.error(e.Span(), "TS2554", "yieldNow expects no arguments.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
 			case "join":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", "join expects exactly one task.")

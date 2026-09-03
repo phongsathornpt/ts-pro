@@ -78,6 +78,8 @@ const (
 	amd64RTCollections int32 = 40
 	amd64RTReclaimed   int32 = 48
 	amd64RTMappedBytes int32 = 56
+	amd64RTTaskHead    int32 = 64
+	amd64RTTaskTail    int32 = 72
 
 	amd64ChunkNext int32 = 0
 	amd64ChunkEnd  int32 = 8

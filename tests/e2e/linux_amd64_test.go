@@ -1347,3 +1347,23 @@ console.log("done");
 		expected: "captured\ndone\n",
 	})
 }
+
+func TestLinuxAMD64CooperativeTaskQueueAndYield(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "cooperative_task_queue_and_yield",
+		source: `
+const first = spawn((): void => { console.log(1); });
+const second = spawn((): void => { console.log(2); });
+yieldNow();
+console.log(3);
+join(second);
+join(first);
+const outer = spawn((): number => {
+  const child = spawn((): number => 40);
+  return join(child) + 2;
+});
+console.log(join(outer));
+`,
+		expected: "1\n3\n2\n42\n",
+	})
+}

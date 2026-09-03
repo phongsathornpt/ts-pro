@@ -177,6 +177,12 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	markDone := len(e.Code)
 	patchJcc(markDoneJump, markDone)
 
+	// The runnable queue is a runtime-owned GC root. Marking its head is enough
+	// because task tracing follows the next pointer through the complete queue.
+	e.MovRegDeref(amd64.RDI, amd64.R15, amd64RTTaskHead)
+	markTaskQueueCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markTaskQueueCall + 5)))
+
 	// Propagate marks through array objects and reference backing stores until
 	// a fixed point is reached. Atomic strings/scalar backing stores have no children.
 	tracePass := len(e.Code)
@@ -395,6 +401,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskClosure)
 	markTaskClosureCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markTaskClosureCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskNext)
+	markTaskNextCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markTaskNextCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
 	e.MovRegDeref(amd64.R10, amd64.R12, amd64ObjectHeaderSize+amd64TaskKind)
 	e.CmpRegImm32(amd64.R10, int32(amd64TaskResultRef))
