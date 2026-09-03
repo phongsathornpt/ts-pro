@@ -8,19 +8,19 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/backend/lower"
 	"github.com/phongsathornpt/ts-pro/internal/backend/obj/elf"
 	"github.com/phongsathornpt/ts-pro/internal/backend/obj/macho"
-	"github.com/phongsathornpt/ts-pro/internal/backend/obj/pe"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/parser"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/sema"
 	"github.com/phongsathornpt/ts-pro/internal/midend/irgen"
 	"github.com/phongsathornpt/ts-pro/internal/midend/opt"
 	"github.com/phongsathornpt/ts-pro/internal/support/diag"
 	"github.com/phongsathornpt/ts-pro/internal/support/source"
+	"github.com/phongsathornpt/ts-pro/internal/target"
 )
 
-// Options configuration for compiler compilation.
+// Options configures compiler output.
 type Options struct {
-	TargetOS   string // "darwin", "linux", "windows"
-	TargetArch string // "amd64", "arm64"
+	TargetOS   string // currently: "linux" or "darwin"
+	TargetArch string // currently: "amd64" or "arm64" where supported by TargetOS
 	OptLevel   int    // 0, 1, 2, 3
 }
 
@@ -97,9 +97,14 @@ func (c *Compiler) CompileSource(filename string, src []byte) ([]byte, diag.Diag
 	// 4. Optimization
 	opt.Optimize(irProg, opt.Options{Level: c.opts.OptLevel})
 
-	// 5. Instruction Selection & Lowering
+	// 5. Validate the target before instruction selection.
+	tgt, err := target.Parse(c.opts.TargetOS, c.opts.TargetArch)
+	if err != nil {
+		return nil, allDiags, err
+	}
+
 	arch := lower.ArchAMD64
-	if c.opts.TargetArch == "arm64" {
+	if tgt.Arch == target.ArchARM64 {
 		arch = lower.ArchARM64
 	}
 	code, err := lower.Lower(irProg, arch)
@@ -109,16 +114,14 @@ func (c *Compiler) CompileSource(filename string, src []byte) ([]byte, diag.Diag
 
 	// 6. Object / Executable Emission
 	var bin []byte
-	isARM64 := c.opts.TargetArch == "arm64"
-	switch c.opts.TargetOS {
-	case "linux":
+	isARM64 := tgt.Arch == target.ArchARM64
+	switch tgt.OS {
+	case target.OSLinux:
 		bin, err = elf.CreateExecutable(code, isARM64)
-	case "darwin":
+	case target.OSDarwin:
 		bin, err = macho.CreateExecutable(code, isARM64)
-	case "windows":
-		bin, err = pe.CreateExecutable(code, isARM64)
 	default:
-		return nil, allDiags, fmt.Errorf("unsupported target OS: %s", c.opts.TargetOS)
+		return nil, allDiags, fmt.Errorf("unsupported target OS: %s", tgt.OS)
 	}
 	if err != nil {
 		return nil, allDiags, fmt.Errorf("executable emission failed: %w", err)
