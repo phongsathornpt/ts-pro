@@ -1190,6 +1190,155 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	return res
 }
 
+func irFunctionMemberType(t types.Type) *types.FunctionType {
+	if fn, ok := t.(*types.FunctionType); ok {
+		return fn
+	}
+	if u, ok := t.(*types.UnionType); ok {
+		for _, m := range u.Members {
+			if fn, ok := m.(*types.FunctionType); ok {
+				return fn
+			}
+		}
+	}
+	return nil
+}
+
+func (g *generator) thenableMethodType(t types.Type) (*types.ObjectType, *types.FunctionType, bool) {
+	obj, ok := t.(*types.ObjectType)
+	if !ok {
+		return nil, nil, false
+	}
+	if info := g.semaResult.Classes[obj.Name]; info != nil {
+		if fn := info.Methods["then"]; fn != nil {
+			return obj, fn, true
+		}
+	}
+	if field, exists := obj.Fields["then"]; exists {
+		if fn := irFunctionMemberType(field.Type); fn != nil {
+			return obj, fn, true
+		}
+	}
+	return nil, nil, false
+}
+
+func (g *generator) emitThenableMethodCall(receiver ir.Operand, obj *types.ObjectType, fn *types.FunctionType, args []ir.Operand) {
+	if info := g.semaResult.Classes[obj.Name]; info != nil && info.Methods["then"] != nil {
+		_ = g.emitClassMethodCall(receiver, info, "then", args)
+		return
+	}
+	field, ok := obj.Fields["then"]
+	if !ok {
+		g.failExpr("thenable %s is missing then field", obj)
+		return
+	}
+	offsets, _, _ := g.objectLayout(obj)
+	rawType := field.Type
+	raw := g.currentFn.NewValue("then_method_raw", rawType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: receiver, Field: "then", Offset: offsets["then"]})
+	closure := ir.Operand(raw)
+	if rawType != fn {
+		unboxed := g.currentFn.NewValue("then_method", fn)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: unboxed, Callee: "ts_js_unbox_ref", Args: []ir.Operand{raw}, ParamTypes: []types.Type{types.TypeAny}})
+		closure = unboxed
+	}
+	paramTypes := make([]types.Type, len(fn.Params))
+	for i := range fn.Params {
+		paramTypes[i] = fn.Params[i].Type
+	}
+	var thisArg ir.Operand
+	if fn.This != nil {
+		thisArg = receiver
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Closure: closure, ThisArg: thisArg, Args: args, ParamTypes: paramTypes})
+}
+
+func (g *generator) makeThenableSettlementCallback(statusCh, valueCh ir.Operand, valueType types.Type, fulfilled bool) ir.Operand {
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	name := fmt.Sprintf("$promise_settle%d", g.arrowCounter)
+	g.arrowCounter++
+	fnType := types.NewFunction([]types.Param{{Name: "value", Type: valueType}}, types.TypeVoid)
+	lifted := ir.NewFunction(name, types.TypeVoid)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	status := lifted.NewValue("status_ch", statusCh.Type())
+	payload := lifted.NewValue("value_ch", valueCh.Type())
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.ClosureGetInst{Res: status, Closure: env, Index: 0},
+		&ir.ClosureGetInst{Res: payload, Closure: env, Index: 1})
+	arg := lifted.NewValue("value", valueType)
+	lifted.Params = append(lifted.Params, arg)
+	boxedStatus := g.boxJSValue(ir.ConstBool{Value: fulfilled}, types.TypeBoolean)
+	sent := lifted.NewValue("settled", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: sent, Callee: "ts_channel_try_send", Args: []ir.Operand{status, boxedStatus}, ParamTypes: []types.Type{status.Type(), types.TypeAny}})
+	sendBB := lifted.NewBlock("settle_send")
+	doneBB := lifted.NewBlock("settle_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sent, Then: sendBB, Else: doneBB}
+	g.currentBB = sendBB
+	boxedArg := g.boxJSValue(arg, valueType)
+	sendBB.Instructions = append(sendBB.Instructions, &ir.CallInst{Callee: "ts_channel_send", Args: []ir.Operand{payload, boxedArg}, ParamTypes: []types.Type{payload.Type(), types.TypeAny}})
+	sendBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	doneBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("settler", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: name, Captures: []ir.Operand{statusCh, valueCh}, RefMask: 3})
+	return closure
+}
+
+func (g *generator) lowerThenablePromise(e *ast.CallExpr, taskType *types.ObjectType, inner types.Type, thenableType *types.ObjectType, thenFn *types.FunctionType) ir.Operand {
+	thenable := g.lowerExpr(e.Args[0])
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	driverType := types.NewFunction(nil, inner)
+	driverName := fmt.Sprintf("$thenable%d", g.arrowCounter)
+	g.arrowCounter++
+	driver := ir.NewFunction(driverName, inner)
+	g.currentFn = driver
+	g.currentBB = driver.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := driver.NewValue("$env", driverType)
+	driver.Params = append(driver.Params, env)
+	receiver := driver.NewValue("thenable", thenableType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: receiver, Closure: env, Index: 0})
+	channelType := types.NewObject(fmt.Sprintf("$ThenableChannel$%d", g.arrowCounter))
+	statusCh := driver.NewValue("settle_status", channelType)
+	valueCh := driver.NewValue("settle_value", channelType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: statusCh, Callee: "ts_channel_new", Args: []ir.Operand{ir.ConstNumber{Value: 1}}, ParamTypes: []types.Type{types.TypeNumber}},
+		&ir.CallInst{Res: valueCh, Callee: "ts_channel_new", Args: []ir.Operand{ir.ConstNumber{Value: 1}}, ParamTypes: []types.Type{types.TypeNumber}})
+	resolve := g.makeThenableSettlementCallback(statusCh, valueCh, inner, true)
+	reject := g.makeThenableSettlementCallback(statusCh, valueCh, types.TypeAny, false)
+	g.emitThenableMethodCall(receiver, thenableType, thenFn, []ir.Operand{resolve, reject})
+	statusBox := driver.NewValue("settle_status_box", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: statusBox, Callee: "ts_channel_recv", Args: []ir.Operand{statusCh}, ParamTypes: []types.Type{channelType}})
+	status := g.coerceJSValueBoundary(statusBox, types.TypeAny, types.TypeBoolean)
+	payload := driver.NewValue("settle_payload", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: payload, Callee: "ts_channel_recv", Args: []ir.Operand{valueCh}, ParamTypes: []types.Type{channelType}})
+	okBB := driver.NewBlock("thenable_fulfilled")
+	rejectBB := driver.NewBlock("thenable_rejected")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: status, Then: okBB, Else: rejectBB}
+	g.currentBB = okBB
+	resolved := g.coerceJSValueBoundary(payload, types.TypeAny, inner)
+	okBB.Terminator = &ir.ReturnTerm{Val: resolved}
+	g.currentBB = rejectBB
+	rejectBB.Instructions = append(rejectBB.Instructions, &ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{payload}, ParamTypes: []types.Type{types.TypeAny}})
+	rejectBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, driver)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("thenable_driver", driverType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{thenable}, RefMask: 1})
+	task := g.currentFn.NewValue("thenable_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	return task
+}
+
 func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
 	ident, ok := member.Object.(*ast.IdentExpr)
 	if !ok || ident.Name != "Promise" || (member.Property != "resolve" && member.Property != "reject") {
@@ -1210,6 +1359,9 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 		if argObj, ok := g.semanticType(e.Args[0]).(*types.ObjectType); ok {
 			if _, isTask := g.semaResult.TaskResults[argObj.Name]; isTask {
 				return g.lowerExpr(e.Args[0]), true
+			}
+			if thenObj, thenFn, isThenable := g.thenableMethodType(argObj); isThenable {
+				return g.lowerThenablePromise(e, taskType, inner, thenObj, thenFn), true
 			}
 		}
 	}

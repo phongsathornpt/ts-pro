@@ -1807,6 +1807,44 @@ func (c *Checker) newPromiseType(inner types.Type) *types.ObjectType {
 	return obj
 }
 
+func functionMemberType(t types.Type) *types.FunctionType {
+	if fn, ok := t.(*types.FunctionType); ok {
+		return fn
+	}
+	if u, ok := t.(*types.UnionType); ok {
+		for _, m := range u.Members {
+			if fn, ok := m.(*types.FunctionType); ok {
+				return fn
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Checker) thenableResultType(t types.Type) (types.Type, bool) {
+	obj, ok := t.(*types.ObjectType)
+	if !ok {
+		return nil, false
+	}
+	var thenFn *types.FunctionType
+	if info := c.result.Classes[obj.Name]; info != nil {
+		thenFn = info.Methods["then"]
+	}
+	if thenFn == nil {
+		if field, exists := obj.Fields["then"]; exists {
+			thenFn = functionMemberType(field.Type)
+		}
+	}
+	if thenFn == nil || len(thenFn.Params) == 0 {
+		return nil, false
+	}
+	resolveFn := functionMemberType(thenFn.Params[0].Type)
+	if resolveFn == nil || len(resolveFn.Params) == 0 {
+		return nil, false
+	}
+	return resolveFn.Params[0].Type, true
+}
+
 func (c *Checker) promiseResultType(t types.Type) (types.Type, bool) {
 	obj, ok := t.(*types.ObjectType)
 	if !ok {
@@ -1839,6 +1877,8 @@ func (c *Checker) checkPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr
 	} else if member.Property == "resolve" {
 		if adopted, ok := c.promiseResultType(argType); ok {
 			inner = adopted
+		} else if assimilated, ok := c.thenableResultType(argType); ok {
+			inner = assimilated
 		} else {
 			inner = argType
 		}

@@ -1709,3 +1709,73 @@ box.invoke((value: number): void => { console.log(value); }, (reason: any): void
 		expected: "42\n",
 	})
 }
+
+func TestLinuxAMD64PromiseThenableAssimilation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_thenable_assimilation",
+		source: `
+interface NumberThenable {
+  base: number;
+  then: (this: NumberThenable, resolve: (value: number) => void, reject: (reason: any) => void) => void;
+}
+
+class BaseThenable {
+  value: number;
+  constructor(value: number) { this.value = value; }
+  then(resolve: (value: number) => void, reject: (reason: any) => void): void { resolve(this.value); }
+}
+class DerivedThenable extends BaseThenable {
+  override then(resolve: (value: number) => void, reject: (reason: any) => void): void { resolve(this.value + 2); }
+}
+
+async function structural(): Promise<number> {
+  const value: NumberThenable = {
+    base: 40,
+    then: function (this: NumberThenable, resolve: (value: number) => void, reject: (reason: any) => void): void {
+      resolve(this.base + 2);
+      reject("late");
+    },
+  };
+  return await Promise.resolve(value);
+}
+
+async function delayed(): Promise<number> {
+  const value: NumberThenable = {
+    base: 40,
+    then: function (this: NumberThenable, resolve: (value: number) => void, reject: (reason: any) => void): void {
+      const result = this.base + 2;
+      spawn((): void => { sleep(1); resolve(result); reject("late-async"); });
+    },
+  };
+  return await Promise.resolve(value);
+}
+
+async function classValue(): Promise<number> {
+  const value: BaseThenable = new DerivedThenable(40);
+  return await Promise.resolve(value);
+}
+
+async function rejected(): Promise<number> {
+  const value: NumberThenable = {
+    base: 0,
+    then: function (this: NumberThenable, resolve: (value: number) => void, reject: (reason: any) => void): void {
+      reject("thenable-reject");
+      resolve(99);
+    },
+  };
+  try {
+    return await Promise.resolve(value);
+  } catch (error: any) {
+    console.log(error);
+    return 7;
+  }
+}
+
+console.log(join(structural()));
+console.log(join(delayed()));
+console.log(join(classValue()));
+console.log(join(rejected()));
+`,
+		expected: "42\n42\n42\nthenable-reject\n7\n",
+	})
+}
