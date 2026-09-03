@@ -644,3 +644,19 @@ console.log(label);
 		expected: "10\n20\nlocalhost\n8080\n7\nseven\n",
 	})
 }
+
+func TestLinuxAMD64DefaultsAndUndefined(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "default_optional_and_undefined_abi",
+		source: `
+function probe(a: number = 1, b?: string): void {
+  console.log(a);
+  console.log(b === undefined);
+}
+probe();
+probe(2, "x");
+console.log(undefined);
+`,
+		expected: "1\n1\n2\n0\nundefined\n",
+	})
+}

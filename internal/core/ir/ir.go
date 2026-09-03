@@ -63,6 +63,18 @@ func (c ConstBool) String() string {
 	return "false"
 }
 
+type ConstNull struct{}
+
+func (ConstNull) operandNode()     {}
+func (ConstNull) Type() types.Type { return types.TypeNull }
+func (ConstNull) String() string   { return "null" }
+
+type ConstUndefined struct{}
+
+func (ConstUndefined) operandNode()     {}
+func (ConstUndefined) Type() types.Type { return types.TypeUndefined }
+func (ConstUndefined) String() string   { return "undefined" }
+
 // Instruction is an SSA statement inside a basic block.
 type Instruction interface {
 	instructionNode()
@@ -87,9 +99,10 @@ type (
 	}
 
 	CallInst struct {
-		Res    *Value
-		Callee string
-		Args   []Operand
+		Res        *Value
+		Callee     string
+		Args       []Operand
+		ParamTypes []types.Type
 	}
 
 	MakeClosureInst struct {
@@ -106,9 +119,10 @@ type (
 	}
 
 	IndirectCallInst struct {
-		Res     *Value
-		Closure Operand
-		Args    []Operand
+		Res        *Value
+		Closure    Operand
+		Args       []Operand
+		ParamTypes []types.Type
 	}
 
 	AllocObjectInst struct {

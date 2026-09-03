@@ -13,8 +13,35 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/target"
 )
 
-func isNumberType(t types.Type) bool { return t != nil && t.Kind() == types.KindNumber }
-func numberBits(v float64) int64     { return int64(math.Float64bits(v)) }
+func isNumberType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == types.KindNumber {
+		return true
+	}
+	u, ok := t.(*types.UnionType)
+	if !ok {
+		return false
+	}
+	hasNumber := false
+	for _, m := range u.Members {
+		switch m.Kind() {
+		case types.KindNumber:
+			hasNumber = true
+		case types.KindNull, types.KindUndefined:
+		default:
+			return false
+		}
+	}
+	return hasNumber
+}
+func numberBits(v float64) int64 { return int64(math.Float64bits(v)) }
+
+const (
+	amd64UndefinedBits int64 = 0x7ff8000000000001
+	amd64NullBits      int64 = 0x7ff8000000000002
+)
 
 type Arch string
 
@@ -809,6 +836,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.MovRegImm64(scratch, 0)
 				}
 				return scratch, nil
+			case ir.ConstUndefined:
+				e.MovRegImm64(scratch, amd64UndefinedBits)
+				return scratch, nil
+			case ir.ConstNull:
+				e.MovRegImm64(scratch, amd64NullBits)
+				return scratch, nil
 			default:
 				return scratch, fmt.Errorf("unsupported AMD64 operand %T", op)
 			}
@@ -895,6 +928,28 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				switch bi := inst.(type) {
 				case *ir.BinaryInst:
 					dstLoc := locs[bi.Res.ID]
+					_, lhsNull := bi.LHS.(ir.ConstNull)
+					_, lhsUndef := bi.LHS.(ir.ConstUndefined)
+					_, rhsNull := bi.RHS.(ir.ConstNull)
+					_, rhsUndef := bi.RHS.(ir.ConstUndefined)
+					if (bi.Op == ir.OpEq || bi.Op == ir.OpNe) && (lhsNull || lhsUndef || rhsNull || rhsUndef) {
+						lhs, err := loadRawValue(bi.LHS, amd64.R10)
+						if err != nil {
+							return nil, err
+						}
+						rhs, err := loadRawValue(bi.RHS, amd64.R11)
+						if err != nil {
+							return nil, err
+						}
+						e.CmpRegReg(lhs, rhs)
+						cond := amd64.CondE
+						if bi.Op == ir.OpNe {
+							cond = amd64.CondNE
+						}
+						e.Setcc(cond, amd64.R10)
+						storeSSAValue(bi.Res, amd64.R10)
+						continue
+					}
 					if bi.LHS.Type() == types.TypeString && bi.RHS.Type() == types.TypeString && (bi.Op == ir.OpEq || bi.Op == ir.OpNe) {
 						lhs, err := loadRawValue(bi.LHS, amd64.RDI)
 						if err != nil {
@@ -1193,8 +1248,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 						return nil
 					}
-					for _, arg := range bi.Args {
-						if isNumberType(arg.Type()) {
+					for i, arg := range bi.Args {
+						argType := arg.Type()
+						if i < len(bi.ParamTypes) && bi.ParamTypes[i] != nil {
+							argType = bi.ParamTypes[i]
+						}
+						if isNumberType(argType) {
 							if xmmArg < len(amd64NumberParamRegs) {
 								v, err := loadOperand(arg, amd64.R10)
 								if err != nil {
@@ -1263,8 +1322,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 							return nil
 						}
 					}
-					for _, arg := range bi.Args {
-						if isNumberType(arg.Type()) {
+					for i, arg := range bi.Args {
+						argType := arg.Type()
+						if i < len(bi.ParamTypes) && bi.ParamTypes[i] != nil {
+							argType = bi.ParamTypes[i]
+						}
+						if isNumberType(argType) {
 							if xmmArg < len(amd64NumberParamRegs) {
 								src, err := loadOperand(arg, amd64.R10)
 								if err != nil {
@@ -1325,7 +1388,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				switch term := bb.Terminator.(type) {
 				case *ir.ReturnTerm:
 					if term.Val != nil {
-						if isNumberType(term.Val.Type()) {
+						if isNumberType(fn.ReturnType) {
 							src, err := loadOperand(term.Val, amd64.R10)
 							if err != nil {
 								return nil, err
@@ -1424,6 +1487,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 										e.MovRegImm64(amd64.R10, 0)
 									}
 									storeSSAValue(phi.Res, amd64.R10)
+								} else if _, ok := inc.Value.(ir.ConstUndefined); ok {
+									e.MovRegImm64(amd64.R10, amd64UndefinedBits)
+									storeSSAValue(phi.Res, amd64.R10)
+								} else if _, ok := inc.Value.(ir.ConstNull); ok {
+									e.MovRegImm64(amd64.R10, amd64NullBits)
+									storeSSAValue(phi.Res, amd64.R10)
 								} else if c, ok := inc.Value.(ir.ConstString); ok {
 									strOffset := len(e.Code)
 									e.LeaRipRel32(amd64.R10, 0)
@@ -1452,6 +1521,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_print_bool"] = len(e.Code)
 	emitAMD64PrintBool(e)
+	fnOffsets["ts_print_undefined"] = len(e.Code)
+	emitAMD64PrintLiteral(e, "undefined\n")
 
 	// Emit ts_print_str for Linux AMD64
 	fnOffsets["ts_print_str"] = len(e.Code)
@@ -1770,6 +1841,28 @@ func emitAMD64PrintBool(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RDI, 1)
 	e.MovRegReg(amd64.RSI, amd64.RSP)
 	e.MovRegImm64(amd64.RDX, 2)
+	e.MovRegImm64(amd64.RAX, 1)
+	e.Syscall()
+	e.MovRegReg(amd64.RSP, amd64.RBP)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64PrintLiteral(e *amd64.Emitter, text string) {
+	size := ((len(text) + 15) / 16) * 16
+	if size == 0 {
+		size = 16
+	}
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, int32(size))
+	for i, ch := range []byte(text) {
+		e.MovRegImm64(amd64.RAX, int64(ch))
+		e.MovDerefReg8(amd64.RSP, int32(i), amd64.RAX)
+	}
+	e.MovRegImm64(amd64.RDI, 1)
+	e.MovRegReg(amd64.RSI, amd64.RSP)
+	e.MovRegImm64(amd64.RDX, int64(len(text)))
 	e.MovRegImm64(amd64.RAX, 1)
 	e.Syscall()
 	e.MovRegReg(amd64.RSP, amd64.RBP)

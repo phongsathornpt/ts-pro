@@ -1024,6 +1024,9 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 		if pType == nil {
 			pType = types.TypeAny
 		}
+		if p.Optional {
+			pType = types.NewUnion(pType, types.TypeUndefined)
+		}
 		params = append(params, types.Param{
 			Name:     p.Name,
 			Type:     pType,

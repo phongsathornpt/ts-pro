@@ -22,6 +22,7 @@ type generator struct {
 	err               error
 	arrowCounter      int
 	genericDecls      map[string]*ast.FunctionDecl
+	functionDecls     map[string]*ast.FunctionDecl
 	genericSpecs      map[string]string
 	genericSpecCount  int
 	typeBindings      map[*types.TypeVar]types.Type
@@ -652,6 +653,7 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		semaResult:        semaResult,
 		prog:              &ir.Program{},
 		genericDecls:      make(map[string]*ast.FunctionDecl),
+		functionDecls:     make(map[string]*ast.FunctionDecl),
 		genericSpecs:      make(map[string]string),
 		classTags:         make(map[string]int),
 		emittedClassSpecs: make(map[string]bool),
@@ -666,8 +668,11 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 	}
 
 	for _, stmt := range astProg.Statements {
-		if fnDecl, ok := stmt.(*ast.FunctionDecl); ok && len(fnDecl.TypeParams) > 0 {
-			g.genericDecls[fnDecl.Name] = fnDecl
+		if fnDecl, ok := stmt.(*ast.FunctionDecl); ok {
+			g.functionDecls[fnDecl.Name] = fnDecl
+			if len(fnDecl.TypeParams) > 0 {
+				g.genericDecls[fnDecl.Name] = fnDecl
+			}
 		}
 	}
 	for _, stmt := range astProg.Statements {
@@ -1303,6 +1308,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return ir.ConstString{Value: e.Value}
 	case *ast.BoolLit:
 		return ir.ConstBool{Value: e.Value}
+	case *ast.NullLit:
+		return ir.ConstNull{}
+	case *ast.UndefinedLit:
+		return ir.ConstUndefined{}
 	case *ast.ThisExpr:
 		if thisVal, ok := g.locals["$this"]; ok {
 			return thisVal
@@ -1635,7 +1644,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					args = append(args, g.lowerExpr(arg))
 				}
 				res := g.currentFn.NewValue("ret", fnType.Return)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: res, Closure: closure, Args: args})
+				paramTypes := make([]types.Type, len(fnType.Params))
+				for i := range fnType.Params {
+					paramTypes[i] = fnType.Params[i].Type
+				}
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: res, Closure: closure, Args: args, ParamTypes: paramTypes})
 				return res
 			}
 		}
@@ -1670,6 +1683,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 							calleeName = "ts_print_str"
 						case types.TypeBoolean:
 							calleeName = "ts_print_bool"
+						case types.TypeUndefined:
+							calleeName = "ts_print_undefined"
 						}
 					}
 				}
@@ -1682,15 +1697,40 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		for _, arg := range e.Args {
 			args = append(args, g.lowerExpr(arg))
 		}
+		callType, _ := g.semanticType(e.Callee).(*types.FunctionType)
+		if concrete := g.semaResult.GenericCalls[e]; concrete != nil {
+			callType = concrete
+		}
+		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
+			if decl := g.functionDecls[ident.Name]; decl != nil {
+				for i := len(args); i < len(decl.Params); i++ {
+					p := decl.Params[i]
+					if p.Default != nil {
+						args = append(args, g.lowerExpr(p.Default))
+						continue
+					}
+					if p.Optional {
+						args = append(args, ir.ConstUndefined{})
+						continue
+					}
+					break
+				}
+			}
+		}
+		var paramTypes []types.Type
+		if callType != nil && !isConsoleLogCall(e.Callee) && !strings.HasPrefix(calleeName, "ts_") {
+			paramTypes = make([]types.Type, len(callType.Params))
+			for i := range callType.Params {
+				paramTypes[i] = callType.Params[i].Type
+			}
+		}
 		resultType := types.TypeNumber
 		if t := g.semanticType(e); t != nil {
 			resultType = t
 		}
 		resVal := g.currentFn.NewValue("ret", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Res:    resVal,
-			Callee: calleeName,
-			Args:   args,
+			Res: resVal, Callee: calleeName, Args: args, ParamTypes: paramTypes,
 		})
 		return resVal
 	case *ast.AssignExpr:
