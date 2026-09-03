@@ -3,6 +3,7 @@ package sema
 import (
 	"testing"
 
+	"github.com/phongsathornpt/ts-pro/internal/core/types"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/parser"
 	"github.com/phongsathornpt/ts-pro/internal/support/source"
 )
@@ -117,5 +118,54 @@ const bad = (x: number): string => x + 1;
 	result := Check(prog)
 	if !result.Diagnostics.HasErrors() {
 		t.Fatal("expected arrow return type mismatch")
+	}
+}
+
+func TestSemaExplicitGenericFunctionSpecialization(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("generics.ts", []byte(`
+function identity<T>(x: T): T { return x; }
+function pair<A, B>(first: A, second: B): [A, B] { return [first, second]; }
+const n: number = identity<number>(42);
+const s: string = identity<string>("hello");
+const p: [string, number] = pair<string, number>("answer", 42);
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	identity := result.RootScope.Resolve("identity")
+	fn, ok := identity.Type.(*types.FunctionType)
+	if !ok || len(fn.TypeParams) != 1 {
+		t.Fatalf("identity type = %T %v", identity.Type, identity.Type)
+	}
+	if !fn.Params[0].Type.Equals(fn.TypeParams[0]) || !fn.Return.Equals(fn.TypeParams[0]) {
+		t.Fatalf("identity did not preserve declaration type variable: %s", fn)
+	}
+	pairVar := result.RootScope.Resolve("p")
+	if pairVar == nil || !pairVar.Type.Equals(types.NewTuple(types.TypeString, types.TypeNumber)) {
+		t.Fatalf("p type = %v, want [string, number]", pairVar)
+	}
+}
+
+func TestSemaGenericTypeArgumentMismatch(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("generic-bad.ts", []byte(`
+function identity<T>(x: T): T { return x; }
+const bad: number = identity<string>("wrong");
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if !result.Diagnostics.HasErrors() {
+		t.Fatal("expected generic specialization assignment mismatch")
 	}
 }

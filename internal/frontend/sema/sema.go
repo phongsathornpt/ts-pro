@@ -67,9 +67,10 @@ type Result struct {
 }
 
 type Checker struct {
-	currentScope *Scope
-	result       *Result
-	currentFnRet types.Type
+	currentScope  *Scope
+	result        *Result
+	currentFnRet  types.Type
+	typeParamEnvs []map[string]*types.TypeVar
 }
 
 func NewChecker() *Checker {
@@ -83,6 +84,32 @@ func NewChecker() *Checker {
 			Diagnostics: make(diag.DiagnosticList, 0),
 		},
 	}
+}
+
+func (c *Checker) pushTypeParams(vars []*types.TypeVar) func() {
+	env := make(map[string]*types.TypeVar, len(vars))
+	for _, tv := range vars {
+		env[tv.Name] = tv
+	}
+	c.typeParamEnvs = append(c.typeParamEnvs, env)
+	return func() { c.typeParamEnvs = c.typeParamEnvs[:len(c.typeParamEnvs)-1] }
+}
+
+func (c *Checker) resolveTypeParam(name string) *types.TypeVar {
+	for i := len(c.typeParamEnvs) - 1; i >= 0; i-- {
+		if tv := c.typeParamEnvs[i][name]; tv != nil {
+			return tv
+		}
+	}
+	return nil
+}
+
+func newTypeParams(names []string) []*types.TypeVar {
+	vars := make([]*types.TypeVar, len(names))
+	for i, name := range names {
+		vars[i] = types.NewTypeVar(name, nil)
+	}
+	return vars
 }
 
 func (c *Checker) error(span source.Span, code string, msg string) {
@@ -176,6 +203,42 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 	}
 }
 
+func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) types.Type {
+	if expr == nil || expected == nil {
+		return c.checkExpr(expr)
+	}
+	if tuple, ok := expected.(*types.TupleType); ok {
+		if lit, ok := expr.(*ast.ArrayLit); ok {
+			actual := make([]types.Type, len(lit.Elements))
+			for i, elem := range lit.Elements {
+				actual[i] = c.checkExpr(elem)
+			}
+			actualTuple := types.NewTuple(actual...)
+			if len(actual) == len(tuple.Elements) && actualTuple.AssignableTo(tuple) {
+				c.result.Types[lit] = tuple
+				return tuple
+			}
+			c.result.Types[lit] = actualTuple
+			return actualTuple
+		}
+	}
+	if array, ok := expected.(*types.ArrayType); ok {
+		if lit, ok := expr.(*ast.ArrayLit); ok {
+			compatible := true
+			for _, elem := range lit.Elements {
+				if !c.checkExpr(elem).AssignableTo(array.Elem) {
+					compatible = false
+				}
+			}
+			if compatible {
+				c.result.Types[lit] = array
+				return array
+			}
+		}
+	}
+	return c.checkExpr(expr)
+}
+
 func (c *Checker) checkVarDecl(stmt *ast.VarDeclStmt) {
 	for _, decl := range stmt.Declarations {
 		var declaredType types.Type
@@ -185,7 +248,11 @@ func (c *Checker) checkVarDecl(stmt *ast.VarDeclStmt) {
 
 		var initType types.Type
 		if decl.Init != nil {
-			initType = c.checkExpr(decl.Init)
+			if declaredType != nil {
+				initType = c.checkExprWithExpected(decl.Init, declaredType)
+			} else {
+				initType = c.checkExpr(decl.Init)
+			}
 		}
 
 		finalType := declaredType
@@ -218,15 +285,26 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 	parentFnRet := c.currentFnRet
 	defer func() { c.currentFnRet = parentFnRet }()
 
-	fnType := c.resolveFunctionType(fn)
+	fnType, _ := c.result.Types[fn].(*types.FunctionType)
+	if fnType == nil {
+		fnType = c.resolveFunctionType(fn)
+		c.result.Types[fn] = fnType
+	}
 	c.currentFnRet = fnType.Return
+	popTypeParams := c.pushTypeParams(fnType.TypeParams)
+	defer popTypeParams()
 
 	// Function scope
 	c.currentScope = NewScope(c.currentScope)
 	defer func() { c.currentScope = c.currentScope.Parent }()
 
-	for _, p := range fn.Params {
-		pType := c.resolveTypeNode(p.Type)
+	for i, p := range fn.Params {
+		pType := types.TypeAny
+		if i < len(fnType.Params) {
+			pType = fnType.Params[i].Type
+		} else if resolved := c.resolveTypeNode(p.Type); resolved != nil {
+			pType = resolved
+		}
 		if pType == nil {
 			pType = types.TypeAny
 		}
@@ -293,7 +371,11 @@ func (c *Checker) checkFor(s *ast.ForStmt) {
 func (c *Checker) checkReturn(s *ast.ReturnStmt) {
 	var retType types.Type = types.TypeVoid
 	if s.Value != nil {
-		retType = c.checkExpr(s.Value)
+		if c.currentFnRet != nil {
+			retType = c.checkExprWithExpected(s.Value, c.currentFnRet)
+		} else {
+			retType = c.checkExpr(s.Value)
+		}
 	}
 
 	if c.currentFnRet != nil {
@@ -445,17 +527,37 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			return types.TypeAny
 		}
 
+		effective := fnType
+		if len(e.TypeArgs) > 0 {
+			if len(fnType.TypeParams) == 0 {
+				c.error(e.Span(), "TS2558", fmt.Sprintf("Expected 0 type arguments, but got %d.", len(e.TypeArgs)))
+			} else {
+				args := make([]types.Type, len(e.TypeArgs))
+				for i, node := range e.TypeArgs {
+					args[i] = c.resolveTypeNode(node)
+				}
+				instantiated, err := types.InstantiateFunction(fnType, args)
+				if err != nil {
+					c.error(e.Span(), "TS2558", err.Error())
+				} else {
+					effective = instantiated
+				}
+			}
+		} else if len(fnType.TypeParams) > 0 {
+			c.error(e.Span(), "TS2684", "Generic call requires explicit type arguments in the current native semantic subset.")
+		}
+
 		for i, arg := range e.Args {
 			argType := c.checkExpr(arg)
-			if i < len(fnType.Params) {
-				expected := fnType.Params[i].Type
+			if i < len(effective.Params) {
+				expected := effective.Params[i].Type
 				if !argType.AssignableTo(expected) {
 					c.error(arg.Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.", argType, expected))
 				}
 			}
 		}
-		c.result.Types[e] = fnType.Return
-		return fnType.Return
+		c.result.Types[e] = effective.Return
+		return effective.Return
 	case *ast.AssignExpr:
 		targetType := c.checkExpr(e.Left)
 		valType := c.checkExpr(e.Right)
@@ -551,6 +653,9 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 }
 
 func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType {
+	typeParams := newTypeParams(fn.TypeParams)
+	pop := c.pushTypeParams(typeParams)
+	defer pop()
 	var params []types.Param
 	for _, p := range fn.Params {
 		pType := c.resolveTypeNode(p.Type)
@@ -567,7 +672,7 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 	if retType == nil {
 		retType = types.TypeVoid
 	}
-	return types.NewFunction(params, retType)
+	return types.NewGenericFunction(typeParams, params, retType)
 }
 
 func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
@@ -591,10 +696,17 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeNever
 		case "unknown":
 			return types.TypeUnknown
+		case "undefined":
+			return types.TypeUndefined
+		case "null":
+			return types.TypeNull
 		default:
 			return types.TypeAny
 		}
 	case *ast.TypeRefNode:
+		if tv := c.resolveTypeParam(t.Name); tv != nil {
+			return tv
+		}
 		if t.Name == "Array" && len(t.TypeArgs) == 1 {
 			return types.NewArray(c.resolveTypeNode(t.TypeArgs[0]))
 		}
@@ -606,6 +718,12 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 	case *ast.ArrayTypeNode:
 		elem := c.resolveTypeNode(t.ElemType)
 		return types.NewArray(elem)
+	case *ast.TupleTypeNode:
+		elems := make([]types.Type, len(t.Elements))
+		for i, elem := range t.Elements {
+			elems[i] = c.resolveTypeNode(elem)
+		}
+		return types.NewTuple(elems...)
 	case *ast.ObjectTypeNode:
 		obj := types.NewObject("")
 		for _, field := range t.Fields {
