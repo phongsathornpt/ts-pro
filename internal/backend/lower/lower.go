@@ -1547,6 +1547,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
 
+	fnOffsets["ts_number_to_string"] = len(e.Code)
+	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_bool_to_string"] = len(e.Code)
+	emitAMD64BoolToString(e, fnOffsets["ts_alloc"])
+
 	fnOffsets["ts_object_new"] = len(e.Code)
 	emitAMD64ObjectNew(e, fnOffsets["ts_alloc"])
 
@@ -1866,6 +1871,44 @@ func emitAMD64PrintLiteral(e *amd64.Emitter, text string) {
 	e.MovRegImm64(amd64.RAX, 1)
 	e.Syscall()
 	e.MovRegReg(amd64.RSP, amd64.RBP)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64BoolToString(e *amd64.Emitter, allocOffset int) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.SubRegImm32(amd64.RSP, 8)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegImm64(amd64.RDI, 13)
+	callAt := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAt + 5)))
+	e.TestRegReg(amd64.RBX, amd64.RBX)
+	falseJump := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	write := func(offset int32, ch byte) {
+		e.MovRegImm64(amd64.R10, int64(ch))
+		e.MovDerefReg8(amd64.RAX, offset, amd64.R10)
+	}
+	e.MovRegImm64(amd64.R10, 4)
+	e.MovDerefReg(amd64.RAX, 0, amd64.R10)
+	for i, ch := range []byte("true") {
+		write(int32(8+i), ch)
+	}
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+	falseLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[falseJump+2:], uint32(int32(falseLabel-(falseJump+6))))
+	e.MovRegImm64(amd64.R10, 5)
+	e.MovDerefReg(amd64.RAX, 0, amd64.R10)
+	for i, ch := range []byte("false") {
+		write(int32(8+i), ch)
+	}
+	doneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(doneLabel-(doneJump+5))))
+	e.AddRegImm32(amd64.RSP, 8)
+	e.Pop(amd64.RBX)
 	e.Pop(amd64.RBP)
 	e.Ret()
 }

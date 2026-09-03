@@ -680,3 +680,16 @@ console.log(isUp(Direction.Down));
 		expected: "200\n404\n0\n1\n2\n3\n1\n0\n",
 	})
 }
+
+func TestLinuxAMD64TemplateInterpolation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "template_interpolation_typed_coercion",
+		source: "function render(name: string, age: number, active: boolean, title?: string): string {\n" +
+			"  return `${name}:${age + 1}:${active}:${title}`;\n" +
+			"}\n" +
+			"console.log(render(\"alice\", 41, true, \"Dr.\"));\n" +
+			"console.log(render(\"bob\", 9, false));\n" +
+			"console.log(`value=${0.1}, square=${3 * 3}`);\n",
+		expected: "alice:42:true:Dr.\nbob:10:false:undefined\nvalue=0.1, square=9\n",
+	})
+}

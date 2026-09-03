@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/token"
@@ -954,6 +955,76 @@ func (p *Parser) parsePostfix() ast.Expr {
 	}
 }
 
+func (p *Parser) parseTemplateLiteral(tok token.Token) ast.Expr {
+	text := tok.Text
+	if !strings.Contains(text, "${") {
+		return &ast.StringLit{SourceSpan: tok.Span, Value: text}
+	}
+	parts := []ast.Expr{&ast.StringLit{SourceSpan: tok.Span, Value: ""}}
+	for pos := 0; pos < len(text); {
+		rel := strings.Index(text[pos:], "${")
+		if rel < 0 {
+			if pos < len(text) {
+				parts = append(parts, &ast.StringLit{SourceSpan: tok.Span, Value: text[pos:]})
+			}
+			break
+		}
+		start := pos + rel
+		if start > pos {
+			parts = append(parts, &ast.StringLit{SourceSpan: tok.Span, Value: text[pos:start]})
+		}
+		i := start + 2
+		depth := 1
+		quote := byte(0)
+		for i < len(text) && depth > 0 {
+			ch := text[i]
+			if quote != 0 {
+				if ch == '\\' {
+					i += 2
+					continue
+				}
+				if ch == quote {
+					quote = 0
+				}
+				i++
+				continue
+			}
+			if ch == '\'' || ch == '"' || ch == '`' {
+				quote = ch
+				i++
+				continue
+			}
+			switch ch {
+			case '{':
+				depth++
+			case '}':
+				depth--
+			}
+			i++
+		}
+		if depth != 0 {
+			p.error(tok.Span, "unterminated template interpolation")
+			return &ast.StringLit{SourceSpan: tok.Span, Value: text}
+		}
+		exprText := strings.TrimSpace(text[start+2 : i-1])
+		fs := source.NewFileSet()
+		file := fs.AddFile("<template-expression>", []byte(exprText))
+		nested := New(file)
+		expr := nested.parseExpression()
+		if nested.diagnostics.HasErrors() || nested.current().Kind != token.EOF {
+			p.error(tok.Span, "invalid template interpolation expression")
+			return &ast.StringLit{SourceSpan: tok.Span, Value: text}
+		}
+		parts = append(parts, expr)
+		pos = i
+	}
+	result := parts[0]
+	for _, part := range parts[1:] {
+		result = &ast.BinaryExpr{SourceSpan: tok.Span, Left: result, Op: token.Plus, Right: part}
+	}
+	return result
+}
+
 func (p *Parser) parsePrimary() ast.Expr {
 	tok := p.current()
 
@@ -965,9 +1036,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		val, _ := strconv.ParseFloat(tok.Text, 64)
 		return &ast.NumberLit{SourceSpan: tok.Span, Value: val, Raw: tok.Text}
-	case token.String, token.TemplateNoSubst:
+	case token.String:
 		p.advance()
 		return &ast.StringLit{SourceSpan: tok.Span, Value: tok.Text}
+	case token.TemplateNoSubst:
+		p.advance()
+		return p.parseTemplateLiteral(tok)
 	case token.KwTrue:
 		p.advance()
 		return &ast.BoolLit{SourceSpan: tok.Span, Value: true}

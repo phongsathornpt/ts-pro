@@ -10,6 +10,14 @@ import (
 // 17-significant-digit decimal path. It follows ECMAScript's fixed/scientific
 // display thresholds and preserves NaN, infinities, and signed zero.
 func emitAMD64PrintValV2(e *amd64.Emitter) {
+	emitAMD64FormatValV2(e, false, 0)
+}
+
+func emitAMD64NumberToString(e *amd64.Emitter, allocOffset int) {
+	emitAMD64FormatValV2(e, true, allocOffset)
+}
+
+func emitAMD64FormatValV2(e *amd64.Emitter, asString bool, allocOffset int) {
 	var candidateCalls []int
 	emitCandidateCall := func() {
 		at := len(e.Code)
@@ -53,10 +61,40 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	emitReturn := func() {
 		e.MovRegReg(amd64.RDX, amd64.R8)
 		e.SubRegReg(amd64.RDX, amd64.R9)
-		e.MovRegImm64(amd64.RDI, 1)
-		e.MovRegReg(amd64.RSI, amd64.R9)
-		e.MovRegImm64(amd64.RAX, 1)
-		e.Syscall()
+		if asString {
+			e.MovDerefReg(amd64.RBP, -264, amd64.RDX)
+			e.MovDerefReg(amd64.RBP, -272, amd64.R9)
+			e.MovRegReg(amd64.RDI, amd64.RDX)
+			e.AddRegImm32(amd64.RDI, 8)
+			callAt := len(e.Code)
+			e.CallRel32(int32(allocOffset - (callAt + 5)))
+			e.MovDerefReg(amd64.RBP, -280, amd64.RAX)
+			e.MovRegDeref(amd64.RDX, amd64.RBP, -264)
+			e.MovDerefReg(amd64.RAX, 0, amd64.RDX)
+			e.MovRegReg(amd64.R10, amd64.RAX)
+			e.AddRegImm32(amd64.R10, 8)
+			e.MovRegDeref(amd64.R8, amd64.RBP, -272)
+			e.MovRegReg(amd64.R9, amd64.RDX)
+			e.TestRegReg(amd64.R9, amd64.R9)
+			done := len(e.Code)
+			e.JccRel32(amd64.CondE, 0)
+			loop := len(e.Code)
+			e.MovzxRegDeref8(amd64.R11, amd64.R8, 0)
+			e.MovDerefReg8(amd64.R10, 0, amd64.R11)
+			e.AddRegImm32(amd64.R8, 1)
+			e.AddRegImm32(amd64.R10, 1)
+			e.SubRegImm32(amd64.R9, 1)
+			back := len(e.Code)
+			e.JccRel32(amd64.CondNE, 0)
+			patchJcc(back, loop)
+			patchJcc(done, len(e.Code))
+			e.MovRegDeref(amd64.RAX, amd64.RBP, -280)
+		} else {
+			e.MovRegImm64(amd64.RDI, 1)
+			e.MovRegReg(amd64.RSI, amd64.R9)
+			e.MovRegImm64(amd64.RAX, 1)
+			e.Syscall()
+		}
 		e.MovRegReg(amd64.RSP, amd64.RBP)
 		e.Pop(amd64.RBP)
 		e.Ret()
@@ -64,7 +102,7 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
-	e.SubRegImm32(amd64.RSP, 256)
+	e.SubRegImm32(amd64.RSP, 288)
 
 	// Keep raw IEEE-754 bits in RAX for special-value/sign handling.
 	e.MovQRegXMM(amd64.RAX, amd64.XMM0)
@@ -101,7 +139,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	nonZero := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	emitByte(amd64.R8, '0')
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 	patchJcc(nonZero, len(e.Code))
 
@@ -136,7 +176,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondNE, 0)
 	patchJcc(integerFastBack, integerFastLoop)
 	emitCopy(amd64.RSI, amd64.R11)
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 
 	floatingPath := len(e.Code)
@@ -389,7 +431,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	fixedDone := len(e.Code)
 	patchJmp(fixedDoneJump, fixedDone)
 	patchJmp(leadingDoneJump, fixedDone)
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 
 	// Scientific notation: one leading digit, optional fraction, then e±N.
@@ -442,7 +486,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondNE, 0)
 	patchJcc(expBack, expLoop)
 	emitCopy(amd64.RSI, amd64.R11)
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 
 	// NaN and infinities preserve ECMAScript spellings.
@@ -468,7 +514,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	for _, ch := range []byte("Infinity") {
 		emitByte(amd64.R8, ch)
 	}
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 
 	nan := len(e.Code)
@@ -476,7 +524,9 @@ func emitAMD64PrintValV2(e *amd64.Emitter) {
 	for _, ch := range []byte("NaN") {
 		emitByte(amd64.R8, ch)
 	}
-	emitByte(amd64.R8, '\n')
+	if !asString {
+		emitByte(amd64.R8, '\n')
+	}
 	emitReturn()
 
 	// Local candidate parser used only by the shortening search above. It

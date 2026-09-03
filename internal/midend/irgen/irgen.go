@@ -311,6 +311,116 @@ func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Oper
 	return res
 }
 
+func (g *generator) coerceStringType(t types.Type, op ir.Operand) ir.Operand {
+	if t == types.TypeString {
+		return op
+	}
+	if isNumberSemanticType(t) {
+		res := g.currentFn.NewValue("num_str", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_number_to_string", Args: []ir.Operand{op}})
+		return res
+	}
+	if t == types.TypeBoolean {
+		res := g.currentFn.NewValue("bool_str", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_bool_to_string", Args: []ir.Operand{op}})
+		return res
+	}
+	if t == types.TypeNull {
+		return ir.ConstString{Value: "null"}
+	}
+	if t == types.TypeUndefined {
+		return ir.ConstString{Value: "undefined"}
+	}
+	return g.failExpr("native string coercion is not implemented for %s", t)
+}
+
+func (g *generator) coerceNullableUnionString(t *types.UnionType, op ir.Operand) ir.Operand {
+	var concrete types.Type
+	hasNull, hasUndefined := false, false
+	for _, member := range t.Members {
+		switch member.Kind() {
+		case types.KindNull:
+			hasNull = true
+		case types.KindUndefined:
+			hasUndefined = true
+		default:
+			if concrete != nil {
+				return g.failExpr("native string coercion is not implemented for multi-representation union %s", t)
+			}
+			concrete = member
+		}
+	}
+	if concrete == nil {
+		return g.failExpr("native string coercion requires a concrete member in %s", t)
+	}
+	if concrete != types.TypeString && concrete != types.TypeBoolean && !isNumberSemanticType(concrete) {
+		return g.failExpr("native string coercion is not implemented for %s", t)
+	}
+
+	join := g.currentFn.NewBlock("str_coerce_join")
+	incoming := make([]ir.PhiIncoming, 0, 3)
+	emitNullish := func(name string, sentinel ir.Operand, literal string) {
+		cond := g.currentFn.NewValue(name+"_match", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: cond, Op: ir.OpEq, LHS: op, RHS: sentinel})
+		match := g.currentFn.NewBlock(name)
+		next := g.currentFn.NewBlock(name + "_next")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: cond, Then: match, Else: next}
+		match.Terminator = &ir.JumpTerm{Target: join}
+		incoming = append(incoming, ir.PhiIncoming{Block: match, Value: ir.ConstString{Value: literal}})
+		g.currentBB = next
+	}
+	if hasUndefined {
+		emitNullish("str_undefined", ir.ConstUndefined{}, "undefined")
+	}
+	if hasNull {
+		emitNullish("str_null", ir.ConstNull{}, "null")
+	}
+	fallback := g.currentBB
+	converted := g.coerceStringType(concrete, op)
+	if fallback.Terminator == nil {
+		fallback.Terminator = &ir.JumpTerm{Target: join}
+	}
+	incoming = append(incoming, ir.PhiIncoming{Block: fallback, Value: converted})
+	g.currentBB = join
+	res := g.currentFn.NewValue("str_coerce", types.TypeString)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: res, Incoming: incoming})
+	return res
+}
+
+func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand {
+	t := g.semanticType(expr)
+	if t == nil {
+		t = op.Type()
+	}
+	if union, ok := t.(*types.UnionType); ok {
+		return g.coerceNullableUnionString(union, op)
+	}
+	return g.coerceStringType(t, op)
+}
+
+func isNumberSemanticType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t == types.TypeNumber {
+		return true
+	}
+	if u, ok := t.(*types.UnionType); ok {
+		hasNumber := false
+		for _, m := range u.Members {
+			switch m.Kind() {
+			case types.KindNumber:
+				hasNumber = true
+			case types.KindNull, types.KindUndefined:
+			default:
+				return false
+			}
+		}
+		return hasNumber
+	}
+	return false
+}
+
 func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct{}) []string {
 	found := make(map[string]struct{})
 	var walk func(ast.Expr)
@@ -1426,12 +1536,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				isString = true
 			}
 			if isString {
+				lhs = g.coerceStringOperand(e.Left, lhs)
+				rhs = g.coerceStringOperand(e.Right, rhs)
 				resVal := g.currentFn.NewValue("str", types.TypeString)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-					Res:    resVal,
-					Callee: "ts_string_concat",
-					Args:   []ir.Operand{lhs, rhs},
-				})
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: resVal, Callee: "ts_string_concat", Args: []ir.Operand{lhs, rhs}})
 				return resVal
 			}
 		}
