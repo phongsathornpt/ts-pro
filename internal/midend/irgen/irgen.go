@@ -21,6 +21,7 @@ type generator struct {
 	currentFn         *ir.Function
 	currentBB         *ir.BasicBlock
 	locals            map[string]ir.Operand
+	localProvenance   map[string]types.Type
 	err               error
 	arrowCounter      int
 	genericDecls      map[string]*ast.FunctionDecl
@@ -303,10 +304,10 @@ func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete
 	// Register before lowering so recursive calls reuse this specialization.
 	g.genericSpecs[key] = name
 
-	outerFn, outerBB, outerLocals, outerBindings := g.currentFn, g.currentBB, g.locals, g.typeBindings
+	outerFn, outerBB, outerLocals, outerProvenance, outerBindings := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings
 	g.typeBindings = bindings
 	fn, err := g.lowerFunctionAs(decl, concrete, name)
-	g.currentFn, g.currentBB, g.locals, g.typeBindings = outerFn, outerBB, outerLocals, outerBindings
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings = outerFn, outerBB, outerLocals, outerProvenance, outerBindings
 	if err != nil {
 		delete(g.genericSpecs, key)
 		return "", err
@@ -503,7 +504,7 @@ func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetTy
 		}
 		switch sourceType.Kind() {
 		case types.KindNumber, types.KindString, types.KindBoolean,
-			types.KindArray, types.KindTuple, types.KindFunction:
+			types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
 			return g.boxJSValue(value, sourceType)
 		case types.KindNull, types.KindUndefined:
 			return value
@@ -524,7 +525,7 @@ func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetTy
 			callee = "ts_js_unbox_string"
 		case types.KindBoolean:
 			callee = "ts_js_unbox_bool"
-		case types.KindArray, types.KindTuple, types.KindFunction:
+		case types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
 			callee = "ts_js_unbox_ref"
 		default:
 			return value
@@ -749,13 +750,14 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		}
 	}
 
-	outerFn, outerBB, outerLocals := g.currentFn, g.currentBB, g.locals
+	outerFn, outerBB, outerLocals, outerProvenance := g.currentFn, g.currentBB, g.locals, g.localProvenance
 	name := fmt.Sprintf("$arrow%d", g.arrowCounter)
 	g.arrowCounter++
 	lifted := ir.NewFunction(name, fnType.Return)
 	g.currentFn = lifted
 	g.currentBB = lifted.NewBlock("entry")
 	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
 
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
@@ -780,7 +782,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	}
 	g.prog.Functions = append(g.prog.Functions, lifted)
 
-	g.currentFn, g.currentBB, g.locals = outerFn, outerBB, outerLocals
+	g.currentFn, g.currentBB, g.locals, g.localProvenance = outerFn, outerBB, outerLocals, outerProvenance
 	res := g.currentFn.NewValue("closure", fnType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
 		Res: res, Function: name, Captures: captureOps, RefMask: refMask,
@@ -1296,6 +1298,7 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 	g.currentFn = irFn
 	g.currentBB = irFn.NewBlock("entry")
 	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
 	previousClass := g.currentClass
 	g.currentClass = info
 	defer func() { g.currentClass = previousClass }()
@@ -1399,9 +1402,9 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 		return nil
 	}
 
-	outerFn, outerBB, outerLocals, outerBindings := g.currentFn, g.currentBB, g.locals, g.typeBindings
+	outerFn, outerBB, outerLocals, outerProvenance, outerBindings := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings
 	defer func() {
-		g.currentFn, g.currentBB, g.locals, g.typeBindings = outerFn, outerBB, outerLocals, outerBindings
+		g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings = outerFn, outerBB, outerLocals, outerProvenance, outerBindings
 	}()
 
 	ctorDecl := classConstructorDecl(cls)
@@ -1434,9 +1437,9 @@ func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
 		return nil
 	}
 	g.emittedClassSpecs[info.Name] = true
-	outerFn, outerBB, outerLocals, outerBindings, outerClass := g.currentFn, g.currentBB, g.locals, g.typeBindings, g.currentClass
+	outerFn, outerBB, outerLocals, outerProvenance, outerBindings, outerClass := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings, g.currentClass
 	defer func() {
-		g.currentFn, g.currentBB, g.locals, g.typeBindings, g.currentClass = outerFn, outerBB, outerLocals, outerBindings, outerClass
+		g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings, g.currentClass = outerFn, outerBB, outerLocals, outerProvenance, outerBindings, outerClass
 	}()
 	g.typeBindings = info.TypeBindings
 	cls := info.Decl
@@ -1531,6 +1534,7 @@ func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
 	irFn := ir.NewFunction("@main", types.TypeVoid)
 	g.currentFn = irFn
 	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
 
 	entryBB := irFn.NewBlock("entry")
 	g.currentBB = entryBB
@@ -1560,6 +1564,7 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 	irFn := ir.NewFunction(name, retType)
 	g.currentFn = irFn
 	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
 
 	entryBB := irFn.NewBlock("entry")
 	g.currentBB = entryBB
@@ -1587,6 +1592,22 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 		return nil, g.err
 	}
 	return irFn, nil
+}
+
+func (g *generator) provenObjectType(expr ast.Expr) (*types.ObjectType, bool) {
+	ident, ok := expr.(*ast.IdentExpr)
+	if !ok || g.localProvenance == nil {
+		return nil, false
+	}
+	t, ok := g.localProvenance[ident.Name].(*types.ObjectType)
+	return t, ok && t != nil
+}
+
+func (g *generator) unboxKnownObject(value ir.Operand, objectType *types.ObjectType) ir.Operand {
+	if value == nil || objectType == nil {
+		return value
+	}
+	return g.coerceJSValueBoundary(value, types.TypeAny, objectType)
 }
 
 func (g *generator) lowerDynamicObjectLiteral(lit *ast.ObjectLit) ir.Operand {
@@ -1650,7 +1671,15 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 					initOp = g.lowerExpr(d.Init)
 				}
 				if i < len(resolved) {
-					initOp = g.coerceJSValueBoundary(initOp, g.semanticType(d.Init), resolved[i])
+					sourceType := g.semanticType(d.Init)
+					initOp = g.coerceJSValueBoundary(initOp, sourceType, resolved[i])
+					if irJSValueType(resolved[i]) {
+						if objectType, ok := sourceType.(*types.ObjectType); ok {
+							if _, dynamicLiteral := d.Init.(*ast.ObjectLit); !dynamicLiteral {
+								g.localProvenance[d.Name] = objectType
+							}
+						}
+					}
 				}
 			}
 			if initOp == nil {
@@ -1927,6 +1956,7 @@ func (g *generator) lowerIf(s *ast.IfStmt) {
 
 	// Restore locals for else block
 	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
 	for k, v := range origLocals {
 		g.locals[k] = v
 	}
@@ -2635,6 +2665,17 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return res
 			}
 			if target.Type() == types.TypeAny {
+				if concrete, ok := g.provenObjectType(e.Target); ok {
+					offsets, _, _ := g.objectLayout(concrete)
+					if offset, exists := offsets[key]; exists {
+						field := concrete.Fields[key]
+						raw := g.unboxKnownObject(target, concrete)
+						res := g.currentFn.NewValue("computed_any_field", field.Type)
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: raw, Field: key, Offset: offset})
+						return res
+					}
+					return ir.ConstUndefined{}
+				}
 				return g.lowerDynamicGet(target, key)
 			}
 			return g.failExpr("native string-key indexing requires a closed object or dynamic object")
@@ -2737,10 +2778,22 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				offsets, _, _ := g.objectLayout(concrete)
 				if offset, exists := offsets[e.Property]; exists {
 					field := concrete.Fields[e.Property]
-					res := g.currentFn.NewValue("any_field", field.Type)
+					res := g.currentFn.NewValue("any_typed_field", field.Type)
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
 					return res
 				}
+				return ir.ConstUndefined{}
+			}
+			if concrete, ok := g.provenObjectType(e.Object); ok {
+				offsets, _, _ := g.objectLayout(concrete)
+				if offset, exists := offsets[e.Property]; exists {
+					field := concrete.Fields[e.Property]
+					raw := g.unboxKnownObject(obj, concrete)
+					res := g.currentFn.NewValue("any_field", field.Type)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: raw, Field: e.Property, Offset: offset})
+					return res
+				}
+				return ir.ConstUndefined{}
 			}
 			if obj.Type() == types.TypeAny {
 				return g.lowerDynamicGet(obj, e.Property)
@@ -2974,16 +3027,18 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if mem, ok := e.Left.(*ast.MemberExpr); ok && g.semanticType(mem.Object) == types.TypeAny {
 			obj := g.lowerExpr(mem.Object)
-			if concrete, ok := obj.Type().(*types.ObjectType); ok {
+			if concrete, ok := g.provenObjectType(mem.Object); ok {
 				offsets, _, _ := g.objectLayout(concrete)
 				if offset, exists := offsets[mem.Property]; exists {
 					if e.Op != token.Eq {
 						return g.failExpr("compound assignment through any alias is not implemented yet")
 					}
 					rhs := g.lowerExpr(e.Right)
-					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: rhs})
+					raw := g.unboxKnownObject(obj, concrete)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: raw, Field: mem.Property, Offset: offset, Val: rhs})
 					return rhs
 				}
+				return g.failExpr("cannot add property %q to a proven closed shape through any", mem.Property)
 			}
 			if obj.Type() == types.TypeAny {
 				if e.Op != token.Eq {
@@ -3016,6 +3071,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					return value
 				}
 				if target.Type() == types.TypeAny {
+					if concrete, ok := g.provenObjectType(idx.Target); ok {
+						offsets, _, _ := g.objectLayout(concrete)
+						if offset, exists := offsets[key]; exists {
+							if e.Op != token.Eq {
+								return g.failExpr("compound computed assignment through any alias is not implemented yet")
+							}
+							rhs := g.lowerExpr(e.Right)
+							raw := g.unboxKnownObject(target, concrete)
+							g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: raw, Field: key, Offset: offset, Val: rhs})
+							return rhs
+						}
+						return g.failExpr("cannot add computed property %q to a proven closed shape through any", key)
+					}
 					if e.Op != token.Eq {
 						return g.failExpr("dynamic computed compound assignment is not implemented yet")
 					}
@@ -3077,8 +3145,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			rhs := g.lowerExpr(e.Right)
 			if e.Op == token.Eq {
 				targetType := g.semanticType(e.Left)
-				rhs = g.coerceJSValueBoundary(rhs, g.semanticType(e.Right), targetType)
+				sourceType := g.semanticType(e.Right)
+				rhs = g.coerceJSValueBoundary(rhs, sourceType, targetType)
 				g.locals[ident.Name] = rhs
+				delete(g.localProvenance, ident.Name)
+				if irJSValueType(targetType) {
+					if objectType, ok := sourceType.(*types.ObjectType); ok {
+						g.localProvenance[ident.Name] = objectType
+					}
+				}
 				return rhs
 			}
 			value := g.lowerAssignmentValue(e, current, rhs)

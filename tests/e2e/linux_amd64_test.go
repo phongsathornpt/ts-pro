@@ -1102,3 +1102,32 @@ console.log(returnedClosureNative(41));
 		expected: "42\n42\n42\n",
 	})
 }
+
+func TestLinuxAMD64JSValueClosedObjectProvenance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "jsvalue_closed_object_provenance",
+		source: `
+interface Child { value: number; }
+interface Holder { count: number; label: string; active: boolean; child: Child; }
+const typed: Holder = { count: 42, label: "before", active: true, child: { value: 7 } };
+const alias: any = typed;
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(alias.count);
+console.log(alias.label);
+console.log(alias.active);
+console.log(alias.child.value);
+console.log(alias.missing);
+const replacement: Child = { value: 77 };
+alias.count = 99;
+alias.label = "after";
+alias.active = false;
+alias.child = replacement;
+console.log(typed.count);
+console.log(typed.label);
+console.log(typed.active);
+console.log(typed.child.value);
+`,
+		expected: "42\nbefore\n1\n7\nundefined\n99\nafter\n0\n77\n",
+	})
+}
