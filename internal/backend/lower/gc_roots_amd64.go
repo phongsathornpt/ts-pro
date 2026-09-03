@@ -99,4 +99,5 @@ const (
 	amd64ObjectTypeJSValueData    int64 = 6
 	amd64ObjectTypeDynamicObject  int64 = 7
 	amd64ObjectTypeDynamicEntries int64 = 8
+	amd64ObjectTypeTask           int64 = 9
 )

@@ -1588,6 +1588,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
+	fnOffsets["ts_task_spawn"] = len(e.Code)
+	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_task_join"] = len(e.Code)
+	emitAMD64TaskJoin(e)
 
 	fnOffsets["ts_number_to_string"] = len(e.Code)
 	emitAMD64NumberToString(e, fnOffsets["ts_alloc"])

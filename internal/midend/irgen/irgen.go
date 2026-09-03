@@ -441,6 +441,32 @@ func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand
 	return g.coerceStringType(t, op)
 }
 
+func nativeTaskResultKind(t types.Type) float64 {
+	if t == nil || t.Kind() == types.KindVoid {
+		return float64(amd64TaskResultVoidIR)
+	}
+	if t.Kind() == types.KindNumber {
+		return float64(amd64TaskResultNumberIR)
+	}
+	if irJSValueType(t) {
+		return float64(amd64TaskResultJSIR)
+	}
+	switch t.Kind() {
+	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
+		return float64(amd64TaskResultRefIR)
+	default:
+		return float64(amd64TaskResultScalarIR)
+	}
+}
+
+const (
+	amd64TaskResultVoidIR = iota
+	amd64TaskResultNumberIR
+	amd64TaskResultScalarIR
+	amd64TaskResultRefIR
+	amd64TaskResultJSIR
+)
+
 func restParamIndex(params []types.Param) int {
 	for i, param := range params {
 		if param.Rest {
@@ -3023,6 +3049,42 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
+		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
+			switch ident.Name {
+			case "spawn":
+				if len(e.Args) != 1 {
+					return g.failExpr("native spawn expects exactly one closure")
+				}
+				taskType, ok := g.semanticType(e).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("native spawn is missing a task handle type")
+				}
+				resultType, ok := g.semaResult.TaskResults[taskType.Name]
+				if !ok {
+					return g.failExpr("native spawn task %q is missing result metadata", taskType.Name)
+				}
+				closure := g.lowerExpr(e.Args[0])
+				res := g.currentFn.NewValue("task", taskType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+					Res: res, Callee: "ts_task_spawn",
+					Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}},
+				})
+				return res
+			case "join":
+				if len(e.Args) != 1 {
+					return g.failExpr("native join expects exactly one task")
+				}
+				task := g.lowerExpr(e.Args[0])
+				resultType := g.semanticType(e)
+				if resultType == nil || resultType.Kind() == types.KindVoid {
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_join", Args: []ir.Operand{task}})
+					return nil
+				}
+				res := g.currentFn.NewValue("task_result", resultType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_join", Args: []ir.Operand{task}})
+				return res
+			}
+		}
 		if isConsoleLogCall(e.Callee) {
 			if len(e.Args) != 1 {
 				return g.failExpr("console.log native lowering expects exactly one argument")

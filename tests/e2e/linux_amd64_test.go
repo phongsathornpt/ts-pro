@@ -1307,3 +1307,28 @@ console.log(dynamicBox.plain(2));
 		expected: "42\n42\n",
 	})
 }
+
+func TestLinuxAMD64TypedSpawnJoinResults(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "typed_spawn_join_results",
+		source: `
+const base = 40;
+const numberTask = spawn((): number => base + 2);
+const boolTask = spawn((): boolean => true);
+const stringTask = spawn((): string => "task-" + "string");
+const objectTask = spawn((): { value: number } => ({ value: 42 }));
+const arrayTask = spawn((): number[] => [1, 42, 3]);
+const anyTask = spawn((): any => 42);
+let churn = "";
+for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
+console.log(join(numberTask));
+console.log(join(numberTask));
+console.log(join(boolTask));
+console.log(join(stringTask));
+console.log(join(objectTask).value);
+console.log(join(arrayTask)[1]!);
+console.log(join(anyTask));
+`,
+		expected: "42\n42\n1\ntask-string\n42\n42\n42\n",
+	})
+}

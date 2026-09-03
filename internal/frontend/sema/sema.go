@@ -92,6 +92,7 @@ type Result struct {
 	Enums              map[string]map[string]float64
 	ImportAliases      map[string]string
 	BuiltinCollections map[string]*BuiltinCollectionInfo
+	TaskResults        map[string]types.Type
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
@@ -108,6 +109,7 @@ type Checker struct {
 	typeParamEnvs     []map[string]*types.TypeVar
 	genericClassSpecs map[string]*ClassInfo
 	classSpecCount    int
+	taskTypeCount     int
 }
 
 func NewChecker() *Checker {
@@ -124,6 +126,7 @@ func NewChecker() *Checker {
 			ImportAliases:      make(map[string]string),
 			VarTypes:           make(map[*ast.VarDeclStmt][]types.Type),
 			BuiltinCollections: make(map[string]*BuiltinCollectionInfo),
+			TaskResults:        make(map[string]types.Type),
 			RootScope:          root,
 			Diagnostics:        make(diag.DiagnosticList, 0),
 		},
@@ -1225,6 +1228,54 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = fnType
 		return fnType
 	case *ast.CallExpr:
+		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
+			switch ident.Name {
+			case "spawn":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "spawn expects exactly one zero-argument function.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				fnType, ok := c.checkExpr(e.Args[0]).(*types.FunctionType)
+				if !ok {
+					c.error(e.Args[0].Span(), "TS2345", "spawn expects a function value.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				if len(fnType.Params) != 0 {
+					c.error(e.Args[0].Span(), "TS2345", "spawn currently requires a zero-argument function.")
+				}
+				name := fmt.Sprintf("$Task$%d", c.taskTypeCount)
+				c.taskTypeCount++
+				taskType := types.NewObject(name)
+				c.result.TaskResults[name] = fnType.Return
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = taskType
+				return taskType
+			case "join":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "join expects exactly one task.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				taskType := c.checkExpr(e.Args[0])
+				obj, ok := taskType.(*types.ObjectType)
+				if !ok {
+					c.error(e.Args[0].Span(), "TS2345", "join expects a task handle.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				resultType, ok := c.result.TaskResults[obj.Name]
+				if !ok {
+					c.error(e.Args[0].Span(), "TS2345", "join received an unknown task handle type.")
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = resultType
+				return resultType
+			}
+		}
 		calleeType := c.checkExpr(e.Callee)
 		fnType, ok := calleeType.(*types.FunctionType)
 		if !ok {
