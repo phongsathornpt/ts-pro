@@ -2,6 +2,77 @@
 
 Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
+## Active raw-native compiler status (source of truth)
+
+> This section tracks the currently active handwritten frontend → SSA → raw native backend.
+> Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only and do **not** mean this active backend is 100% complete.
+> Current fixture sweep after template interpolation: **47 / 125 compile PASS, 68 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **15/25** compile cleanly; dynamic has **3 PASS / 1 DIAG / 10 backend FAIL**, and concurrency remains **57 DIAG**.
+
+### Completed active milestones
+
+- [x] Linux AMD64 standalone ELF startup, SysV ABI, spills, strict fixups, F64/SSE2 semantics, short-circuit logic, shortest-roundtrip NumberToString, and cross-host Linux-AMD64 execution runner.
+- [x] Native heap metadata, precise shadow roots, mark-sweep reclamation/free-list reuse, and GC stress for current heap objects.
+- [x] Native strings, arrays, indexed growth, tuples, closed objects, closures/indirect calls, and reference-aware GC tracing.
+- [x] Generic function type variables, inference, explicit specialization, monomorphized IR, heterogeneous generic tuples, and specialization caching.
+- [x] Non-generic and generic native classes, constructors, parameter properties, initializers, mutation, inheritance, `super(...)`, overrides, hidden class tags, and closed-world virtual dispatch.
+- [x] `do...while`, `switch`, array `for...of`, compound assignments, parser progress guarantees, and fail-loud unsupported IR generation.
+- [x] Array/object/tuple destructuring via single-evaluation parser desugaring.
+- [x] Native null/undefined sentinels plus optional/default-call ABI classification, omitted optional arguments, and `console.log(undefined)`.
+- [x] Numeric enums lowered as compile-time constants.
+- [x] Template literal interpolation with normal expression parsing, exact number-to-string conversion, boolean/nullish coercion, nullable-union coercion, and native regression coverage.
+
+### Remaining basic TypeScript / standard-library fixtures
+
+- [ ] Rest parameters and spread syntax.
+  - [ ] Rest parameter ABI/lowering.
+  - [ ] Array spread.
+  - [ ] Object spread.
+- [ ] Nullish and optional semantics beyond the sentinel foundation.
+  - [ ] `??` nullish coalescing.
+  - [ ] Optional chaining `?.`.
+  - [ ] Optional object fields and missing-field `undefined`.
+  - [ ] Union property lookup across compatible object members.
+- [ ] Computed property keys / index access for statically known string keys.
+- [ ] Evolving/dynamic object shapes.
+- [ ] Multi-module import/export graph, module resolution, linking, and cross-module symbol naming.
+- [ ] Native standard APIs required by fixtures.
+  - [ ] `JSON.parse` / `JSON.stringify`.
+  - [ ] `Date`.
+  - [ ] `Map` / `Set`.
+  - [ ] `RegExp`, including regex literal syntax.
+
+### Dynamic JavaScript value model
+
+- [ ] Introduce a real native `JSValue` representation without degrading typed F64/string/object fast paths.
+- [ ] Boxing/unboxing boundaries for `any` and mixed unions.
+- [ ] Dynamic truthiness, equality, arithmetic, `ToPrimitive`, `ToNumber`, and `ToString`.
+- [ ] Dynamic property get/set and evolving property storage.
+- [ ] Dynamic calls and receiver-correct method `this`.
+- [ ] Close all `examples/dynamic/*` native fixture failures and add differential tests.
+
+### Native concurrency and async/Promise coverage for the active backend
+
+- [ ] Add active-backend semantic declarations and IR for scheduler/task primitives (`spawn`, `join`, `yieldNow`, `sleep`, task groups/cancellation/context).
+- [ ] Add typed task results and precise GC roots for suspended tasks.
+- [ ] Add typed buffered/unbuffered channels plus blocking/nonblocking operations.
+- [ ] Add parser/sema support for `async`, `await`, `try`, `catch`, `finally`, and `throw`.
+- [ ] Lower async functions to resumable state machines with typed spill/root state.
+- [ ] Add Promise lifecycle, rejection propagation, adoption/thenables, repeated await, and aggregate combinators required by fixtures.
+- [ ] Close all `examples/concurrency/*` native fixture failures.
+
+### Active-backend final acceptance
+
+- [ ] Re-run and commit a deterministic native fixture sweep script.
+- [ ] Reach **125 / 125** active raw-native fixtures compiling with **0 diagnostics, 0 lowering failures, 0 timeouts**.
+- [ ] Add Node differential execution for deterministic observable semantics and require matching stdout/exit status.
+- [ ] Stress GC during dynamic-object graphs, closures, class dispatch, suspended tasks, channels, and Promise continuations.
+- [ ] `CGO_ENABLED=0 go test ./...`.
+- [ ] `CGO_ENABLED=0 go vet ./...`.
+- [ ] `CGO_ENABLED=0 go build ./...`.
+- [ ] `make test-linux-amd64`.
+- [ ] `git diff --check`.
+- [ ] Only after the gates above pass, mark the active raw-native compiler roadmap 100% complete.
+
 ## Current pure-Go Linux AMD64 backend
 
 - [x] Explicit `linux/amd64` target validation; unsupported target pairs fail instead of silently falling back.
@@ -29,7 +100,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Keep Go under `runtime/` (and native-library packages) for allocator/GC, scheduler/tasks, channels, timers, blocking pool, JSValue, strings/arrays/objects, and native libraries.
   - [x] Remove all handwritten runtime C after Go runtime parity; the cached Go `c-archive` now publishes its generated C-compatible ABI header for toolchain/tests.
 
-## Pure Go only refactor
+## Historical / alternate Pure-Go refactor (reference only)
 
 The current Go c-archive/C ABI path is transitional and is superseded by this
 target. Pure Go means the repository builds and tests with `CGO_ENABLED=0` and
@@ -87,10 +158,10 @@ contains no C or assembly implementation dependency.
 
 ## Project completion goal
 
-- [x] Reach 100% of the compiler roadmap tracked in this file, with every completed capability covered by native acceptance/regression tests and differential tests where TypeScript/JavaScript observable behavior applies.
-- [x] Do not mark the project 100% until all `[ ]` and `[~]` roadmap items below are either completed (`[x]`) or explicitly superseded (`[S]`) with a documented replacement.
+- [~] Reach 100% of the **active raw-native compiler roadmap above**; historical completed roadmaps below are reference material and do not satisfy this goal.
+- [ ] Do not mark the active project 100% until all `[ ]` and `[~]` items in **Active raw-native compiler status** are completed (`[x]`) or explicitly superseded (`[S]`) with a documented replacement.
 
-## Foundation and frontend
+## Historical broader roadmap: foundation and frontend (reference only)
 
 - [S] Historical migration from Rust to the current Go compiler path; superseded as target architecture by the TypeScript-7 compiler / Go-runtime-only split.
 - [x] Remove the superseded Rust workspace from the repository.
@@ -105,7 +176,7 @@ contains no C or assembly implementation dependency.
 - [x] Preserve the existing Go TypeScript-LS workspace manager only as transitional tooling; move compiler/workspace ownership into the TypeScript 7 implementation.
 - [x] Preserve TypeScript-LS crash detection and generation-based restart behavior during compiler migration.
 
-## HIR, representation, and MIR
+## Historical broader roadmap: HIR, representation, and MIR (reference only)
 
 - [x] Preserve the current Go semantic DTO/HIR implementation as a reference while porting compiler-owned DTO/HIR into the TypeScript 7 compiler.
 - [x] Separate TypeScript semantic types from native runtime `Repr`.
@@ -152,7 +223,7 @@ contains no C or assembly implementation dependency.
   - [x] Nested generic types, generic recursion, constrained structural generics, and specialization caching across modules.
 - [x] Exceptions, Promise, and async/await.
 
-## Native concurrency management
+## Historical broader roadmap: native concurrency management (reference only)
 
 - [x] Add bounded lazy native scheduler core with `TSNATIVE_WORKERS`, parked idle workers, and deterministic restartable shutdown.
 - [x] Add lightweight stackless task lifecycle, bounded `TSNATIVE_MAX_TASKS` active-task accounting, FIFO runnable execution, join/release, and 10k-task churn coverage.
