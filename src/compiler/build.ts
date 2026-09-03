@@ -24,6 +24,10 @@ export class CompilerDriver {
     this.options = options;
   }
 
+  public getOptions(): Readonly<BuildOptions> {
+    return this.options;
+  }
+
   public compileMIRToLLVM(module: Module): string {
     return emitLLVM(module);
   }

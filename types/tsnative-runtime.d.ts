@@ -23,8 +23,8 @@ declare function taskGroup(): TsnativeTaskGroup;
 declare function groupSpawn<T>(group: TsnativeTaskGroup, fn: () => T): TsnativeTask<T>;
 declare function groupJoin(group: TsnativeTaskGroup): void;
 declare function groupCancel(group: TsnativeTaskGroup): void;
-declare function setTaskContext(value: any): void;
-declare function taskContext(): any;
+declare function setTaskContext<T = unknown>(value: T): void;
+declare function taskContext<T = unknown>(): T;
 
 interface TsnativeChannel<T> {
   readonly __tsnativeChannelBrand: never;

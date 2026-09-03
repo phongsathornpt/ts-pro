@@ -47,7 +47,7 @@ function emitFunction(fn: Function, out: string[]): void {
 function emitInstruction(inst: Instruction, out: string[]): void {
   const res = `%v${inst.result}`;
   const repr = inst.repr;
-  const op = inst.op;
+  const op: Operation = inst.op;
 
   switch (op.kind) {
     case "ConstF64":
@@ -68,8 +68,8 @@ function emitInstruction(inst: Instruction, out: string[]): void {
       emitUnary(res, repr, op.op, op.operand, out);
       break;
     case "Call": {
-      const args = op.args.map(a => `double %v${a}`).join(", "); // simplified
-      out.push(`  ${res} = call ${llvmType(repr)} @fn${op.callee}(${args})`);
+      const args = op.args.map(a => `double %v${a}`).join(", ");
+      out.push(`  ${res} = call ${llvmType(repr)} @f${op.callee}(${args})`);
       break;
     }
     case "Intrinsic":
@@ -84,13 +84,15 @@ function emitInstruction(inst: Instruction, out: string[]): void {
       out.push(`  ${res} = phi ${llvmType(repr)} ${incoming}`);
       break;
     }
-    default:
-      out.push(`  ; op ${(op as any).kind}`);
+    default: {
+      const unhandledOp: { readonly kind: string } = op;
+      out.push(`  ; op ${unhandledOp.kind}`);
       break;
+    }
   }
 }
 
-function emitBinary(res: string, repr: Repr, op: BinaryOp, left: number, right: number, out: string[]): void {
+function emitBinary(res: string, _repr: Repr, op: BinaryOp, left: number, right: number, out: string[]): void {
   const l = `%v${left}`;
   const r = `%v${right}`;
   switch (op) {
@@ -132,7 +134,7 @@ function emitBinary(res: string, repr: Repr, op: BinaryOp, left: number, right: 
   }
 }
 
-function emitUnary(res: string, repr: Repr, op: UnaryOp, operand: number, out: string[]): void {
+function emitUnary(res: string, _repr: Repr, op: UnaryOp, operand: number, out: string[]): void {
   const v = `%v${operand}`;
   switch (op) {
     case UnaryOp.Negate:

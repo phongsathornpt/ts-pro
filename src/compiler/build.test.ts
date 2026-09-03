@@ -1,4 +1,3 @@
-import { emitLLVM } from "../codegen/llvm.ts";
 import { Repr } from "../mir/mir.ts";
 import type { Module } from "../mir/mir.ts";
 import { BinaryOp } from "../frontend/model.ts";

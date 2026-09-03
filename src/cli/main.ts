@@ -1,6 +1,10 @@
 import { CompilerDriver } from "../compiler/build.ts";
 
-declare const process: any;
+interface NodeJSProcess {
+  readonly argv: readonly string[];
+  exit(code?: number): never;
+}
+declare const process: NodeJSProcess;
 
 function main() {
   const args = process.argv.slice(2);
@@ -25,10 +29,13 @@ function main() {
 
     for (let i = 1; i < args.length; i++) {
       const arg = args[i];
+      if (arg === undefined) {
+        continue;
+      }
       if (arg === "--thin-lto") {
         thinLTO = true;
       } else if (arg === "-o" && i + 1 < args.length) {
-        output = args[++i];
+        output = args[++i] ?? "";
       } else if (!arg.startsWith("-")) {
         input = arg;
       }
@@ -40,6 +47,7 @@ function main() {
     }
 
     const driver = new CompilerDriver({ input, output, thinLTO });
+    void driver;
     console.log(`[tspro-ts] Compiling ${input} (thinLTO: ${thinLTO})...`);
   }
 }

@@ -119,8 +119,11 @@ func (e *extractor) extractConcurrencyCall(node tsast.Node, expr *Expr, name str
 		expr.Callee = nil
 		return expr, nil
 	case "taskContext":
-		if len(expr.Args) != 0 || int(expr.Type) >= len(e.result.Types) || e.result.Types[expr.Type].Kind != TypeAny {
+		if len(expr.Args) != 0 || int(expr.Type) >= len(e.result.Types) || (e.result.Types[expr.Type].Kind != TypeAny && e.result.Types[expr.Type].Kind != TypeUnknown) {
 			return nil, fmt.Errorf("taskContext at %d takes no arguments and returns any", node.Pos())
+		}
+		if e.result.Types[expr.Type].Kind == TypeUnknown {
+			e.result.Types[expr.Type].Kind = TypeAny
 		}
 		expr.Kind = ExprTaskContextGet
 		expr.Callee = nil
