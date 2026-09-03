@@ -259,3 +259,23 @@ console.log(outer[0]![0]);
 		expected: "keep-alive\nnested-alive\n",
 	})
 }
+
+func TestLinuxAMD64ArrayCapacityGrowth(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "array_capacity_growth_preserves_payloads",
+		source: `
+let nums: number[] = [1, 2, 3, 4];
+console.log(nums.push(5));
+console.log(nums[0]);
+console.log(nums[4]);
+let refs: string[] = ["a", "b", "c", "d"];
+refs[0] = "keep-" + "alive";
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(refs.push("e"));
+console.log(refs[0]);
+console.log(refs.pop()!);
+console.log(refs.length);
+`,
+		expected: "5\n1\n5\n5\nkeep-alive\ne\n4\n",
+	})
+}
