@@ -186,6 +186,25 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 						endMap[v.ID] = step
 					}
 				}
+			case *ir.MakeClosureInst:
+				for _, cap := range i.Captures {
+					if v, ok := cap.(*ir.Value); ok {
+						endMap[v.ID] = step
+					}
+				}
+			case *ir.ClosureGetInst:
+				if v, ok := i.Closure.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+			case *ir.IndirectCallInst:
+				if v, ok := i.Closure.(*ir.Value); ok {
+					endMap[v.ID] = step
+				}
+				for _, arg := range i.Args {
+					if v, ok := arg.(*ir.Value); ok {
+						endMap[v.ID] = step
+					}
+				}
 			case *ir.AllocArrayInst:
 				if v, ok := i.Length.(*ir.Value); ok {
 					endMap[v.ID] = step

@@ -92,6 +92,25 @@ type (
 		Args   []Operand
 	}
 
+	MakeClosureInst struct {
+		Res      *Value
+		Function string
+		Captures []Operand
+		RefMask  uint64
+	}
+
+	ClosureGetInst struct {
+		Res     *Value
+		Closure Operand
+		Index   int
+	}
+
+	IndirectCallInst struct {
+		Res     *Value
+		Closure Operand
+		Args    []Operand
+	}
+
 	AllocObjectInst struct {
 		Res        *Value
 		Shape      string
@@ -224,6 +243,32 @@ func (i *CallInst) String() string {
 		return fmt.Sprintf("%s = call @%s(%s)", i.Res, i.Callee, strings.Join(args, ", "))
 	}
 	return fmt.Sprintf("call @%s(%s)", i.Callee, strings.Join(args, ", "))
+}
+func (i *MakeClosureInst) instructionNode() {}
+func (i *MakeClosureInst) Result() *Value   { return i.Res }
+func (i *MakeClosureInst) String() string {
+	var caps []string
+	for _, c := range i.Captures {
+		caps = append(caps, c.String())
+	}
+	return fmt.Sprintf("%s = make_closure @%s refs=%#x [%s]", i.Res, i.Function, i.RefMask, strings.Join(caps, ", "))
+}
+func (i *ClosureGetInst) instructionNode() {}
+func (i *ClosureGetInst) Result() *Value   { return i.Res }
+func (i *ClosureGetInst) String() string {
+	return fmt.Sprintf("%s = closure_get %s[%d]", i.Res, i.Closure, i.Index)
+}
+func (i *IndirectCallInst) instructionNode() {}
+func (i *IndirectCallInst) Result() *Value   { return i.Res }
+func (i *IndirectCallInst) String() string {
+	var args []string
+	for _, a := range i.Args {
+		args = append(args, a.String())
+	}
+	if i.Res != nil {
+		return fmt.Sprintf("%s = call_indirect %s(%s)", i.Res, i.Closure, strings.Join(args, ", "))
+	}
+	return fmt.Sprintf("call_indirect %s(%s)", i.Closure, strings.Join(args, ", "))
 }
 func (i *AllocObjectInst) instructionNode() {}
 func (i *AllocObjectInst) Result() *Value   { return i.Res }

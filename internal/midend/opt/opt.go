@@ -177,6 +177,25 @@ func deadCodeElim(fn *ir.Function) bool {
 						uses[v.ID]++
 					}
 				}
+			case *ir.MakeClosureInst:
+				for _, cap := range i.Captures {
+					if v, ok := cap.(*ir.Value); ok {
+						uses[v.ID]++
+					}
+				}
+			case *ir.ClosureGetInst:
+				if v, ok := i.Closure.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+			case *ir.IndirectCallInst:
+				if v, ok := i.Closure.(*ir.Value); ok {
+					uses[v.ID]++
+				}
+				for _, arg := range i.Args {
+					if v, ok := arg.(*ir.Value); ok {
+						uses[v.ID]++
+					}
+				}
 			case *ir.AllocArrayInst:
 				if v, ok := i.Length.(*ir.Value); ok {
 					uses[v.ID]++
@@ -236,7 +255,7 @@ func deadCodeElim(fn *ir.Function) bool {
 			res := inst.Result()
 			// Keep calls or instructions with side effects
 			switch inst.(type) {
-			case *ir.CallInst, *ir.SetFieldInst, *ir.SetElementInst, *ir.ArrayPushInst, *ir.ArrayPopInst:
+			case *ir.CallInst, *ir.IndirectCallInst, *ir.SetFieldInst, *ir.SetElementInst, *ir.ArrayPushInst, *ir.ArrayPopInst:
 				retained = append(retained, inst)
 				continue
 			}

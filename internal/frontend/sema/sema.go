@@ -588,6 +588,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeAny
 		}
 	case *ast.TypeRefNode:
+		if t.Name == "Array" && len(t.TypeArgs) == 1 {
+			return types.NewArray(c.resolveTypeNode(t.TypeArgs[0]))
+		}
 		sym := c.currentScope.Resolve(t.Name)
 		if sym != nil && (sym.Kind == SymInterface || sym.Kind == SymClass || sym.Kind == SymTypeAlias) {
 			return sym.Type

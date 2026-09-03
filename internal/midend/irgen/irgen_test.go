@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/parser"
 	"github.com/phongsathornpt/ts-pro/internal/frontend/sema"
 	"github.com/phongsathornpt/ts-pro/internal/support/source"
@@ -222,15 +221,31 @@ func TestIRGenRejectsObjectReferenceMaskOverflow(t *testing.T) {
 	}
 }
 
-func TestIRGenRejectsUnsupportedArrowFunctionValue(t *testing.T) {
-	prog := &ast.Program{Statements: []ast.Stmt{
-		&ast.ExprStmt{Expr: &ast.ArrowFuncExpr{
-			Body:       &ast.NumberLit{Value: 1},
-			IsExprBody: true,
-		}},
-	}}
+func TestIRGenLiftsCapturedArrowFunction(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("closure.ts", []byte(`
+function apply(base: number): number {
+  const add = (x: number): number => base + x;
+  return add(7);
+}
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %s", diags.Format(fs))
+	}
 	semaResult := sema.Check(prog)
-	if _, err := Generate(prog, semaResult); err == nil || !strings.Contains(err.Error(), "unsupported expression node") {
-		t.Fatalf("expected unsupported-expression lowering error, got %v", err)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %s", semaResult.Diagnostics.Format(fs))
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	for _, want := range []string{"make_closure @$arrow0", "closure_get %$env[0]", "call_indirect"} {
+		if !strings.Contains(dump, want) {
+			t.Fatalf("expected %q in closure IR:\n%s", want, dump)
+		}
 	}
 }

@@ -13,12 +13,13 @@ import (
 )
 
 type generator struct {
-	semaResult *sema.Result
-	prog       *ir.Program
-	currentFn  *ir.Function
-	currentBB  *ir.BasicBlock
-	locals     map[string]ir.Operand
-	err        error
+	semaResult   *sema.Result
+	prog         *ir.Program
+	currentFn    *ir.Function
+	currentBB    *ir.BasicBlock
+	locals       map[string]ir.Operand
+	err          error
+	arrowCounter int
 }
 
 func irHeapRefType(t types.Type) bool {
@@ -26,7 +27,7 @@ func irHeapRefType(t types.Type) bool {
 		return false
 	}
 	switch t.Kind() {
-	case types.KindString, types.KindArray, types.KindObject:
+	case types.KindString, types.KindArray, types.KindObject, types.KindFunction:
 		return true
 	case types.KindUnion:
 		if u, ok := t.(*types.UnionType); ok {
@@ -107,6 +108,142 @@ func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Oper
 	res := g.currentFn.NewValue("assign", resultType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: res, Op: op, LHS: current, RHS: rhs})
 	return res
+}
+
+func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct{}) []string {
+	found := make(map[string]struct{})
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		if e == nil {
+			return
+		}
+		switch n := e.(type) {
+		case *ast.IdentExpr:
+			if _, isParam := params[n.Name]; isParam {
+				return
+			}
+			if _, ok := g.locals[n.Name]; ok {
+				found[n.Name] = struct{}{}
+			}
+		case *ast.BinaryExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *ast.UnaryExpr:
+			walk(n.Target)
+		case *ast.CallExpr:
+			walk(n.Callee)
+			for _, a := range n.Args {
+				walk(a)
+			}
+		case *ast.MemberExpr:
+			walk(n.Object)
+		case *ast.IndexExpr:
+			walk(n.Target)
+			walk(n.Index)
+		case *ast.ArrayLit:
+			for _, el := range n.Elements {
+				walk(el)
+			}
+		case *ast.ObjectLit:
+			for _, prop := range n.Properties {
+				walk(prop.Value)
+			}
+		case *ast.AssignExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *ast.TernaryExpr:
+			walk(n.Cond)
+			walk(n.Then)
+			walk(n.Else)
+		case *ast.ArrowFuncExpr:
+			// Nested arrows own their capture analysis.
+		}
+	}
+	walk(expr)
+	names := make([]string, 0, len(found))
+	for name := range found {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
+	if !e.IsExprBody {
+		return g.failExpr("block-body arrow functions are not yet supported by native closure lowering")
+	}
+	body, ok := e.Body.(ast.Expr)
+	if !ok {
+		return g.failExpr("arrow expression body has unsupported node %T", e.Body)
+	}
+	fnType, ok := g.semaResult.Types[e].(*types.FunctionType)
+	if !ok {
+		return g.failExpr("arrow function is missing a resolved function type")
+	}
+	paramSet := make(map[string]struct{}, len(e.Params))
+	for _, p := range e.Params {
+		paramSet[p.Name] = struct{}{}
+	}
+	captureNames := g.collectArrowCaptures(body, paramSet)
+	captureOps := make([]ir.Operand, 0, len(captureNames))
+	var refMask uint64
+	for i, name := range captureNames {
+		op := g.locals[name]
+		captureOps = append(captureOps, op)
+		if irHeapRefType(op.Type()) {
+			if i >= 64 {
+				return g.failExpr("closure capture %q exceeds the 64-bit GC reference mask", name)
+			}
+			refMask |= uint64(1) << i
+		}
+	}
+
+	outerFn, outerBB, outerLocals := g.currentFn, g.currentBB, g.locals
+	name := fmt.Sprintf("$arrow%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, fnType.Return)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	for i, captureName := range captureNames {
+		captureType := captureOps[i].Type()
+		v := lifted.NewValue(captureName+"_capture", captureType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: v, Closure: env, Index: i})
+		g.locals[captureName] = v
+	}
+	for i, p := range e.Params {
+		pt := types.TypeAny
+		if i < len(fnType.Params) {
+			pt = fnType.Params[i].Type
+		}
+		v := lifted.NewValue(p.Name, pt)
+		lifted.Params = append(lifted.Params, v)
+		g.locals[p.Name] = v
+	}
+	ret := g.lowerExpr(body)
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: ret}
+	}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+
+	g.currentFn, g.currentBB, g.locals = outerFn, outerBB, outerLocals
+	res := g.currentFn.NewValue("closure", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
+		Res: res, Function: name, Captures: captureOps, RefMask: refMask,
+	})
+	return res
+}
+
+func isConsoleLogCall(expr ast.Expr) bool {
+	mem, ok := expr.(*ast.MemberExpr)
+	if !ok || mem.Property != "log" {
+		return false
+	}
+	ident, ok := mem.Object.(*ast.IdentExpr)
+	return ok && ident.Name == "console"
 }
 
 // Generate lowers an AST program and its semantic facts into SSA IR.
@@ -572,6 +709,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if op, exists := g.locals[e.Name]; exists {
 			return op
 		}
+		if sym := g.semaResult.Symbols[e]; sym != nil && sym.Kind == sema.SymFunc {
+			fnType, ok := sym.Type.(*types.FunctionType)
+			if !ok {
+				return g.failExpr("function symbol %q has non-function type %T", e.Name, sym.Type)
+			}
+			res := g.currentFn.NewValue("closure", fnType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
+			return res
+		}
 		return g.failExpr("cannot lower unresolved or non-local identifier %q as a value", e.Name)
 	case *ast.BinaryExpr:
 		if e.Op == token.AmpAmp || e.Op == token.PipePipe {
@@ -648,6 +794,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			RHS: rhs,
 		})
 		return resVal
+	case *ast.ArrowFuncExpr:
+		return g.lowerArrowExpr(e)
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
@@ -747,6 +895,25 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPopInst{Res: res, Array: array})
 					return res
 				}
+			}
+		}
+		if fnType, ok := g.semaResult.Types[e.Callee].(*types.FunctionType); ok && !isConsoleLogCall(e.Callee) {
+			directNamed := false
+			if ident, isIdent := e.Callee.(*ast.IdentExpr); isIdent {
+				_, isLocal := g.locals[ident.Name]
+				if sym := g.semaResult.Symbols[ident]; !isLocal && sym != nil && sym.Kind == sema.SymFunc {
+					directNamed = true
+				}
+			}
+			if !directNamed {
+				closure := g.lowerExpr(e.Callee)
+				args := make([]ir.Operand, 0, len(e.Args))
+				for _, arg := range e.Args {
+					args = append(args, g.lowerExpr(arg))
+				}
+				res := g.currentFn.NewValue("ret", fnType.Return)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: res, Closure: closure, Args: args})
+				return res
 			}
 		}
 		calleeName := "unknown"
