@@ -40,4 +40,11 @@ func TestARM64Encodings(t *testing.T) {
 	if !bytes.Equal(e.Code, []byte{0x20, 0x0C, 0xC2, 0x9A}) {
 		t.Errorf("Sdiv X0, X1, X2: got %x, want 200cc29a", e.Code)
 	}
+
+	// ADR X0, #0 -> 00 00 00 10
+	e = NewEmitter()
+	e.Adr(X0, 0)
+	if !bytes.Equal(e.Code, []byte{0x00, 0x00, 0x00, 0x10}) {
+		t.Errorf("Adr X0, 0: got %x, want 00000010", e.Code)
+	}
 }

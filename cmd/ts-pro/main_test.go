@@ -68,6 +68,11 @@ func TestEndToEndExecution(t *testing.T) {
 			sourcePath: "../../examples/basics/loops.ts",
 			expected:   "45\n45\n",
 		},
+		{
+			name:       "strings concatenation and printing",
+			sourcePath: "../../examples/basics/strings.ts",
+			expected:   "Hello, TypeScript 7!\n",
+		},
 	}
 
 	for _, tc := range tests {

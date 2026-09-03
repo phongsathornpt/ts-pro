@@ -133,6 +133,11 @@ func (e *Emitter) Sdiv(xd, xn, xm Register) {
 	e.emitU32(0x9AC00C00 | (uint32(xm) << 16) | (uint32(xn) << 5) | uint32(xd))
 }
 
+// Bic: BIC Xd, Xn, Xm (64-bit bit clear: Xd = Xn & ~Xm)
+func (e *Emitter) Bic(xd, xn, xm Register) {
+	e.emitU32(0x8A200000 | (uint32(xm) << 16) | (uint32(xn) << 5) | uint32(xd))
+}
+
 // Cset: CSET Xd, cond (CSINC Xd, XZR, XZR, invert(cond))
 func (e *Emitter) Cset(xd Register, cond Cond) {
 	invCond := uint32(cond ^ 1)
@@ -203,4 +208,12 @@ func (e *Emitter) Cbnz(xt Register, wordOffset int32) {
 // Svc: SVC #0 (Syscall)
 func (e *Emitter) Svc(imm16 uint16) {
 	e.emitU32(0xD4000001 | (uint32(imm16) << 5))
+}
+
+// Adr: ADR Xd, byteOffset (+-1MB signed byte offset)
+func (e *Emitter) Adr(xd Register, byteOffset int32) {
+	imm21 := uint32(byteOffset) & 0x1FFFFF
+	immlo := imm21 & 0x3
+	immhi := (imm21 >> 2) & 0x7FFFF
+	e.emitU32(0x10000000 | (immlo << 29) | (immhi << 5) | uint32(xd))
 }

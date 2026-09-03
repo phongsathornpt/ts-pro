@@ -68,12 +68,25 @@ type branchFixupAMD64 struct {
 	condReg  amd64.Register
 }
 
+type stringFixupARM64 struct {
+	offset    int
+	targetReg arm64.Register
+	str       string
+}
+
+type stringFixupAMD64 struct {
+	offset    int
+	targetReg amd64.Register
+	str       string
+}
+
 func lowerARM64(prog *ir.Program) ([]byte, error) {
 	e := arm64.NewEmitter()
 
 	fnOffsets := make(map[string]int)
 	var callFixups []callFixup
 	var branchFixups []branchFixupARM64
+	var strFixups []stringFixupARM64
 	bbOffsets := make(map[string]int)
 
 	for _, fn := range prog.Functions {
@@ -178,6 +191,14 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 								}
 							} else if cArg, ok := arg.(ir.ConstNumber); ok {
 								e.Movz(targetParam, uint16(cArg.Value))
+							} else if sArg, ok := arg.(ir.ConstString); ok {
+								strOffset := len(e.Code)
+								e.Adr(targetParam, 0)
+								strFixups = append(strFixups, stringFixupARM64{
+									offset:    strOffset,
+									targetReg: targetParam,
+									str:       sArg.Value,
+								})
 							}
 						}
 					}
@@ -211,6 +232,14 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 							}
 						} else if c, ok := term.Val.(ir.ConstNumber); ok {
 							e.Movz(arm64.X0, uint16(c.Value))
+						} else if s, ok := term.Val.(ir.ConstString); ok {
+							strOffset := len(e.Code)
+							e.Adr(arm64.X0, 0)
+							strFixups = append(strFixups, stringFixupARM64{
+								offset:    strOffset,
+								targetReg: arm64.X0,
+								str:       s.Value,
+							})
 						}
 					}
 
@@ -273,6 +302,14 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 										}
 									} else if c, ok := inc.Value.(ir.ConstNumber); ok {
 										e.Movz(dstReg, uint16(c.Value))
+									} else if s, ok := inc.Value.(ir.ConstString); ok {
+										strOffset := len(e.Code)
+										e.Adr(dstReg, 0)
+										strFixups = append(strFixups, stringFixupARM64{
+											offset:    strOffset,
+											targetReg: dstReg,
+											str:       s.Value,
+										})
 									}
 								}
 							}
@@ -295,9 +332,49 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_print_val"] = len(e.Code)
 	emitARM64PrintVal(e)
 
+	// Emit ts_print_str (string printer)
+	fnOffsets["ts_print_str"] = len(e.Code)
+	emitARM64PrintStr(e)
+
+	// Emit ts_alloc (heap bump allocator)
+	fnOffsets["ts_alloc"] = len(e.Code)
+	emitARM64Alloc(e)
+
+	// Emit ts_string_concat (string concatenator)
+	fnOffsets["ts_string_concat"] = len(e.Code)
+	emitARM64StringConcat(e, fnOffsets["ts_alloc"])
+
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)
 	emitARM64SysExit(e)
+
+	// Emit String Constants Table
+	strOffsets := make(map[string]int)
+	for _, sf := range strFixups {
+		if _, exists := strOffsets[sf.str]; !exists {
+			for len(e.Code)%8 != 0 {
+				e.Code = append(e.Code, 0)
+			}
+			strOffsets[sf.str] = len(e.Code)
+
+			var lenBuf [8]byte
+			binary.LittleEndian.PutUint64(lenBuf[:], uint64(len(sf.str)))
+			e.Code = append(e.Code, lenBuf[:]...)
+			e.Code = append(e.Code, []byte(sf.str)...)
+			e.Code = append(e.Code, 0)
+		}
+	}
+
+	// Fix up string ADR instructions
+	for _, sf := range strFixups {
+		targetAddr := strOffsets[sf.str]
+		disp := int32(targetAddr - sf.offset)
+		imm21 := uint32(disp) & 0x1FFFFF
+		immlo := imm21 & 0x3
+		immhi := (imm21 >> 2) & 0x7FFFF
+		inst := 0x10000000 | (immlo << 29) | (immhi << 5) | uint32(sf.targetReg)
+		binary.LittleEndian.PutUint32(e.Code[sf.offset:], inst)
+	}
 
 	// Fix up function calls
 	for _, cf := range callFixups {
@@ -402,12 +479,142 @@ func emitARM64SysExit(e *arm64.Emitter) {
 	e.Ret()
 }
 
+func emitARM64PrintStr(e *arm64.Emitter) {
+	// Frame: 48 bytes (16-byte aligned)
+	e.SubImm(arm64.SP, arm64.SP, 48)
+	e.Stp(arm64.X29, arm64.X30, arm64.SP, 32)
+	e.AddImm(arm64.X29, arm64.SP, 32)
+
+	e.MovReg(arm64.X9, arm64.X0)
+	e.Ldr(arm64.X2, arm64.X9, 0)    // len
+	e.AddImm(arm64.X1, arm64.X9, 8) // data ptr
+	e.Movz(arm64.X0, 1)             // stdout
+	e.Movz(arm64.X16, 4)            // Darwin sys_write
+	e.Svc(0x80)
+
+	// Write newline
+	e.AddImm(arm64.X1, arm64.SP, 16)
+	e.Movz(arm64.X2, 10)
+	e.Strb(arm64.X2, arm64.X1, 0)
+	e.Movz(arm64.X2, 1)
+	e.Movz(arm64.X0, 1)
+	e.Movz(arm64.X16, 4)
+	e.Svc(0x80)
+
+	e.Ldp(arm64.X29, arm64.X30, arm64.SP, 32)
+	e.AddImm(arm64.SP, arm64.SP, 48)
+	e.Ret()
+}
+
+func emitARM64Alloc(e *arm64.Emitter) {
+	pcInText := 1024 + len(e.Code)
+	adrOffset := int32(0x4000 - pcInText)
+	e.Adr(arm64.X1, adrOffset) // X1 points to 0x100004000 (__DATA)
+
+	e.Ldr(arm64.X2, arm64.X1, 0) // current offset
+	cbnzOffset := len(e.Code)
+	e.Cbnz(arm64.X2, 0)
+	e.Movz(arm64.X2, 16)
+
+	hasOffset := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[cbnzOffset:], 0xB5000000|(uint32(int32((hasOffset-cbnzOffset)/4)&0x7FFFF)<<5)|uint32(arm64.X2))
+
+	e.Add(arm64.X3, arm64.X1, arm64.X2) // return ptr
+	e.Add(arm64.X2, arm64.X2, arm64.X0) // new offset
+	e.AddImm(arm64.X2, arm64.X2, 15)
+	e.Movz(arm64.X4, 15)
+	e.Bic(arm64.X2, arm64.X2, arm64.X4)
+	e.Str(arm64.X2, arm64.X1, 0)
+	e.MovReg(arm64.X0, arm64.X3)
+	e.Ret()
+}
+
+func emitARM64StringConcat(e *arm64.Emitter, allocOffset int) {
+	e.SubImm(arm64.SP, arm64.SP, 80)
+	e.Stp(arm64.X29, arm64.X30, arm64.SP, 64)
+	e.AddImm(arm64.X29, arm64.SP, 64)
+	e.Stp(arm64.X19, arm64.X20, arm64.SP, 48)
+	e.Stp(arm64.X21, arm64.X22, arm64.SP, 32)
+	e.Stp(arm64.X23, arm64.X24, arm64.SP, 16)
+
+	e.MovReg(arm64.X19, arm64.X0) // a
+	e.MovReg(arm64.X20, arm64.X1) // b
+
+	e.Ldr(arm64.X21, arm64.X19, 0) // len_a
+	e.Ldr(arm64.X22, arm64.X20, 0) // len_b
+
+	e.Add(arm64.X23, arm64.X21, arm64.X22) // total_len
+
+	e.AddImm(arm64.X0, arm64.X23, 16) // alloc size
+	callAllocOffset := len(e.Code)
+	e.Bl(int32((allocOffset - callAllocOffset) / 4))
+
+	e.MovReg(arm64.X24, arm64.X0) // new_str
+
+	e.Str(arm64.X23, arm64.X24, 0) // store total_len
+
+	// Copy a
+	e.AddImm(arm64.X9, arm64.X19, 8)  // src_a
+	e.AddImm(arm64.X10, arm64.X24, 8) // dst
+	e.Movz(arm64.X11, 0)
+
+	cbzCopyA := len(e.Code)
+	e.Cbz(arm64.X21, 0)
+
+	loopCopyA := len(e.Code)
+	e.Ldrb(arm64.X12, arm64.X9, 0)
+	e.Strb(arm64.X12, arm64.X10, 0)
+	e.AddImm(arm64.X9, arm64.X9, 1)
+	e.AddImm(arm64.X10, arm64.X10, 1)
+	e.AddImm(arm64.X11, arm64.X11, 1)
+	e.Cmp(arm64.X11, arm64.X21)
+	loopBackA := len(e.Code)
+	e.BCond(arm64.CondLT, int32((loopCopyA-loopBackA)/4))
+
+	afterCopyA := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[cbzCopyA:], 0xB4000000|(uint32(int32((afterCopyA-cbzCopyA)/4)&0x7FFFF)<<5)|uint32(arm64.X21))
+
+	// Copy b
+	e.AddImm(arm64.X9, arm64.X20, 8) // src_b
+	e.Movz(arm64.X11, 0)
+
+	cbzCopyB := len(e.Code)
+	e.Cbz(arm64.X22, 0)
+
+	loopCopyB := len(e.Code)
+	e.Ldrb(arm64.X12, arm64.X9, 0)
+	e.Strb(arm64.X12, arm64.X10, 0)
+	e.AddImm(arm64.X9, arm64.X9, 1)
+	e.AddImm(arm64.X10, arm64.X10, 1)
+	e.AddImm(arm64.X11, arm64.X11, 1)
+	e.Cmp(arm64.X11, arm64.X22)
+	loopBackB := len(e.Code)
+	e.BCond(arm64.CondLT, int32((loopCopyB-loopBackB)/4))
+
+	afterCopyB := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[cbzCopyB:], 0xB4000000|(uint32(int32((afterCopyB-cbzCopyB)/4)&0x7FFFF)<<5)|uint32(arm64.X22))
+
+	// Null-terminate
+	e.Movz(arm64.X12, 0)
+	e.Strb(arm64.X12, arm64.X10, 0)
+
+	e.MovReg(arm64.X0, arm64.X24)
+
+	e.Ldp(arm64.X23, arm64.X24, arm64.SP, 16)
+	e.Ldp(arm64.X21, arm64.X22, arm64.SP, 32)
+	e.Ldp(arm64.X19, arm64.X20, arm64.SP, 48)
+	e.Ldp(arm64.X29, arm64.X30, arm64.SP, 64)
+	e.AddImm(arm64.SP, arm64.SP, 80)
+	e.Ret()
+}
+
 func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	e := amd64.NewEmitter()
 
 	fnOffsets := make(map[string]int)
 	var callFixups []callFixup
 	var branchFixups []branchFixupAMD64
+	var strFixups []stringFixupAMD64
 	bbOffsets := make(map[string]int)
 
 	for _, fn := range prog.Functions {
@@ -507,6 +714,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 								}
 							} else if cArg, ok := arg.(ir.ConstNumber); ok {
 								e.MovRegImm64(targetParam, int64(cArg.Value))
+							} else if sArg, ok := arg.(ir.ConstString); ok {
+								strOffset := len(e.Code)
+								e.LeaRipRel32(targetParam, 0)
+								strFixups = append(strFixups, stringFixupAMD64{
+									offset:    strOffset + 3,
+									targetReg: targetParam,
+									str:       sArg.Value,
+								})
 							}
 						}
 					}
@@ -539,6 +754,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 							}
 						} else if c, ok := term.Val.(ir.ConstNumber); ok {
 							e.MovRegImm64(amd64.RAX, int64(c.Value))
+						} else if s, ok := term.Val.(ir.ConstString); ok {
+							strOffset := len(e.Code)
+							e.LeaRipRel32(amd64.RAX, 0)
+							strFixups = append(strFixups, stringFixupAMD64{
+								offset:    strOffset + 3,
+								targetReg: amd64.RAX,
+								str:       s.Value,
+							})
 						}
 					}
 
@@ -624,9 +847,37 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_print_val"] = len(e.Code)
 	emitAMD64PrintVal(e)
 
+	// Emit ts_print_str for Linux AMD64
+	fnOffsets["ts_print_str"] = len(e.Code)
+	emitAMD64PrintStr(e)
+
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)
 	emitAMD64SysExit(e)
+
+	// Emit String Constants Table
+	strOffsets := make(map[string]int)
+	for _, sf := range strFixups {
+		if _, exists := strOffsets[sf.str]; !exists {
+			for len(e.Code)%8 != 0 {
+				e.Code = append(e.Code, 0)
+			}
+			strOffsets[sf.str] = len(e.Code)
+
+			var lenBuf [8]byte
+			binary.LittleEndian.PutUint64(lenBuf[:], uint64(len(sf.str)))
+			e.Code = append(e.Code, lenBuf[:]...)
+			e.Code = append(e.Code, []byte(sf.str)...)
+			e.Code = append(e.Code, 0)
+		}
+	}
+
+	// Fix up string LEA instructions
+	for _, sf := range strFixups {
+		targetAddr := strOffsets[sf.str]
+		disp := int32(targetAddr - (sf.offset + 4))
+		binary.LittleEndian.PutUint32(e.Code[sf.offset:], uint32(disp))
+	}
 
 	// Fix up function calls
 	for _, cf := range callFixups {
@@ -677,5 +928,35 @@ func emitAMD64SysExit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RDI, 0)
 	e.MovRegImm64(amd64.RAX, 60) // Linux sys_exit
 	e.Syscall()
+	e.Ret()
+}
+
+func emitAMD64PrintStr(e *amd64.Emitter) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, 32)
+
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.MovRegDeref(amd64.RDX, amd64.R10, 0) // count = length
+
+	e.MovRegReg(amd64.RSI, amd64.R10)
+	e.AddRegImm32(amd64.RSI, 8) // buf = r10 + 8
+
+	e.MovRegImm64(amd64.RDI, 1) // stdout
+	e.MovRegImm64(amd64.RAX, 1) // Linux sys_write = 1
+	e.Syscall()
+
+	// Newline '\n'
+	e.MovRegImm64(amd64.RAX, 10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RAX)
+	e.MovRegReg(amd64.RSI, amd64.RSP)
+	e.AddRegImm32(amd64.RSI, 16)
+	e.MovRegImm64(amd64.RDX, 1)
+	e.MovRegImm64(amd64.RDI, 1)
+	e.MovRegImm64(amd64.RAX, 1)
+	e.Syscall()
+
+	e.AddRegImm32(amd64.RSP, 32)
+	e.Pop(amd64.RBP)
 	e.Ret()
 }

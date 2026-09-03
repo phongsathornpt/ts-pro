@@ -410,6 +410,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.BinaryExpr:
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
+
+		if e.Op == token.Plus {
+			isString := false
+			if g.semaResult != nil {
+				if t, ok := g.semaResult.Types[e]; ok && t == types.TypeString {
+					isString = true
+				} else if t, ok := g.semaResult.Types[e.Left]; ok && t == types.TypeString {
+					isString = true
+				} else if t, ok := g.semaResult.Types[e.Right]; ok && t == types.TypeString {
+					isString = true
+				}
+			}
+			if isString {
+				resVal := g.currentFn.NewValue("str", types.TypeString)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+					Res:    resVal,
+					Callee: "ts_string_concat",
+					Args:   []ir.Operand{lhs, rhs},
+				})
+				return resVal
+			}
+		}
+
 		op := ir.OpAdd
 		switch e.Op {
 		case token.Plus:
@@ -477,6 +500,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		} else if mem, ok := e.Callee.(*ast.MemberExpr); ok {
 			if objIdent, ok := mem.Object.(*ast.IdentExpr); ok && objIdent.Name == "console" && mem.Property == "log" {
 				calleeName = "ts_print_val"
+				if len(e.Args) > 0 && g.semaResult != nil {
+					if t, ok := g.semaResult.Types[e.Args[0]]; ok && t == types.TypeString {
+						calleeName = "ts_print_str"
+					}
+				}
 			}
 		}
 		var args []ir.Operand

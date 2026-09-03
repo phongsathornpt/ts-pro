@@ -249,3 +249,11 @@ func (e *Emitter) MovRegDeref(dst Register, base Register, disp int32) {
 func (e *Emitter) Syscall() {
 	e.emitBytes(0x0F, 0x05)
 }
+
+// LeaRipRel32: LEA dst, [RIP + disp32] (64-bit)
+func (e *Emitter) LeaRipRel32(dst Register, disp int32) {
+	e.emitByte(rex(true, dst >= 8, false, false))
+	e.emitByte(0x8D)
+	e.emitByte(modRM(0b00, dst, 5))
+	e.emitInt32(disp)
+}

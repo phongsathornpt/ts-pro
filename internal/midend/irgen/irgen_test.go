@@ -117,3 +117,22 @@ function sumWhile(n: number): number {
 	}
 	t.Logf("Loops Dump:\n%s", irProg.Dump())
 }
+
+func TestIRGenStrings(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("strings.ts", []byte(`
+export function greet(name: string): string {
+  return "Hello, " + name + "!";
+}
+
+console.log(greet("TypeScript 7"));
+`))
+	p := parser.New(f)
+	prog, _ := p.Parse()
+	semaResult := sema.Check(prog)
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	t.Logf("Strings Dump:\n%s", irProg.Dump())
+}

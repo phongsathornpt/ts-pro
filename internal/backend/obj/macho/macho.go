@@ -21,6 +21,7 @@ const (
 
 	VM_PROT_NONE    = 0x0
 	VM_PROT_READ    = 0x1
+	VM_PROT_WRITE   = 0x2
 	VM_PROT_EXECUTE = 0x4
 )
 
@@ -116,6 +117,7 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	headerSize := uint32(32)
 	segPageZeroSize := uint32(72)
 	segTextSize := uint32(72 + 80) // 1 section (__text)
+	segDataSize := uint32(72 + 80) // 1 section (__data)
 	segLinkeditSize := uint32(72)
 	buildVerSize := uint32(24)
 	entryCmdSize := uint32(24)
@@ -124,7 +126,7 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	dylibPath := []byte("/usr/lib/libSystem.B.dylib\x00\x00\x00\x00\x00\x00") // 32 bytes -> cmdsize 56
 	dylibCmdSize := uint32(24 + len(dylibPath))
 
-	sizeOfCmds := segPageZeroSize + segTextSize + segLinkeditSize + buildVerSize + entryCmdSize + dylinkerCmdSize + dylibCmdSize
+	sizeOfCmds := segPageZeroSize + segTextSize + segDataSize + segLinkeditSize + buildVerSize + entryCmdSize + dylinkerCmdSize + dylibCmdSize
 	codeOffset := uint64(1024)
 	padding := int(codeOffset - uint64(headerSize+sizeOfCmds))
 
@@ -133,7 +135,7 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 		CpuType:    cpuType,
 		CpuSubtype: cpuSubtype,
 		FileType:   MH_EXECUTE,
-		NCmds:      7,
+		NCmds:      8,
 		SizeOfCmds: sizeOfCmds,
 		Flags:      0x00200085, // MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
 	}
@@ -170,14 +172,37 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	textSect.Align = 4
 	textSect.Flags = 0x80000400 // S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS
 
+	// __DATA segment (Read/Write heap memory)
+	var dataSeg SegmentCmd64
+	dataSeg.Cmd = LC_SEGMENT_64
+	dataSeg.CmdSize = segDataSize
+	copy(dataSeg.SegName[:], "__DATA")
+	dataSeg.VmAddr = baseAddr + pageSize
+	dataSeg.VmSize = pageSize
+	dataSeg.FileOff = pageSize
+	dataSeg.FileSize = pageSize
+	dataSeg.MaxProt = VM_PROT_READ | VM_PROT_WRITE
+	dataSeg.InitProt = VM_PROT_READ | VM_PROT_WRITE
+	dataSeg.NSects = 1
+
+	// __data section
+	var dataSect Section64
+	copy(dataSect.SectName[:], "__data")
+	copy(dataSect.SegName[:], "__DATA")
+	dataSect.Addr = baseAddr + pageSize
+	dataSect.Size = pageSize
+	dataSect.Offset = uint32(pageSize)
+	dataSect.Align = 4
+	dataSect.Flags = 0 // S_REGULAR
+
 	// __LINKEDIT segment
 	var linkeditSeg SegmentCmd64
 	linkeditSeg.Cmd = LC_SEGMENT_64
 	linkeditSeg.CmdSize = segLinkeditSize
 	copy(linkeditSeg.SegName[:], "__LINKEDIT")
-	linkeditSeg.VmAddr = baseAddr + pageSize
+	linkeditSeg.VmAddr = baseAddr + 2*pageSize
 	linkeditSeg.VmSize = pageSize
-	linkeditSeg.FileOff = pageSize
+	linkeditSeg.FileOff = 2 * pageSize
 	linkeditSeg.FileSize = 0
 	linkeditSeg.MaxProt = VM_PROT_READ
 	linkeditSeg.InitProt = VM_PROT_READ
@@ -217,6 +242,8 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	_ = binary.Write(buf, binary.LittleEndian, pageZero)
 	_ = binary.Write(buf, binary.LittleEndian, textSeg)
 	_ = binary.Write(buf, binary.LittleEndian, textSect)
+	_ = binary.Write(buf, binary.LittleEndian, dataSeg)
+	_ = binary.Write(buf, binary.LittleEndian, dataSect)
 	_ = binary.Write(buf, binary.LittleEndian, linkeditSeg)
 	_ = binary.Write(buf, binary.LittleEndian, buildVer)
 	_ = binary.Write(buf, binary.LittleEndian, entry)
@@ -234,6 +261,9 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	if uint64(buf.Len()) < pageSize {
 		buf.Write(make([]byte, pageSize-uint64(buf.Len())))
 	}
+
+	// Write 16KB of __DATA (zeroed)
+	buf.Write(make([]byte, pageSize))
 
 	return buf.Bytes(), nil
 }

@@ -47,4 +47,11 @@ func TestAMD64Encodings(t *testing.T) {
 	if !bytes.Equal(e.Code, []byte{0x48, 0x31, 0xC0}) {
 		t.Errorf("Xor RAX, RAX: got %x, want 4831c0", e.Code)
 	}
+
+	// LEA RAX, [RIP + 0] -> 48 8d 05 00 00 00 00
+	e = NewEmitter()
+	e.LeaRipRel32(RAX, 0)
+	if !bytes.Equal(e.Code, []byte{0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00}) {
+		t.Errorf("LeaRipRel32 RAX, 0: got %x, want 488d0500000000", e.Code)
+	}
 }
