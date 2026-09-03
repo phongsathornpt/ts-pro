@@ -11,4 +11,5 @@
 
 /.tsnative/
 /.tspro/
+/examples/concurrency/__test_*.ts
 

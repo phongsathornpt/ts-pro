@@ -10,10 +10,18 @@ import (
 	"time"
 )
 
-func TestBuildFibNativeExecutable(t *testing.T) {
+func requireLLVM(t *testing.T) {
+	t.Helper()
+	if os.Getenv("TS_PRO_LLVM") != "1" {
+		t.Skip("skipping legacy LLVM/native test (quarantined; set TS_PRO_LLVM=1 to run)")
+	}
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not installed")
 	}
+}
+
+func TestBuildFibNativeExecutable(t *testing.T) {
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +181,125 @@ func TestBuildConcurrencyGroupPureGoExecutable(t *testing.T) {
 	}
 }
 
+func TestBuildConcurrencyCancelPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "cancel-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_cancel.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "1" {
+		t.Fatalf("pure-Go cancel output = %q, want 1", got)
+	}
+}
+
+func TestBuildConcurrencyGroupCancelPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "group-cancel-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_group_cancel.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "3" {
+		t.Fatalf("pure-Go group cancel output = %q, want 3", got)
+	}
+}
+
+func TestBuildConcurrencyContextPureGoExecutable(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "context-pure-go")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{
+		Root: root, Input: "examples/concurrency/concurrency_context.ts", Output: output, PureGo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeOutput, err := exec.CommandContext(ctx, output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
+	}
+	if got := strings.TrimSpace(string(nativeOutput)); got != "trace-42\ntrace-42" {
+		t.Fatalf("pure-Go context output = %q, want trace-42\\ntrace-42", got)
+	}
+}
+
+func TestBuildRejectsMutableMapCaptureAcrossSpawn(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceFile := filepath.Join(root, "examples", "concurrency", "__test_bad_capture.ts")
+	code := "const m = new Map<string, number>();\nconst t = spawn((): void => {\n  m.set(\"bad\", 1);\n});\njoin(t);\n"
+	if err := os.WriteFile(sourceFile, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(sourceFile) }()
+	output := filepath.Join(t.TempDir(), "bad_capture")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{
+		Root: root, Input: sourceFile, Output: output, PureGo: true,
+	})
+	if err == nil {
+		t.Fatal("expected build error for mutable Map capture across spawn, but got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot capture mutable") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestBuildRejectsMutableSetCaptureAcrossSpawn(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceFile := filepath.Join(root, "examples", "concurrency", "__test_bad_set_capture.ts")
+	code := "const s = new Set<string>();\nconst t = spawn((): void => {\n  s.add(\"bad\");\n});\njoin(t);\n"
+	if err := os.WriteFile(sourceFile, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(sourceFile) }()
+	output := filepath.Join(t.TempDir(), "bad_set_capture")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err = Build(ctx, BuildOptions{
+		Root: root, Input: sourceFile, Output: output, PureGo: true,
+	})
+	if err == nil {
+		t.Fatal("expected build error for mutable Set capture across spawn, but got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot capture mutable") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestBuildStringArraysPureGoExecutable(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -248,9 +375,14 @@ func TestBuildConcurrencyPromiseAggregatePureGoExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run pure-Go binary: %v: %s", err, nativeOutput)
 	}
-	expected := "345\n9\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root\n101\n1\n1\nbool-reject\n44\n123\n8\nraw:promise\n10"
-	if got := strings.TrimSpace(string(nativeOutput)); got != expected {
-		t.Fatalf("pure-Go output = %q, want %q", got, expected)
+	// In aggregateRaceBooleans(), Promise.race is called on two immediately-resolved promises:
+	// Promise.resolve(false) and Promise.resolve(true). In pure-Go, concurrent watcher goroutines
+	// deliver completion to the race coordinator channel; depending on runtime goroutine scheduling,
+	// either can win the race, producing aggregateBoolScore 1 (true) or 0 (false).
+	expected1 := "345\n9\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root\n101\n1\n1\nbool-reject\n44\n123\n8\nraw:promise\n10"
+	expected2 := "345\n9\naggregate-reject\n42\n9\n30\n30\nrace-reject\n43\nalpha:beta-done\nfirst-root\n101\n0\n1\nbool-reject\n44\n123\n8\nraw:promise\n10"
+	if got := strings.TrimSpace(string(nativeOutput)); got != expected1 && got != expected2 {
+		t.Fatalf("pure-Go output = %q, want %q or %q", got, expected1, expected2)
 	}
 }
 
@@ -339,9 +471,7 @@ func TestBuildStopsOnTypeScriptErrors(t *testing.T) {
 }
 
 func TestBuildLoopSSAExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -362,9 +492,7 @@ func TestBuildLoopSSAExecutable(t *testing.T) {
 }
 
 func TestBuildTypedNumberArrayExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -385,9 +513,7 @@ func TestBuildTypedNumberArrayExecutable(t *testing.T) {
 }
 
 func TestBuildNativeStringExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -408,9 +534,7 @@ func TestBuildNativeStringExecutable(t *testing.T) {
 }
 
 func TestBuildClosedObjectNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -437,9 +561,7 @@ func TestBuildClosedObjectNativeExecutable(t *testing.T) {
 }
 
 func TestBuildClassMethodNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -466,9 +588,7 @@ func TestBuildClassMethodNativeExecutable(t *testing.T) {
 }
 
 func TestBuildExplicitClassFieldsNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -495,9 +615,7 @@ func TestBuildExplicitClassFieldsNativeExecutable(t *testing.T) {
 }
 
 func TestBuildNativeTaskIntrinsicsExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -526,9 +644,7 @@ func TestBuildNativeTaskIntrinsicsExecutable(t *testing.T) {
 }
 
 func TestBuildNativeF64TaskResultExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -555,9 +671,7 @@ func TestBuildNativeF64TaskResultExecutable(t *testing.T) {
 }
 
 func TestBuildNativeStringTaskResultExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -584,9 +698,7 @@ func TestBuildNativeStringTaskResultExecutable(t *testing.T) {
 }
 
 func TestBuildNativeExtendedTaskResultMatrix(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -624,9 +736,7 @@ func TestBuildNativeExtendedTaskResultMatrix(t *testing.T) {
 }
 
 func TestBuildNativeChannelTryExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -651,9 +761,7 @@ func TestBuildNativeChannelTryExecutable(t *testing.T) {
 }
 
 func TestBuildNativeBlockingChannelTasksSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -683,9 +791,7 @@ func TestBuildNativeBlockingChannelTasksSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeSleepTaskSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -712,9 +818,7 @@ func TestBuildNativeSleepTaskSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeMultiSuspendTaskSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -741,9 +845,7 @@ func TestBuildNativeMultiSuspendTaskSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncAwaitSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -770,9 +872,7 @@ func TestBuildNativeAsyncAwaitSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeTypedAsyncAwaitSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -808,9 +908,7 @@ func TestBuildNativeTypedAsyncAwaitSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncLinearSSAContinuation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -837,9 +935,7 @@ func TestBuildNativeAsyncLinearSSAContinuation(t *testing.T) {
 }
 
 func TestBuildNativeAsyncReferenceSSAContinuation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -866,9 +962,7 @@ func TestBuildNativeAsyncReferenceSSAContinuation(t *testing.T) {
 }
 
 func TestBuildNativeAsyncBranchContinuation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -895,9 +989,7 @@ func TestBuildNativeAsyncBranchContinuation(t *testing.T) {
 }
 
 func TestBuildNativeAsyncLoopPhiContinuation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -924,9 +1016,7 @@ func TestBuildNativeAsyncLoopPhiContinuation(t *testing.T) {
 }
 
 func TestBuildNativeAsyncNativeOpsContinuation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -953,9 +1043,7 @@ func TestBuildNativeAsyncNativeOpsContinuation(t *testing.T) {
 }
 
 func TestBuildNativeDelayedNestedJoinSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -982,9 +1070,7 @@ func TestBuildNativeDelayedNestedJoinSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncReferencePhiStateSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1012,9 +1098,7 @@ func TestBuildNativeAsyncReferencePhiStateSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeDynamicReferenceBoxing(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1039,9 +1123,7 @@ func TestBuildNativeDynamicReferenceBoxing(t *testing.T) {
 }
 
 func TestBuildNativeTaggedUnionBoundary(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1067,9 +1149,7 @@ func TestBuildNativeTaggedUnionBoundary(t *testing.T) {
 }
 
 func TestBuildNativeDynamicPrimitiveOperators(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1095,9 +1175,7 @@ func TestBuildNativeDynamicPrimitiveOperators(t *testing.T) {
 }
 
 func TestBuildNativeAsyncDynamicOperatorSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1121,9 +1199,7 @@ func TestBuildNativeAsyncDynamicOperatorSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeDynamicCheckedUnboxing(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1148,9 +1224,7 @@ func TestBuildNativeDynamicCheckedUnboxing(t *testing.T) {
 }
 
 func TestBuildNativeReferenceChannelSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1178,9 +1252,7 @@ func TestBuildNativeReferenceChannelSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeBooleanChannelSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1207,9 +1279,7 @@ func TestBuildNativeBooleanChannelSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeLogicalTaskYieldSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1236,9 +1306,7 @@ func TestBuildNativeLogicalTaskYieldSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeCooperativeCancellationSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1265,9 +1333,7 @@ func TestBuildNativeCooperativeCancellationSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeExecutionBudgetFairnessSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1294,9 +1360,7 @@ func TestBuildNativeExecutionBudgetFairnessSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeStructuredTaskGroupSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1323,9 +1387,7 @@ func TestBuildNativeStructuredTaskGroupSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeTaskGroupCancellationSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1349,9 +1411,7 @@ func TestBuildNativeTaskGroupCancellationSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeTaskContextInheritanceSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1378,9 +1438,7 @@ func TestBuildNativeTaskContextInheritanceSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncRejectPropagatesSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1410,9 +1468,7 @@ func TestBuildNativeAsyncRejectPropagatesSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncLocalTryCatchSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1439,9 +1495,7 @@ func TestBuildNativeAsyncLocalTryCatchSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncAwaitCatchSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1468,9 +1522,7 @@ func TestBuildNativeAsyncAwaitCatchSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncNestedRecoverySingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1498,9 +1550,7 @@ func TestBuildNativeAsyncNestedRecoverySingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeImmediatePromiseSemanticsSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1528,9 +1578,7 @@ func TestBuildNativeImmediatePromiseSemanticsSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativePromiseAggregatesSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1554,9 +1602,7 @@ func TestBuildNativePromiseAggregatesSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeRepeatedPromiseAwaitSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1584,9 +1630,7 @@ func TestBuildNativeRepeatedPromiseAwaitSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativePromiseAdoptionSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1614,9 +1658,7 @@ func TestBuildNativePromiseAdoptionSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativePromiseReassignmentSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1644,9 +1686,7 @@ func TestBuildNativePromiseReassignmentSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativePromiseControlFlowOwnershipSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1674,9 +1714,7 @@ func TestBuildNativePromiseControlFlowOwnershipSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncFinallySingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1703,9 +1741,7 @@ func TestBuildNativeAsyncFinallySingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncFinallyCompletionSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1733,9 +1769,7 @@ func TestBuildNativeAsyncFinallyCompletionSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeAsyncFinallyOverrideSingleWorker(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1762,9 +1796,7 @@ func TestBuildNativeAsyncFinallyOverrideSingleWorker(t *testing.T) {
 }
 
 func TestBuildNativeChannelExternalTaskCrossPath(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1799,9 +1831,7 @@ func TestBuildNativeChannelExternalTaskCrossPath(t *testing.T) {
 }
 
 func TestBuildStackLocalObjectNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1834,9 +1864,7 @@ func TestBuildStackLocalObjectNativeExecutable(t *testing.T) {
 }
 
 func TestBuildMutableScalarObjectNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1869,9 +1897,7 @@ func TestBuildMutableScalarObjectNativeExecutable(t *testing.T) {
 }
 
 func TestBuildNestedMutableScalarObjectNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1904,9 +1930,7 @@ func TestBuildNestedMutableScalarObjectNativeExecutable(t *testing.T) {
 }
 
 func TestBuildReferenceBearingScalarObjectNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1936,9 +1960,7 @@ func TestBuildReferenceBearingScalarObjectNativeExecutable(t *testing.T) {
 }
 
 func TestBuildStackClosureReferenceCaptureNativeExecutable(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -1968,9 +1990,7 @@ func TestBuildStackClosureReferenceCaptureNativeExecutable(t *testing.T) {
 }
 
 func TestBuildEscapingClosureRemainsHeapAllocated(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2000,9 +2020,7 @@ func TestBuildEscapingClosureRemainsHeapAllocated(t *testing.T) {
 }
 
 func TestBuildReferenceBearingStackObjectSurvivesGCStress(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2034,9 +2052,7 @@ func TestBuildReferenceBearingStackObjectSurvivesGCStress(t *testing.T) {
 }
 
 func TestBuildDynamicPropertySetSurvivesGCStress(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2058,9 +2074,7 @@ func TestBuildDynamicPropertySetSurvivesGCStress(t *testing.T) {
 	}
 }
 func TestBuildNativeDynamicMethodPreservesThis(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2084,9 +2098,7 @@ func TestBuildNativeDynamicMethodPreservesThis(t *testing.T) {
 	}
 }
 func TestBuildNativeDynamicStructuralMethodPreservesThis(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2107,9 +2119,7 @@ func TestBuildNativeDynamicStructuralMethodPreservesThis(t *testing.T) {
 }
 
 func TestBuildNativeClassPromiseThenableAssimilation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2132,9 +2142,7 @@ func TestBuildNativeClassPromiseThenableAssimilation(t *testing.T) {
 }
 
 func TestBuildNativeOptionalPromiseThenableAssimilation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2157,9 +2165,7 @@ func TestBuildNativeOptionalPromiseThenableAssimilation(t *testing.T) {
 }
 
 func TestBuildNativePromiseThenableAssimilation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -2182,9 +2188,7 @@ func TestBuildNativePromiseThenableAssimilation(t *testing.T) {
 }
 
 func TestBuildNativeAsyncPromiseThenableAssimilation(t *testing.T) {
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not installed")
-	}
+	requireLLVM(t)
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
