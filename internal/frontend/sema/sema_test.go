@@ -200,3 +200,23 @@ const second: number = p[1];
 		t.Fatalf("second type = %v", second)
 	}
 }
+
+func TestSemaArrayForOfElementType(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("forof.ts", []byte(`
+const values: number[] = [1, 2, 3];
+let total = 0;
+for (const value of values) {
+  total = total + value;
+}
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+}

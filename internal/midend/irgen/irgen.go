@@ -376,6 +376,8 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		g.lowerDoWhile(s)
 	case *ast.ForStmt:
 		g.lowerFor(s)
+	case *ast.ForOfStmt:
+		g.lowerForOf(s)
 	case *ast.SwitchStmt:
 		g.lowerSwitch(s)
 	case *ast.BreakStmt:
@@ -430,6 +432,9 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 			walk(node.Cond)
 			walk(node.Post)
 			walk(node.Body)
+		case *ast.ForOfStmt:
+			walk(node.Iterable)
+			walk(node.Body)
 		case *ast.SwitchStmt:
 			walk(node.Expr)
 			for _, clause := range node.Cases {
@@ -442,6 +447,79 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 	}
 	walk(stmt)
 	return res
+}
+
+func (g *generator) lowerForOf(s *ast.ForOfStmt) {
+	iterable := g.lowerExpr(s.Iterable)
+	arrType, ok := g.semaResult.Types[s.Iterable].(*types.ArrayType)
+	if !ok {
+		if g.err == nil {
+			g.err = fmt.Errorf("native for-of currently requires an array iterable")
+		}
+		return
+	}
+
+	preBB := g.currentBB
+	condBB := g.currentFn.NewBlock("forof_cond")
+	bodyBB := g.currentFn.NewBlock("forof_body")
+	postBB := g.currentFn.NewBlock("forof_post")
+	exitBB := g.currentFn.NewBlock("forof_exit")
+	if preBB.Terminator == nil {
+		preBB.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+
+	modVars := findModifiedVars(s.Body)
+	delete(modVars, s.Name)
+	loopPhis := make(map[string]*ir.PhiInst)
+	for name := range modVars {
+		if val, exists := g.locals[name]; exists {
+			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_forof", name), val.Type())
+			phi := &ir.PhiInst{Res: phiVal, Incoming: []ir.PhiIncoming{{Block: preBB, Value: val}}}
+			loopPhis[name] = phi
+			condBB.Phis = append(condBB.Phis, phi)
+			g.locals[name] = phiVal
+		}
+	}
+	index := g.currentFn.NewValue("forof_i", types.TypeNumber)
+	indexPhi := &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: preBB, Value: ir.ConstNumber{Value: 0}}}}
+	condBB.Phis = append(condBB.Phis, indexPhi)
+
+	g.currentBB = condBB
+	length := g.currentFn.NewValue("forof_len", types.TypeNumber)
+	condBB.Instructions = append(condBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: iterable})
+	cond := g.currentFn.NewValue("forof_has", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: cond, Op: ir.OpLt, LHS: index, RHS: length})
+	condBB.Terminator = &ir.BranchTerm{Cond: cond, Then: bodyBB, Else: exitBB}
+
+	previousLoopVar, hadPrevious := g.locals[s.Name]
+	g.currentBB = bodyBB
+	elem := g.currentFn.NewValue(s.Name, arrType.Elem)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.GetElementInst{Res: elem, Array: iterable, Index: index})
+	g.locals[s.Name] = elem
+	g.lowerStatement(s.Body)
+	bodyEnd := g.currentBB
+	if bodyEnd.Terminator == nil {
+		bodyEnd.Terminator = &ir.JumpTerm{Target: postBB}
+	}
+
+	g.currentBB = postBB
+	nextIndex := g.currentFn.NewValue("forof_next", types.TypeNumber)
+	postBB.Instructions = append(postBB.Instructions, &ir.BinaryInst{Res: nextIndex, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
+	postEnd := g.currentBB
+	if postEnd.Terminator == nil {
+		postEnd.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+	indexPhi.Incoming = append(indexPhi.Incoming, ir.PhiIncoming{Block: postEnd, Value: nextIndex})
+	for name, phi := range loopPhis {
+		phi.Incoming = append(phi.Incoming, ir.PhiIncoming{Block: postEnd, Value: g.locals[name]})
+		g.locals[name] = phi.Res
+	}
+	if hadPrevious {
+		g.locals[s.Name] = previousLoopVar
+	} else {
+		delete(g.locals, s.Name)
+	}
+	g.currentBB = exitBB
 }
 
 func (g *generator) lowerFor(s *ast.ForStmt) {

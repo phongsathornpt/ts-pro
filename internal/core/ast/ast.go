@@ -299,6 +299,15 @@ type (
 		Body       Stmt
 	}
 
+	ForOfStmt struct {
+		SourceSpan source.Span
+		Kind       token.Kind
+		Name       string
+		Type       TypeNode
+		Iterable   Expr
+		Body       Stmt
+	}
+
 	SwitchCase struct {
 		SourceSpan source.Span
 		Test       Expr // nil for default
@@ -352,6 +361,8 @@ func (s *DoWhileStmt) Span() source.Span   { return s.SourceSpan }
 func (s *DoWhileStmt) stmtNode()           {}
 func (s *ForStmt) Span() source.Span       { return s.SourceSpan }
 func (s *ForStmt) stmtNode()               {}
+func (s *ForOfStmt) Span() source.Span     { return s.SourceSpan }
+func (s *ForOfStmt) stmtNode()             {}
 func (s *SwitchStmt) Span() source.Span    { return s.SourceSpan }
 func (s *SwitchStmt) stmtNode()            {}
 func (s *ReturnStmt) Span() source.Span    { return s.SourceSpan }

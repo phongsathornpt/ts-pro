@@ -480,3 +480,26 @@ console.log(action("unknown"));
 		expected: "other\none\ntwo\n100\n50\n-1\n",
 	})
 }
+
+func TestLinuxAMD64ArrayForOf(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "array_for_of_number_boolean_string_elements",
+		source: `
+function sum(xs: number[]): number {
+  let total = 0;
+  for (const x of xs) { total = total + x; }
+  return total;
+}
+function count(xs: boolean[]): number {
+  let total = 0;
+  for (const x of xs) { if (x) { total = total + 1; } }
+  return total;
+}
+const words: string[] = ["a", "b", "c"];
+console.log(sum([10, 20, 30, 40]));
+console.log(count([true, false, true]));
+for (const word of words) { console.log(word); }
+`,
+		expected: "100\n2\na\nb\nc\n",
+	})
+}

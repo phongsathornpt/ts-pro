@@ -554,9 +554,35 @@ func (p *Parser) parseSwitch() *ast.SwitchStmt {
 	return &ast.SwitchStmt{SourceSpan: source.Span{Start: kw.Span.Start, End: rbrace.Span.End}, Expr: expr, Cases: cases}
 }
 
-func (p *Parser) parseFor() *ast.ForStmt {
+func (p *Parser) parseFor() ast.Stmt {
 	kw := p.advance()
 	p.expect(token.LParen)
+
+	// Speculatively recognize the TypeScript for-of declaration form.
+	declCursor := p.cursor
+	declDiags := len(p.diagnostics)
+	if p.current().Kind == token.KwLet || p.current().Kind == token.KwConst || p.current().Kind == token.KwVar {
+		kind := p.advance().Kind
+		if p.current().Kind == token.Ident {
+			nameTok := p.advance()
+			var typeNode ast.TypeNode
+			if p.match(token.Colon) {
+				typeNode = p.parseType()
+			}
+			if p.match(token.KwOf) {
+				iterable := p.parseExpression()
+				p.expect(token.RParen)
+				body := p.parseStatement()
+				return &ast.ForOfStmt{
+					SourceSpan: source.Span{Start: kw.Span.Start, End: body.Span().End},
+					Kind:       kind, Name: nameTok.Text, Type: typeNode, Iterable: iterable, Body: body,
+				}
+			}
+		}
+	}
+	p.cursor = declCursor
+	p.diagnostics = p.diagnostics[:declDiags]
+
 	var init ast.Stmt
 	if !p.match(token.Semicolon) {
 		init = p.parseStatement()
@@ -574,10 +600,7 @@ func (p *Parser) parseFor() *ast.ForStmt {
 	body := p.parseStatement()
 	return &ast.ForStmt{
 		SourceSpan: source.Span{Start: kw.Span.Start, End: body.Span().End},
-		Init:       init,
-		Cond:       cond,
-		Post:       post,
-		Body:       body,
+		Init:       init, Cond: cond, Post: post, Body: body,
 	}
 }
 

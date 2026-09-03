@@ -256,3 +256,21 @@ switch (value) {
 		t.Fatal("default clause must have nil test")
 	}
 }
+
+func TestParseArrayForOfLoop(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("forof.ts", []byte(`
+for (const value: number of values) {
+  console.log(value);
+}
+`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	loop, ok := prog.Statements[0].(*ast.ForOfStmt)
+	if !ok || loop.Name != "value" || loop.Type == nil {
+		t.Fatalf("unexpected for-of AST: %T %#v", prog.Statements[0], prog.Statements[0])
+	}
+}
