@@ -439,6 +439,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 	if objType == nil {
 		return nil, false
 	}
+	if objType == types.TypeAny || objType == types.TypeUnknown {
+		return types.TypeAny, true
+	}
 	switch t := objType.(type) {
 	case *types.TupleType:
 		if property == "length" {

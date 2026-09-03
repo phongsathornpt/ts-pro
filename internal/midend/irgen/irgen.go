@@ -31,6 +31,11 @@ type generator struct {
 	emittedClassSpecs map[string]bool
 }
 
+func typeNodeIsAny(node ast.TypeNode) bool {
+	primitive, ok := node.(*ast.PrimitiveTypeNode)
+	return ok && primitive.Kind == "any"
+}
+
 func irJSValueType(t types.Type) bool {
 	if t == nil {
 		return false
@@ -1150,6 +1155,47 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 	return irFn, nil
 }
 
+func (g *generator) lowerDynamicObjectLiteral(lit *ast.ObjectLit) ir.Operand {
+	obj := g.currentFn.NewValue("dynamic_object", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: obj, Callee: "ts_dynamic_object_new"})
+	for _, prop := range lit.Properties {
+		if prop.Spread {
+			return g.failExpr("dynamic object spread is not implemented yet")
+		}
+		value := g.lowerExpr(prop.Value)
+		boxed := g.boxJSValue(value, g.semanticType(prop.Value))
+		res := g.currentFn.NewValue("dynamic_init", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: res, Callee: "ts_dynamic_set",
+			Args:       []ir.Operand{obj, ir.ConstString{Value: prop.Key}, boxed},
+			ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
+		})
+	}
+	return obj
+}
+
+func (g *generator) lowerDynamicGet(obj ir.Operand, key string) ir.Operand {
+	res := g.currentFn.NewValue("dynamic_get", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_dynamic_get",
+		Args:       []ir.Operand{obj, ir.ConstString{Value: key}},
+		ParamTypes: []types.Type{types.TypeAny, types.TypeString},
+	})
+	return res
+}
+
+func (g *generator) lowerDynamicSet(obj ir.Operand, key string, rhs ast.Expr) ir.Operand {
+	value := g.lowerExpr(rhs)
+	boxed := g.boxJSValue(value, g.semanticType(rhs))
+	res := g.currentFn.NewValue("dynamic_set", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_dynamic_set",
+		Args:       []ir.Operand{obj, ir.ConstString{Value: key}, boxed},
+		ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
+	})
+	return res
+}
+
 func (g *generator) lowerStatement(stmt ast.Stmt) {
 	switch s := stmt.(type) {
 	case *ast.BlockStmt:
@@ -1160,7 +1206,14 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		for _, d := range s.Declarations {
 			var initOp ir.Operand
 			if d.Init != nil {
-				initOp = g.lowerExpr(d.Init)
+				if typeNodeIsAny(d.Type) {
+					if lit, ok := d.Init.(*ast.ObjectLit); ok {
+						initOp = g.lowerDynamicObjectLiteral(lit)
+					}
+				}
+				if initOp == nil {
+					initOp = g.lowerExpr(d.Init)
+				}
 			}
 			if initOp == nil {
 				initOp = ir.ConstNumber{Value: 0}
@@ -2098,7 +2151,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: target, Field: key, Offset: offset})
 				return res
 			}
-			return g.failExpr("native string-key indexing requires a closed object with concrete provenance")
+			if target.Type() == types.TypeAny {
+				return g.lowerDynamicGet(target, key)
+			}
+			return g.failExpr("native string-key indexing requires a closed object or dynamic object")
 		}
 		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
 			lit, ok := e.Index.(*ast.NumberLit)
@@ -2178,6 +2234,21 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
 					return res
 				}
+			}
+		}
+		if g.semanticType(e.Object) == types.TypeAny {
+			obj := g.lowerExpr(e.Object)
+			if concrete, ok := obj.Type().(*types.ObjectType); ok {
+				offsets, _, _ := g.objectLayout(concrete)
+				if offset, exists := offsets[e.Property]; exists {
+					field := concrete.Fields[e.Property]
+					res := g.currentFn.NewValue("any_field", field.Type)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
+					return res
+				}
+			}
+			if obj.Type() == types.TypeAny {
+				return g.lowerDynamicGet(obj, e.Property)
 			}
 		}
 		return g.failExpr("unsupported member access .%s", e.Property)
@@ -2375,6 +2446,27 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return value
 			}
 		}
+		if mem, ok := e.Left.(*ast.MemberExpr); ok && g.semanticType(mem.Object) == types.TypeAny {
+			obj := g.lowerExpr(mem.Object)
+			if concrete, ok := obj.Type().(*types.ObjectType); ok {
+				offsets, _, _ := g.objectLayout(concrete)
+				if offset, exists := offsets[mem.Property]; exists {
+					if e.Op != token.Eq {
+						return g.failExpr("compound assignment through any alias is not implemented yet")
+					}
+					rhs := g.lowerExpr(e.Right)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: rhs})
+					return rhs
+				}
+			}
+			if obj.Type() == types.TypeAny {
+				if e.Op != token.Eq {
+					return g.failExpr("dynamic compound property assignment is not implemented yet")
+				}
+				return g.lowerDynamicSet(obj, mem.Property, e.Right)
+			}
+		}
+
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
 			if key, ok := g.staticStringKey(idx.Index); ok {
 				target := g.lowerExpr(idx.Target)
@@ -2397,7 +2489,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: target, Field: key, Offset: offset, Val: value})
 					return value
 				}
-				return g.failExpr("native string-key assignment requires a closed object with concrete provenance")
+				if target.Type() == types.TypeAny {
+					if e.Op != token.Eq {
+						return g.failExpr("dynamic computed compound assignment is not implemented yet")
+					}
+					return g.lowerDynamicSet(target, key, e.Right)
+				}
+				return g.failExpr("native string-key assignment requires a closed object or dynamic object")
 			}
 			if tuple, isTuple := g.semanticType(idx.Target).(*types.TupleType); isTuple {
 				lit, ok := idx.Index.(*ast.NumberLit)

@@ -90,11 +90,13 @@ const (
 	amd64ObjectType       int32 = 24
 	amd64ObjectHeaderSize int32 = 32
 
-	amd64ObjectTypeAtomic      int64 = 0
-	amd64ObjectTypeArray       int64 = 1
-	amd64ObjectTypeArrayData   int64 = 2
-	amd64ObjectTypeRefData     int64 = 3
-	amd64ObjectTypeObject      int64 = 4
-	amd64ObjectTypeClosure     int64 = 5
-	amd64ObjectTypeJSValueData int64 = 6
+	amd64ObjectTypeAtomic         int64 = 0
+	amd64ObjectTypeArray          int64 = 1
+	amd64ObjectTypeArrayData      int64 = 2
+	amd64ObjectTypeRefData        int64 = 3
+	amd64ObjectTypeObject         int64 = 4
+	amd64ObjectTypeClosure        int64 = 5
+	amd64ObjectTypeJSValueData    int64 = 6
+	amd64ObjectTypeDynamicObject  int64 = 7
+	amd64ObjectTypeDynamicEntries int64 = 8
 )

@@ -856,3 +856,25 @@ console.log(grown[200000]);
 		expected: "3\n1\nupdated\ntrue\n1\n7\nkeep-alive\n",
 	})
 }
+
+func TestLinuxAMD64EvolvingDynamicShapes(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "evolving_dynamic_object_growth_and_gc",
+		source: `
+const obj: any = {};
+obj.a = 1;
+obj.b = "keep-" + "alive";
+obj.c = true;
+obj.d = 4;
+obj.e = 5;
+obj.c = false;
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(obj.a);
+console.log(obj.b);
+console.log(obj.c);
+console.log(obj.e);
+console.log(obj.missing);
+`,
+		expected: "1\nkeep-alive\nfalse\n5\nundefined\n",
+	})
+}
