@@ -1691,3 +1691,21 @@ console.log(1);
 		expected: "1\n42\n",
 	})
 }
+
+func TestLinuxAMD64ClassMethodUnusedTrailingArgumentPreservesThis(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "class_method_unused_trailing_arg_preserves_this",
+		source: `
+class Box {
+  value: number;
+  constructor(value: number) { this.value = value; }
+  invoke(resolve: (value: number) => void, unused: (reason: any) => void): void {
+    resolve(this.value + 2);
+  }
+}
+const box = new Box(40);
+box.invoke((value: number): void => { console.log(value); }, (reason: any): void => {});
+`,
+		expected: "42\n",
+	})
+}

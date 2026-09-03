@@ -69,3 +69,26 @@ func TestSpillWhenPressureHigh(t *testing.T) {
 		t.Errorf("expected at least one spill with only 1 physical register")
 	}
 }
+
+func TestParametersLiveAtEntryDoNotShareRegister(t *testing.T) {
+	fn := ir.NewFunction("entryParams", types.TypeNumber)
+	thisVal := fn.NewValue("this", types.NewObject("Box"))
+	used := fn.NewValue("used", types.TypeNumber)
+	unused := fn.NewValue("unused", types.NewFunction(nil, types.TypeVoid))
+	fn.Params = []*ir.Value{thisVal, used, unused}
+	b := fn.NewBlock("entry")
+	field := fn.NewValue("field", types.TypeNumber)
+	b.Instructions = append(b.Instructions, &ir.GetFieldInst{Res: field, Obj: thisVal, Field: "value", Offset: 16})
+	result := fn.NewValue("result", types.TypeNumber)
+	b.Instructions = append(b.Instructions, &ir.BinaryInst{Res: result, Op: ir.OpAdd, LHS: field, RHS: used})
+	b.Terminator = &ir.ReturnTerm{Val: result}
+
+	ra := New(4)
+	locs := ra.Allocate(fn)
+	if locs[thisVal.ID].IsReg && locs[unused.ID].IsReg && locs[thisVal.ID].Reg == locs[unused.ID].Reg {
+		t.Fatalf("this and unused trailing parameter share entry register %d", locs[thisVal.ID].Reg)
+	}
+	if locs[used.ID].IsReg && locs[unused.ID].IsReg && locs[used.ID].Reg == locs[unused.ID].Reg {
+		t.Fatalf("used and unused trailing parameter share entry register %d", locs[used.ID].Reg)
+	}
+}

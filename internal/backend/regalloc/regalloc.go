@@ -74,7 +74,7 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 		// Expire old intervals
 		var stillActive []activeItem
 		for _, act := range active {
-			if act.interval.End <= curr.Start {
+			if act.interval.End < curr.Start || (act.interval.End == curr.Start && act.interval.Start < curr.Start) {
 				freeRegs[act.reg] = true
 			} else {
 				stillActive = append(stillActive, act)
