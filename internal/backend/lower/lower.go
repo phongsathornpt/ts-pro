@@ -1529,6 +1529,23 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// Emit ts_print_str for Linux AMD64
 	fnOffsets["ts_print_str"] = len(e.Code)
 	emitAMD64PrintStr(e)
+	fnOffsets["ts_print_object"] = len(e.Code)
+	emitAMD64PrintLiteral(e, "[object Object]\n")
+	fnOffsets["ts_print_true"] = len(e.Code)
+	emitAMD64PrintLiteral(e, "true\n")
+	fnOffsets["ts_print_false"] = len(e.Code)
+	emitAMD64PrintLiteral(e, "false\n")
+
+	fnOffsets["ts_js_box_number"] = len(e.Code)
+	emitAMD64JSBoxNumber(e)
+	fnOffsets["ts_js_box_bool"] = len(e.Code)
+	emitAMD64JSBoxBool(e)
+	fnOffsets["ts_js_box_string"] = len(e.Code)
+	emitAMD64JSBoxString(e)
+	fnOffsets["ts_js_box_ref"] = len(e.Code)
+	emitAMD64JSBoxRef(e)
+	fnOffsets["ts_js_print"] = len(e.Code)
+	emitAMD64JSPrint(e, fnOffsets["ts_print_val"], fnOffsets["ts_print_str"], fnOffsets["ts_print_undefined"], fnOffsets["ts_print_null"], fnOffsets["ts_print_object"], fnOffsets["ts_print_true"], fnOffsets["ts_print_false"])
 
 	fnOffsets["ts_runtime_init"] = len(e.Code)
 	emitAMD64RuntimeInit(e)

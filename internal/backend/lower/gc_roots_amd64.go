@@ -11,6 +11,9 @@ func isAMD64HeapRefType(t types.Type) bool {
 	if t == nil {
 		return false
 	}
+	if amd64JSValueType(t) {
+		return true
+	}
 	switch t.Kind() {
 	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
 		return true
@@ -27,6 +30,9 @@ func isAMD64HeapRefType(t types.Type) bool {
 }
 
 func amd64ArrayElementClass(t types.Type) int64 {
+	if amd64JSValueType(t) {
+		return 2
+	}
 	if isAMD64HeapRefType(t) {
 		return 1
 	}
@@ -84,10 +90,11 @@ const (
 	amd64ObjectType       int32 = 24
 	amd64ObjectHeaderSize int32 = 32
 
-	amd64ObjectTypeAtomic    int64 = 0
-	amd64ObjectTypeArray     int64 = 1
-	amd64ObjectTypeArrayData int64 = 2
-	amd64ObjectTypeRefData   int64 = 3
-	amd64ObjectTypeObject    int64 = 4
-	amd64ObjectTypeClosure   int64 = 5
+	amd64ObjectTypeAtomic      int64 = 0
+	amd64ObjectTypeArray       int64 = 1
+	amd64ObjectTypeArrayData   int64 = 2
+	amd64ObjectTypeRefData     int64 = 3
+	amd64ObjectTypeObject      int64 = 4
+	amd64ObjectTypeClosure     int64 = 5
+	amd64ObjectTypeJSValueData int64 = 6
 )

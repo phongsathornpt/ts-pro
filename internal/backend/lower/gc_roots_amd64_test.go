@@ -42,7 +42,10 @@ func TestAMD64HeapRefTypeRecognizesReferenceUnion(t *testing.T) {
 	if !isAMD64HeapRefType(types.NewUnion(types.TypeNumber, types.TypeString)) {
 		t.Fatal("number|string union must be reference-capable for conservative heap tracing")
 	}
-	if isAMD64HeapRefType(types.NewUnion(types.TypeNumber, types.TypeBoolean)) {
-		t.Fatal("number|boolean union must remain scalar")
+	if !isAMD64HeapRefType(types.NewUnion(types.TypeNumber, types.TypeBoolean)) {
+		t.Fatal("number|boolean union requires a JSValue root slot")
+	}
+	if got := amd64ArrayElementClass(types.NewUnion(types.TypeNumber, types.TypeString)); got != 2 {
+		t.Fatalf("number|string array element class = %d, want JSValue class 2", got)
 	}
 }

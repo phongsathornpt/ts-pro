@@ -31,9 +31,43 @@ type generator struct {
 	emittedClassSpecs map[string]bool
 }
 
+func irJSValueType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Kind() == types.KindAny || t.Kind() == types.KindUnknown {
+		return true
+	}
+	u, ok := t.(*types.UnionType)
+	if !ok {
+		return false
+	}
+	classes := map[int]bool{}
+	for _, member := range u.Members {
+		switch member.Kind() {
+		case types.KindNull, types.KindUndefined, types.KindNever:
+			continue
+		case types.KindNumber:
+			classes[1] = true
+		case types.KindBoolean:
+			classes[2] = true
+		case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
+			classes[3] = true
+		case types.KindAny, types.KindUnknown:
+			return true
+		default:
+			classes[4] = true
+		}
+	}
+	return len(classes) > 1
+}
+
 func irHeapRefType(t types.Type) bool {
 	if t == nil {
 		return false
+	}
+	if irJSValueType(t) {
+		return true
 	}
 	switch t.Kind() {
 	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
@@ -433,8 +467,12 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 		Res: rest, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(restCount)},
 	})
 	for i, value := range args[restIndex:] {
+		stored := value
+		if irJSValueType(arrType.Elem) {
+			stored = g.boxJSValue(value, value.Type())
+		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
-			Array: rest, Index: ir.ConstNumber{Value: float64(i)}, Val: value,
+			Array: rest, Index: ir.ConstNumber{Value: float64(i)}, Val: stored,
 		})
 	}
 	packed := append([]ir.Operand(nil), args[:restIndex]...)
@@ -442,12 +480,46 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 	return packed
 }
 
+func (g *generator) boxJSValue(value ir.Operand, sourceType types.Type) ir.Operand {
+	if value == nil {
+		return value
+	}
+	if sourceType == nil {
+		sourceType = value.Type()
+	}
+	if irJSValueType(sourceType) {
+		return value
+	}
+	switch sourceType.Kind() {
+	case types.KindNull, types.KindUndefined:
+		return value
+	case types.KindNumber:
+		res := g.currentFn.NewValue("js_num", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_number", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeNumber}})
+		return res
+	case types.KindBoolean:
+		res := g.currentFn.NewValue("js_bool", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_bool", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeBoolean}})
+		return res
+	case types.KindString:
+		res := g.currentFn.NewValue("js_str", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_string", Args: []ir.Operand{value}, ParamTypes: []types.Type{sourceType}})
+		return res
+	case types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
+		res := g.currentFn.NewValue("js_ref", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_ref", Args: []ir.Operand{value}, ParamTypes: []types.Type{sourceType}})
+		return res
+	default:
+		return g.failExpr("native JSValue boxing is not implemented for %s", sourceType)
+	}
+}
+
 func (g *generator) pushArrayOperand(array ir.Operand, value ir.Operand) {
 	length := g.currentFn.NewValue("push_len", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: length, Array: array, Val: value})
 }
 
-func (g *generator) appendSpreadArray(dst ir.Operand, src ir.Operand, elemType types.Type) {
+func (g *generator) appendSpreadArray(dst ir.Operand, src ir.Operand, elemType, dstElemType types.Type) {
 	preheader := g.currentBB
 	condBB := g.currentFn.NewBlock("spread_cond")
 	bodyBB := g.currentFn.NewBlock("spread_body")
@@ -469,7 +541,11 @@ func (g *generator) appendSpreadArray(dst ir.Operand, src ir.Operand, elemType t
 	g.currentBB = bodyBB
 	elem := g.currentFn.NewValue("spread_elem", elemType)
 	bodyBB.Instructions = append(bodyBB.Instructions, &ir.GetElementInst{Res: elem, Array: src, Index: index})
-	g.pushArrayOperand(dst, elem)
+	stored := ir.Operand(elem)
+	if irJSValueType(dstElemType) && !irJSValueType(elemType) {
+		stored = g.boxJSValue(elem, elemType)
+	}
+	g.pushArrayOperand(dst, stored)
 	bodyBB.Instructions = append(bodyBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
 	bodyBB.Terminator = &ir.JumpTerm{Target: condBB}
 	g.currentBB = doneBB
@@ -675,7 +751,13 @@ func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 				return nil
 			}
 		}
-		return g.failExpr("console.log native printing is not implemented for any without concrete provenance")
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_js_print", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
+		return nil
+	}
+	if irJSValueType(t) {
+		value := g.lowerExpr(expr)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_js_print", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
+		return nil
 	}
 	if callee, ok := consolePrinterForType(t); ok {
 		if t == types.TypeUndefined || t == types.TypeNull {
@@ -1811,15 +1893,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					return g.failExpr("native array spread requires an array source")
 				}
 				source := g.lowerExpr(spread.Value)
-				g.appendSpreadArray(res, source, sourceType.Elem)
+				g.appendSpreadArray(res, source, sourceType.Elem, arrType.Elem)
 				continue
 			}
 			val := g.lowerExpr(el)
+			stored := val
+			if irJSValueType(arrType.Elem) {
+				stored = g.boxJSValue(val, g.semanticType(el))
+			}
 			if hasSpread {
-				g.pushArrayOperand(res, val)
+				g.pushArrayOperand(res, stored)
 			} else {
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{
-					Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: val,
+					Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: stored,
 				})
 			}
 		}
@@ -2137,6 +2223,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 						return g.failExpr("array.push expects exactly one argument in native lowering")
 					}
 					val := g.lowerExpr(e.Args[0])
+					if irJSValueType(arrType.Elem) {
+						val = g.boxJSValue(val, g.semanticType(e.Args[0]))
+					}
 					res := g.currentFn.NewValue("len", types.TypeNumber)
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: res, Array: array, Val: val})
 					return res
@@ -2338,7 +2427,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			index := g.lowerExpr(idx.Index)
 			if e.Op == token.Eq {
 				rhs := g.lowerExpr(e.Right)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: rhs})
+				stored := rhs
+				if arrType, ok := array.Type().(*types.ArrayType); ok && irJSValueType(arrType.Elem) {
+					stored = g.boxJSValue(rhs, g.semanticType(e.Right))
+				}
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: stored})
 				return rhs
 			}
 			currentType := types.TypeAny

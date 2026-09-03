@@ -833,3 +833,26 @@ console.log(arr[idx]);
 		expected: "101\nAlice\nAlice\n202\napplication/json\ntext/html\n20\n99\n",
 	})
 }
+
+func TestLinuxAMD64JSValueArrays(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "jsvalue_any_union_arrays_gc",
+		source: `
+const values: any[] = [1, "two", true];
+values[1] = "up" + "dated";
+console.log(values.length);
+console.log(values[0]);
+console.log(values[1]);
+console.log(values[2]);
+const mixed: (number | string)[] = [1, "two"];
+mixed[1] = 7;
+console.log(mixed[0]);
+console.log(mixed[1]);
+const grown: any[] = [];
+grown[200000] = "keep-" + "alive";
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(grown[200000]);
+`,
+		expected: "3\n1\nupdated\ntrue\n1\n7\nkeep-alive\n",
+	})
+}
