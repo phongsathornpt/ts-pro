@@ -314,8 +314,18 @@ func normalizeOptions(options BuildOptions) (BuildOptions, error) {
 	if !validOptimization(options.Optimization) {
 		return options, fmt.Errorf("unsupported optimization %q", options.Optimization)
 	}
+	// Pure-Go is the canonical default for all builds. Because BuildOptions has PureGo=false
+	// as its Go zero-value, we default options.PureGo to true unless DisablePureGo is set,
+	// or PureGo is explicitly false under the TS_PRO_LLVM=1 quarantine override (used by legacy tests).
 	if options.DisablePureGo {
+		if os.Getenv("TS_PRO_LLVM") != "1" {
+			return options, fmt.Errorf("llvm native backend is quarantined (set TS_PRO_LLVM=1 to enable)")
+		}
 		options.PureGo = false
+	} else if !options.PureGo && os.Getenv("TS_PRO_LLVM") == "1" {
+		options.PureGo = false
+	} else {
+		options.PureGo = true
 	}
 	return options, nil
 }

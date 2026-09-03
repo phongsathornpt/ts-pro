@@ -659,6 +659,16 @@ func (f *functionLowerer) lowerExpr(expr *frontend.Expr) (hir.ValueID, error) {
 		}
 		captures := make([]hir.ValueID, 0, len(expr.Captures))
 		for i, capture := range expr.Captures {
+			if capture.Type < frontend.TypeID(len(f.module.source.Types)) {
+				tKind := f.module.source.Types[capture.Type].Kind
+				if tKind == frontend.TypeMap || tKind == frontend.TypeSet {
+					typeName := f.module.source.Types[capture.Type].Name
+					if typeName == "" {
+						typeName = "collection"
+					}
+					return 0, fmt.Errorf("cannot capture mutable %s across task spawn: use typed channels or explicit synchronization", typeName)
+				}
+			}
 			value, err := f.lowerExprAs(capture, target.Params[i].Type)
 			if err != nil {
 				return 0, err
