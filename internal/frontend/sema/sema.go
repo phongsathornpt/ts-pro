@@ -60,10 +60,11 @@ func (s *Scope) Resolve(name string) *Symbol {
 
 // Result holds the analyzed types and symbols for an AST.
 type Result struct {
-	Types       map[ast.Node]types.Type
-	Symbols     map[ast.Node]*Symbol
-	RootScope   *Scope
-	Diagnostics diag.DiagnosticList
+	Types        map[ast.Node]types.Type
+	Symbols      map[ast.Node]*Symbol
+	GenericCalls map[*ast.CallExpr]*types.FunctionType
+	RootScope    *Scope
+	Diagnostics  diag.DiagnosticList
 }
 
 type Checker struct {
@@ -78,10 +79,11 @@ func NewChecker() *Checker {
 	return &Checker{
 		currentScope: root,
 		result: &Result{
-			Types:       make(map[ast.Node]types.Type),
-			Symbols:     make(map[ast.Node]*Symbol),
-			RootScope:   root,
-			Diagnostics: make(diag.DiagnosticList, 0),
+			Types:        make(map[ast.Node]types.Type),
+			Symbols:      make(map[ast.Node]*Symbol),
+			GenericCalls: make(map[*ast.CallExpr]*types.FunctionType),
+			RootScope:    root,
+			Diagnostics:  make(diag.DiagnosticList, 0),
 		},
 	}
 }
@@ -196,6 +198,8 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 		c.checkDoWhile(s)
 	case *ast.ForStmt:
 		c.checkFor(s)
+	case *ast.ForOfStmt:
+		c.checkForOf(s)
 	case *ast.SwitchStmt:
 		c.checkSwitch(s)
 	case *ast.BreakStmt, *ast.ContinueStmt:
@@ -366,6 +370,27 @@ func (c *Checker) checkSwitch(s *ast.SwitchStmt) {
 			c.checkStatement(stmt)
 		}
 	}
+}
+
+func (c *Checker) checkForOf(s *ast.ForOfStmt) {
+	iterableType := c.checkExpr(s.Iterable)
+	arr, ok := iterableType.(*types.ArrayType)
+	if !ok {
+		c.error(s.Iterable.Span(), "TS2488", fmt.Sprintf("Type '%s' is not iterable by the native array for-of lowering.", iterableType))
+		return
+	}
+	elemType := arr.Elem
+	if s.Type != nil {
+		declared := c.resolveTypeNode(s.Type)
+		if !elemType.AssignableTo(declared) {
+			c.error(s.Span(), "TS2322", fmt.Sprintf("Type '%s' is not assignable to for-of variable type '%s'.", elemType, declared))
+		}
+		elemType = declared
+	}
+	c.currentScope = NewScope(c.currentScope)
+	defer func() { c.currentScope = c.currentScope.Parent }()
+	_ = c.currentScope.Define(&Symbol{Name: s.Name, Kind: SymVar, Type: elemType, Node: s})
+	c.checkStatement(s.Body)
 }
 
 func (c *Checker) checkFor(s *ast.ForStmt) {
@@ -543,6 +568,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			return types.TypeAny
 		}
 
+		argTypes := make([]types.Type, len(e.Args))
+		for i, arg := range e.Args {
+			argTypes[i] = c.checkExpr(arg)
+		}
+
 		effective := fnType
 		if len(e.TypeArgs) > 0 {
 			if len(fnType.TypeParams) == 0 {
@@ -555,22 +585,31 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				instantiated, err := types.InstantiateFunction(fnType, args)
 				if err != nil {
 					c.error(e.Span(), "TS2558", err.Error())
-				} else {
-					effective = instantiated
+					c.result.Types[e] = types.TypeAny
+					return types.TypeAny
 				}
+				effective = instantiated
 			}
 		} else if len(fnType.TypeParams) > 0 {
-			c.error(e.Span(), "TS2684", "Generic call requires explicit type arguments in the current native semantic subset.")
+			instantiated, err := types.InferFunction(fnType, argTypes)
+			if err != nil {
+				c.error(e.Span(), "TS2684", err.Error())
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
+			effective = instantiated
 		}
 
-		for i, arg := range e.Args {
-			argType := c.checkExpr(arg)
+		for i, argType := range argTypes {
 			if i < len(effective.Params) {
 				expected := effective.Params[i].Type
 				if !argType.AssignableTo(expected) {
-					c.error(arg.Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.", argType, expected))
+					c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.", argType, expected))
 				}
 			}
+		}
+		if len(fnType.TypeParams) > 0 {
+			c.result.GenericCalls[e] = effective
 		}
 		c.result.Types[e] = effective.Return
 		return effective.Return
@@ -618,6 +657,22 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		indexType := c.checkExpr(e.Index)
 		if indexType != types.TypeNumber && indexType != types.TypeAny {
 			c.error(e.Index.Span(), "TS7015", "Array index expression must be a number.")
+		}
+		if tuple, ok := targetType.(*types.TupleType); ok {
+			if lit, ok := e.Index.(*ast.NumberLit); ok {
+				idx := int(lit.Value)
+				if float64(idx) == lit.Value && idx >= 0 && idx < len(tuple.Elements) {
+					c.result.Types[e] = tuple.Elements[idx]
+					return tuple.Elements[idx]
+				}
+			}
+			if len(tuple.Elements) > 0 {
+				u := types.NewUnion(tuple.Elements...)
+				c.result.Types[e] = u
+				return u
+			}
+			c.result.Types[e] = types.TypeNever
+			return types.TypeNever
 		}
 		if arr, ok := targetType.(*types.ArrayType); ok {
 			c.result.Types[e] = arr.Elem

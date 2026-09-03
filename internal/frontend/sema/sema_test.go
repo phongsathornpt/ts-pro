@@ -169,3 +169,34 @@ const bad: number = identity<string>("wrong");
 		t.Fatal("expected generic specialization assignment mismatch")
 	}
 }
+
+func TestSemaInfersGenericFunctionCallsAndTupleIndexes(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("generic-infer.ts", []byte(`
+function identity<T>(x: T): T { return x; }
+function pair<A, B>(first: A, second: B): [A, B] { return [first, second]; }
+const n: number = identity(42);
+const s: string = identity("hello");
+const p: [string, number] = pair("answer", 42);
+const first: string = p[0];
+const second: number = p[1];
+`))
+	p := parser.New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	result := Check(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("sema diagnostics: %s", result.Diagnostics.Format(fs))
+	}
+	if len(result.GenericCalls) != 3 {
+		t.Fatalf("generic call instantiations = %d, want 3", len(result.GenericCalls))
+	}
+	if first := result.RootScope.Resolve("first"); first == nil || !first.Type.Equals(types.TypeString) {
+		t.Fatalf("first type = %v", first)
+	}
+	if second := result.RootScope.Resolve("second"); second == nil || !second.Type.Equals(types.TypeNumber) {
+		t.Fatalf("second type = %v", second)
+	}
+}
