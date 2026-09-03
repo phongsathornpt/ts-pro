@@ -317,3 +317,26 @@ const item = new Derived(40, "ok");
 		t.Fatalf("expected new expression, got %T", decl.Declarations[0].Init)
 	}
 }
+
+func TestParseNamedImportAliases(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("main.ts", []byte(`import { multiply, power as pow, Counter } from "./helper";`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	if len(prog.Statements) != 1 {
+		t.Fatalf("expected one import, got %d statements", len(prog.Statements))
+	}
+	imp, ok := prog.Statements[0].(*ast.ImportDecl)
+	if !ok {
+		t.Fatalf("expected *ast.ImportDecl, got %T", prog.Statements[0])
+	}
+	if imp.Module != "./helper" || len(imp.Specifiers) != 3 {
+		t.Fatalf("unexpected import: %#v", imp)
+	}
+	if imp.Specifiers[1].Imported != "power" || imp.Specifiers[1].Local != "pow" {
+		t.Fatalf("alias specifier = %#v", imp.Specifiers[1])
+	}
+}

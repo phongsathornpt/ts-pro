@@ -1,6 +1,9 @@
 package tspro
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +52,22 @@ let x: number = "mismatch";
 	diags := c.Check("test.ts", src)
 	if !diags.HasErrors() {
 		t.Errorf("expected type error, got none")
+	}
+}
+
+func TestCompileFileRejectsCyclicRelativeImports(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.ts")
+	b := filepath.Join(dir, "b.ts")
+	if err := os.WriteFile(a, []byte(`import { b } from "./b"; export function a(): number { return b(); }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(`import { a } from "./a"; export function b(): number { return a(); }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
+	_, err := c.CompileFile(a, filepath.Join(dir, "out"))
+	if err == nil || !strings.Contains(err.Error(), "cyclic module import") {
+		t.Fatalf("CompileFile cycle error = %v", err)
 	}
 }

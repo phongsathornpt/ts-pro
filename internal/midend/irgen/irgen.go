@@ -2334,7 +2334,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		calleeName := "unknown"
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			calleeName = ident.Name
-			if decl := g.genericDecls[ident.Name]; decl != nil {
+			if imported := g.semaResult.ImportAliases[ident.Name]; imported != "" {
+				calleeName = imported
+			}
+			if decl := g.genericDecls[calleeName]; decl != nil {
 				concrete := g.semaResult.GenericCalls[e]
 				if concrete == nil {
 					return g.failExpr("generic call %q is missing a semantic instantiation", ident.Name)

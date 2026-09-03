@@ -83,6 +83,7 @@ type Result struct {
 	GenericClasses map[*ast.NewExpr]*ClassInfo
 	Classes        map[string]*ClassInfo
 	Enums          map[string]map[string]float64
+	ImportAliases  map[string]string
 	RootScope      *Scope
 	Diagnostics    diag.DiagnosticList
 }
@@ -108,6 +109,7 @@ func NewChecker() *Checker {
 			GenericClasses: make(map[*ast.NewExpr]*ClassInfo),
 			Classes:        make(map[string]*ClassInfo),
 			Enums:          make(map[string]map[string]float64),
+			ImportAliases:  make(map[string]string),
 			RootScope:      root,
 			Diagnostics:    make(diag.DiagnosticList, 0),
 		},
@@ -193,6 +195,23 @@ func (c *Checker) declareTopLevel(prog *ast.Program) {
 
 	for _, stmt := range prog.Statements {
 		switch s := stmt.(type) {
+		case *ast.ImportDecl:
+			for _, spec := range s.Specifiers {
+				target := c.currentScope.Resolve(spec.Imported)
+				if target == nil {
+					c.error(s.Span(), "TS2305", fmt.Sprintf("Module %q has no exported member %q.", s.Module, spec.Imported))
+					continue
+				}
+				if spec.Local == spec.Imported {
+					continue
+				}
+				alias := &Symbol{Name: spec.Local, Kind: target.Kind, Type: target.Type, Node: s}
+				if err := c.currentScope.Define(alias); err != nil {
+					c.error(s.Span(), "TS2300", err.Error())
+					continue
+				}
+				c.result.ImportAliases[spec.Local] = spec.Imported
+			}
 		case *ast.EnumDecl:
 			value := float64(0)
 			for _, member := range s.Members {
@@ -376,6 +395,8 @@ func (c *Checker) checkProgram(prog *ast.Program) {
 
 func (c *Checker) checkStatement(stmt ast.Stmt) {
 	switch s := stmt.(type) {
+	case *ast.ImportDecl:
+		// Resolved during top-level declaration after dependency flattening.
 	case *ast.VarDeclStmt:
 		c.checkVarDecl(s)
 	case *ast.FunctionDecl:

@@ -878,3 +878,57 @@ console.log(obj.missing);
 		expected: "1\nkeep-alive\nfalse\n5\nundefined\n",
 	})
 }
+
+func TestLinuxAMD64MultiModuleRelativeImports(t *testing.T) {
+	dir := t.TempDir()
+	modules := filepath.Join(dir, "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	helper := `
+export function multiply(a: number, b: number): number { return a * b; }
+export function power(base: number, exp: number): number {
+  let result = 1;
+  for (let i = 0; i < exp; i++) { result = result * base; }
+  return result;
+}
+export class Counter {
+  count: number;
+  constructor(initial: number) { this.count = initial; }
+  increment(): number { this.count = this.count + 1; return this.count; }
+  value(): number { return this.count; }
+}
+`
+	main := `
+import { multiply, power as pow, Counter } from "./modules/helper";
+console.log(multiply(6, 7));
+console.log(pow(2, 8));
+const c = new Counter(10);
+c.increment(); c.increment();
+console.log(c.value());
+`
+	if err := os.WriteFile(filepath.Join(modules, "helper.ts"), []byte(helper), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ts")
+	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(dir, "app")
+	compiler := tspro.New(tspro.Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
+	if diags, err := compiler.CompileFile(mainPath, binPath); err != nil {
+		t.Fatalf("multi-module compile failed: %v, diagnostics: %s", err, diags.Format(compiler.FileSet()))
+	}
+	assertLinuxAMD64ELF(t, binPath)
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Logf("linux/amd64 execution skipped on host %s/%s", runtime.GOOS, runtime.GOARCH)
+		return
+	}
+	out, err := exec.Command(binPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("multi-module execution failed: %v\n%s", err, out)
+	}
+	if got, want := string(out), "42\n256\n12\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}

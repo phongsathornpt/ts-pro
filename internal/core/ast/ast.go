@@ -239,6 +239,17 @@ type (
 		Declarations []VarDeclarator
 	}
 
+	ImportSpecifier struct {
+		Imported string
+		Local    string
+	}
+
+	ImportDecl struct {
+		SourceSpan source.Span
+		Module     string
+		Specifiers []ImportSpecifier
+	}
+
 	FunctionDecl struct {
 		SourceSpan source.Span
 		Name       string
@@ -387,6 +398,9 @@ type (
 func (s *VarDeclStmt) Span() source.Span   { return s.SourceSpan }
 func (s *VarDeclStmt) stmtNode()           {}
 func (s *VarDeclStmt) declNode()           {}
+func (s *ImportDecl) Span() source.Span    { return s.SourceSpan }
+func (s *ImportDecl) stmtNode()            {}
+func (s *ImportDecl) declNode()            {}
 func (s *FunctionDecl) Span() source.Span  { return s.SourceSpan }
 func (s *FunctionDecl) stmtNode()          {}
 func (s *FunctionDecl) declNode()          {}

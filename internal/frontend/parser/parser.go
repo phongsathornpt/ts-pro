@@ -123,6 +123,8 @@ func (p *Parser) Parse() (*ast.Program, diag.DiagnosticList) {
 func (p *Parser) parseStatement() ast.Stmt {
 	p.match(token.KwExport)
 	switch p.current().Kind {
+	case token.KwImport:
+		return p.parseImportDecl()
 	case token.KwLet, token.KwConst, token.KwVar:
 		return p.parseVarDecl()
 	case token.KwFunction:
@@ -155,6 +157,34 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseBlock()
 	default:
 		return p.parseExprStatement()
+	}
+}
+
+func (p *Parser) parseImportDecl() *ast.ImportDecl {
+	kw := p.advance()
+	p.expect(token.LBrace)
+	var specs []ast.ImportSpecifier
+	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
+		start := p.cursor
+		imported := p.expect(token.Ident)
+		local := imported.Text
+		if p.match(token.KwAs) {
+			local = p.expect(token.Ident).Text
+		}
+		specs = append(specs, ast.ImportSpecifier{Imported: imported.Text, Local: local})
+		if !p.match(token.Comma) {
+			p.ensureProgress(start, "import specifier list")
+			break
+		}
+		p.ensureProgress(start, "import specifier list")
+	}
+	p.expect(token.RBrace)
+	p.expect(token.KwFrom)
+	module := p.expect(token.String)
+	p.match(token.Semicolon)
+	return &ast.ImportDecl{
+		SourceSpan: source.Span{Start: kw.Span.Start, End: module.Span.End},
+		Module:     module.Text, Specifiers: specs,
 	}
 }
 
