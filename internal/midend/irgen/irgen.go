@@ -25,6 +25,8 @@ type generator struct {
 	genericSpecs     map[string]string
 	genericSpecCount int
 	typeBindings     map[*types.TypeVar]types.Type
+	currentClass     *sema.ClassInfo
+	classTags        map[string]int
 }
 
 func irHeapRefType(t types.Type) bool {
@@ -48,25 +50,153 @@ func irHeapRefType(t types.Type) bool {
 
 func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, string) {
 	names := make([]string, 0, len(t.Fields))
-	for name := range t.Fields {
-		names = append(names, name)
+	classLayout := g.semaResult != nil && g.semaResult.Classes[t.Name] != nil && len(t.FieldOrder) == len(t.Fields)
+	if classLayout {
+		names = append(names, t.FieldOrder...)
+	} else {
+		for name := range t.Fields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
 	}
-	sort.Strings(names)
 	offsets := make(map[string]int, len(names))
 	var refMask uint64
+	baseSlot := 0
+	baseOffset := 16
+	shapeNames := names
+	if classLayout {
+		baseSlot = 1
+		baseOffset = 24
+		shapeNames = append([]string{"$class"}, names...)
+	}
 	for i, name := range names {
-		offsets[name] = 16 + i*8
+		offsets[name] = baseOffset + i*8
 		if irHeapRefType(t.Fields[name].Type) {
-			if i >= 64 {
+			slot := i + baseSlot
+			if slot >= 64 {
 				if g.err == nil {
-					g.err = fmt.Errorf("object reference field %q occupies slot %d beyond the 64-bit GC reference mask", name, i)
+					g.err = fmt.Errorf("object reference field %q occupies slot %d beyond the 64-bit GC reference mask", name, slot)
 				}
 			} else {
-				refMask |= uint64(1) << i
+				refMask |= uint64(1) << slot
 			}
 		}
 	}
-	return offsets, refMask, strings.Join(names, ",")
+	return offsets, refMask, strings.Join(shapeNames, ",")
+}
+
+func (g *generator) classTag(name string) int {
+	if tag := g.classTags[name]; tag != 0 {
+		return tag
+	}
+	return 0
+}
+
+func (g *generator) isClassDescendant(name, base string) bool {
+	for name != "" {
+		if name == base {
+			return true
+		}
+		info := g.semaResult.Classes[name]
+		if info == nil {
+			return false
+		}
+		name = info.BaseName
+	}
+	return false
+}
+
+func (g *generator) emitClassMethodCall(obj ir.Operand, staticInfo *sema.ClassInfo, method string, args []ir.Operand) ir.Operand {
+	methodType := staticInfo.Methods[method]
+	if methodType == nil {
+		return g.failExpr("class %s has no method %q", staticInfo.Name, method)
+	}
+	callOwner := func(owner string, bb *ir.BasicBlock) ir.Operand {
+		g.currentBB = bb
+		callArgs := make([]ir.Operand, 0, len(args)+1)
+		callArgs = append(callArgs, obj)
+		callArgs = append(callArgs, args...)
+		if methodType.Return == types.TypeVoid {
+			bb.Instructions = append(bb.Instructions, &ir.CallInst{Callee: classMethodName(owner, method), Args: callArgs})
+			return nil
+		}
+		res := g.currentFn.NewValue("method_ret", methodType.Return)
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: res, Callee: classMethodName(owner, method), Args: callArgs})
+		return res
+	}
+
+	// A more concrete SSA type proves the runtime class, so devirtualize.
+	if concrete, ok := obj.Type().(*types.ObjectType); ok && concrete.Name != "" && concrete.Name != staticInfo.Name {
+		if info := g.semaResult.Classes[concrete.Name]; info != nil && g.isClassDescendant(info.Name, staticInfo.Name) {
+			owner := info.MethodOwners[method]
+			if owner == "" {
+				owner = info.Name
+			}
+			return callOwner(owner, g.currentBB)
+		}
+	}
+
+	staticOwner := staticInfo.MethodOwners[method]
+	if staticOwner == "" {
+		staticOwner = staticInfo.Name
+	}
+	type candidate struct {
+		name, owner string
+		tag         int
+	}
+	var candidates []candidate
+	for name, info := range g.semaResult.Classes {
+		if name == staticInfo.Name || !g.isClassDescendant(name, staticInfo.Name) {
+			continue
+		}
+		owner := info.MethodOwners[method]
+		if owner == "" || owner == staticOwner {
+			continue
+		}
+		candidates = append(candidates, candidate{name: name, owner: owner, tag: g.classTag(name)})
+	}
+	if len(candidates) == 0 {
+		return callOwner(staticOwner, g.currentBB)
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].tag < candidates[j].tag })
+
+	tagVal := g.currentFn.NewValue("class_tag", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: tagVal, Obj: obj, Field: "$class", Offset: 16})
+	join := g.currentFn.NewBlock("vcall_join")
+	incoming := make([]ir.PhiIncoming, 0, len(candidates)+1)
+	check := g.currentBB
+	for i, cand := range candidates {
+		g.currentBB = check
+		cond := g.currentFn.NewValue("class_match", types.TypeBoolean)
+		check.Instructions = append(check.Instructions, &ir.BinaryInst{Res: cond, Op: ir.OpEq, LHS: tagVal, RHS: ir.ConstNumber{Value: float64(cand.tag)}})
+		callBB := g.currentFn.NewBlock("vcall_" + cand.name)
+		nextBB := g.currentFn.NewBlock("vcall_next")
+		check.Terminator = &ir.BranchTerm{Cond: cond, Then: callBB, Else: nextBB}
+		res := callOwner(cand.owner, callBB)
+		if callBB.Terminator == nil {
+			callBB.Terminator = &ir.JumpTerm{Target: join}
+		}
+		if res != nil {
+			incoming = append(incoming, ir.PhiIncoming{Block: callBB, Value: res})
+		}
+		check = nextBB
+		_ = i
+	}
+	fallback := check
+	res := callOwner(staticOwner, fallback)
+	if fallback.Terminator == nil {
+		fallback.Terminator = &ir.JumpTerm{Target: join}
+	}
+	if res != nil {
+		incoming = append(incoming, ir.PhiIncoming{Block: fallback, Value: res})
+	}
+	g.currentBB = join
+	if methodType.Return == types.TypeVoid {
+		return nil
+	}
+	out := g.currentFn.NewValue("vcall_ret", methodType.Return)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: out, Incoming: incoming})
+	return out
 }
 
 func (g *generator) tupleRefMask(t *types.TupleType) uint64 {
@@ -349,6 +479,9 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, method *ast.ClassMeth
 	g.currentFn = irFn
 	g.currentBB = irFn.NewBlock("entry")
 	g.locals = make(map[string]ir.Operand)
+	previousClass := g.currentClass
+	g.currentClass = info
+	defer func() { g.currentClass = previousClass }()
 
 	thisVal := irFn.NewValue("$this", info.Instance)
 	irFn.Params = append(irFn.Params, thisVal)
@@ -366,22 +499,18 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, method *ast.ClassMeth
 		}
 	}
 
-	if constructor {
-		offsets, _, _ := g.objectLayout(info.Instance)
-		// Class field initializers run for each new instance before the base-class
-		// constructor body in the current non-derived class subset.
+	offsets, _, _ := g.objectLayout(info.Instance)
+	emitOwnInitializers := func() error {
 		for _, field := range cls.Fields {
 			if field.IsStatic || field.Init == nil {
 				continue
 			}
 			offset, ok := offsets[field.Name]
 			if !ok {
-				return nil, fmt.Errorf("class %s field %q is missing from instance layout", cls.Name, field.Name)
+				return fmt.Errorf("class %s field %q is missing from instance layout", cls.Name, field.Name)
 			}
 			value := g.lowerExpr(field.Init)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
-				Obj: thisVal, Field: field.Name, Offset: offset, Val: value,
-			})
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: thisVal, Field: field.Name, Offset: offset, Val: value})
 		}
 		if method != nil {
 			for _, p := range method.Params {
@@ -390,18 +519,46 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, method *ast.ClassMeth
 				}
 				offset, ok := offsets[p.Name]
 				if !ok {
-					return nil, fmt.Errorf("class %s parameter property %q is missing from instance layout", cls.Name, p.Name)
+					return fmt.Errorf("class %s parameter property %q is missing from instance layout", cls.Name, p.Name)
 				}
-				value := g.locals[p.Name]
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
-					Obj: thisVal, Field: p.Name, Offset: offset, Val: value,
-				})
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: thisVal, Field: p.Name, Offset: offset, Val: g.locals[p.Name]})
 			}
+		}
+		return nil
+	}
+
+	bodyStart := 0
+	if constructor && info.BaseName != "" {
+		// JavaScript derived constructors initialize the base portion first. The
+		// current native subset requires an explicit leading super(...) when a
+		// derived constructor is declared; a synthesized constructor calls the
+		// parameterless base constructor.
+		if method != nil && method.Body != nil && len(method.Body.Statements) > 0 {
+			if exprStmt, ok := method.Body.Statements[0].(*ast.ExprStmt); ok {
+				if call, ok := exprStmt.Expr.(*ast.CallExpr); ok {
+					if _, ok := call.Callee.(*ast.SuperExpr); ok {
+						g.lowerExpr(call)
+						bodyStart = 1
+					}
+				}
+			}
+			if bodyStart == 0 {
+				return nil, fmt.Errorf("derived class %s constructor must begin with super(...) in native lowering", cls.Name)
+			}
+		} else {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: classConstructorName(info.BaseName), Args: []ir.Operand{thisVal}})
+		}
+		if err := emitOwnInitializers(); err != nil {
+			return nil, err
+		}
+	} else if constructor {
+		if err := emitOwnInitializers(); err != nil {
+			return nil, err
 		}
 	}
 
 	if method != nil && method.Body != nil {
-		for _, stmt := range method.Body.Statements {
+		for _, stmt := range method.Body.Statements[bodyStart:] {
 			g.lowerStatement(stmt)
 		}
 	}
@@ -459,6 +616,15 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		prog:         &ir.Program{},
 		genericDecls: make(map[string]*ast.FunctionDecl),
 		genericSpecs: make(map[string]string),
+		classTags:    make(map[string]int),
+	}
+	classNames := make([]string, 0, len(semaResult.Classes))
+	for name := range semaResult.Classes {
+		classNames = append(classNames, name)
+	}
+	sort.Strings(classNames)
+	for i, name := range classNames {
+		g.classTags[name] = i + 1
 	}
 
 	for _, stmt := range astProg.Statements {
@@ -1117,8 +1283,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		offsets, refMask, shape := g.objectLayout(info.Instance)
 		obj := g.currentFn.NewValue("instance", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
-			Res: obj, Shape: shape, FieldCount: len(offsets), RefMask: refMask,
+			Res: obj, Shape: shape, FieldCount: len(offsets) + 1, RefMask: refMask,
 		})
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: "$class", Offset: 16, Val: ir.ConstNumber{Value: float64(g.classTag(e.ClassName))}})
 		args := make([]ir.Operand, 0, len(e.Args)+1)
 		args = append(args, obj)
 		for _, arg := range e.Args {
@@ -1364,28 +1531,31 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.failExpr("unsupported member access .%s", e.Property)
 	case *ast.CallExpr:
+		if _, ok := e.Callee.(*ast.SuperExpr); ok {
+			if g.currentClass == nil || g.currentClass.BaseName == "" {
+				return g.failExpr("cannot lower super(...) outside a derived class constructor")
+			}
+			thisVal, ok := g.locals["$this"]
+			if !ok {
+				return g.failExpr("derived constructor is missing native this value")
+			}
+			args := make([]ir.Operand, 0, len(e.Args)+1)
+			args = append(args, thisVal)
+			for _, arg := range e.Args {
+				args = append(args, g.lowerExpr(arg))
+			}
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: classConstructorName(g.currentClass.BaseName), Args: args})
+			return nil
+		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
-				if info := g.semaResult.Classes[objType.Name]; info != nil {
-					if methodType := info.Methods[mem.Property]; methodType != nil {
-						obj := g.lowerExpr(mem.Object)
-						args := make([]ir.Operand, 0, len(e.Args)+1)
-						args = append(args, obj)
-						for _, arg := range e.Args {
-							args = append(args, g.lowerExpr(arg))
-						}
-						if methodType.Return == types.TypeVoid {
-							g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-								Callee: classMethodName(objType.Name, mem.Property), Args: args,
-							})
-							return nil
-						}
-						res := g.currentFn.NewValue("method_ret", methodType.Return)
-						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-							Res: res, Callee: classMethodName(objType.Name, mem.Property), Args: args,
-						})
-						return res
+			if staticType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
+				if staticInfo := g.semaResult.Classes[staticType.Name]; staticInfo != nil && staticInfo.Methods[mem.Property] != nil {
+					obj := g.lowerExpr(mem.Object)
+					callArgs := make([]ir.Operand, 0, len(e.Args))
+					for _, arg := range e.Args {
+						callArgs = append(callArgs, g.lowerExpr(arg))
 					}
+					return g.emitClassMethodCall(obj, staticInfo, mem.Property, callArgs)
 				}
 			}
 			if arrType, ok := g.semanticType(mem.Object).(*types.ArrayType); ok {

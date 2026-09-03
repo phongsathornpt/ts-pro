@@ -567,3 +567,28 @@ console.log(label.get());
 		expected: "42\n2\n3\nkeep-alive\n",
 	})
 }
+
+func TestLinuxAMD64ClassInheritanceAndVirtualDispatch(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "class_inheritance_virtual_dispatch_and_gc",
+		source: `
+class BaseItem {
+  constructor(public value: number, public label: string) {}
+  score(): number { return this.value; }
+  name(): string { return this.label; }
+}
+class DerivedItem extends BaseItem {
+  bonus: number = 2;
+  constructor(value: number, label: string) { super(value, label); }
+  override score(): number { return this.value + this.bonus; }
+}
+function readScore(item: BaseItem): number { return item.score(); }
+function readName(item: BaseItem): string { return item.name(); }
+const item: BaseItem = new DerivedItem(40, "keep-" + "alive");
+for (let i = 0; i < 50000; i++) { const garbage = "ab" + "cd"; }
+console.log(readScore(item));
+console.log(readName(item));
+`,
+		expected: "42\nkeep-alive\n",
+	})
+}
