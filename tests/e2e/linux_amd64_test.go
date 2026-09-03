@@ -1205,3 +1205,24 @@ console.log(loose([5], 5));
 		expected: "true\nfalse\nfalse\ntrue\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64DynamicRelationalComparison(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_relational_comparison",
+		source: `
+function less(a: any, b: any): any { return a < b; }
+function lessEq(a: any, b: any): any { return a <= b; }
+function greater(a: any, b: any): any { return a > b; }
+function greaterEq(a: any, b: any): any { return a >= b; }
+console.log(less("6", 7));
+console.log(less("10", "2"));
+console.log(lessEq("6", 6));
+console.log(greater(7, "6"));
+console.log(greaterEq(7, 7));
+console.log(less(undefined, 1));
+console.log(lessEq(null, 0));
+console.log(greater([5], 4));
+`,
+		expected: "true\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\n",
+	})
+}

@@ -1663,6 +1663,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64JSStrictEqual(e, fnOffsets["ts_string_eq"])
 	fnOffsets["ts_js_loose_eq"] = len(e.Code)
 	emitAMD64JSLooseEqual(e, fnOffsets["ts_js_loose_eq"], fnOffsets["ts_js_strict_eq"], fnOffsets["ts_js_to_number"], fnOffsets["ts_js_to_string"])
+	fnOffsets["ts_js_string_compare"] = len(e.Code)
+	emitAMD64JSStringCompare(e)
+	for _, spec := range []struct{ name, op string }{
+		{"ts_js_lt", "lt"}, {"ts_js_le", "le"}, {"ts_js_gt", "gt"}, {"ts_js_ge", "ge"},
+	} {
+		fnOffsets[spec.name] = len(e.Code)
+		emitAMD64JSRelational(e, fnOffsets["ts_js_to_number"], fnOffsets["ts_js_to_string"], fnOffsets["ts_js_string_compare"], spec.op)
+	}
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)

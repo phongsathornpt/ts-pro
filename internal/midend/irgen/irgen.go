@@ -2604,6 +2604,30 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return eq
 		}
 
+		if (e.Op == token.Lt || e.Op == token.LtEq || e.Op == token.Gt || e.Op == token.GtEq) &&
+			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+			if !irJSValueType(lhs.Type()) {
+				lhs = g.boxJSValue(lhs, lhs.Type())
+			}
+			if !irJSValueType(rhs.Type()) {
+				rhs = g.boxJSValue(rhs, rhs.Type())
+			}
+			callee := "ts_js_lt"
+			switch e.Op {
+			case token.LtEq:
+				callee = "ts_js_le"
+			case token.Gt:
+				callee = "ts_js_gt"
+			case token.GtEq:
+				callee = "ts_js_ge"
+			}
+			resVal := g.currentFn.NewValue("js_rel", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Res: resVal, Callee: callee, Args: []ir.Operand{lhs, rhs}, ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
+			})
+			return resVal
+		}
+
 		if e.Op == token.Plus {
 			isString := false
 			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString {
