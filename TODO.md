@@ -6,7 +6,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
 > Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only and do **not** mean this active backend is 100% complete.
-> Current fixture sweep after optional/computed-property support: **48 / 125 compile PASS, 67 diagnostics, 10 IR/backend failures, 0 timeouts**. Area status: arrays **8/10 PASS + 2 dynamic-value backend blocks**, memory **9/9**, objects **10/10**, basics **19/25** compile cleanly; dynamic has **2 PASS / 4 DIAG / 8 backend FAIL**, and concurrency remains **57 DIAG**.
+> Current fixture sweep after JSValue arrays and evolving dynamic objects: **53 / 125 compile PASS, 63 diagnostics, 9 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **20/25** compile cleanly; dynamic has **4 PASS / 1 DIAG / 9 backend FAIL**, and concurrency remains **57 DIAG**.
 
 ### Completed active milestones
 
@@ -33,7 +33,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Optional object fields with full contextual native shape allocation and missing-field `undefined`.
   - [x] Common union-property lookup across compatible closed object members.
 - [x] Computed property keys / index access for statically known string keys and concretely proven `any` aliases.
-- [ ] Evolving/dynamic object shapes.
+- [x] Evolving/dynamic object shapes with growable GC-traced `{string key, JSValue}` tables.
 - [ ] Multi-module import/export graph, module resolution, linking, and cross-module symbol naming.
 - [ ] Native standard APIs required by fixtures.
   - [ ] `JSON.parse` / `JSON.stringify`.
@@ -43,10 +43,10 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ### Dynamic JavaScript value model
 
-- [ ] Introduce a real native `JSValue` representation without degrading typed F64/string/object fast paths.
-- [ ] Boxing/unboxing boundaries for `any` and mixed unions.
+- [x] Introduce a one-word NaN-boxed native `JSValue` representation without degrading typed F64/string/object fast paths.
+- [~] Complete boxing/unboxing boundaries for `any` and mixed unions; array/object storage and console inspection are implemented, dynamic operators/calls remain.
 - [ ] Dynamic truthiness, equality, arithmetic, `ToPrimitive`, `ToNumber`, and `ToString`.
-- [ ] Dynamic property get/set and evolving property storage.
+- [x] Dynamic property get/set and evolving property storage with GC-traced growable entry tables.
 - [ ] Dynamic calls and receiver-correct method `this`.
 - [ ] Close all `examples/dynamic/*` native fixture failures and add differential tests.
 
