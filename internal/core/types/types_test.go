@@ -99,3 +99,33 @@ func TestTupleTypeAndGenericSubstitution(t *testing.T) {
 		t.Fatal("heterogeneous tuple should be assignable to compatible union array")
 	}
 }
+
+func TestInferGenericFunction(t *testing.T) {
+	tv := NewTypeVar("T", nil)
+	fn := NewGenericFunction([]*TypeVar{tv}, []Param{{Name: "value", Type: tv}}, tv)
+	inst, err := InferFunction(fn, []Type{TypeNumber})
+	if err != nil {
+		t.Fatalf("InferFunction failed: %v", err)
+	}
+	if !inst.Params[0].Type.Equals(TypeNumber) || !inst.Return.Equals(TypeNumber) {
+		t.Fatalf("unexpected inferred function: %s", inst)
+	}
+
+	tvElem := NewTypeVar("E", nil)
+	arrayFn := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "items", Type: NewArray(tvElem)}}, tvElem)
+	arrayInst, err := InferFunction(arrayFn, []Type{NewArray(TypeString)})
+	if err != nil {
+		t.Fatalf("array inference failed: %v", err)
+	}
+	if !arrayInst.Return.Equals(TypeString) {
+		t.Fatalf("array inference return = %s", arrayInst.Return)
+	}
+}
+
+func TestInferGenericFunctionRejectsConflictingBindings(t *testing.T) {
+	tv := NewTypeVar("T", nil)
+	fn := NewGenericFunction([]*TypeVar{tv}, []Param{{Name: "a", Type: tv}, {Name: "b", Type: tv}}, tv)
+	if _, err := InferFunction(fn, []Type{TypeNumber, TypeString}); err == nil {
+		t.Fatal("expected conflicting generic inference to fail")
+	}
+}

@@ -559,3 +559,99 @@ func InstantiateFunction(fn *FunctionType, args []Type) (*FunctionType, error) {
 	instantiated.TypeParams = nil
 	return instantiated, nil
 }
+
+func inferTypeBindings(pattern, actual Type, bindings map[*TypeVar]Type) error {
+	if pattern == nil || actual == nil {
+		return fmt.Errorf("cannot infer from nil type")
+	}
+	switch p := pattern.(type) {
+	case *TypeVar:
+		if existing, ok := bindings[p]; ok {
+			if existing.Equals(actual) {
+				return nil
+			}
+			return fmt.Errorf("conflicting inferences for %s: %s and %s", p, existing, actual)
+		}
+		if p.Constraint != nil && !actual.AssignableTo(p.Constraint) {
+			return fmt.Errorf("inferred type %s does not satisfy constraint %s for %s", actual, p.Constraint, p)
+		}
+		bindings[p] = actual
+		return nil
+	case *ArrayType:
+		a, ok := actual.(*ArrayType)
+		if !ok {
+			return nil
+		}
+		return inferTypeBindings(p.Elem, a.Elem, bindings)
+	case *TupleType:
+		a, ok := actual.(*TupleType)
+		if !ok || len(p.Elements) != len(a.Elements) {
+			return nil
+		}
+		for i := range p.Elements {
+			if err := inferTypeBindings(p.Elements[i], a.Elements[i], bindings); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *FunctionType:
+		a, ok := actual.(*FunctionType)
+		if !ok || len(p.Params) != len(a.Params) {
+			return nil
+		}
+		for i := range p.Params {
+			if err := inferTypeBindings(p.Params[i].Type, a.Params[i].Type, bindings); err != nil {
+				return err
+			}
+		}
+		return inferTypeBindings(p.Return, a.Return, bindings)
+	case *ObjectType:
+		a, ok := actual.(*ObjectType)
+		if !ok {
+			return nil
+		}
+		for name, field := range p.Fields {
+			actualField, exists := a.Fields[name]
+			if !exists {
+				continue
+			}
+			if err := inferTypeBindings(field.Type, actualField.Type, bindings); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// InferFunction infers a generic function's type arguments from actual argument
+// types and returns a concrete instantiation. It deliberately rejects unresolved
+// or conflicting bindings rather than silently widening them to any.
+func InferFunction(fn *FunctionType, actualArgs []Type) (*FunctionType, error) {
+	if fn == nil {
+		return nil, fmt.Errorf("cannot infer nil function type")
+	}
+	if len(fn.TypeParams) == 0 {
+		return fn, nil
+	}
+	bindings := make(map[*TypeVar]Type, len(fn.TypeParams))
+	limit := len(actualArgs)
+	if len(fn.Params) < limit {
+		limit = len(fn.Params)
+	}
+	for i := 0; i < limit; i++ {
+		if err := inferTypeBindings(fn.Params[i].Type, actualArgs[i], bindings); err != nil {
+			return nil, err
+		}
+	}
+	args := make([]Type, len(fn.TypeParams))
+	for i, tp := range fn.TypeParams {
+		arg, ok := bindings[tp]
+		if !ok {
+			return nil, fmt.Errorf("could not infer type argument for %s", tp)
+		}
+		args[i] = arg
+	}
+	return InstantiateFunction(fn, args)
+}
