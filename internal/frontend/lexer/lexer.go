@@ -275,6 +275,10 @@ func (l *Lexer) Next() token.Token {
 			l.nextChar()
 			return token.Token{Kind: token.QuestionQuestion, Span: source.Span{Start: startPos, End: l.currentPos()}}
 		}
+		if l.ch == '.' {
+			l.nextChar()
+			return token.Token{Kind: token.QuestionDot, Span: source.Span{Start: startPos, End: l.currentPos()}}
+		}
 		return token.Token{Kind: token.Question, Span: span}
 	case ':':
 		return token.Token{Kind: token.Colon, Span: span}

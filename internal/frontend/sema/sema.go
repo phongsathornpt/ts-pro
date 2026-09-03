@@ -435,6 +435,55 @@ func removeNullishType(t types.Type) types.Type {
 	}
 }
 
+func (c *Checker) lookupMemberType(objType types.Type, property string) (types.Type, bool) {
+	if objType == nil {
+		return nil, false
+	}
+	switch t := objType.(type) {
+	case *types.TupleType:
+		if property == "length" {
+			return types.TypeNumber, true
+		}
+	case *types.ArrayType:
+		switch property {
+		case "length":
+			return types.TypeNumber, true
+		case "push":
+			return types.NewFunction([]types.Param{{Name: "value", Type: t.Elem}}, types.TypeNumber), true
+		case "pop":
+			return types.NewFunction(nil, t.Elem), true
+		}
+	case *types.ObjectType:
+		if info := c.result.Classes[t.Name]; info != nil {
+			if method := info.Methods[property]; method != nil {
+				return method, true
+			}
+		}
+		if field, ok := t.Fields[property]; ok {
+			if field.Optional {
+				return types.NewUnion(field.Type, types.TypeUndefined), true
+			}
+			return field.Type, true
+		}
+	case *types.UnionType:
+		members := make([]types.Type, 0, len(t.Members))
+		for _, member := range t.Members {
+			mt, ok := c.lookupMemberType(member, property)
+			if !ok {
+				return nil, false
+			}
+			members = append(members, mt)
+		}
+		if len(members) == 1 {
+			return members[0], true
+		}
+		if len(members) > 1 {
+			return types.NewUnion(members...), true
+		}
+	}
+	return nil, false
+}
+
 func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) types.Type {
 	if expr == nil || expected == nil {
 		return c.checkExpr(expr)
@@ -1074,53 +1123,21 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			}
 		}
 		objType := c.checkExpr(e.Object)
-		if _, ok := objType.(*types.TupleType); ok {
-			if e.Property == "length" {
-				c.result.Types[e] = types.TypeNumber
-				return types.TypeNumber
-			}
-			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on tuple type '%s'.", e.Property, objType))
-			c.result.Types[e] = types.TypeAny
-			return types.TypeAny
+		lookupType := objType
+		if e.Optional {
+			lookupType = removeNullishType(objType)
 		}
-		if arr, ok := objType.(*types.ArrayType); ok {
-			switch e.Property {
-			case "length":
-				c.result.Types[e] = types.TypeNumber
-				return types.TypeNumber
-			case "push":
-				t := types.NewFunction([]types.Param{{Name: "value", Type: arr.Elem}}, types.TypeNumber)
-				c.result.Types[e] = t
-				return t
-			case "pop":
-				t := types.NewFunction(nil, arr.Elem)
-				c.result.Types[e] = t
-				return t
-			}
+		memberType, ok := c.lookupMemberType(lookupType, e.Property)
+		if !ok {
 			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
-		if o, ok := objType.(*types.ObjectType); ok {
-			if info := c.result.Classes[o.Name]; info != nil {
-				if method := info.Methods[e.Property]; method != nil {
-					c.result.Types[e] = method
-					return method
-				}
-			}
-			if f, exists := o.Fields[e.Property]; exists {
-				c.result.Types[e] = f.Type
-				return f.Type
-			}
-			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
-			c.result.Types[e] = types.TypeAny
-			return types.TypeAny
+		if e.Optional {
+			memberType = types.NewUnion(memberType, types.TypeUndefined)
 		}
-		if objType != nil && objType != types.TypeAny {
-			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
-		}
-		c.result.Types[e] = types.TypeAny
-		return types.TypeAny
+		c.result.Types[e] = memberType
+		return memberType
 	default:
 		c.result.Types[expr] = types.TypeAny
 		return types.TypeAny

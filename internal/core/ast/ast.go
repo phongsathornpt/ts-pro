@@ -116,6 +116,7 @@ type (
 		Object     Expr
 		Property   string
 		Computed   bool
+		Optional   bool
 	}
 
 	IndexExpr struct {

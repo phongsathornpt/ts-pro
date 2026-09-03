@@ -1444,6 +1444,82 @@ func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
 	g.currentBB = exitBB
 }
 
+func removeNullishIRType(t types.Type) types.Type {
+	if t == nil {
+		return nil
+	}
+	if t == types.TypeNull || t == types.TypeUndefined {
+		return types.TypeNever
+	}
+	union, ok := t.(*types.UnionType)
+	if !ok {
+		return t
+	}
+	members := make([]types.Type, 0, len(union.Members))
+	for _, member := range union.Members {
+		if member == types.TypeNull || member == types.TypeUndefined {
+			continue
+		}
+		members = append(members, member)
+	}
+	switch len(members) {
+	case 0:
+		return types.TypeNever
+	case 1:
+		return members[0]
+	default:
+		return types.NewUnion(members...)
+	}
+}
+
+func (g *generator) lowerOptionalMember(e *ast.MemberExpr) ir.Operand {
+	baseType := removeNullishIRType(g.semanticType(e.Object))
+	objType, ok := baseType.(*types.ObjectType)
+	if !ok {
+		return g.failExpr("native optional chaining currently requires a closed object receiver, got %s", baseType)
+	}
+	offsets, _, _ := g.objectLayout(objType)
+	offset, exists := offsets[e.Property]
+	if !exists {
+		return g.failExpr("object shape has no optional-chain field %q", e.Property)
+	}
+
+	obj := g.lowerExpr(e.Object)
+	start := g.currentBB
+	checkNull := g.currentFn.NewBlock("optional_check_null")
+	missing := g.currentFn.NewBlock("optional_missing")
+	load := g.currentFn.NewBlock("optional_load")
+	join := g.currentFn.NewBlock("optional_join")
+
+	isUndefined := g.currentFn.NewValue("optional_undefined", types.TypeBoolean)
+	start.Instructions = append(start.Instructions, &ir.BinaryInst{Res: isUndefined, Op: ir.OpEq, LHS: obj, RHS: ir.ConstUndefined{}})
+	start.Terminator = &ir.BranchTerm{Cond: isUndefined, Then: missing, Else: checkNull}
+
+	g.currentBB = checkNull
+	isNull := g.currentFn.NewValue("optional_null", types.TypeBoolean)
+	checkNull.Instructions = append(checkNull.Instructions, &ir.BinaryInst{Res: isNull, Op: ir.OpEq, LHS: obj, RHS: ir.ConstNull{}})
+	checkNull.Terminator = &ir.BranchTerm{Cond: isNull, Then: missing, Else: load}
+
+	missing.Terminator = &ir.JumpTerm{Target: join}
+
+	g.currentBB = load
+	resultType := types.TypeAny
+	if t := g.semanticType(e); t != nil {
+		resultType = t
+	}
+	loaded := g.currentFn.NewValue("optional_field", resultType)
+	load.Instructions = append(load.Instructions, &ir.GetFieldInst{Res: loaded, Obj: obj, Field: e.Property, Offset: offset})
+	load.Terminator = &ir.JumpTerm{Target: join}
+
+	g.currentBB = join
+	res := g.currentFn.NewValue("optional", resultType)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: res, Incoming: []ir.PhiIncoming{
+		{Block: missing, Value: ir.ConstUndefined{}},
+		{Block: load, Value: loaded},
+	}})
+	return res
+}
+
 func (g *generator) lowerNullishExpr(e *ast.BinaryExpr) ir.Operand {
 	lhs := g.lowerExpr(e.Left)
 	lhsBB := g.currentBB
@@ -1834,6 +1910,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: res, Array: array, Index: index})
 		return res
 	case *ast.MemberExpr:
+		if e.Optional {
+			return g.lowerOptionalMember(e)
+		}
 		if ident, ok := e.Object.(*ast.IdentExpr); ok {
 			if members := g.semaResult.Enums[ident.Name]; members != nil {
 				if value, exists := members[e.Property]; exists {

@@ -81,6 +81,7 @@ const (
 	AmpAmp           // &&
 	PipePipe         // ||
 	QuestionQuestion // ??
+	QuestionDot      // ?.
 	Eq               // =
 	EqEq             // ==
 	EqEqEq           // ===
@@ -179,6 +180,7 @@ var tokens = [...]string{
 	AmpAmp:           "&&",
 	PipePipe:         "||",
 	QuestionQuestion: "??",
+	QuestionDot:      "?.",
 	Eq:               "=",
 	EqEq:             "==",
 	EqEqEq:           "===",

@@ -941,6 +941,16 @@ func (p *Parser) parsePostfix() ast.Expr {
 				Property:   propTok.Text,
 				Computed:   false,
 			}
+		case token.QuestionDot:
+			p.advance()
+			propTok := p.expect(token.Ident)
+			expr = &ast.MemberExpr{
+				SourceSpan: source.Span{Start: expr.Span().Start, End: propTok.Span.End},
+				Object:     expr,
+				Property:   propTok.Text,
+				Computed:   false,
+				Optional:   true,
+			}
 		case token.LBracket:
 			p.advance()
 			idx := p.parseExpression()

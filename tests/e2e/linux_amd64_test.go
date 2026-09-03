@@ -768,3 +768,17 @@ console.log(flag(true));
 		expected: "Anonymous\nAlice\n42\n0\n100\n1\n0\n1\n",
 	})
 }
+
+func TestLinuxAMD64OptionalChaining(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "nested_optional_chaining",
+		source: `
+type User = { name: string; profile?: { bio: string } };
+function bio(user: User | null): string { return user?.profile?.bio ?? "none"; }
+const full: User = { name: "Bob", profile: { bio: "Hello" } };
+console.log(bio(full));
+console.log(bio(null));
+`,
+		expected: "Hello\nnone\n",
+	})
+}
