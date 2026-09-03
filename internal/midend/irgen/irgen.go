@@ -25,6 +25,7 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		prog:       &ir.Program{},
 	}
 
+	var topStmts []ast.Stmt
 	for _, stmt := range astProg.Statements {
 		if fnDecl, ok := stmt.(*ast.FunctionDecl); ok {
 			fn, err := g.lowerFunction(fnDecl)
@@ -32,10 +33,37 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 				return nil, err
 			}
 			g.prog.Functions = append(g.prog.Functions, fn)
+		} else {
+			topStmts = append(topStmts, stmt)
 		}
 	}
 
+	if len(topStmts) > 0 {
+		mainFn := g.lowerTopLevel(topStmts)
+		// Put @main at the front of Functions so it's the entrypoint
+		g.prog.Functions = append([]*ir.Function{mainFn}, g.prog.Functions...)
+	}
+
 	return g.prog, nil
+}
+
+func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
+	irFn := ir.NewFunction("@main", types.TypeVoid)
+	g.currentFn = irFn
+	g.locals = make(map[string]ir.Operand)
+
+	entryBB := irFn.NewBlock("entry")
+	g.currentBB = entryBB
+
+	for _, s := range stmts {
+		g.lowerStatement(s)
+	}
+
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+	}
+
+	return irFn
 }
 
 func (g *generator) lowerFunction(fnDecl *ast.FunctionDecl) (*ir.Function, error) {
@@ -113,7 +141,127 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 		g.lowerIf(s)
 	case *ast.WhileStmt:
 		g.lowerWhile(s)
+	case *ast.ForStmt:
+		g.lowerFor(s)
 	}
+}
+
+func findModifiedVars(stmt ast.Stmt) map[string]bool {
+	res := make(map[string]bool)
+	var walk func(n ast.Node)
+	walk = func(n ast.Node) {
+		if n == nil {
+			return
+		}
+		switch node := n.(type) {
+		case *ast.AssignExpr:
+			if ident, ok := node.Left.(*ast.IdentExpr); ok {
+				res[ident.Name] = true
+			}
+			walk(node.Right)
+		case *ast.UnaryExpr:
+			if node.Op == token.PlusPlus || node.Op == token.MinusMinus {
+				if ident, ok := node.Target.(*ast.IdentExpr); ok {
+					res[ident.Name] = true
+				}
+			}
+			walk(node.Target)
+		case *ast.BlockStmt:
+			for _, s := range node.Statements {
+				walk(s)
+			}
+		case *ast.ExprStmt:
+			walk(node.Expr)
+		case *ast.IfStmt:
+			walk(node.Cond)
+			walk(node.Then)
+			walk(node.Else)
+		case *ast.WhileStmt:
+			walk(node.Cond)
+			walk(node.Body)
+		case *ast.ForStmt:
+			walk(node.Init)
+			walk(node.Cond)
+			walk(node.Post)
+			walk(node.Body)
+		}
+	}
+	walk(stmt)
+	return res
+}
+
+func (g *generator) lowerFor(s *ast.ForStmt) {
+	if s.Init != nil {
+		g.lowerStatement(s.Init)
+	}
+	preBB := g.currentBB
+	condBB := g.currentFn.NewBlock("for_cond")
+	bodyBB := g.currentFn.NewBlock("for_body")
+	postBB := g.currentFn.NewBlock("for_post")
+	exitBB := g.currentFn.NewBlock("for_exit")
+
+	if preBB.Terminator == nil {
+		preBB.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+
+	modVars := findModifiedVars(s.Body)
+	if s.Post != nil {
+		for k, v := range findModifiedVars(&ast.ExprStmt{Expr: s.Post}) {
+			if v {
+				modVars[k] = true
+			}
+		}
+	}
+
+	loopPhis := make(map[string]*ir.PhiInst)
+	for name := range modVars {
+		if val, exists := g.locals[name]; exists {
+			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_loop", name), val.Type())
+			phi := &ir.PhiInst{
+				Res: phiVal,
+				Incoming: []ir.PhiIncoming{
+					{Block: preBB, Value: val},
+				},
+			}
+			loopPhis[name] = phi
+			condBB.Phis = append(condBB.Phis, phi)
+			g.locals[name] = phiVal
+		}
+	}
+
+	g.currentBB = condBB
+	if s.Cond != nil {
+		cond := g.lowerExpr(s.Cond)
+		condBB.Terminator = &ir.BranchTerm{Cond: cond, Then: bodyBB, Else: exitBB}
+	} else {
+		condBB.Terminator = &ir.JumpTerm{Target: bodyBB}
+	}
+
+	g.currentBB = bodyBB
+	g.lowerStatement(s.Body)
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.JumpTerm{Target: postBB}
+	}
+
+	g.currentBB = postBB
+	if s.Post != nil {
+		g.lowerExpr(s.Post)
+	}
+	postEndBB := g.currentBB
+	if postEndBB.Terminator == nil {
+		postEndBB.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+
+	for name, phi := range loopPhis {
+		updatedVal := g.locals[name]
+		phi.Incoming = append(phi.Incoming, ir.PhiIncoming{
+			Block: postEndBB,
+			Value: updatedVal,
+		})
+		g.locals[name] = phi.Res
+	}
+
+	g.currentBB = exitBB
 }
 
 func (g *generator) lowerIf(s *ast.IfStmt) {
@@ -189,11 +337,29 @@ func (g *generator) lowerIf(s *ast.IfStmt) {
 }
 
 func (g *generator) lowerWhile(s *ast.WhileStmt) {
+	preBB := g.currentBB
 	condBB := g.currentFn.NewBlock("while_cond")
 	bodyBB := g.currentFn.NewBlock("while_body")
 	exitBB := g.currentFn.NewBlock("while_exit")
 
-	g.currentBB.Terminator = &ir.JumpTerm{Target: condBB}
+	preBB.Terminator = &ir.JumpTerm{Target: condBB}
+
+	modVars := findModifiedVars(s.Body)
+	loopPhis := make(map[string]*ir.PhiInst)
+	for name := range modVars {
+		if val, exists := g.locals[name]; exists {
+			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_loop", name), val.Type())
+			phi := &ir.PhiInst{
+				Res: phiVal,
+				Incoming: []ir.PhiIncoming{
+					{Block: preBB, Value: val},
+				},
+			}
+			loopPhis[name] = phi
+			condBB.Phis = append(condBB.Phis, phi)
+			g.locals[name] = phiVal
+		}
+	}
 
 	g.currentBB = condBB
 	cond := g.lowerExpr(s.Cond)
@@ -205,8 +371,18 @@ func (g *generator) lowerWhile(s *ast.WhileStmt) {
 
 	g.currentBB = bodyBB
 	g.lowerStatement(s.Body)
-	if g.currentBB.Terminator == nil {
-		g.currentBB.Terminator = &ir.JumpTerm{Target: condBB}
+	bodyEndBB := g.currentBB
+	if bodyEndBB.Terminator == nil {
+		bodyEndBB.Terminator = &ir.JumpTerm{Target: condBB}
+	}
+
+	for name, phi := range loopPhis {
+		updatedVal := g.locals[name]
+		phi.Incoming = append(phi.Incoming, ir.PhiIncoming{
+			Block: bodyEndBB,
+			Value: updatedVal,
+		})
+		g.locals[name] = phi.Res
 	}
 
 	g.currentBB = exitBB
@@ -267,10 +443,41 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			RHS: rhs,
 		})
 		return resVal
+	case *ast.UnaryExpr:
+		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
+			if ident, ok := e.Target.(*ast.IdentExpr); ok {
+				currVal, exists := g.locals[ident.Name]
+				if !exists {
+					currVal = ir.ConstNumber{Value: 0}
+				}
+				op := ir.OpAdd
+				if e.Op == token.MinusMinus {
+					op = ir.OpSub
+				}
+				nextVal := g.currentFn.NewValue(ident.Name+"_inc", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+					Res: nextVal,
+					Op:  op,
+					LHS: currVal,
+					RHS: ir.ConstNumber{Value: 1},
+				})
+				g.locals[ident.Name] = nextVal
+				if e.Prefix {
+					return nextVal
+				}
+				return currVal
+			}
+		}
+		target := g.lowerExpr(e.Target)
+		return target
 	case *ast.CallExpr:
 		calleeName := "unknown"
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			calleeName = ident.Name
+		} else if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if objIdent, ok := mem.Object.(*ast.IdentExpr); ok && objIdent.Name == "console" && mem.Property == "log" {
+				calleeName = "ts_print_val"
+			}
 		}
 		var args []ir.Operand
 		for _, arg := range e.Args {

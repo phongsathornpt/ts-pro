@@ -360,6 +360,10 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			c.result.Types[e] = types.TypeBoolean
 			return types.TypeBoolean
 		}
+		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
+			c.result.Types[e] = types.TypeNumber
+			return types.TypeNumber
+		}
 		c.result.Types[e] = targetType
 		return targetType
 	case *ast.CallExpr:

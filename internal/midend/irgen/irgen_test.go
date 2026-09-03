@@ -76,3 +76,44 @@ function testPhi(cond: number): number {
 		t.Errorf("expected phi instruction in dump, got:\n%s", dump)
 	}
 }
+
+func TestIRGenTopLevel(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("toplevel.ts", []byte(`
+function fib(n: number): number {
+    return n;
+}
+console.log(fib(20));
+`))
+	p := parser.New(f)
+	prog, _ := p.Parse()
+	semaResult := sema.Check(prog)
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	t.Logf("Dump:\n%s", irProg.Dump())
+}
+
+func TestIRGenLoops(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("loops.ts", []byte(`
+function sumWhile(n: number): number {
+  let total: number = 0;
+  let i: number = 0;
+  while (i < n) {
+    total = total + i;
+    i++;
+  }
+  return total;
+}
+`))
+	p := parser.New(f)
+	prog, _ := p.Parse()
+	semaResult := sema.Check(prog)
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	t.Logf("Loops Dump:\n%s", irProg.Dump())
+}

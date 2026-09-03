@@ -118,6 +118,22 @@ func (e *Emitter) SubRegReg(dst, src Register) {
 	e.emitByte(modRM(0b11, src, dst))
 }
 
+// SubRegImm32: SUB dst, imm32 (64-bit)
+func (e *Emitter) SubRegImm32(dst Register, imm int32) {
+	e.emitByte(rex(true, false, false, dst >= 8))
+	e.emitByte(0x81)
+	e.emitByte(modRM(0b11, 5, dst))
+	e.emitInt32(imm)
+}
+
+// AddRegImm32: ADD dst, imm32 (64-bit)
+func (e *Emitter) AddRegImm32(dst Register, imm int32) {
+	e.emitByte(rex(true, false, false, dst >= 8))
+	e.emitByte(0x81)
+	e.emitByte(modRM(0b11, 0, dst))
+	e.emitInt32(imm)
+}
+
 // CmpRegReg: CMP reg1, reg2 (64-bit)
 func (e *Emitter) CmpRegReg(r1, r2 Register) {
 	e.emitByte(rex(true, r2 >= 8, false, r1 >= 8))
@@ -163,6 +179,70 @@ func (e *Emitter) Pop(reg Register) {
 		e.emitByte(rex(false, false, false, true))
 	}
 	e.emitByte(0x58 + (byte(reg) & 0x07))
+}
+
+// ImulRegReg: IMUL dst, src (64-bit signed multiply)
+func (e *Emitter) ImulRegReg(dst, src Register) {
+	e.emitByte(rex(true, dst >= 8, false, src >= 8))
+	e.emitBytes(0x0F, 0xAF)
+	e.emitByte(modRM(0b11, dst, src))
+}
+
+// XorRegReg: XOR dst, src (64-bit)
+func (e *Emitter) XorRegReg(dst, src Register) {
+	e.emitByte(rex(true, src >= 8, false, dst >= 8))
+	e.emitByte(0x31)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+// AndRegReg: AND dst, src (64-bit)
+func (e *Emitter) AndRegReg(dst, src Register) {
+	e.emitByte(rex(true, src >= 8, false, dst >= 8))
+	e.emitByte(0x21)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+// OrRegReg: OR dst, src (64-bit)
+func (e *Emitter) OrRegReg(dst, src Register) {
+	e.emitByte(rex(true, src >= 8, false, dst >= 8))
+	e.emitByte(0x09)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+// Setcc: SETcc dst (sets lower 8 bits of reg to 1 if condition holds, 0 otherwise)
+func (e *Emitter) Setcc(cond Cond, dst Register) {
+	if dst >= 4 {
+		// REX prefix required to access SIL/DIL/BPL/SPL or R8B-R15B
+		e.emitByte(rex(false, false, false, dst >= 8))
+	}
+	e.emitBytes(0x0F, 0x90|byte(cond))
+	e.emitByte(modRM(0b11, 0, dst))
+}
+
+// MovDerefReg: MOV [base + disp32], src (64-bit)
+func (e *Emitter) MovDerefReg(base Register, disp int32, src Register) {
+	e.emitByte(rex(true, src >= 8, false, base >= 8))
+	e.emitByte(0x89)
+	if disp >= -128 && disp <= 127 {
+		e.emitByte(modRM(0b01, src, base))
+		e.emitByte(byte(disp))
+	} else {
+		e.emitByte(modRM(0b10, src, base))
+		e.emitInt32(disp)
+	}
+}
+
+// MovRegDeref: MOV dst, [base + disp32] (64-bit)
+func (e *Emitter) MovRegDeref(dst Register, base Register, disp int32) {
+	e.emitByte(rex(true, dst >= 8, false, base >= 8))
+	e.emitByte(0x8B)
+	if disp >= -128 && disp <= 127 {
+		e.emitByte(modRM(0b01, dst, base))
+		e.emitByte(byte(disp))
+	} else {
+		e.emitByte(modRM(0b10, dst, base))
+		e.emitInt32(disp)
+	}
 }
 
 // Syscall: SYSCALL

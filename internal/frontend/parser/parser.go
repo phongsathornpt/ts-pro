@@ -516,7 +516,7 @@ func (p *Parser) parseBinary(minPrec int) ast.Expr {
 
 func (p *Parser) parseUnary() ast.Expr {
 	switch p.current().Kind {
-	case token.Bang, token.Minus, token.Plus, token.Tilde:
+	case token.Bang, token.Minus, token.Plus, token.Tilde, token.PlusPlus, token.MinusMinus:
 		opTok := p.advance()
 		target := p.parseUnary()
 		return &ast.UnaryExpr{
@@ -535,6 +535,14 @@ func (p *Parser) parsePostfix() ast.Expr {
 
 	for {
 		switch p.current().Kind {
+		case token.PlusPlus, token.MinusMinus:
+			opTok := p.advance()
+			expr = &ast.UnaryExpr{
+				SourceSpan: source.Span{Start: expr.Span().Start, End: opTok.Span.End},
+				Op:         opTok.Kind,
+				Target:     expr,
+				Prefix:     false,
+			}
 		case token.LParen:
 			// Call
 			p.advance()

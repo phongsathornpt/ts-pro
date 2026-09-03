@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -115,6 +116,10 @@ func runBuild(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+
+	if opts.TargetOS == "darwin" {
+		_ = exec.Command("codesign", "-s", "-", outPath).Run()
 	}
 
 	fmt.Printf("Compiled %s -> %s (%s/%s, O%d)\n", inputFile, outPath, opts.TargetOS, opts.TargetArch, opts.OptLevel)

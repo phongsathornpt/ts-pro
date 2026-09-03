@@ -26,4 +26,18 @@ func TestARM64Encodings(t *testing.T) {
 	if !bytes.Equal(e.Code, []byte{0xE0, 0x03, 0x01, 0xAA}) {
 		t.Errorf("Mov X0, X1: got %x, want e00301aa", e.Code)
 	}
+
+	// MUL X0, X1, X2 -> 20 7c 02 9b
+	e = NewEmitter()
+	e.Mul(X0, X1, X2)
+	if !bytes.Equal(e.Code, []byte{0x20, 0x7C, 0x02, 0x9B}) {
+		t.Errorf("Mul X0, X1, X2: got %x, want 207c029b", e.Code)
+	}
+
+	// SDIV X0, X1, X2 -> 20 0c c2 9a
+	e = NewEmitter()
+	e.Sdiv(X0, X1, X2)
+	if !bytes.Equal(e.Code, []byte{0x20, 0x0C, 0xC2, 0x9A}) {
+		t.Errorf("Sdiv X0, X1, X2: got %x, want 200cc29a", e.Code)
+	}
 }

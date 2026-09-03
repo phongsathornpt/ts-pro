@@ -125,6 +125,7 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 	startMap := make(map[int]int)
 	endMap := make(map[int]int)
+	bbStart := make(map[string]int)
 
 	step := 0
 	for _, p := range fn.Params {
@@ -133,6 +134,7 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 	}
 
 	for _, bb := range fn.Blocks {
+		bbStart[bb.Name] = step + 1
 		for _, phi := range bb.Phis {
 			step++
 			if phi.Res != nil {
@@ -182,6 +184,38 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 			case *ir.BranchTerm:
 				if v, ok := t.Cond.(*ir.Value); ok {
 					endMap[v.ID] = step
+				}
+				for _, target := range []*ir.BasicBlock{t.Then, t.Else} {
+					for _, phi := range target.Phis {
+						for _, inc := range phi.Incoming {
+							if inc.Block == bb {
+								if v, ok := inc.Value.(*ir.Value); ok {
+									endMap[v.ID] = step
+								}
+							}
+						}
+					}
+				}
+			case *ir.JumpTerm:
+				// If target was visited before bb, this is a loop backedge!
+				if tStart, ok := bbStart[t.Target.Name]; ok && tStart < bbStart[bb.Name] {
+					for valID, start := range startMap {
+						if start < tStart && endMap[valID] >= tStart {
+							if endMap[valID] < step {
+								endMap[valID] = step
+							}
+						}
+					}
+				}
+
+				for _, phi := range t.Target.Phis {
+					for _, inc := range phi.Incoming {
+						if inc.Block == bb {
+							if v, ok := inc.Value.(*ir.Value); ok {
+								endMap[v.ID] = step
+							}
+						}
+					}
 				}
 			}
 		}

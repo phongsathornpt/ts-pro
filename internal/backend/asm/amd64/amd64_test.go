@@ -33,4 +33,18 @@ func TestAMD64Encodings(t *testing.T) {
 	if !bytes.Equal(e.Code, []byte{0x48, 0x01, 0xD0}) {
 		t.Errorf("Add RAX, RDX: got %x, want 4801d0", e.Code)
 	}
+
+	// IMUL RAX, RDX -> 48 0f af c2
+	e = NewEmitter()
+	e.ImulRegReg(RAX, RDX)
+	if !bytes.Equal(e.Code, []byte{0x48, 0x0F, 0xAF, 0xC2}) {
+		t.Errorf("Imul RAX, RDX: got %x, want 480fafc2", e.Code)
+	}
+
+	// XOR RAX, RAX -> 48 31 c0
+	e = NewEmitter()
+	e.XorRegReg(RAX, RAX)
+	if !bytes.Equal(e.Code, []byte{0x48, 0x31, 0xC0}) {
+		t.Errorf("Xor RAX, RAX: got %x, want 4831c0", e.Code)
+	}
 }
