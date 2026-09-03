@@ -1659,6 +1659,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		fnOffsets[spec.name] = len(e.Code)
 		emitAMD64JSNumericBinary(e, fnOffsets["ts_js_to_number"], spec.op)
 	}
+	fnOffsets["ts_js_strict_eq"] = len(e.Code)
+	emitAMD64JSStrictEqual(e, fnOffsets["ts_string_eq"])
+	fnOffsets["ts_js_loose_eq"] = len(e.Code)
+	emitAMD64JSLooseEqual(e, fnOffsets["ts_js_loose_eq"], fnOffsets["ts_js_strict_eq"], fnOffsets["ts_js_to_number"], fnOffsets["ts_js_to_string"])
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)

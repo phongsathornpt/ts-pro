@@ -1173,3 +1173,35 @@ console.log(sub(undefined, 2));
 		expected: "5\n42\n12\n3\n3\n1\n-2\nNaN\n",
 	})
 }
+
+func TestLinuxAMD64DynamicEquality(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "dynamic_strict_and_loose_equality",
+		source: `
+function loose(a: any, b: any): any { return a == b; }
+function strict(a: any, b: any): any { return a === b; }
+function looseNot(a: any, b: any): any { return a != b; }
+function strictNot(a: any, b: any): any { return a !== b; }
+console.log(loose("6", 6));
+console.log(strict("6", 6));
+console.log(looseNot("6", 6));
+console.log(strictNot("6", 6));
+console.log(loose(null, undefined));
+console.log(strict(null, undefined));
+console.log(loose(true, 1));
+let nan: any = 0 / 0;
+console.log(strict(nan, nan));
+console.log(strict(0, -0));
+let s1: any = "same" + "";
+let s2: any = "sa" + "me";
+console.log(strict(s1, s2));
+const shared = { value: 42 };
+let oa: any = shared;
+let ob: any = shared;
+console.log(strict(oa, ob));
+console.log(loose({ value: 1 }, "[object Object]"));
+console.log(loose([5], 5));
+`,
+		expected: "true\nfalse\nfalse\ntrue\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+	})
+}

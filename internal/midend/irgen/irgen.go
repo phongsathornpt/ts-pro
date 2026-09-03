@@ -2580,6 +2580,30 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return resVal
 		}
 
+		if (e.Op == token.EqEq || e.Op == token.EqEqEq || e.Op == token.BangEq || e.Op == token.BangEqEq) &&
+			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+			if !irJSValueType(lhs.Type()) {
+				lhs = g.boxJSValue(lhs, lhs.Type())
+			}
+			if !irJSValueType(rhs.Type()) {
+				rhs = g.boxJSValue(rhs, rhs.Type())
+			}
+			callee := "ts_js_loose_eq"
+			if e.Op == token.EqEqEq || e.Op == token.BangEqEq {
+				callee = "ts_js_strict_eq"
+			}
+			eq := g.currentFn.NewValue("js_eq", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Res: eq, Callee: callee, Args: []ir.Operand{lhs, rhs}, ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
+			})
+			if e.Op == token.BangEq || e.Op == token.BangEqEq {
+				resVal := g.currentFn.NewValue("js_ne", types.TypeBoolean)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: resVal, Op: ir.OpEq, LHS: eq, RHS: ir.ConstBool{Value: false}})
+				return resVal
+			}
+			return eq
+		}
+
 		if e.Op == token.Plus {
 			isString := false
 			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString {
