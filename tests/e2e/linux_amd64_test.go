@@ -1864,3 +1864,28 @@ console.log(join(rejectFromArray()));
 		expected: "30\n30\narray-boom\n42\n",
 	})
 }
+func TestLinuxAMD64PromiseLikeClassImplementsAndGuardNarrowing(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_like_class_implements_guard_narrowing",
+		source: `
+class StandardPromiseLike implements PromiseLike<number> {
+  value: number;
+  constructor(value: number) { this.value = value; }
+  then(
+    onfulfilled?: ((value: number) => any) | null,
+    onrejected?: ((reason: any) => any) | null,
+  ): any {
+    if (onfulfilled === undefined) { return this; }
+    if (onfulfilled === null) { return this; }
+    onfulfilled(this.value + 2);
+    return this;
+  }
+}
+async function run(): Promise<number> {
+  return await Promise.resolve(new StandardPromiseLike(40));
+}
+console.log(join(run()));
+`,
+		expected: "42\n",
+	})
+}

@@ -447,6 +447,15 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 		extTok := p.expect(token.Ident)
 		extends = extTok.Text
 	}
+	var implements []ast.TypeNode
+	if p.match(token.KwImplements) {
+		for {
+			implements = append(implements, p.parseType())
+			if !p.match(token.Comma) {
+				break
+			}
+		}
+	}
 
 	p.expect(token.LBrace)
 	var fields []ast.ClassField
@@ -521,6 +530,7 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 		Name:       nameTok.Text,
 		TypeParams: typeParams,
 		Extends:    extends,
+		Implements: implements,
 		Fields:     fields,
 		Methods:    methods,
 	}

@@ -312,6 +312,7 @@ type (
 		Name       string
 		TypeParams []string
 		Extends    string
+		Implements []TypeNode
 		Fields     []ClassField
 		Methods    []ClassMethod
 	}

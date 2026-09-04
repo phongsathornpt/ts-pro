@@ -455,6 +455,103 @@ func (c *Checker) checkStatement(stmt ast.Stmt) {
 	}
 }
 
+func statementReturns(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.BlockStmt:
+		if len(s.Statements) == 0 {
+			return false
+		}
+		return statementReturns(s.Statements[len(s.Statements)-1])
+	default:
+		return false
+	}
+}
+
+func removeExactType(t, excluded types.Type) types.Type {
+	if t == nil || excluded == nil {
+		return t
+	}
+	if t.Equals(excluded) {
+		return types.TypeNever
+	}
+	union, ok := t.(*types.UnionType)
+	if !ok {
+		return t
+	}
+	members := make([]types.Type, 0, len(union.Members))
+	for _, member := range union.Members {
+		if !member.Equals(excluded) {
+			members = append(members, member)
+		}
+	}
+	switch len(members) {
+	case 0:
+		return types.TypeNever
+	case 1:
+		return members[0]
+	default:
+		return types.NewUnion(members...)
+	}
+}
+
+func strictNullishGuard(stmt ast.Stmt) (string, types.Type, bool) {
+	ifStmt, ok := stmt.(*ast.IfStmt)
+	if !ok || ifStmt.Else != nil || !statementReturns(ifStmt.Then) {
+		return "", nil, false
+	}
+	binary, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok || binary.Op != token.EqEqEq {
+		return "", nil, false
+	}
+	match := func(identExpr ast.Expr, literal ast.Expr) (string, types.Type, bool) {
+		ident, ok := identExpr.(*ast.IdentExpr)
+		if !ok {
+			return "", nil, false
+		}
+		switch literal.(type) {
+		case *ast.NullLit:
+			return ident.Name, types.TypeNull, true
+		case *ast.UndefinedLit:
+			return ident.Name, types.TypeUndefined, true
+		default:
+			return "", nil, false
+		}
+	}
+	if name, excluded, ok := match(binary.Left, binary.Right); ok {
+		return name, excluded, true
+	}
+	return match(binary.Right, binary.Left)
+}
+
+func (c *Checker) applyGuardReturnNarrowing(stmt ast.Stmt) {
+	name, excluded, ok := strictNullishGuard(stmt)
+	if !ok {
+		return
+	}
+	sym := c.currentScope.Resolve(name)
+	if sym == nil {
+		return
+	}
+	narrowed := removeExactType(sym.Type, excluded)
+	if narrowed == nil || narrowed.Equals(sym.Type) {
+		return
+	}
+	if local := c.currentScope.Symbols[name]; local != nil {
+		local.Type = narrowed
+		return
+	}
+	_ = c.currentScope.Define(&Symbol{Name: sym.Name, Kind: sym.Kind, Type: narrowed, Node: sym.Node})
+}
+
+func (c *Checker) checkStatementList(statements []ast.Stmt) {
+	for _, stmt := range statements {
+		c.checkStatement(stmt)
+		c.applyGuardReturnNarrowing(stmt)
+	}
+}
+
 func removeNullishType(t types.Type) types.Type {
 	if t == nil {
 		return nil
@@ -769,9 +866,7 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 	}
 
 	if fn.Body != nil {
-		for _, s := range fn.Body.Statements {
-			c.checkStatement(s)
-		}
+		c.checkStatementList(fn.Body.Statements)
 	}
 }
 
@@ -822,9 +917,7 @@ func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 			}
 			_ = c.currentScope.Define(&Symbol{Name: p.Name, Kind: SymParam, Type: pt, Node: cls})
 		}
-		for _, stmt := range method.Body.Statements {
-			c.checkStatement(stmt)
-		}
+		c.checkStatementList(method.Body.Statements)
 		c.currentScope = parentScope
 	}
 }
@@ -855,9 +948,7 @@ func (c *Checker) checkBlock(b *ast.BlockStmt) {
 	c.currentScope = NewScope(c.currentScope)
 	defer func() { c.currentScope = c.currentScope.Parent }()
 
-	for _, s := range b.Statements {
-		c.checkStatement(s)
-	}
+	c.checkStatementList(b.Statements)
 }
 
 func (c *Checker) checkIf(s *ast.IfStmt) {
