@@ -137,7 +137,7 @@ console.log(neg(0));
 console.log((0 / 0) == (0 / 0));
 console.log((0 / 0) != (0 / 0));
 `,
-			expected: "0\n1\n-0\n0\n1\n",
+			expected: "0\n1\n-0\nfalse\ntrue\n",
 		},
 		{
 			name: "sysv_ten_sse_arguments",
@@ -446,7 +446,7 @@ console.log(a !== b);
 console.log(a === c);
 console.log(a !== c);
 `,
-		expected: "1\n0\n0\n1\n",
+		expected: "true\nfalse\nfalse\ntrue\n",
 	})
 }
 
@@ -657,7 +657,7 @@ probe();
 probe(2, "x");
 console.log(undefined);
 `,
-		expected: "1\n1\n2\n0\nundefined\n",
+		expected: "1\ntrue\n2\nfalse\nundefined\n",
 	})
 }
 
@@ -677,7 +677,7 @@ console.log(Direction.Right);
 console.log(isUp(Direction.Up));
 console.log(isUp(Direction.Down));
 `,
-		expected: "200\n404\n0\n1\n2\n3\n1\n0\n",
+		expected: "200\n404\n0\n1\n2\n3\ntrue\nfalse\n",
 	})
 }
 
@@ -745,7 +745,7 @@ console.log(config.port);
 console.log(config.secure);
 console.log(config.env);
 `,
-		expected: "localhost\n9000\n1\nprod\n",
+		expected: "localhost\n9000\ntrue\nprod\n",
 	})
 }
 
@@ -765,7 +765,7 @@ console.log(flag(null));
 console.log(flag(false));
 console.log(flag(true));
 `,
-		expected: "Anonymous\nAlice\n42\n0\n100\n1\n0\n1\n",
+		expected: "Anonymous\nAlice\n42\n0\n100\ntrue\nfalse\ntrue\n",
 	})
 }
 
@@ -804,7 +804,7 @@ const s2: Shape = { kind: "square", size: 20 };
 console.log(s1.kind);
 console.log(s2.kind);
 `,
-		expected: "localhost\n8080\n1\nremote\nundefined\nundefined\ncircle\nsquare\n",
+		expected: "localhost\n8080\ntrue\nremote\nundefined\nundefined\ncircle\nsquare\n",
 	})
 }
 
@@ -966,7 +966,7 @@ const textKeys = new Map<string, number>();
 textKeys.set("same-" + "key", 77);
 console.log(textKeys.get("same-" + "key"));
 `,
-		expected: "6\n1\n6\n0\n1\n5\n1\n99\n0\n5\n1\n1\n0\n1\n7\n77\n",
+		expected: "6\n1\n6\nfalse\ntrue\n5\ntrue\n99\n0\n5\ntrue\ntrue\nfalse\ntrue\n7\n77\n",
 	})
 }
 
@@ -993,7 +993,7 @@ console.log(leap.getUTCHours());
 console.log(leap.getUTCMinutes());
 console.log(leap.getUTCSeconds());
 `,
-		expected: "1\n1970-01-01T00:00:00.000Z\n1970\n0\n1\n0\n0\n0\n2024-02-29T12:34:56.789Z\n2024\n1\n29\n12\n34\n56\n",
+		expected: "true\n1970-01-01T00:00:00.000Z\n1970\n0\n1\n0\n0\n0\n2024-02-29T12:34:56.789Z\n2024\n1\n29\n12\n34\n56\n",
 	})
 }
 
@@ -1044,7 +1044,7 @@ const plain = new RegExp("cat");
 console.log(plain.test("xxcatxx"));
 console.log(8 / 2);
 `,
-		expected: "1\n0\nworld\n1\n0\n1\n0\n1\n4\n",
+		expected: "true\nfalse\nworld\ntrue\nfalse\ntrue\nfalse\ntrue\n4\n",
 	})
 }
 
@@ -1077,7 +1077,7 @@ console.log(identityAny("boxed"));
 console.log(identityAny(false));
 console.log(asNumber(42) + 1);
 `,
-		expected: "41\nhello\ntrue\nnull\nundefined\n42\nhello\n1\nforty-two\n42\nboxed\nfalse\n43\n",
+		expected: "41\nhello\ntrue\nnull\nundefined\n42\nhello\ntrue\nforty-two\n42\nboxed\nfalse\n43\n",
 	})
 }
 
@@ -1128,7 +1128,7 @@ console.log(typed.label);
 console.log(typed.active);
 console.log(typed.child.value);
 `,
-		expected: "42\nbefore\n1\n7\nundefined\n99\nafter\n0\n77\n",
+		expected: "42\nbefore\ntrue\n7\nundefined\n99\nafter\nfalse\n77\n",
 	})
 }
 
@@ -1329,7 +1329,7 @@ console.log(join(objectTask).value);
 console.log(join(arrayTask)[1]!);
 console.log(join(anyTask));
 `,
-		expected: "42\n42\n1\ntask-string\n42\n42\n42\n",
+		expected: "42\n42\ntrue\ntask-string\n42\n42\n42\n",
 	})
 }
 
@@ -1404,7 +1404,7 @@ for (let i = 0; i < 50000; i = i + 1) { churn = "ab" + "cd"; }
 console.log(channelTryRecvOr(strings, "fallback"));
 console.log(channelTryRecvOr(strings, "fallback"));
 `,
-		expected: "1\n0\n42\n7\n1\nkeep-alive\nfallback\n",
+		expected: "true\nfalse\n42\n7\ntrue\nkeep-alive\nfallback\n",
 	})
 }
 func TestLinuxAMD64BlockingBufferedAndRendezvousChannels(t *testing.T) {
@@ -1504,7 +1504,7 @@ join(worker);
 join(release);
 console.log(taskCancelled());
 `,
-		expected: "1\n0\n",
+		expected: "true\nfalse\n",
 	})
 }
 func TestLinuxAMD64TaskContextInheritance(t *testing.T) {
@@ -1576,7 +1576,7 @@ console.log(join(numberParent()));
 console.log(join(boolParent()));
 console.log(join(stringParent("async")));
 `,
-		expected: "42\n1\nasync-done\n",
+		expected: "42\ntrue\nasync-done\n",
 	})
 }
 
@@ -1887,5 +1887,15 @@ async function run(): Promise<number> {
 console.log(join(run()));
 `,
 		expected: "42\n",
+	})
+}
+func TestLinuxAMD64BooleanConsoleMatchesJavaScript(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "boolean_console_matches_javascript",
+		source: `
+console.log(true);
+console.log(false);
+`,
+		expected: "true\nfalse\n",
 	})
 }

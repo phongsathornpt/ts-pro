@@ -25,7 +25,7 @@ console.log(!zero);
 let one = 1;
 console.log(!one);
 `,
-		expected: "-42\n1\n0\n",
+		expected: "-42\ntrue\nfalse\n",
 	})
 }
 
@@ -44,7 +44,7 @@ console.log(1 && 0);
 console.log(0 || 1);
 console.log(0 || 0);
 `,
-		expected: "1\n1\n0\n1\n1\n1\n1\n0\n1\n0\n",
+		expected: "true\ntrue\nfalse\ntrue\ntrue\ntrue\n1\n0\n1\n0\n",
 	})
 }
 
