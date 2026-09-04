@@ -73,6 +73,18 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] `git diff --check`.
 - [x] Active raw-native fixture roadmap accepted at **125 / 125**, with the async state-machine item explicitly superseded by the documented stackful scheduler model.
 
+## Optional next roadmap (new scope, not active blockers)
+
+The active raw-native fixture roadmap is complete. The items below are optional follow-on work and do not change the **125 / 125** acceptance status above.
+
+- [ ] Performance: reduce GPR/XMM payload shuffling, benchmark allocator/GC/scheduler behavior, improve register allocation/code layout, and evaluate PGO/LTO where useful.
+- [ ] Language/ecosystem expansion: broaden TypeScript/ECMAScript syntax, built-in APIs, package/module resolution, and uncommon dynamic edge cases beyond the current fixture set.
+- [ ] Platform parity: bring the complete active feature surface and fixture gates to ARM64/macOS and Windows.
+- [ ] Reliability: add parser/sema/IR/backend fuzzing, randomized GC/scheduler/channel/Promise stress, and broader generated-program differential testing.
+- [ ] Production hardening: security review, reproducible benchmarks/releases, cross-compilation ergonomics, and performance regression tracking.
+
+> These are intentionally unchecked because they define **future scope**, not unfinished work in the completed active roadmap.
+
 ## Current pure-Go Linux AMD64 backend
 
 - [x] Explicit `linux/amd64` target validation; unsupported target pairs fail instead of silently falling back.

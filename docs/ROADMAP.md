@@ -1,82 +1,68 @@
 # Roadmap
 
-## Architecture correction — TypeScript 7 compiler / Go runtime only
+## Active raw-native roadmap: complete
 
-- [ ] Move compiler-owned semantic normalization, HIR/MIR, representation analysis, LLVM emission, and build orchestration out of Go into the TypeScript 7 compiler implementation.
-- [ ] Freeze compile-time Go work to migration/parity fixes only.
-- [x] Complete `runtime/` migration so Go is the sole handwritten runtime/native-library language.
-- [x] Remove handwritten runtime C after Go ABI parity; ABI consumers use the generated Go `c-archive` header.
-- [ ] Retire transitional `cmd/` and `internal/` Go compiler packages after TypeScript-native parity tests pass.
+The repository-defined active raw-native roadmap is complete. The authoritative acceptance state is:
 
-## Milestone 0 — Historical Go compiler rebase [superseded target]
+```text
+125 / 125 native fixtures PASS
+0 diagnostics
+0 build/lowering failures
+0 runtime failures
+0 timeouts
+52 / 52 Node-comparable deterministic fixtures match
+```
 
-- [S] Replace the Rust prototype with the current Go implementation as an intermediate step; the final architecture moves compile-time ownership to TypeScript 7 and keeps Go only for runtime/native libraries.
-- [x] Add a Go module and `cmd/tsnative` CLI as transitional compiler infrastructure; retire it after TypeScript 7 parity.
-- [x] Pin TypeScript 7 as the language-service/compiler dependency.
-- [x] Validate `tsc --lsp --stdio` from the transitional Go driver.
-- [x] Keep strict native `tsconfig` as the project contract.
+The full acceptance gate is documented in `docs/STATUS.md` and `TODO.md`.
 
-## Milestone 1 — TypeScript-LS client
+### Completed milestones
 
-- Implement JSON-RPC/LSP stdio transport in Go.
-- Initialize one long-lived TypeScript-LS per workspace.
-- Implement document/project lifecycle and cancellation.
-- Collect diagnostics and project configuration.
-- Add health/restart handling for crashed LS processes.
-- Add integration tests against pinned TypeScript 7.
+1. Linux AMD64 standalone executable generation and SysV ABI.
+2. F64/string/array/object/closure runtime and precise mark-sweep GC.
+3. Generics, tuples, classes, inheritance, virtual dispatch, and multi-module relative linking.
+4. Dynamic `JSValue` semantics including coercion, operators, properties, calls, and `this`.
+5. Standard fixture APIs: JSON, Date, Map/Set, and RegExp subset.
+6. Stackful cooperative scheduler with precise suspended roots.
+7. Typed tasks/channels, cancellation, task context, task groups, and scheduler-aware timers.
+8. Async/await, throw/catch/finally, Promise lifecycle, adoption, thenables, repeated await, `Promise.all`, and `Promise.race`.
+9. Deterministic native fixture acceptance and Node differential validation.
 
-## Milestone 2 — Semantic bridge ✅
+### Superseded design item
 
-- [x] Define stable compiler-owned symbol/type/source DTOs.
-- [x] Extract function signatures, declarations, references, and exact checker types.
-- [x] Use the pinned official `tsc --api --async` compiler API for semantic extraction.
-- [x] Decode the TypeScript 7 binary AST protocol in Go.
-- [x] Ensure no SWC/Babel/Oxc parser exists in the compiler path.
+The earlier plan for compiler-generated async state machines is superseded for the active raw backend by stackful cooperative task stacks. This is intentional and recorded as `[S]` in `TODO.md`.
 
-## Milestone 3 — Typed HIR in Go ✅
+## Optional post-completion roadmap
 
-- [x] Define module/function/block/value IDs and semantic type IDs.
-- [x] Lower literals, locals, arithmetic, comparisons, calls, branches, returns, mutable loops, and phi merges.
-- [x] Keep TypeScript semantic type separate from native representation.
-- [x] Add HIR verifier and stable textual dump.
+These are **new scope**, not blockers for the completed fixture roadmap.
 
-## Milestone 4 — MIR and LLVM ✅
+### Performance
 
-- [x] Add representation proof for Bool, F64, strings, arrays, references, and static functions.
-- [x] Lower HIR into MIR/SSA, including loop phi nodes.
-- [x] Emit textual LLVM IR from the current Go compiler; port this emitter to the TypeScript 7 compiler before retiring Go compile-time code.
-- [x] Use clang for object generation/link orchestration and the first native executable.
-- [x] Compile the `fib.ts` acceptance program without Node/V8 at runtime.
+- keep numeric SSA values in XMM registers longer and reduce payload shuffling;
+- benchmark allocator/GC pause and throughput under larger heaps;
+- improve register allocation, code layout, code size, and branch quality;
+- add PGO/LTO experiments where they measurably help raw-native output;
+- establish Bun/Node/Go/native comparative benchmark suites for HTTP and compute workloads.
 
-## Milestone 5 — Native data model 🚧
+### Language and ecosystem expansion
 
-- [x] Native strings and specialized `number[]`.
-- [x] Add conservative integer narrowing only after range proof.
-- [x] Closed object shapes with fixed offsets, including class reuse/inheritance support.
-- [x] Closures and function values.
-- [~] Monomorphized generics and direct-call specialization; initial scalar/string call-site specialization is complete, advanced/cross-module cases remain.
-- [~] Escape analysis and scalar replacement; numeric-only non-escaping objects support stack allocation and mutable scalar replacement across nested acyclic CFG merges, fully scalarizable reference-bearing objects can be eliminated while their field values remain GC-rooted, and proven local closures use stack-resident closure/env cells while captures stay independently rooted. Physical non-scalarizable reference-bearing objects still require precise stack-root/interior-pointer handling.
+- broaden TypeScript/ECMAScript syntax beyond the current fixture set;
+- expand built-in objects and Web-standard APIs as separately defined specs require;
+- strengthen npm/package/module resolution and cross-module optimization;
+- improve dynamic object semantics and uncommon coercion/property edge cases beyond current differential coverage.
 
-## Milestone 6 — Dynamic boundary and scale
+### Platform parity
 
-- Tagged `JSValue` only for genuinely dynamic values.
-- Checked conversions, dynamic operators, and property slow paths.
-- Heap allocator and initial mark/sweep GC.
-- [~] Exceptions, Promise, and async/await: native rejection recovery and immediate `Promise.resolve` / `Promise.reject<T>` settlement are implemented; Promise adoption and aggregate combinators remain.
-- Incremental object cache, parallel codegen, ThinLTO, PGO, and cross compilation.
+- bring the complete active feature surface to ARM64/macOS and Windows targets;
+- add cross-platform fixture and differential gates equivalent to Linux AMD64.
 
+### Reliability and production hardening
 
-## Milestone 7 — Native concurrency management
+- parser/sema/IR/backend fuzzing;
+- randomized GC/scheduler/channel/Promise stress;
+- differential property testing against Node/TypeScript for broader generated programs;
+- security review of executable writer, runtime memory handling, and dynamic boundaries;
+- reproducible benchmark and release artifacts.
 
-- Bounded M:N scheduler with worker count near CPU cores.
-- Lightweight stackless tasks with spawn/join/yield.
-- Per-worker queues and work stealing.
-- Typed channels, timers, cancellation, structured concurrency, and blocking-call isolation.
-- Async/await state machines that park tasks instead of OS threads.
-- Scheduler/GC integration, per-worker allocation, and later Green-Tea-style mark-page work.
+## Historical roadmaps
 
-See `CONCURRENCY.md` for the step-by-step commit plan and acceptance gates.
-
-## Current checkpoint
-
-The historical compiler checkpoint `6bad298` predates the current runtime/concurrency work. The current branch now has the Go-only handwritten native runtime, stackless tasks/async continuations, typed channels, timers/blocking pool, structured concurrency, cancellation, task-local context, and dynamic JSValue coverage described in `STATUS.md` and `TODO.md`. The remaining critical path is precise scheduler/GC integration, allocator locality, incomplete dynamic/Promise/language coverage, multi-module work, and migration of compile-time ownership into TypeScript 7.
+Older TypeScript-7 migration, LLVM, pure-Go generated-code, c-archive, stackless scheduler, and transitional compiler plans are retained in git history and the historical sections of `TODO.md`. They are not active completion criteria.

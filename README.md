@@ -2,6 +2,17 @@
 
 `ts-pro` is a pure Go native TypeScript compiler and embedded runtime toolchain. It compiles strongly-typed TypeScript programs directly into standalone native machine code executables (Linux ELF64, macOS Mach-O 64, Windows PE/COFF 64) with `CGO_ENABLED=0` and zero external dependencies (no Node.js, V8, external C toolchains, or Clang).
 
+## Current Status
+
+The active Linux AMD64 raw-native compiler roadmap is complete for the repository acceptance surface:
+
+- **125 / 125** native fixtures compile and run.
+- **52 / 52** Node-comparable deterministic fixtures match stdout and exit status.
+- Dynamic, classes/generics, modules, standard fixture APIs, stackful concurrency, async/await, and Promise/thenable/aggregate coverage are included.
+- The exact validation commands and scope are documented in [`docs/STATUS.md`](docs/STATUS.md) and [`TODO.md`](TODO.md).
+
+Future work is optional scope expansion and optimization, not unfinished fixture acceptance. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## Project Structure
 
 ```text
