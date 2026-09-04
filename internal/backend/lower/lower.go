@@ -1615,6 +1615,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskSleep(e, fnOffsets["ts_clock_now_ns"], fnOffsets["ts_nanosleep_ns"], fnOffsets["ts_task_suspend"])
 	fnOffsets["ts_task_reject"] = len(e.Code)
 	emitAMD64TaskReject(e)
+	fnOffsets["ts_task_done"] = len(e.Code)
+	emitAMD64TaskDone(e)
 	fnOffsets["ts_task_rejected"] = len(e.Code)
 	emitAMD64TaskRejected(e)
 	fnOffsets["ts_task_error"] = len(e.Code)

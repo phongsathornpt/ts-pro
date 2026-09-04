@@ -1339,9 +1339,266 @@ func (g *generator) lowerThenablePromise(e *ast.CallExpr, taskType *types.Object
 	return task
 }
 
+func (g *generator) promiseSettledIRType(t types.Type) types.Type {
+	if t == nil {
+		return types.TypeAny
+	}
+	if obj, ok := t.(*types.ObjectType); ok {
+		if inner := g.semaResult.TaskResults[obj.Name]; inner != nil {
+			return inner
+		}
+		if _, fn, ok := g.thenableMethodType(obj); ok && len(fn.Params) > 0 {
+			if resolve := irFunctionMemberType(fn.Params[0].Type); resolve != nil && len(resolve.Params) > 0 {
+				return resolve.Params[0].Type
+			}
+		}
+	}
+	if union, ok := t.(*types.UnionType); ok {
+		members := make([]types.Type, 0, len(union.Members))
+		for _, member := range union.Members {
+			members = append(members, g.promiseSettledIRType(member))
+		}
+		return types.NewUnion(members...)
+	}
+	return t
+}
+
+func (g *generator) makeImmediatePromiseTask(value ir.Operand, sourceType, resultType types.Type) ir.Operand {
+	value = g.coerceJSValueBoundary(value, sourceType, resultType)
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	name := fmt.Sprintf("$promise_immediate%d", g.arrowCounter)
+	g.arrowCounter++
+	closureType := types.NewFunction(nil, resultType)
+	lifted := ir.NewFunction(name, resultType)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", closureType)
+	lifted.Params = append(lifted.Params, env)
+	captured := lifted.NewValue("promise_value", resultType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: captured, Closure: env, Index: 0})
+	g.currentBB.Terminator = &ir.ReturnTerm{Val: captured}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("promise_immediate_closure", closureType)
+	var refMask uint64
+	if irHeapRefType(resultType) {
+		refMask = 1
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: name, Captures: []ir.Operand{value}, RefMask: refMask})
+	taskType := types.NewObject(fmt.Sprintf("$PromiseImmediate$%d", g.arrowCounter))
+	task := g.currentFn.NewValue("promise_immediate_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
+	return task
+}
+
+func (g *generator) lowerPromiseAggregateInput(expr ast.Expr) (ir.Operand, types.Type) {
+	sourceType := g.semanticType(expr)
+	settledType := g.promiseSettledIRType(sourceType)
+	if obj, ok := sourceType.(*types.ObjectType); ok {
+		if inner := g.semaResult.TaskResults[obj.Name]; inner != nil {
+			return g.lowerExpr(expr), inner
+		}
+		if thenObj, thenFn, isThenable := g.thenableMethodType(obj); isThenable {
+			taskType := types.NewObject(fmt.Sprintf("$PromiseAggregateThenable$%d", g.arrowCounter))
+			fake := &ast.CallExpr{Args: []ast.Expr{expr}}
+			return g.lowerThenablePromise(fake, taskType, settledType, thenObj, thenFn), settledType
+		}
+	}
+	value := g.lowerExpr(expr)
+	return g.makeImmediatePromiseTask(value, sourceType, settledType), settledType
+}
+
+func (g *generator) lowerPromiseLiteralAggregate(e *ast.CallExpr, member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type, literal *ast.ArrayLit) ir.Operand {
+	if len(literal.Elements) > 64 {
+		return g.failExpr("Promise.%s literal input exceeds 64 native captures", member.Property)
+	}
+	tasks := make([]ir.Operand, 0, len(literal.Elements))
+	resultTypes := make([]types.Type, 0, len(literal.Elements))
+	for _, element := range literal.Elements {
+		task, resultType := g.lowerPromiseAggregateInput(element)
+		tasks = append(tasks, task)
+		resultTypes = append(resultTypes, resultType)
+	}
+
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	driverType := types.NewFunction(nil, inner)
+	driverName := fmt.Sprintf("$promise_%s%d", member.Property, g.arrowCounter)
+	g.arrowCounter++
+	driver := ir.NewFunction(driverName, inner)
+	g.currentFn = driver
+	g.currentBB = driver.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := driver.NewValue("$env", driverType)
+	driver.Params = append(driver.Params, env)
+	captured := make([]ir.Operand, len(tasks))
+	for i, task := range tasks {
+		v := driver.NewValue(fmt.Sprintf("aggregate_task_%d", i), task.Type())
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: v, Closure: env, Index: i})
+		captured[i] = v
+	}
+
+	if member.Property == "all" {
+		g.lowerPromiseAllDriver(captured, resultTypes, inner)
+	} else {
+		g.lowerPromiseRaceDriver(captured, resultTypes, inner)
+	}
+	g.prog.Functions = append(g.prog.Functions, driver)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+
+	closure := g.currentFn.NewValue("promise_aggregate_driver", driverType)
+	var refMask uint64
+	if len(tasks) == 64 {
+		refMask = ^uint64(0)
+	} else if len(tasks) > 0 {
+		refMask = (uint64(1) << len(tasks)) - 1
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: tasks, RefMask: refMask})
+	result := g.currentFn.NewValue("promise_aggregate_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	return result
+}
+
+func (g *generator) lowerPromiseAllDriver(tasks []ir.Operand, resultTypes []types.Type, inner types.Type) {
+	poll := g.currentFn.NewBlock("promise_all_poll")
+	pending := g.currentFn.NewBlock("promise_all_pending")
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+	g.currentBB = poll
+
+	for i, task := range tasks {
+		rejected := g.currentFn.NewValue(fmt.Sprintf("all_rejected_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rejected, Callee: "ts_task_rejected", Args: []ir.Operand{task}})
+		rejectBB := g.currentFn.NewBlock(fmt.Sprintf("promise_all_reject_%d", i))
+		nextBB := g.currentFn.NewBlock(fmt.Sprintf("promise_all_reject_next_%d", i))
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: nextBB}
+		g.currentBB = rejectBB
+		errVal := g.currentFn.NewValue("aggregate_error", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions,
+			&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+			&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
+		)
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+		g.currentBB = nextBB
+	}
+
+	for i, task := range tasks {
+		done := g.currentFn.NewValue(fmt.Sprintf("all_done_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: done, Callee: "ts_task_done", Args: []ir.Operand{task}})
+		nextBB := g.currentFn.NewBlock(fmt.Sprintf("promise_all_done_next_%d", i))
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: done, Then: nextBB, Else: pending}
+		g.currentBB = nextBB
+	}
+
+	values := make([]ir.Operand, len(tasks))
+	for i, task := range tasks {
+		resultType := resultTypes[i]
+		if resultType == nil || resultType.Kind() == types.KindVoid {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_join", Args: []ir.Operand{task}})
+			values[i] = ir.ConstUndefined{}
+			continue
+		}
+		value := g.currentFn.NewValue(fmt.Sprintf("all_value_%d", i), resultType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_task_join", Args: []ir.Operand{task}})
+		values[i] = value
+	}
+	g.finishPromiseAllResult(values, resultTypes, inner)
+
+	g.currentBB = pending
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+}
+
+func (g *generator) finishPromiseAllResult(values []ir.Operand, resultTypes []types.Type, inner types.Type) {
+	switch out := inner.(type) {
+	case *types.TupleType:
+		res := g.currentFn.NewValue("promise_all_tuple", out)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: out.String(), FieldCount: len(out.Elements), RefMask: g.tupleRefMask(out)})
+		for i, value := range values {
+			coerced := g.coerceJSValueBoundary(value, resultTypes[i], out.Elements[i])
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: strconv.Itoa(i), Offset: 16 + i*8, Val: coerced})
+		}
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: res}
+	case *types.ArrayType:
+		res := g.currentFn.NewValue("promise_all_array", out)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{Res: res, ElemType: out.Elem, Length: ir.ConstNumber{Value: float64(len(values))}})
+		for i, value := range values {
+			coerced := g.coerceJSValueBoundary(value, resultTypes[i], out.Elem)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: coerced})
+		}
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: res}
+	default:
+		g.failExpr("Promise.all result type %s is not tuple/array", inner)
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: ir.ConstUndefined{}}
+	}
+}
+
+func (g *generator) lowerPromiseRaceDriver(tasks []ir.Operand, resultTypes []types.Type, inner types.Type) {
+	poll := g.currentFn.NewBlock("promise_race_poll")
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+	g.currentBB = poll
+	for i, task := range tasks {
+		done := g.currentFn.NewValue(fmt.Sprintf("race_done_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: done, Callee: "ts_task_done", Args: []ir.Operand{task}})
+		settledBB := g.currentFn.NewBlock(fmt.Sprintf("promise_race_settled_%d", i))
+		nextBB := g.currentFn.NewBlock(fmt.Sprintf("promise_race_next_%d", i))
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: done, Then: settledBB, Else: nextBB}
+		g.currentBB = settledBB
+		rejected := g.currentFn.NewValue(fmt.Sprintf("race_rejected_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rejected, Callee: "ts_task_rejected", Args: []ir.Operand{task}})
+		rejectBB := g.currentFn.NewBlock(fmt.Sprintf("promise_race_reject_%d", i))
+		fulfillBB := g.currentFn.NewBlock(fmt.Sprintf("promise_race_fulfill_%d", i))
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: fulfillBB}
+		g.currentBB = rejectBB
+		errVal := g.currentFn.NewValue("race_error", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions,
+			&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+			&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
+		)
+		g.currentBB.Terminator = &ir.ReturnTerm{}
+		g.currentBB = fulfillBB
+		resultType := resultTypes[i]
+		if resultType == nil || resultType.Kind() == types.KindVoid {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_join", Args: []ir.Operand{task}})
+			g.currentBB.Terminator = &ir.ReturnTerm{Val: ir.ConstUndefined{}}
+		} else {
+			value := g.currentFn.NewValue(fmt.Sprintf("race_value_%d", i), resultType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_task_join", Args: []ir.Operand{task}})
+			coerced := g.coerceJSValueBoundary(value, resultType, inner)
+			g.currentBB.Terminator = &ir.ReturnTerm{Val: coerced}
+		}
+		g.currentBB = nextBB
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+}
+
 func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
 	ident, ok := member.Object.(*ast.IdentExpr)
-	if !ok || ident.Name != "Promise" || (member.Property != "resolve" && member.Property != "reject") {
+	if !ok || ident.Name != "Promise" {
+		return nil, false
+	}
+	if member.Property == "all" || member.Property == "race" {
+		if len(e.Args) != 1 {
+			return g.failExpr("Promise.%s expects one array argument", member.Property), true
+		}
+		taskType, ok := g.semanticType(e).(*types.ObjectType)
+		if !ok {
+			return g.failExpr("Promise.%s is missing aggregate task type", member.Property), true
+		}
+		inner := g.semaResult.TaskResults[taskType.Name]
+		if inner == nil {
+			inner = types.TypeAny
+		}
+		if literal, ok := e.Args[0].(*ast.ArrayLit); ok {
+			return g.lowerPromiseLiteralAggregate(e, member, taskType, inner, literal), true
+		}
+		return g.failExpr("Promise.%s array-variable lowering is not implemented yet", member.Property), true
+	}
+	if member.Property != "resolve" && member.Property != "reject" {
 		return nil, false
 	}
 	if len(e.Args) != 1 {

@@ -1793,3 +1793,34 @@ console.log(channelRecv(out));
 		expected: "30\n20\n",
 	})
 }
+func TestLinuxAMD64PromiseLiteralAggregates(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_literal_aggregates",
+		source: `
+async function delayed(ms: number, value: number): Promise<number> {
+  sleep(ms);
+  return value;
+}
+async function allValues(): Promise<number> {
+  const values = await Promise.all<number>([delayed(8, 1), Promise.resolve(2), 3]);
+  return values[0]! * 100 + values[1]! * 10 + values[2]!;
+}
+async function rejectEarly(): Promise<number> {
+  try {
+    await Promise.all<number>([delayed(8, 1), Promise.reject<number>("aggregate-boom"), delayed(1, 3)]);
+    return 0;
+  } catch (error: any) {
+    console.log(error);
+    return 42;
+  }
+}
+async function raceValues(): Promise<number> {
+  return await Promise.race<number>([delayed(8, 20), delayed(1, 30)]);
+}
+console.log(join(allValues()));
+console.log(join(rejectEarly()));
+console.log(join(raceValues()));
+`,
+		expected: "123\naggregate-boom\n42\n30\n",
+	})
+}

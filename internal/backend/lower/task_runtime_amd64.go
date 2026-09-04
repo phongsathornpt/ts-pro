@@ -495,6 +495,14 @@ func emitAMD64TaskReject(e *amd64.Emitter) {
 	e.Ret()
 }
 
+func emitAMD64TaskDone(e *amd64.Emitter) {
+	// RDI = task. Return whether the task has fulfilled or rejected.
+	e.MovRegDeref(amd64.R10, amd64.RDI, amd64TaskState)
+	e.CmpRegImm32(amd64.R10, 2)
+	e.Setcc(amd64.CondAE, amd64.RAX)
+	e.Ret()
+}
+
 func emitAMD64TaskRejected(e *amd64.Emitter) {
 	// RDI = task. Return canonical bool in RAX.
 	e.MovRegDeref(amd64.R10, amd64.RDI, amd64TaskState)

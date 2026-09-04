@@ -1854,10 +1854,92 @@ func (c *Checker) promiseResultType(t types.Type) (types.Type, bool) {
 	return inner, ok
 }
 
+func (c *Checker) promiseSettledType(t types.Type) types.Type {
+	if t == nil {
+		return types.TypeAny
+	}
+	if adopted, ok := c.promiseResultType(t); ok {
+		return adopted
+	}
+	if assimilated, ok := c.thenableResultType(t); ok {
+		return assimilated
+	}
+	if union, ok := t.(*types.UnionType); ok {
+		members := make([]types.Type, 0, len(union.Members))
+		for _, member := range union.Members {
+			members = append(members, c.promiseSettledType(member))
+		}
+		return types.NewUnion(members...)
+	}
+	return t
+}
+
+func (c *Checker) checkPromiseAggregateCall(e *ast.CallExpr, member *ast.MemberExpr) types.Type {
+	if len(e.Args) != 1 {
+		c.error(e.Span(), "TS2554", fmt.Sprintf("Promise.%s expects exactly one array argument.", member.Property))
+		c.result.Types[e] = types.TypeAny
+		return types.TypeAny
+	}
+	argType := c.checkExpr(e.Args[0])
+	arr, ok := argType.(*types.ArrayType)
+	if !ok {
+		c.error(e.Args[0].Span(), "TS2345", fmt.Sprintf("Promise.%s expects an array input.", member.Property))
+		c.result.Types[e] = types.TypeAny
+		return types.TypeAny
+	}
+	var explicit types.Type
+	if len(e.TypeArgs) > 0 {
+		if len(e.TypeArgs) != 1 {
+			c.error(e.Span(), "TS2558", "Promise aggregate builtin expects one type argument.")
+		}
+		explicit = c.resolveTypeNode(e.TypeArgs[0])
+	}
+
+	var inner types.Type
+	switch member.Property {
+	case "all":
+		if literal, ok := e.Args[0].(*ast.ArrayLit); ok && explicit == nil {
+			elems := make([]types.Type, 0, len(literal.Elements))
+			for _, element := range literal.Elements {
+				elems = append(elems, c.promiseSettledType(c.result.Types[element]))
+			}
+			inner = types.NewTuple(elems...)
+		} else {
+			elem := explicit
+			if elem == nil {
+				elem = c.promiseSettledType(arr.Elem)
+			}
+			inner = types.NewArray(elem)
+		}
+	case "race":
+		inner = explicit
+		if inner == nil {
+			if literal, ok := e.Args[0].(*ast.ArrayLit); ok {
+				members := make([]types.Type, 0, len(literal.Elements))
+				for _, element := range literal.Elements {
+					members = append(members, c.promiseSettledType(c.result.Types[element]))
+				}
+				inner = types.NewUnion(members...)
+			} else {
+				inner = c.promiseSettledType(arr.Elem)
+			}
+		}
+	}
+	pt := c.newPromiseType(inner)
+	c.result.Types[member.Object] = types.TypeAny
+	c.result.Types[member] = types.TypeAny
+	c.result.Types[e.Callee] = types.TypeAny
+	c.result.Types[e] = pt
+	return pt
+}
+
 func (c *Checker) checkPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
 	ident, ok := member.Object.(*ast.IdentExpr)
 	if !ok || ident.Name != "Promise" {
 		return nil, false
+	}
+	if member.Property == "all" || member.Property == "race" {
+		return c.checkPromiseAggregateCall(e, member), true
 	}
 	if member.Property != "resolve" && member.Property != "reject" {
 		return nil, false
