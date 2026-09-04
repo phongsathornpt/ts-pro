@@ -10,8 +10,12 @@ func TestParseSupportedTargets(t *testing.T) {
 		{os: "linux", arch: "amd64"},
 		{os: "darwin", arch: "arm64"},
 	} {
-		if _, err := Parse(tc.os, tc.arch); err != nil {
+		tgt, err := Parse(tc.os, tc.arch)
+		if err != nil {
 			t.Fatalf("Parse(%q, %q): %v", tc.os, tc.arch, err)
+		}
+		if tgt.String() != tc.os+"/"+tc.arch {
+			t.Errorf("tgt.String() = %q, want %s/%s", tgt.String(), tc.os, tc.arch)
 		}
 	}
 }

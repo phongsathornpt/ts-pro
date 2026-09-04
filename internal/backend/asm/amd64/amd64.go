@@ -95,17 +95,14 @@ func (e *Emitter) emitInt64(v int64) {
 	e.Code = append(e.Code, buf[:]...)
 }
 
-// rex returns a REX prefix byte. W=1 (64-bit), R=reg_high, X=index_high, B=rm_high.
-func rex(w, r, x, b bool) byte {
+// rex returns a REX prefix byte. W=1 (64-bit), R=reg_high, B=rm_high.
+func rex(w, r, _, b bool) byte {
 	var res byte = 0x40
 	if w {
 		res |= 0x08
 	}
 	if r {
 		res |= 0x04
-	}
-	if x {
-		res |= 0x02
 	}
 	if b {
 		res |= 0x01

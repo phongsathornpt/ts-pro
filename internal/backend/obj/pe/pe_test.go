@@ -26,4 +26,13 @@ func TestCreatePEExecutable(t *testing.T) {
 	if peSig != IMAGE_NT_SIGNATURE {
 		t.Errorf("expected PE signature 'PE\\0\\0', got 0x%x", peSig)
 	}
+
+	// Test ARM64 PE
+	peArm, err := CreateExecutable(code, true)
+	if err != nil {
+		t.Fatalf("CreateExecutable(ARM64) failed: %v", err)
+	}
+	if len(peArm) < 512 {
+		t.Fatalf("PE ARM64 binary too small: %d bytes", len(peArm))
+	}
 }

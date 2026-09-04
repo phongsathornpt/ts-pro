@@ -12,10 +12,12 @@ import (
 
 const version = "0.1.0"
 
+var exitFunc = os.Exit
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "ts-pro: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 

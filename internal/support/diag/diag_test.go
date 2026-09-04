@@ -11,8 +11,6 @@ func TestDiagnosticFormat(t *testing.T) {
 	fs := source.NewFileSet()
 	f := fs.AddFile("example.ts", []byte("function add(a: number, b: number) {\n    return a + c;\n}"))
 
-	// 'c' is at line 2, offset 48 (0-indexed: 36 bytes in line 1 + \n = 37. Line 2: "    return a + c;" -> 'c' is offset 37+15 = 52)
-	// Let's find index of 'c'
 	idx := strings.Index(string(f.Src), "c;")
 	cPos := f.Base + source.Pos(idx)
 
@@ -34,4 +32,25 @@ func TestDiagnosticFormat(t *testing.T) {
 	if !strings.Contains(formatted, "hint: Did you mean 'b'?") {
 		t.Errorf("expected hint in:\n%s", formatted)
 	}
+
+	// List formatting & has errors
+	list := DiagnosticList{d, Diagnostic{Severity: SeverityWarning, Message: "warn"}}
+	if !list.HasErrors() {
+		t.Errorf("expected HasErrors to be true")
+	}
+	_ = list.Format(fs)
+
+	noErrList := DiagnosticList{Diagnostic{Severity: SeverityInfo, Message: "info"}}
+	if noErrList.HasErrors() {
+		t.Errorf("expected HasErrors to be false")
+	}
+
+	// Severities string
+	for _, s := range []Severity{SeverityHint, SeverityInfo, SeverityWarning, SeverityError, Severity(99)} {
+		_ = s.String()
+	}
+
+	// Format without fileset or invalid span
+	dNoSpan := Diagnostic{Message: "plain message"}
+	_ = dNoSpan.Format(nil)
 }

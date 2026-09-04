@@ -53,6 +53,89 @@ let x: number = "mismatch";
 	if !diags.HasErrors() {
 		t.Errorf("expected type error, got none")
 	}
+
+	// Check syntax error
+	badSyntax := []byte(`let x: = 123;`)
+	diagsSyntax := c.Check("bad.ts", badSyntax)
+	if !diagsSyntax.HasErrors() {
+		t.Errorf("expected parse error, got none")
+	}
+}
+
+func TestCompilerOptionsDefaults(t *testing.T) {
+	cEmpty := New(Options{})
+	if cEmpty.opts.TargetOS == "" || cEmpty.opts.TargetArch == "" {
+		t.Errorf("expected defaults filled, got OS=%q Arch=%q", cEmpty.opts.TargetOS, cEmpty.opts.TargetArch)
+	}
+}
+
+func TestCompileSourceRejections(t *testing.T) {
+	c := New(DefaultOptions())
+
+	// Syntax error
+	_, _, err := c.CompileSource("bad.ts", []byte(`let x: = ;`))
+	if err == nil {
+		t.Errorf("expected error on bad syntax")
+	}
+
+	// Relative import rejected in CompileSource
+	_, _, err = c.CompileSource("imp.ts", []byte(`import { x } from "./other";`))
+	if err == nil || !strings.Contains(err.Error(), "relative imports require CompileFile") {
+		t.Errorf("expected relative imports error, got %v", err)
+	}
+
+	// Unsupported OS target
+	cBadOS := New(Options{TargetOS: "solaris", TargetArch: "amd64"})
+	_, _, err = cBadOS.CompileSource("test.ts", []byte(`let x: number = 1;`))
+	if err == nil {
+		t.Errorf("expected error for unsupported target OS")
+	}
+}
+
+func TestCompileFileModuleLoading(t *testing.T) {
+	dir := t.TempDir()
+
+	// Non-relative import rejection
+	badImport := filepath.Join(dir, "bad_import.ts")
+	if err := os.WriteFile(badImport, []byte(`import { x } from "pkg";`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{TargetOS: "linux", TargetArch: "amd64"})
+	_, err := c.CompileFile(badImport, filepath.Join(dir, "out1"))
+	if err == nil || !strings.Contains(err.Error(), "only relative TypeScript imports are supported") {
+		t.Errorf("expected non-relative import error, got %v", err)
+	}
+
+	// Missing module file
+	missingImport := filepath.Join(dir, "missing_import.ts")
+	if err := os.WriteFile(missingImport, []byte(`import { x } from "./nonexistent";`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.CompileFile(missingImport, filepath.Join(dir, "out2"))
+	if err == nil || !strings.Contains(err.Error(), "cannot resolve module") {
+		t.Errorf("expected cannot resolve module error, got %v", err)
+	}
+
+	// Valid relative import with directory index.ts
+	modDir := filepath.Join(dir, "submod")
+	if err := os.Mkdir(modDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modDir, "index.ts"), []byte(`export function helper(): number { return 42; }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainTs := filepath.Join(dir, "main.ts")
+	if err := os.WriteFile(mainTs, []byte(`import { helper } from "./submod"; console.log(helper());`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outBin := filepath.Join(dir, "out_main")
+	diags, err := c.CompileFile(mainTs, outBin)
+	if err != nil {
+		t.Fatalf("CompileFile failed: %v, diags: %v", err, diags)
+	}
+	if info, err := os.Stat(outBin); err != nil || info.Size() == 0 {
+		t.Errorf("expected output binary created, info: %v, err: %v", info, err)
+	}
 }
 
 func TestCompileFileRejectsCyclicRelativeImports(t *testing.T) {

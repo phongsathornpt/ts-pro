@@ -31,6 +31,14 @@ func TestFileSet(t *testing.T) {
 	if loc.Line != 2 || loc.Column != 1 || loc.Filename != "test1.ts" {
 		t.Errorf("unexpected loc: %+v", loc)
 	}
+	if loc.String() != "test1.ts:2:1" {
+		t.Errorf("loc.String() = %q", loc.String())
+	}
+
+	noFileLoc := Location{Line: 5, Column: 10}
+	if noFileLoc.String() != "5:10" {
+		t.Errorf("noFileLoc.String() = %q", noFileLoc.String())
+	}
 
 	// Add second file
 	src2 := []byte("let x = 42;")
@@ -39,5 +47,22 @@ func TestFileSet(t *testing.T) {
 	loc2 := fs.Location(xPos)
 	if loc2.Line != 1 || loc2.Column != 5 || loc2.Filename != "test2.ts" {
 		t.Errorf("unexpected loc2: %+v", loc2)
+	}
+
+	// Edge cases
+	if f1.LineContent(0) != "" || f1.LineContent(100) != "" {
+		t.Errorf("out-of-range lines should be empty")
+	}
+
+	badLoc := f1.Location(0)
+	if badLoc.Line != 0 {
+		t.Errorf("bad pos should return zero line")
+	}
+
+	if fs.File(99999) != nil {
+		t.Errorf("expected nil for non-existent pos")
+	}
+	if fs.Location(99999).Line != 0 {
+		t.Errorf("expected empty location for non-existent pos")
 	}
 }

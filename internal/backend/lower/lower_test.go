@@ -5,6 +5,7 @@ import (
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
+	"github.com/phongsathornpt/ts-pro/internal/target"
 )
 
 func TestLowerAMD64(t *testing.T) {
@@ -131,5 +132,44 @@ func TestLowerRejectsUnresolvedCall(t *testing.T) {
 
 	if _, err := Lower(prog, ArchAMD64); err == nil {
 		t.Fatal("expected unresolved call target to fail lowering")
+	}
+}
+
+func TestLowerTargetAndArchErrors(t *testing.T) {
+	prog := &ir.Program{}
+	if _, err := Lower(prog, Arch("unsupported")); err == nil {
+		t.Errorf("expected unsupported arch error")
+	}
+
+	tgtLinux := target.Target{OS: target.OSLinux, Arch: target.ArchAMD64}
+	if _, err := LowerTarget(prog, tgtLinux); err != nil {
+		t.Errorf("expected LowerTarget linux/amd64 to succeed, got %v", err)
+	}
+
+	tgtDarwin := target.Target{OS: target.OSDarwin, Arch: target.ArchARM64}
+	if _, err := LowerTarget(prog, tgtDarwin); err != nil {
+		t.Errorf("expected LowerTarget darwin/arm64 to succeed, got %v", err)
+	}
+
+	tgtUnsupported := target.Target{OS: target.OSLinux, Arch: target.ArchARM64}
+	if _, err := LowerTarget(prog, tgtUnsupported); err == nil {
+		t.Errorf("expected error for unsupported target linux/arm64")
+	}
+}
+
+func TestIsNumberTypeCoverage(t *testing.T) {
+	if isNumberType(nil) {
+		t.Errorf("isNumberType(nil) should be false")
+	}
+	if !isNumberType(types.TypeNumber) {
+		t.Errorf("isNumberType(TypeNumber) should be true")
+	}
+	uNum := types.NewUnion(types.TypeNumber, types.TypeNull)
+	if !isNumberType(uNum) {
+		t.Errorf("isNumberType(number | null) should be true")
+	}
+	uOther := types.NewUnion(types.TypeString, types.TypeBoolean)
+	if isNumberType(uOther) {
+		t.Errorf("isNumberType(string | boolean) should be false")
 	}
 }

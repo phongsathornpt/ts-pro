@@ -16,4 +16,8 @@ func TestEmbeddedRuntime(t *testing.T) {
 	if len(data) == 0 {
 		t.Errorf("expected non-empty embedded file")
 	}
+
+	if _, err := GetRuntimeSource("nonexistent.go"); err == nil {
+		t.Errorf("expected error for nonexistent file")
+	}
 }

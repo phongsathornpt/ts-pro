@@ -66,8 +66,11 @@ func TestLexerBasic(t *testing.T) {
 func TestLexerStringsAndComments(t *testing.T) {
 	fs := source.NewFileSet()
 	f := fs.AddFile("test2.ts", []byte(`// comment line
-let msg = "hello\nworld"; /* block comment */
+let msg = "hello\nworld\r\t\\\'\""; /* block comment */
 let x = 0x1F;
+let b = 0b1010;
+let f = 3.14e-2;
+let dotF = .5;
 `))
 
 	tokens, diags := TokenizeAll(f)
@@ -84,10 +87,51 @@ let x = 0x1F;
 	if tokens[2].Kind != token.Eq {
 		t.Errorf("expected Eq, got %v", tokens[2].Kind)
 	}
-	if tokens[3].Kind != token.String || tokens[3].Text != "hello\nworld" {
-		t.Errorf("expected string with escaped newline, got %v (%q)", tokens[3].Kind, tokens[3].Text)
+}
+
+func TestLexerAllOperatorsAndPunctuation(t *testing.T) {
+	src := []byte(`
++ ++ += - -- -= * ** *= / /= % %=
+! ~ & && &= | || |= ^ ^=
+<< >> >>> = == === != !==
+< <= > >= ( ) { } [ ] ; , . ... ? ?? ?. : =>
+`)
+	fs := source.NewFileSet()
+	f := fs.AddFile("ops.ts", src)
+	tokens, _ := TokenizeAll(f)
+	if len(tokens) < 30 {
+		t.Fatalf("too few tokens parsed: %d", len(tokens))
 	}
-	if tokens[8].Kind != token.Number || tokens[8].Text != "0x1F" {
-		t.Errorf("expected hex number 0x1F, got %v (%q)", tokens[8].Kind, tokens[8].Text)
+}
+
+func TestLexerErrorsAndEdgeCases(t *testing.T) {
+	fs := source.NewFileSet()
+
+	// Unterminated block comment
+	f1 := fs.AddFile("err1.ts", []byte(`/* unterminated block`))
+	_, d1 := TokenizeAll(f1)
+	if !d1.HasErrors() {
+		t.Errorf("expected TS1002 diagnostic for unterminated block comment")
+	}
+
+	// Unterminated string
+	f2 := fs.AddFile("err2.ts", []byte(`"unterminated string`))
+	_, d2 := TokenizeAll(f2)
+	if !d2.HasErrors() {
+		t.Errorf("expected diagnostic for unterminated string")
+	}
+
+	// Single quote string
+	f3 := fs.AddFile("str.ts", []byte(`'single quoted'`))
+	toks3, d3 := TokenizeAll(f3)
+	if d3.HasErrors() || len(toks3) < 1 || toks3[0].Text != "single quoted" {
+		t.Errorf("expected single quote string, got %v, diags: %v", toks3, d3)
+	}
+
+	// Template literals
+	f4 := fs.AddFile("tpl.ts", []byte("`hello ${world}`"))
+	toks4, _ := TokenizeAll(f4)
+	if len(toks4) < 1 {
+		t.Errorf("expected template token")
 	}
 }

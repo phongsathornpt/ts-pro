@@ -20,4 +20,13 @@ func TestCreateExecutable(t *testing.T) {
 	if !bytes.Equal(elfData[:4], []byte{0x7f, 'E', 'L', 'F'}) {
 		t.Errorf("expected ELF magic 0x7fELF, got %x", elfData[:4])
 	}
+
+	// Test ARM64
+	elfArm, err := CreateExecutable(code, true)
+	if err != nil {
+		t.Fatalf("CreateExecutable(ARM64) failed: %v", err)
+	}
+	if len(elfArm) < 64 {
+		t.Fatalf("ELF ARM64 binary too small: %d bytes", len(elfArm))
+	}
 }

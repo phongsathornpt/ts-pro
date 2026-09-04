@@ -3,6 +3,8 @@
 package sys
 
 import (
+	"io"
+	"os"
 	"testing"
 )
 
@@ -19,5 +21,24 @@ func TestMmapMunmap(t *testing.T) {
 
 	if err := Munmap(mem); err != nil {
 		t.Errorf("Munmap failed: %v", err)
+	}
+}
+
+func TestSysWrite(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	n, err := Write(int(w.Fd()), []byte("sys write test"))
+	if err != nil || n != 14 {
+		t.Fatalf("Write failed: n=%d err=%v", n, err)
+	}
+
+	buf := make([]byte, 14)
+	if _, err := io.ReadFull(r, buf); err != nil || string(buf) != "sys write test" {
+		t.Fatalf("read pipe failed: %v, got %q", err, string(buf))
 	}
 }

@@ -12,8 +12,18 @@ func TestClosure(t *testing.T) {
 	if c.GetUpvalue(1) != 20 {
 		t.Errorf("GetUpvalue(1) = %d, want 20", c.GetUpvalue(1))
 	}
+	if c.GetUpvalue(-1) != 0 || c.GetUpvalue(10) != 0 {
+		t.Errorf("expected 0 for out of bounds upvalue")
+	}
+
 	c.SetUpvalue(1, 99)
 	if c.GetUpvalue(1) != 99 {
 		t.Errorf("GetUpvalue(1) after update = %d, want 99", c.GetUpvalue(1))
+	}
+	c.SetUpvalue(-1, 99)
+	c.SetUpvalue(10, 99)
+
+	if c.Pointer() == nil {
+		t.Errorf("expected non-nil pointer")
 	}
 }

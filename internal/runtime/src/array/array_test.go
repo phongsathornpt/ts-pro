@@ -22,11 +22,35 @@ func TestArrayOperations(t *testing.T) {
 		t.Errorf("Get(0) = %v, want 3.14", math.Float64frombits(val))
 	}
 
+	if _, ok := Get(arr, -1); ok {
+		t.Errorf("expected Get(-1) to fail")
+	}
+	if _, ok := Get(arr, 10); ok {
+		t.Errorf("expected Get(10) to fail")
+	}
+
+	if !Set(arr, 1, 100) {
+		t.Errorf("expected Set(1) to succeed")
+	}
+	if Set(arr, -1, 100) {
+		t.Errorf("expected Set(-1) to fail")
+	}
+	if Set(arr, 10, 100) {
+		t.Errorf("expected Set(10) to fail")
+	}
+
 	popVal, ok := Pop(arr)
 	if !ok || popVal != 99 {
 		t.Errorf("Pop() = %v, want 99", popVal)
 	}
 	if arr.Length != 2 {
 		t.Errorf("arr.Length after pop = %d, want 2", arr.Length)
+	}
+
+	// Pop remaining
+	Pop(arr)
+	Pop(arr)
+	if _, ok := Pop(arr); ok {
+		t.Errorf("expected Pop on empty array to fail")
 	}
 }

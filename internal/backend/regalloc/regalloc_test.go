@@ -36,6 +36,9 @@ func TestLinearScanAllocation(t *testing.T) {
 			t.Errorf("value %d unallocated", id)
 		}
 	}
+	if ra.StackFrameSlots() < 0 {
+		t.Errorf("invalid stack frame slots")
+	}
 }
 
 func TestSpillWhenPressureHigh(t *testing.T) {
@@ -91,4 +94,123 @@ func TestParametersLiveAtEntryDoNotShareRegister(t *testing.T) {
 	if locs[used.ID].IsReg && locs[unused.ID].IsReg && locs[used.ID].Reg == locs[unused.ID].Reg {
 		t.Fatalf("used and unused trailing parameter share entry register %d", locs[used.ID].Reg)
 	}
+}
+
+func TestIntervalsAllInstructionKinds(t *testing.T) {
+	fn := ir.NewFunction("allInsts", types.TypeNumber)
+	vArr := fn.NewValue("arr", types.NewArray(types.TypeNumber))
+	vObj := fn.NewValue("obj", types.NewObject("Point"))
+	vVal := fn.NewValue("val", types.TypeNumber)
+	vIdx := fn.NewValue("idx", types.TypeNumber)
+	vLen := fn.NewValue("len", types.TypeNumber)
+	vPop := fn.NewValue("pop", types.TypeNumber)
+	vPush := fn.NewValue("push", types.TypeNumber)
+	vUnary := fn.NewValue("unary", types.TypeNumber)
+	vClosure := fn.NewValue("closure", types.NewFunction(nil, types.TypeVoid))
+	vIndirect := fn.NewValue("indirect", types.TypeVoid)
+
+	b := fn.NewBlock("entry")
+	b.Instructions = append(b.Instructions,
+		&ir.UnaryInst{Res: vUnary, Op: "-", Val: vVal},
+		&ir.SetFieldInst{Obj: vObj, Field: "x", Offset: 16, Val: vVal},
+		&ir.MakeClosureInst{Res: vClosure, Function: "foo", Captures: []ir.Operand{vVal}},
+		&ir.ClosureGetInst{Res: vVal, Closure: vClosure, Index: 0},
+		&ir.IndirectCallInst{Res: vIndirect, Closure: vClosure, ThisArg: vObj, Args: []ir.Operand{vVal}},
+		&ir.AllocArrayInst{Res: vArr, ElemType: types.TypeNumber, Length: vVal},
+		&ir.GetElementInst{Res: vVal, Array: vArr, Index: vIdx},
+		&ir.SetElementInst{Array: vArr, Index: vIdx, Val: vVal},
+		&ir.ArrayLengthInst{Res: vLen, Array: vArr},
+		&ir.ArrayPushInst{Res: vPush, Array: vArr, Val: vVal},
+		&ir.ArrayPopInst{Res: vPop, Array: vArr},
+	)
+
+	loopHeader := fn.NewBlock("loopHeader")
+	loopHeader.Phis = append(loopHeader.Phis, &ir.PhiInst{
+		Res:      vVal,
+		Incoming: []ir.PhiIncoming{{Block: b, Value: vVal}},
+	})
+	b.Terminator = &ir.JumpTerm{Target: loopHeader}
+
+	loopBody := fn.NewBlock("loopBody")
+	loopHeader.Terminator = &ir.BranchTerm{Cond: vVal, Then: loopBody, Else: b}
+
+	// Backedge jump to loopHeader
+	loopBody.Terminator = &ir.JumpTerm{Target: loopHeader}
+
+	ra := New(2)
+	locs := ra.Allocate(fn)
+	if len(locs) == 0 {
+		t.Fatalf("expected allocations, got none")
+	}
+}
+
+func TestSpillActiveEviction(t *testing.T) {
+	fn := ir.NewFunction("testEvict", types.TypeNumber)
+	b := fn.NewBlock("entry")
+
+	// vLong has a very long lifetime
+	vLong := fn.NewValue("vLong", types.TypeNumber)
+	// vShort has a shorter lifetime
+	vShort := fn.NewValue("vShort", types.TypeNumber)
+	vMedium := fn.NewValue("vMedium", types.TypeNumber)
+
+	b.Instructions = append(b.Instructions,
+		&ir.CallInst{Res: vLong, Callee: "fn0", Args: []ir.Operand{vLong}},
+		&ir.BinaryInst{Res: vShort, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 1}, RHS: ir.ConstNumber{Value: 2}},
+		&ir.BinaryInst{Res: vMedium, Op: ir.OpAdd, LHS: vShort, RHS: ir.ConstNumber{Value: 3}},
+	)
+	target := fn.NewBlock("target")
+	target.Phis = append(target.Phis, &ir.PhiInst{
+		Res:      vLong,
+		Incoming: []ir.PhiIncoming{{Block: b, Value: vLong}},
+	})
+	b.Terminator = &ir.BranchTerm{Cond: vShort, Then: target, Else: target}
+	target.Terminator = &ir.ReturnTerm{Val: vLong}
+
+	ra := New(1)
+	_ = ra.Allocate(fn)
+}
+
+func TestSortActiveTieBreak(t *testing.T) {
+	fn := ir.NewFunction("tiebreak", types.TypeNumber)
+	b := fn.NewBlock("entry")
+
+	v1 := fn.NewValue("v1", types.TypeNumber)
+	v2 := fn.NewValue("v2", types.TypeNumber)
+	v3 := fn.NewValue("v3", types.TypeNumber)
+	v4 := fn.NewValue("v4", types.TypeNumber)
+
+	b.Instructions = append(b.Instructions,
+		&ir.BinaryInst{Res: v1, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 1}, RHS: ir.ConstNumber{Value: 2}},
+		&ir.BinaryInst{Res: v2, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 3}, RHS: ir.ConstNumber{Value: 4}},
+		&ir.BinaryInst{Res: v3, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 5}, RHS: ir.ConstNumber{Value: 6}},
+		&ir.BinaryInst{Res: v4, Op: ir.OpAdd, LHS: v1, RHS: v2},
+	)
+	b.Terminator = &ir.ReturnTerm{Val: v3}
+
+	ra := New(2)
+	_ = ra.Allocate(fn)
+}
+
+func TestSortActiveTieBreak2(t *testing.T) {
+	fn := ir.NewFunction("tiebreak2", types.TypeNumber)
+	b := fn.NewBlock("entry")
+
+	v1 := fn.NewValue("v1", types.TypeNumber)
+	v2 := fn.NewValue("v2", types.TypeNumber)
+	v3 := fn.NewValue("v3", types.TypeNumber)
+	v4 := fn.NewValue("v4", types.TypeNumber)
+	v5 := fn.NewValue("v5", types.TypeNumber)
+
+	b.Instructions = append(b.Instructions,
+		&ir.CallInst{Res: v1, Callee: "f1", Args: []ir.Operand{}},
+		&ir.CallInst{Res: v2, Callee: "f2", Args: []ir.Operand{}},
+		&ir.BinaryInst{Res: v3, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 1}, RHS: ir.ConstNumber{Value: 2}},
+		&ir.BinaryInst{Res: v4, Op: ir.OpAdd, LHS: v3, RHS: v1},
+		&ir.BinaryInst{Res: v5, Op: ir.OpAdd, LHS: v4, RHS: v2},
+	)
+	b.Terminator = &ir.ReturnTerm{Val: v5}
+
+	ra := New(2)
+	_ = ra.Allocate(fn)
 }

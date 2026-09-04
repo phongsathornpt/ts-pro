@@ -19,4 +19,17 @@ func TestAllocatorAlloc(t *testing.T) {
 	if p1 == p2 {
 		t.Errorf("expected distinct allocation pointers")
 	}
+
+	// Add root, test expansion
+	alloc.AddRoot(p1)
+	pBig := alloc.Alloc(2048)
+	if pBig == nil {
+		t.Fatalf("expected non-nil pointer after expansion")
+	}
+
+	alloc.ClearRoots()
+	alloc.collectLocked()
+	if alloc.cursor != 0 {
+		t.Errorf("expected cursor reset after ClearRoots, got %d", alloc.cursor)
+	}
 }

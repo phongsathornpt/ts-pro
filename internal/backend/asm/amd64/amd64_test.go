@@ -173,6 +173,26 @@ func TestAMD64X87MemoryEncodings(t *testing.T) {
 	if want := []byte{0xDC, 0x75, 0x80}; !bytes.Equal(e.Code, want) {
 		t.Fatalf("fdiv: got %x want %x", e.Code, want)
 	}
+	e = NewEmitter()
+	e.FldDeref64(RBP, -128)
+	if len(e.Code) == 0 {
+		t.Fatalf("fld generated no code")
+	}
+	e = NewEmitter()
+	e.FsubDeref64(RBP, -128)
+	if len(e.Code) == 0 {
+		t.Fatalf("fsub generated no code")
+	}
+	e = NewEmitter()
+	e.FstpDeref80(RBP, -128)
+	if len(e.Code) == 0 {
+		t.Fatalf("fstp80 generated no code")
+	}
+	e = NewEmitter()
+	e.FldDeref80(RBP, -128)
+	if len(e.Code) == 0 {
+		t.Fatalf("fld80 generated no code")
+	}
 }
 
 func TestCallRegEncoding(t *testing.T) {
@@ -192,4 +212,51 @@ func TestCallRegEncoding(t *testing.T) {
 			t.Fatalf("call r11 encoding = % x, want % x", e.Code, want)
 		}
 	})
+}
+
+func TestAMD64MoreEncoders(t *testing.T) {
+	e := NewEmitter()
+	e.MovRegImm64(RAX, 1234567890123)
+	e.MovRegImm64(R12, 1234567890123)
+	e.SubRegReg(RAX, RDX)
+	e.SubRegReg(R12, R13)
+	e.AddRegImm32(RAX, 10)
+	e.AddRegImm32(R12, 10)
+	e.SubRegImm32(RAX, 10)
+	e.SubRegImm32(R12, 10)
+	e.CmpRegImm32(RAX, 10)
+	e.CmpRegImm32(R12, 10)
+	e.CmpRegReg(RAX, RDX)
+	e.CmpRegReg(R12, R13)
+	e.TestRegReg(RAX, RAX)
+	e.AndRegReg(RAX, RDX)
+	e.AndRegReg(R12, R13)
+	e.OrRegReg(RAX, RDX)
+	e.OrRegReg(R12, R13)
+	e.ShrRegImm8(RAX, 2)
+	e.ShrRegImm8(R12, 2)
+	e.Pop(RBP)
+	e.Pop(R12)
+	e.Push(R12)
+	e.Syscall()
+	e.MovSDRegReg(XMM0, XMM1)
+	e.MovSDRegReg(XMM8, XMM9)
+	e.XorPD(XMM0, XMM0)
+	e.JmpRel32(0)
+	e.JccRel32(CondE, 0)
+	e.CallRel32(0)
+	e.MovDerefReg(RAX, 1000, RDX)
+	e.MovRegDeref(RAX, RDX, 1000)
+	e.MovDerefReg8(R12, 1000, RDX)
+	e.FildDeref64(R12, -8)
+	e.FstpDeref64(R12, -8)
+	e.FmulDeref64(R12, -8)
+	e.FdivDeref64(R12, -8)
+	e.FldDeref64(R12, -8)
+	e.FsubDeref64(R12, -8)
+	e.FstpDeref80(R12, -16)
+	e.FldDeref80(R12, -16)
+	e.Fabs()
+	e.FldST0()
+	e.FcomipST1()
 }
