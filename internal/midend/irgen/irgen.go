@@ -1576,6 +1576,201 @@ func (g *generator) lowerPromiseRaceDriver(tasks []ir.Operand, resultTypes []typ
 	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
 }
 
+func (g *generator) promiseArrayTaskResultType(t types.Type) (types.Type, bool) {
+	if obj, ok := t.(*types.ObjectType); ok {
+		inner := g.semaResult.TaskResults[obj.Name]
+		return inner, inner != nil
+	}
+	if union, ok := t.(*types.UnionType); ok {
+		members := make([]types.Type, 0, len(union.Members))
+		for _, member := range union.Members {
+			inner, ok := g.promiseArrayTaskResultType(member)
+			if !ok {
+				return nil, false
+			}
+			members = append(members, inner)
+		}
+		return types.NewUnion(members...), true
+	}
+	return nil, false
+}
+
+func (g *generator) lowerPromiseArrayAggregate(e *ast.CallExpr, member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type) ir.Operand {
+	arrType, ok := g.semanticType(e.Args[0]).(*types.ArrayType)
+	if !ok {
+		return g.failExpr("Promise.%s expects native array input", member.Property)
+	}
+	resultType, ok := g.promiseArrayTaskResultType(arrType.Elem)
+	if !ok {
+		return g.failExpr("Promise.%s array-variable lowering currently requires Promise/task elements", member.Property)
+	}
+	source := g.lowerExpr(e.Args[0])
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	driverType := types.NewFunction(nil, inner)
+	driverName := fmt.Sprintf("$promise_%s_array%d", member.Property, g.arrowCounter)
+	g.arrowCounter++
+	driver := ir.NewFunction(driverName, inner)
+	g.currentFn = driver
+	g.currentBB = driver.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := driver.NewValue("$env", driverType)
+	driver.Params = append(driver.Params, env)
+	array := driver.NewValue("aggregate_array", arrType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: array, Closure: env, Index: 0})
+	length := driver.NewValue("aggregate_length", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: array})
+	if member.Property == "all" {
+		g.lowerPromiseAllArrayDriver(array, length, arrType.Elem, resultType, inner)
+	} else {
+		g.lowerPromiseRaceArrayDriver(array, length, arrType.Elem, resultType, inner)
+	}
+	g.prog.Functions = append(g.prog.Functions, driver)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("promise_array_driver", driverType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{source}, RefMask: 1})
+	result := g.currentFn.NewValue("promise_array_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	return result
+}
+
+func (g *generator) lowerPromiseAllArrayDriver(array, length ir.Operand, taskElemType, resultType, inner types.Type) {
+	out, ok := inner.(*types.ArrayType)
+	if !ok {
+		g.failExpr("Promise.all array-variable result must be an array, got %s", inner)
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: ir.ConstUndefined{}}
+		return
+	}
+	poll := g.currentFn.NewBlock("promise_all_array_poll")
+	rejectCond := g.currentFn.NewBlock("promise_all_array_reject_cond")
+	rejectBody := g.currentFn.NewBlock("promise_all_array_reject_body")
+	rejectNext := g.currentFn.NewBlock("promise_all_array_reject_next")
+	doneCond := g.currentFn.NewBlock("promise_all_array_done_cond")
+	doneBody := g.currentFn.NewBlock("promise_all_array_done_body")
+	doneNext := g.currentFn.NewBlock("promise_all_array_done_next")
+	pending := g.currentFn.NewBlock("promise_all_array_pending")
+	allocBB := g.currentFn.NewBlock("promise_all_array_alloc")
+	fillCond := g.currentFn.NewBlock("promise_all_array_fill_cond")
+	fillBody := g.currentFn.NewBlock("promise_all_array_fill_body")
+	fillDone := g.currentFn.NewBlock("promise_all_array_fill_done")
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+	poll.Terminator = &ir.JumpTerm{Target: rejectCond}
+
+	rejectIndex := g.currentFn.NewValue("all_reject_i", types.TypeNumber)
+	rejectNextIndex := g.currentFn.NewValue("all_reject_next", types.TypeNumber)
+	rejectCond.Phis = append(rejectCond.Phis, &ir.PhiInst{Res: rejectIndex, Incoming: []ir.PhiIncoming{{Block: poll, Value: ir.ConstNumber{Value: 0}}, {Block: rejectNext, Value: rejectNextIndex}}})
+	rejectMore := g.currentFn.NewValue("all_reject_more", types.TypeBoolean)
+	rejectCond.Instructions = append(rejectCond.Instructions, &ir.BinaryInst{Res: rejectMore, Op: ir.OpLt, LHS: rejectIndex, RHS: length})
+	rejectCond.Terminator = &ir.BranchTerm{Cond: rejectMore, Then: rejectBody, Else: doneCond}
+	task := g.currentFn.NewValue("all_reject_task", taskElemType)
+	rejected := g.currentFn.NewValue("all_array_rejected", types.TypeBoolean)
+	rejectBody.Instructions = append(rejectBody.Instructions,
+		&ir.GetElementInst{Res: task, Array: array, Index: rejectIndex},
+		&ir.CallInst{Res: rejected, Callee: "ts_task_rejected", Args: []ir.Operand{task}},
+	)
+	rejectFail := g.currentFn.NewBlock("promise_all_array_reject")
+	rejectBody.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectFail, Else: rejectNext}
+	errVal := g.currentFn.NewValue("all_array_error", types.TypeAny)
+	rejectFail.Instructions = append(rejectFail.Instructions,
+		&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+		&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
+	)
+	rejectFail.Terminator = &ir.ReturnTerm{}
+	rejectNext.Instructions = append(rejectNext.Instructions, &ir.BinaryInst{Res: rejectNextIndex, Op: ir.OpAdd, LHS: rejectIndex, RHS: ir.ConstNumber{Value: 1}})
+	rejectNext.Terminator = &ir.JumpTerm{Target: rejectCond}
+
+	doneIndex := g.currentFn.NewValue("all_done_i", types.TypeNumber)
+	doneNextIndex := g.currentFn.NewValue("all_done_next", types.TypeNumber)
+	doneCond.Phis = append(doneCond.Phis, &ir.PhiInst{Res: doneIndex, Incoming: []ir.PhiIncoming{{Block: rejectCond, Value: ir.ConstNumber{Value: 0}}, {Block: doneNext, Value: doneNextIndex}}})
+	doneMore := g.currentFn.NewValue("all_done_more", types.TypeBoolean)
+	doneCond.Instructions = append(doneCond.Instructions, &ir.BinaryInst{Res: doneMore, Op: ir.OpLt, LHS: doneIndex, RHS: length})
+	doneCond.Terminator = &ir.BranchTerm{Cond: doneMore, Then: doneBody, Else: allocBB}
+	doneTask := g.currentFn.NewValue("all_done_task", taskElemType)
+	done := g.currentFn.NewValue("all_array_done", types.TypeBoolean)
+	doneBody.Instructions = append(doneBody.Instructions,
+		&ir.GetElementInst{Res: doneTask, Array: array, Index: doneIndex},
+		&ir.CallInst{Res: done, Callee: "ts_task_done", Args: []ir.Operand{doneTask}},
+	)
+	doneBody.Terminator = &ir.BranchTerm{Cond: done, Then: doneNext, Else: pending}
+	doneNext.Instructions = append(doneNext.Instructions, &ir.BinaryInst{Res: doneNextIndex, Op: ir.OpAdd, LHS: doneIndex, RHS: ir.ConstNumber{Value: 1}})
+	doneNext.Terminator = &ir.JumpTerm{Target: doneCond}
+	pending.Instructions = append(pending.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
+	pending.Terminator = &ir.JumpTerm{Target: poll}
+
+	result := g.currentFn.NewValue("promise_all_array", out)
+	allocBB.Instructions = append(allocBB.Instructions, &ir.AllocArrayInst{Res: result, ElemType: out.Elem, Length: length})
+	allocBB.Terminator = &ir.JumpTerm{Target: fillCond}
+	fillIndex := g.currentFn.NewValue("all_fill_i", types.TypeNumber)
+	fillNextIndex := g.currentFn.NewValue("all_fill_next", types.TypeNumber)
+	fillCond.Phis = append(fillCond.Phis, &ir.PhiInst{Res: fillIndex, Incoming: []ir.PhiIncoming{{Block: allocBB, Value: ir.ConstNumber{Value: 0}}, {Block: fillBody, Value: fillNextIndex}}})
+	fillMore := g.currentFn.NewValue("all_fill_more", types.TypeBoolean)
+	fillCond.Instructions = append(fillCond.Instructions, &ir.BinaryInst{Res: fillMore, Op: ir.OpLt, LHS: fillIndex, RHS: length})
+	fillCond.Terminator = &ir.BranchTerm{Cond: fillMore, Then: fillBody, Else: fillDone}
+	fillTask := g.currentFn.NewValue("all_fill_task", taskElemType)
+	fillValue := g.currentFn.NewValue("all_fill_value", resultType)
+	fillBody.Instructions = append(fillBody.Instructions,
+		&ir.GetElementInst{Res: fillTask, Array: array, Index: fillIndex},
+		&ir.CallInst{Res: fillValue, Callee: "ts_task_join", Args: []ir.Operand{fillTask}},
+	)
+	g.currentBB = fillBody
+	stored := g.coerceJSValueBoundary(fillValue, resultType, out.Elem)
+	fillBody.Instructions = append(fillBody.Instructions,
+		&ir.SetElementInst{Array: result, Index: fillIndex, Val: stored},
+		&ir.BinaryInst{Res: fillNextIndex, Op: ir.OpAdd, LHS: fillIndex, RHS: ir.ConstNumber{Value: 1}},
+	)
+	fillBody.Terminator = &ir.JumpTerm{Target: fillCond}
+	fillDone.Terminator = &ir.ReturnTerm{Val: result}
+	g.currentBB = fillDone
+}
+
+func (g *generator) lowerPromiseRaceArrayDriver(array, length ir.Operand, taskElemType, resultType, inner types.Type) {
+	poll := g.currentFn.NewBlock("promise_race_array_poll")
+	cond := g.currentFn.NewBlock("promise_race_array_cond")
+	body := g.currentFn.NewBlock("promise_race_array_body")
+	next := g.currentFn.NewBlock("promise_race_array_next")
+	pending := g.currentFn.NewBlock("promise_race_array_pending")
+	g.currentBB.Terminator = &ir.JumpTerm{Target: poll}
+	poll.Terminator = &ir.JumpTerm{Target: cond}
+
+	index := g.currentFn.NewValue("race_array_i", types.TypeNumber)
+	nextIndex := g.currentFn.NewValue("race_array_next_i", types.TypeNumber)
+	cond.Phis = append(cond.Phis, &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: poll, Value: ir.ConstNumber{Value: 0}}, {Block: next, Value: nextIndex}}})
+	more := g.currentFn.NewValue("race_array_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: length})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: pending}
+	task := g.currentFn.NewValue("race_array_task", taskElemType)
+	done := g.currentFn.NewValue("race_array_done", types.TypeBoolean)
+	body.Instructions = append(body.Instructions,
+		&ir.GetElementInst{Res: task, Array: array, Index: index},
+		&ir.CallInst{Res: done, Callee: "ts_task_done", Args: []ir.Operand{task}},
+	)
+	settled := g.currentFn.NewBlock("promise_race_array_settled")
+	body.Terminator = &ir.BranchTerm{Cond: done, Then: settled, Else: next}
+	next.Instructions = append(next.Instructions, &ir.BinaryInst{Res: nextIndex, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
+	next.Terminator = &ir.JumpTerm{Target: cond}
+	pending.Instructions = append(pending.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
+	pending.Terminator = &ir.JumpTerm{Target: poll}
+
+	rejected := g.currentFn.NewValue("race_array_rejected", types.TypeBoolean)
+	settled.Instructions = append(settled.Instructions, &ir.CallInst{Res: rejected, Callee: "ts_task_rejected", Args: []ir.Operand{task}})
+	rejectBB := g.currentFn.NewBlock("promise_race_array_reject")
+	fulfillBB := g.currentFn.NewBlock("promise_race_array_fulfill")
+	settled.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: fulfillBB}
+	errVal := g.currentFn.NewValue("race_array_error", types.TypeAny)
+	rejectBB.Instructions = append(rejectBB.Instructions,
+		&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+		&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
+	)
+	rejectBB.Terminator = &ir.ReturnTerm{}
+	value := g.currentFn.NewValue("race_array_value", resultType)
+	fulfillBB.Instructions = append(fulfillBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_task_join", Args: []ir.Operand{task}})
+	g.currentBB = fulfillBB
+	coerced := g.coerceJSValueBoundary(value, resultType, inner)
+	fulfillBB.Terminator = &ir.ReturnTerm{Val: coerced}
+	g.currentBB = fulfillBB
+}
+
 func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
 	ident, ok := member.Object.(*ast.IdentExpr)
 	if !ok || ident.Name != "Promise" {
@@ -1596,7 +1791,7 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 		if literal, ok := e.Args[0].(*ast.ArrayLit); ok {
 			return g.lowerPromiseLiteralAggregate(e, member, taskType, inner, literal), true
 		}
-		return g.failExpr("Promise.%s array-variable lowering is not implemented yet", member.Property), true
+		return g.lowerPromiseArrayAggregate(e, member, taskType, inner), true
 	}
 	if member.Property != "resolve" && member.Property != "reject" {
 		return nil, false

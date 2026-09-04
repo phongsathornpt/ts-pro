@@ -1824,3 +1824,43 @@ console.log(join(raceValues()));
 		expected: "123\naggregate-boom\n42\n30\n",
 	})
 }
+func TestLinuxAMD64PromiseArrayVariableAggregates(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_array_variable_aggregates",
+		source: `
+async function delayed(ms: number, value: number): Promise<number> {
+  sleep(ms);
+  return value;
+}
+async function allFromArray(): Promise<number> {
+  const first = delayed(4, 10);
+  const second = Promise.resolve(20);
+  const items = [first, second];
+  const values = await Promise.all(items);
+  return values[0]! + values[1]!;
+}
+async function raceFromArray(): Promise<number> {
+  const slow = delayed(8, 20);
+  const fast = delayed(1, 30);
+  const items = [slow, fast];
+  return await Promise.race(items);
+}
+async function rejectFromArray(): Promise<number> {
+  try {
+    const slow = delayed(8, 1);
+    const bad = Promise.reject<number>("array-boom");
+    const items = [slow, bad];
+    await Promise.all(items);
+    return 0;
+  } catch (error: any) {
+    console.log(error);
+    return 42;
+  }
+}
+console.log(join(allFromArray()));
+console.log(join(raceFromArray()));
+console.log(join(rejectFromArray()));
+`,
+		expected: "30\n30\narray-boom\n42\n",
+	})
+}
