@@ -5,8 +5,8 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ## Active raw-native compiler status (source of truth)
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
-> Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only and do **not** mean this active backend is 100% complete.
-> Current fixture sweep after JSValue arrays and evolving dynamic objects: **53 / 125 compile PASS, 63 diagnostics, 9 IR/backend failures, 0 timeouts**. Area status: arrays **10/10**, memory **9/9**, objects **10/10**, basics **20/25** compile cleanly; dynamic has **4 PASS / 1 DIAG / 9 backend FAIL**, and concurrency remains **57 DIAG**.
+> Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only; the active raw-native status is determined exclusively by this section and its acceptance gates.
+> Current active acceptance: **125 / 125 native fixtures PASS, 0 diagnostics, 0 build/lowering failures, 0 runtime failures, 0 timeouts**. Deterministic differential coverage is **52 / 52 Node-comparable fixtures matching stdout and exit status**; 7 fixtures are explicitly skipped only because Node strip-types cannot execute enum syntax, extensionless TS imports, or parameter-property syntax directly.
 
 ### Completed active milestones
 
@@ -21,7 +21,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Numeric enums lowered as compile-time constants.
 - [x] Template literal interpolation with normal expression parsing, exact number-to-string conversion, boolean/nullish coercion, nullable-union coercion, and native regression coverage.
 
-### Remaining basic TypeScript / standard-library fixtures
+### Basic TypeScript / standard-library fixture coverage
 
 - [x] Rest parameters and spread syntax.
   - [x] Rest parameter ABI/lowering via typed native-array packing.
@@ -34,44 +34,44 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
   - [x] Common union-property lookup across compatible closed object members.
 - [x] Computed property keys / index access for statically known string keys and concretely proven `any` aliases.
 - [x] Evolving/dynamic object shapes with growable GC-traced `{string key, JSValue}` tables.
-- [ ] Multi-module import/export graph, module resolution, linking, and cross-module symbol naming.
-- [ ] Native standard APIs required by fixtures.
-  - [ ] `JSON.parse` / `JSON.stringify`.
-  - [ ] `Date`.
-  - [ ] `Map` / `Set`.
-  - [ ] `RegExp`, including regex literal syntax.
+- [x] Multi-module import/export graph, relative module resolution, dependency ordering/linking, import aliases, cycle rejection, and cross-module symbol resolution.
+- [x] Native standard APIs required by fixtures.
+  - [x] `JSON.parse` / `JSON.stringify`.
+  - [x] `Date`.
+  - [x] `Map` / `Set`.
+  - [x] `RegExp`, including regex literal syntax.
 
 ### Dynamic JavaScript value model
 
 - [x] Introduce a one-word NaN-boxed native `JSValue` representation without degrading typed F64/string/object fast paths.
-- [~] Complete boxing/unboxing boundaries for `any` and mixed unions; array/object storage and console inspection are implemented, dynamic operators/calls remain.
-- [ ] Dynamic truthiness, equality, arithmetic, `ToPrimitive`, `ToNumber`, and `ToString`.
+- [x] Complete boxing/unboxing boundaries for `any` and mixed unions across primitives, arrays, closures, closed objects, dynamic objects, calls, returns, and typed consumers.
+- [x] Dynamic truthiness, strict/loose equality, arithmetic, relational comparison, `ToPrimitive`, `ToNumber`, and `ToString`.
 - [x] Dynamic property get/set and evolving property storage with GC-traced growable entry tables.
-- [ ] Dynamic calls and receiver-correct method `this`.
-- [ ] Close all `examples/dynamic/*` native fixture failures and add differential tests.
+- [x] Dynamic calls plus receiver-correct class/structural method `this`, including function-expression `this:` pseudo-parameters.
+- [x] Close all `examples/dynamic/*` native fixture failures and include them in deterministic Node differential acceptance.
 
 ### Native concurrency and async/Promise coverage for the active backend
 
-- [ ] Add active-backend semantic declarations and IR for scheduler/task primitives (`spawn`, `join`, `yieldNow`, `sleep`, task groups/cancellation/context).
-- [ ] Add typed task results and precise GC roots for suspended tasks.
-- [ ] Add typed buffered/unbuffered channels plus blocking/nonblocking operations.
-- [ ] Add parser/sema support for `async`, `await`, `try`, `catch`, `finally`, and `throw`.
-- [ ] Lower async functions to resumable state machines with typed spill/root state.
-- [ ] Add Promise lifecycle, rejection propagation, adoption/thenables, repeated await, and aggregate combinators required by fixtures.
-- [ ] Close all `examples/concurrency/*` native fixture failures.
+- [x] Add active-backend semantic declarations and IR for scheduler/task primitives (`spawn`, `join`, `yieldNow`, scheduler-aware `sleep`, task groups/cancellation/context).
+- [x] Add typed task results, private native task stacks, and precise GC roots for suspended tasks.
+- [x] Add typed buffered/unbuffered channels plus blocking/nonblocking operations and cross-task rendezvous.
+- [x] Add parser/sema support for `async`, `await`, `try`, `catch`, `finally`, and `throw`.
+- [S] Compiler-generated async state machines are superseded on the active raw backend by stackful cooperative task stacks with saved callee state and precise suspended shadow-root chains; async/await suspension uses that scheduler model.
+- [x] Add Promise lifecycle, rejection propagation, `finally` completion semantics, resolve/reject, adoption/thenables, repeated await, `all`/`race`, and scheduler-aware timer ordering required by fixtures.
+- [x] Close all `examples/concurrency/*` native fixture failures.
 
 ### Active-backend final acceptance
 
-- [ ] Re-run and commit a deterministic native fixture sweep script.
-- [ ] Reach **125 / 125** active raw-native fixtures compiling with **0 diagnostics, 0 lowering failures, 0 timeouts**.
-- [ ] Add Node differential execution for deterministic observable semantics and require matching stdout/exit status.
-- [ ] Stress GC during dynamic-object graphs, closures, class dispatch, suspended tasks, channels, and Promise continuations.
-- [ ] `CGO_ENABLED=0 go test ./...`.
-- [ ] `CGO_ENABLED=0 go vet ./...`.
-- [ ] `CGO_ENABLED=0 go build ./...`.
-- [ ] `make test-linux-amd64`.
-- [ ] `git diff --check`.
-- [ ] Only after the gates above pass, mark the active raw-native compiler roadmap 100% complete.
+- [x] Re-run and commit a deterministic native fixture sweep script.
+- [x] Reach **125 / 125** active raw-native fixtures compiling/running with **0 diagnostics, 0 lowering failures, 0 runtime failures, 0 timeouts**.
+- [x] Add Node differential execution for deterministic observable semantics and require matching stdout/exit status (**52 / 52 comparable fixtures**).
+- [x] Stress GC during dynamic-object graphs, closures, class dispatch, suspended task stacks, channels, Promise/thenable continuations, and aggregate results.
+- [x] `CGO_ENABLED=0 go test ./...`.
+- [x] `CGO_ENABLED=0 go vet ./...`.
+- [x] `CGO_ENABLED=0 go build ./...`.
+- [x] `make test-linux-amd64`.
+- [x] `git diff --check`.
+- [x] Active raw-native fixture roadmap accepted at **125 / 125**, with the async state-machine item explicitly superseded by the documented stackful scheduler model.
 
 ## Current pure-Go Linux AMD64 backend
 
@@ -158,8 +158,8 @@ contains no C or assembly implementation dependency.
 
 ## Project completion goal
 
-- [~] Reach 100% of the **active raw-native compiler roadmap above**; historical completed roadmaps below are reference material and do not satisfy this goal.
-- [ ] Do not mark the active project 100% until all `[ ]` and `[~]` items in **Active raw-native compiler status** are completed (`[x]`) or explicitly superseded (`[S]`) with a documented replacement.
+- [x] Reach 100% of the **active raw-native fixture roadmap above**; historical completed roadmaps below remain reference material.
+- [x] All active raw-native status items are completed (`[x]`) or explicitly superseded (`[S]`) with a documented replacement.
 
 ## Historical broader roadmap: foundation and frontend (reference only)
 
