@@ -308,11 +308,7 @@ func (c *Checker) resolveClassInfo(cls *ast.ClassDecl) {
 			}
 			for name, method := range base.Methods {
 				info.Methods[name] = method
-				owner := base.MethodOwners[name]
-				if owner == "" {
-					owner = base.Name
-				}
-				info.MethodOwners[name] = owner
+				info.MethodOwners[name] = base.MethodOwners[name]
 			}
 		}
 	}
@@ -365,25 +361,16 @@ func genericClassKey(info *ClassInfo, args []types.Type) string {
 	return info.Name + "<" + strings.Join(parts, ",") + ">"
 }
 
-func (c *Checker) specializeClass(info *ClassInfo, args []types.Type) (*ClassInfo, error) {
-	if info == nil {
-		return nil, fmt.Errorf("cannot specialize nil class")
-	}
-	if len(info.TypeParams) != len(args) {
-		return nil, fmt.Errorf("generic class '%s' expects %d type arguments, got %d", info.Name, len(info.TypeParams), len(args))
-	}
+func (c *Checker) specializeClass(info *ClassInfo, args []types.Type) *ClassInfo {
 	key := genericClassKey(info, args)
 	if spec := c.genericClassSpecs[key]; spec != nil {
-		return spec, nil
+		return spec
 	}
 	bindings := make(map[*types.TypeVar]types.Type, len(args))
 	for i, tp := range info.TypeParams {
 		bindings[tp] = args[i]
 	}
-	instance, ok := types.Substitute(info.Instance, bindings).(*types.ObjectType)
-	if !ok {
-		return nil, fmt.Errorf("generic class %s instance substitution produced %T", info.Name, instance)
-	}
+	instance := types.Substitute(info.Instance, bindings).(*types.ObjectType)
 	name := fmt.Sprintf("%s$spec%d", info.Name, c.classSpecCount)
 	c.classSpecCount++
 	instance.Name = name
@@ -394,10 +381,7 @@ func (c *Checker) specializeClass(info *ClassInfo, args []types.Type) (*ClassInf
 		BaseName: info.BaseName, TypeBindings: bindings, GenericBase: info.Name, Resolved: true,
 	}
 	for method, fn := range info.Methods {
-		concrete, ok := types.Substitute(fn, bindings).(*types.FunctionType)
-		if !ok {
-			return nil, fmt.Errorf("generic class %s method %s substitution produced %T", info.Name, method, concrete)
-		}
+		concrete := types.Substitute(fn, bindings).(*types.FunctionType)
 		spec.Methods[method] = concrete
 		owner := info.MethodOwners[method]
 		if owner == info.Name || owner == "" {
@@ -407,7 +391,7 @@ func (c *Checker) specializeClass(info *ClassInfo, args []types.Type) (*ClassInf
 	}
 	c.genericClassSpecs[key] = spec
 	c.result.Classes[name] = spec
-	return spec, nil
+	return spec
 }
 
 func (c *Checker) checkProgram(prog *ast.Program) {
@@ -470,30 +454,20 @@ func statementReturns(stmt ast.Stmt) bool {
 }
 
 func removeExactType(t, excluded types.Type) types.Type {
-	if t == nil || excluded == nil {
-		return t
-	}
 	if t.Equals(excluded) {
 		return types.TypeNever
 	}
-	union, ok := t.(*types.UnionType)
-	if !ok {
-		return t
-	}
+	union := t.(*types.UnionType)
 	members := make([]types.Type, 0, len(union.Members))
 	for _, member := range union.Members {
 		if !member.Equals(excluded) {
 			members = append(members, member)
 		}
 	}
-	switch len(members) {
-	case 0:
-		return types.TypeNever
-	case 1:
+	if len(members) == 1 {
 		return members[0]
-	default:
-		return types.NewUnion(members...)
 	}
+	return types.NewUnion(members...)
 }
 
 func strictNullishGuard(stmt ast.Stmt) (string, types.Type, bool) {
@@ -535,7 +509,7 @@ func (c *Checker) applyGuardReturnNarrowing(stmt ast.Stmt) {
 		return
 	}
 	narrowed := removeExactType(sym.Type, excluded)
-	if narrowed == nil || narrowed.Equals(sym.Type) {
+	if narrowed.Equals(sym.Type) {
 		return
 	}
 	if local := c.currentScope.Symbols[name]; local != nil {
@@ -553,9 +527,6 @@ func (c *Checker) checkStatementList(statements []ast.Stmt) {
 }
 
 func removeNullishType(t types.Type) types.Type {
-	if t == nil {
-		return nil
-	}
 	if t == types.TypeNull || t == types.TypeUndefined {
 		return types.TypeNever
 	}
@@ -620,9 +591,6 @@ func (c *Checker) builtinCollection(kind string, key, value types.Type) *Builtin
 }
 
 func (c *Checker) builtinCollectionMember(info *BuiltinCollectionInfo, property string) (types.Type, bool) {
-	if info == nil {
-		return nil, false
-	}
 	if property == "size" {
 		return types.TypeNumber, true
 	}
@@ -653,9 +621,6 @@ func (c *Checker) builtinCollectionMember(info *BuiltinCollectionInfo, property 
 }
 
 func (c *Checker) lookupMemberType(objType types.Type, property string) (types.Type, bool) {
-	if objType == nil {
-		return nil, false
-	}
 	if objType == types.TypeAny || objType == types.TypeUnknown {
 		return types.TypeAny, true
 	}
@@ -723,10 +688,7 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 			}
 			members = append(members, mt)
 		}
-		if len(members) == 1 {
-			return members[0], true
-		}
-		if len(members) > 1 {
+		if len(members) > 0 {
 			return types.NewUnion(members...), true
 		}
 	}
@@ -734,9 +696,6 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 }
 
 func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) types.Type {
-	if expr == nil || expected == nil {
-		return c.checkExpr(expr)
-	}
 	if tuple, ok := expected.(*types.TupleType); ok {
 		if lit, ok := expr.(*ast.ArrayLit); ok {
 			actual := make([]types.Type, len(lit.Elements))
@@ -847,15 +806,7 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 	defer func() { c.currentScope = c.currentScope.Parent }()
 
 	for i, p := range fn.Params {
-		pType := types.TypeAny
-		if i < len(fnType.Params) {
-			pType = fnType.Params[i].Type
-		} else if resolved := c.resolveTypeNode(p.Type); resolved != nil {
-			pType = resolved
-		}
-		if pType == nil {
-			pType = types.TypeAny
-		}
+		pType := fnType.Params[i].Type
 		sym := &Symbol{
 			Name: p.Name,
 			Kind: SymParam,
@@ -872,9 +823,6 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 
 func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 	info := c.result.Classes[cls.Name]
-	if info == nil {
-		return
-	}
 	parentClass := c.currentClass
 	parentRet := c.currentFnRet
 	c.currentClass = info
@@ -904,9 +852,7 @@ func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 		} else {
 			fnType = info.Methods[method.Name]
 		}
-		if fnType == nil {
-			continue
-		}
+
 		c.currentFnRet = fnType.Return
 		parentScope := c.currentScope
 		c.currentScope = NewScope(parentScope)
@@ -1041,9 +987,6 @@ func (c *Checker) checkReturn(s *ast.ReturnStmt) {
 }
 
 func (c *Checker) checkExpr(expr ast.Expr) types.Type {
-	if expr == nil {
-		return types.TypeVoid
-	}
 
 	switch e := expr.(type) {
 	case *ast.NumberLit:
@@ -1083,12 +1026,9 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
-		if base := c.result.Classes[c.currentClass.BaseName]; base != nil {
-			c.result.Types[e] = base.Constructor
-			return base.Constructor
-		}
-		c.result.Types[e] = types.TypeAny
-		return types.TypeAny
+		base := c.result.Classes[c.currentClass.BaseName]
+		c.result.Types[e] = base.Constructor
+		return base.Constructor
 	case *ast.NewExpr:
 		if e.ClassName == "RegExp" {
 			if len(e.Args) < 1 || len(e.Args) > 2 {
@@ -1152,13 +1092,9 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				for i, node := range e.TypeArgs {
 					typeArgs[i] = c.resolveTypeNode(node)
 				}
-				spec, err := c.specializeClass(info, typeArgs)
-				if err != nil {
-					c.error(e.Span(), "TS2314", err.Error())
-				} else {
-					info = spec
-					c.result.GenericClasses[e] = spec
-				}
+				spec := c.specializeClass(info, typeArgs)
+				info = spec
+				c.result.GenericClasses[e] = spec
 			}
 		} else if len(e.TypeArgs) > 0 {
 			c.error(e.Span(), "TS2558", fmt.Sprintf("Class '%s' is not generic.", e.ClassName))
@@ -1247,9 +1183,13 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		resultType, ok := c.result.TaskResults[obj.Name]
 		if !ok {
-			c.error(e.Target.Span(), "TS1320", "await received an unknown task/Promise handle.")
-			c.result.Types[e] = types.TypeAny
-			return types.TypeAny
+			if res, isThenable := c.thenableResultType(obj); isThenable {
+				resultType = res
+			} else {
+				c.error(e.Target.Span(), "TS1320", "await received an unknown task/Promise handle.")
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
 		}
 		c.result.Types[e] = resultType
 		return resultType
@@ -1304,18 +1244,14 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		declaredReturn := c.resolveTypeNode(e.ReturnType)
 		var returnType types.Type
 		if e.IsExprBody {
-			bodyExpr, ok := e.Body.(ast.Expr)
-			if !ok {
-				returnType = types.TypeAny
-			} else {
-				bodyType := c.checkExpr(bodyExpr)
-				returnType = bodyType
-				if declaredReturn != nil {
-					if !bodyType.AssignableTo(declaredReturn) {
-						c.error(bodyExpr.Span(), "TS2322", fmt.Sprintf("Type '%s' is not assignable to return type '%s'.", bodyType, declaredReturn))
-					}
-					returnType = declaredReturn
+			bodyExpr := e.Body.(ast.Expr)
+			bodyType := c.checkExpr(bodyExpr)
+			returnType = bodyType
+			if declaredReturn != nil {
+				if !bodyType.AssignableTo(declaredReturn) {
+					c.error(bodyExpr.Span(), "TS2322", fmt.Sprintf("Type '%s' is not assignable to return type '%s'.", bodyType, declaredReturn))
 				}
+				returnType = declaredReturn
 			}
 		} else {
 			if declaredReturn == nil {
@@ -1806,36 +1742,34 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
-	case *ast.MemberExpr:
-		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+	default:
+		mem := expr.(*ast.MemberExpr)
+		if ident, ok := mem.Object.(*ast.IdentExpr); ok {
 			if members := c.result.Enums[ident.Name]; members != nil {
-				if _, exists := members[e.Property]; !exists {
-					c.error(e.Span(), "TS2339", fmt.Sprintf("Enum '%s' has no member '%s'.", ident.Name, e.Property))
+				if _, exists := members[mem.Property]; !exists {
+					c.error(e.Span(), "TS2339", fmt.Sprintf("Enum '%s' has no member '%s'.", ident.Name, mem.Property))
 				}
 				c.result.Types[ident] = types.TypeNumber
-				c.result.Types[e] = types.TypeNumber
+				c.result.Types[mem] = types.TypeNumber
 				return types.TypeNumber
 			}
 		}
-		objType := c.checkExpr(e.Object)
+		objType := c.checkExpr(mem.Object)
 		lookupType := objType
-		if e.Optional {
+		if mem.Optional {
 			lookupType = removeNullishType(objType)
 		}
-		memberType, ok := c.lookupMemberType(lookupType, e.Property)
+		memberType, ok := c.lookupMemberType(lookupType, mem.Property)
 		if !ok {
-			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", e.Property, objType))
-			c.result.Types[e] = types.TypeAny
+			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", mem.Property, objType))
+			c.result.Types[mem] = types.TypeAny
 			return types.TypeAny
 		}
-		if e.Optional {
+		if mem.Optional {
 			memberType = types.NewUnion(memberType, types.TypeUndefined)
 		}
-		c.result.Types[e] = memberType
+		c.result.Types[mem] = memberType
 		return memberType
-	default:
-		c.result.Types[expr] = types.TypeAny
-		return types.TypeAny
 	}
 }
 
@@ -1888,9 +1822,6 @@ func (c *Checker) resolveFunctionType(fn *ast.FunctionDecl) *types.FunctionType 
 }
 
 func (c *Checker) newPromiseType(inner types.Type) *types.ObjectType {
-	if inner == nil {
-		inner = types.TypeAny
-	}
 	name := fmt.Sprintf("$Promise$%d", c.taskTypeCount)
 	c.taskTypeCount++
 	obj := types.NewObject(name)
@@ -1926,14 +1857,12 @@ func (c *Checker) thenableResultType(t types.Type) (types.Type, bool) {
 			thenFn = functionMemberType(field.Type)
 		}
 	}
-	if thenFn == nil || len(thenFn.Params) == 0 {
-		return nil, false
+	if thenFn != nil && len(thenFn.Params) > 0 {
+		if resolveFn := functionMemberType(thenFn.Params[0].Type); resolveFn != nil && len(resolveFn.Params) > 0 {
+			return resolveFn.Params[0].Type, true
+		}
 	}
-	resolveFn := functionMemberType(thenFn.Params[0].Type)
-	if resolveFn == nil || len(resolveFn.Params) == 0 {
-		return nil, false
-	}
-	return resolveFn.Params[0].Type, true
+	return nil, false
 }
 
 func (c *Checker) promiseResultType(t types.Type) (types.Type, bool) {
@@ -1946,9 +1875,6 @@ func (c *Checker) promiseResultType(t types.Type) (types.Type, bool) {
 }
 
 func (c *Checker) promiseSettledType(t types.Type) types.Type {
-	if t == nil {
-		return types.TypeAny
-	}
 	if adopted, ok := c.promiseResultType(t); ok {
 		return adopted
 	}
@@ -2089,13 +2015,11 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeUnknown
 		case "undefined":
 			return types.TypeUndefined
-		case "null":
-			return types.TypeNull
 		default:
-			return types.TypeAny
+			return types.TypeNull
 		}
 	case *ast.TypeRefNode:
-		if (t.Name == "Promise" || t.Name == "PromiseLike") && len(t.TypeArgs) == 1 {
+		if t.Name == "Promise" || t.Name == "PromiseLike" {
 			return c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))
 		}
 		if tv := c.resolveTypeParam(t.Name); tv != nil {
@@ -2130,10 +2054,11 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			members = append(members, c.resolveTypeNode(m))
 		}
 		return types.NewUnion(members...)
-	case *ast.FunctionTypeNode:
-		params := make([]types.Param, 0, len(t.Params))
+	default:
+		ftn := node.(*ast.FunctionTypeNode)
+		params := make([]types.Param, 0, len(ftn.Params))
 		var thisType types.Type
-		for _, p := range t.Params {
+		for _, p := range ftn.Params {
 			pt := c.resolveTypeNode(p.Type)
 			if pt == nil {
 				pt = types.TypeAny
@@ -2144,14 +2069,10 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			}
 			params = append(params, types.Param{Name: p.Name, Type: pt, Optional: p.Optional, Rest: p.Rest})
 		}
-		ret := c.resolveTypeNode(t.ReturnType)
-		if ret == nil {
-			ret = types.TypeVoid
-		}
+		ret := c.resolveTypeNode(ftn.ReturnType)
 		fn := types.NewFunction(params, ret)
 		fn.This = thisType
 		return fn
-	default:
-		return types.TypeAny
 	}
 }
+

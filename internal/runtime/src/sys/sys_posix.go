@@ -11,9 +11,12 @@ func Write(fd int, p []byte) (int, error) {
 	return syscall.Write(fd, p)
 }
 
+// SysExitHook allows intercepting Exit in tests.
+var SysExitHook = syscall.Exit
+
 // Exit exits the process directly via syscall.
 func Exit(code int) {
-	syscall.Exit(code)
+	SysExitHook(code)
 }
 
 // Mmap allocates virtual memory pages via raw mmap.

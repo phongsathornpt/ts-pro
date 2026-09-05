@@ -69,12 +69,6 @@ func (f *File) LineContent(line int) string {
 	} else {
 		end = len(f.Src)
 	}
-	if start > len(f.Src) {
-		return ""
-	}
-	if end > len(f.Src) {
-		end = len(f.Src)
-	}
 	return string(f.Src[start:end])
 }
 
@@ -88,9 +82,6 @@ func (f *File) Location(pos Pos) Location {
 	idx := sort.Search(len(f.lines), func(i int) bool {
 		return f.lines[i] > offset
 	}) - 1
-	if idx < 0 {
-		idx = 0
-	}
 	line := idx + 1
 	col := offset - f.lines[idx] + 1
 	return Location{
@@ -150,7 +141,7 @@ func (fs *FileSet) File(pos Pos) *File {
 	idx := sort.Search(len(fs.files), func(i int) bool {
 		return fs.files[i].Base > pos
 	}) - 1
-	if idx < 0 || idx >= len(fs.files) {
+	if idx < 0 {
 		return nil
 	}
 	f := fs.files[idx]

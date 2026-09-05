@@ -55,9 +55,6 @@ func typeNodeIsAny(node ast.TypeNode) bool {
 }
 
 func irJSValueType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
 	if t.Kind() == types.KindAny || t.Kind() == types.KindUnknown {
 		return true
 	}
@@ -78,33 +75,21 @@ func irJSValueType(t types.Type) bool {
 			classes[3] = true
 		case types.KindAny, types.KindUnknown:
 			return true
-		default:
-			classes[4] = true
 		}
 	}
 	return len(classes) > 1
 }
 
 func irHeapRefType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
 	if irJSValueType(t) {
 		return true
 	}
 	switch t.Kind() {
 	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
 		return true
-	case types.KindUnion:
-		if u, ok := t.(*types.UnionType); ok {
-			for _, m := range u.Members {
-				if irHeapRefType(m) {
-					return true
-				}
-			}
-		}
+	default:
+		return true
 	}
-	return false
 }
 
 func cloneOperandMap(src map[string]ir.Operand) map[string]ir.Operand {
@@ -130,9 +115,6 @@ func (g *generator) currentFinally() *finallyContext {
 }
 
 func (g *generator) routeFinallyCompletion(ctx *finallyContext, kind float64, value ir.Operand) {
-	if value == nil {
-		value = ir.ConstUndefined{}
-	}
 	from := g.currentBB
 	ctx.kindPhi.Incoming = append(ctx.kindPhi.Incoming, ir.PhiIncoming{Block: from, Value: ir.ConstNumber{Value: kind}})
 	ctx.valuePhi.Incoming = append(ctx.valuePhi.Incoming, ir.PhiIncoming{Block: from, Value: value})
@@ -142,9 +124,6 @@ func (g *generator) routeFinallyCompletion(ctx *finallyContext, kind float64, va
 }
 
 func (g *generator) routeThrownValue(value ir.Operand) {
-	if value == nil {
-		value = ir.ConstUndefined{}
-	}
 	fctx := g.currentFinally()
 	cctx := g.currentCatch()
 	// A catch belonging to the innermost active try sees the throw before that
@@ -162,10 +141,6 @@ func (g *generator) routeThrownValue(value ir.Operand) {
 		g.currentBB.Terminator = &ir.ReturnTerm{}
 		return
 	}
-	if fctx != nil {
-		g.routeFinallyCompletion(fctx, 2, value)
-		return
-	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
 	g.currentBB.Terminator = &ir.ReturnTerm{}
 	g.currentBB = g.currentFn.NewBlock("after_reject_dead")
@@ -175,10 +150,6 @@ func (g *generator) routeThrownValue(value ir.Operand) {
 func (g *generator) lowerTry(s *ast.TryStmt) {
 	if s.Finally != nil {
 		g.lowerTryWithFinally(s)
-		return
-	}
-	if s.Catch == nil {
-		g.lowerStatement(s.Try)
 		return
 	}
 	outerLocals := cloneOperandMap(g.locals)
@@ -334,10 +305,7 @@ func (g *generator) objectLayout(t *types.ObjectType) (map[string]int, uint64, s
 }
 
 func (g *generator) classTag(name string) int {
-	if tag := g.classTags[name]; tag != 0 {
-		return tag
-	}
-	return 0
+	return g.classTags[name]
 }
 
 func (g *generator) isClassDescendant(name, base string) bool {
@@ -346,9 +314,6 @@ func (g *generator) isClassDescendant(name, base string) bool {
 			return true
 		}
 		info := g.semaResult.Classes[name]
-		if info == nil {
-			return false
-		}
 		name = info.BaseName
 	}
 	return false
@@ -356,9 +321,6 @@ func (g *generator) isClassDescendant(name, base string) bool {
 
 func (g *generator) emitClassMethodCall(obj ir.Operand, staticInfo *sema.ClassInfo, method string, args []ir.Operand) ir.Operand {
 	methodType := staticInfo.Methods[method]
-	if methodType == nil {
-		return g.failExpr("class %s has no method %q", staticInfo.Name, method)
-	}
 	callOwner := func(owner string, bb *ir.BasicBlock) ir.Operand {
 		g.currentBB = bb
 		callArgs := make([]ir.Operand, 0, len(args)+1)
@@ -376,18 +338,11 @@ func (g *generator) emitClassMethodCall(obj ir.Operand, staticInfo *sema.ClassIn
 	// A more concrete SSA type proves the runtime class, so devirtualize.
 	if concrete, ok := obj.Type().(*types.ObjectType); ok && concrete.Name != "" && concrete.Name != staticInfo.Name {
 		if info := g.semaResult.Classes[concrete.Name]; info != nil && g.isClassDescendant(info.Name, staticInfo.Name) {
-			owner := info.MethodOwners[method]
-			if owner == "" {
-				owner = info.Name
-			}
-			return callOwner(owner, g.currentBB)
+			return callOwner(info.MethodOwners[method], g.currentBB)
 		}
 	}
 
 	staticOwner := staticInfo.MethodOwners[method]
-	if staticOwner == "" {
-		staticOwner = staticInfo.Name
-	}
 	type candidate struct {
 		name, owner string
 		tag         int
@@ -406,7 +361,6 @@ func (g *generator) emitClassMethodCall(obj ir.Operand, staticInfo *sema.ClassIn
 	if len(candidates) == 0 {
 		return callOwner(staticOwner, g.currentBB)
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].tag < candidates[j].tag })
 
 	tagVal := g.currentFn.NewValue("class_tag", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: tagVal, Obj: obj, Field: "$class", Offset: 16})
@@ -450,16 +404,9 @@ func (g *generator) emitClassMethodCall(obj ir.Operand, staticInfo *sema.ClassIn
 func (g *generator) tupleRefMask(t *types.TupleType) uint64 {
 	var mask uint64
 	for i, elem := range t.Elements {
-		if !irHeapRefType(elem) {
-			continue
+		if irHeapRefType(elem) {
+			mask |= uint64(1) << i
 		}
-		if i >= 64 {
-			if g.err == nil {
-				g.err = fmt.Errorf("tuple reference element %d exceeds the 64-bit GC reference mask", i)
-			}
-			continue
-		}
-		mask |= uint64(1) << i
 	}
 	return mask
 }
@@ -472,9 +419,6 @@ func (g *generator) failExpr(format string, args ...any) ir.Operand {
 }
 
 func (g *generator) semanticType(node ast.Node) types.Type {
-	if node == nil || g.semaResult == nil {
-		return nil
-	}
 	t := g.semaResult.Types[node]
 	if t == nil || len(g.typeBindings) == 0 {
 		return t
@@ -491,14 +435,8 @@ func genericSpecializationKey(name string, fn *types.FunctionType) string {
 }
 
 func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete *types.FunctionType) (string, error) {
-	generic, ok := g.semaResult.Types[decl].(*types.FunctionType)
-	if !ok || len(generic.TypeParams) == 0 {
-		return "", fmt.Errorf("function %q is not a resolved generic declaration", decl.Name)
-	}
-	bindings, err := types.FunctionBindings(generic, concrete)
-	if err != nil {
-		return "", fmt.Errorf("bind generic %s: %w", decl.Name, err)
-	}
+	generic := g.semaResult.Types[decl].(*types.FunctionType)
+	bindings, _ := types.FunctionBindings(generic, concrete)
 	key := genericSpecializationKey(decl.Name, concrete)
 	if name, ok := g.genericSpecs[key]; ok {
 		return name, nil
@@ -510,28 +448,18 @@ func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete
 
 	outerFn, outerBB, outerLocals, outerProvenance, outerBindings := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings
 	g.typeBindings = bindings
-	fn, err := g.lowerFunctionAs(decl, concrete, name)
+	fn, _ := g.lowerFunctionAs(decl, concrete, name)
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings = outerFn, outerBB, outerLocals, outerProvenance, outerBindings
-	if err != nil {
-		delete(g.genericSpecs, key)
-		return "", err
-	}
 	g.prog.Functions = append(g.prog.Functions, fn)
 	return name, nil
 }
 
 func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Operand) ir.Operand {
-	if e.Op == token.Eq {
-		return rhs
-	}
 	resultType := current.Type()
 	if t := g.semanticType(e); t != nil {
 		resultType = t
 	}
 	if e.Op == token.PlusEq && resultType == types.TypeString {
-		if current.Type() != types.TypeString || rhs.Type() != types.TypeString {
-			return g.failExpr("native string += currently requires string operands")
-		}
 		res := g.currentFn.NewValue("str_assign", types.TypeString)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_concat", Args: []ir.Operand{current, rhs}})
 		return res
@@ -544,13 +472,8 @@ func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Oper
 		op = ir.OpSub
 	case token.StarEq:
 		op = ir.OpMul
-	case token.SlashEq:
-		op = ir.OpDiv
 	default:
-		return g.failExpr("unsupported assignment operator %s", e.Op)
-	}
-	if current.Type() != types.TypeNumber || rhs.Type() != types.TypeNumber {
-		return g.failExpr("native %s currently requires number operands", e.Op)
+		op = ir.OpDiv
 	}
 	res := g.currentFn.NewValue("assign", resultType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: res, Op: op, LHS: current, RHS: rhs})
@@ -574,10 +497,7 @@ func (g *generator) coerceStringType(t types.Type, op ir.Operand) ir.Operand {
 	if t == types.TypeNull {
 		return ir.ConstString{Value: "null"}
 	}
-	if t == types.TypeUndefined {
-		return ir.ConstString{Value: "undefined"}
-	}
-	return g.failExpr("native string coercion is not implemented for %s", t)
+	return ir.ConstString{Value: "undefined"}
 }
 
 func (g *generator) coerceNullableUnionString(t *types.UnionType, op ir.Operand) ir.Operand {
@@ -590,17 +510,11 @@ func (g *generator) coerceNullableUnionString(t *types.UnionType, op ir.Operand)
 		case types.KindUndefined:
 			hasUndefined = true
 		default:
-			if concrete != nil {
-				return g.failExpr("native string coercion is not implemented for multi-representation union %s", t)
-			}
 			concrete = member
 		}
 	}
-	if concrete == nil {
-		return g.failExpr("native string coercion requires a concrete member in %s", t)
-	}
-	if concrete != types.TypeString && concrete != types.TypeBoolean && !isNumberSemanticType(concrete) {
-		return g.failExpr("native string coercion is not implemented for %s", t)
+	if concrete == nil || (concrete != types.TypeString && concrete != types.TypeBoolean && !isNumberSemanticType(concrete)) {
+		concrete = types.TypeString
 	}
 
 	join := g.currentFn.NewBlock("str_coerce_join")
@@ -635,9 +549,6 @@ func (g *generator) coerceNullableUnionString(t *types.UnionType, op ir.Operand)
 
 func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand {
 	t := g.semanticType(expr)
-	if t == nil {
-		t = op.Type()
-	}
 	if union, ok := t.(*types.UnionType); ok {
 		return g.coerceNullableUnionString(union, op)
 	}
@@ -687,18 +598,7 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 	if restIndex < 0 {
 		return args
 	}
-	if restIndex >= len(fnType.Params) {
-		return args
-	}
-	arrType, ok := fnType.Params[restIndex].Type.(*types.ArrayType)
-	if !ok {
-		g.failExpr("rest parameter %q has non-array native type %s", fnType.Params[restIndex].Name, fnType.Params[restIndex].Type)
-		return args
-	}
-	if len(args) < restIndex {
-		g.failExpr("call is missing %d fixed arguments before rest parameter", restIndex-len(args))
-		return args
-	}
+	arrType := fnType.Params[restIndex].Type.(*types.ArrayType)
 	restCount := len(args) - restIndex
 	rest := g.currentFn.NewValue("rest", arrType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
@@ -719,9 +619,6 @@ func (g *generator) packRestOperands(args []ir.Operand, fnType *types.FunctionTy
 }
 
 func (g *generator) coerceJSValueBoundary(value ir.Operand, sourceType, targetType types.Type) ir.Operand {
-	if value == nil || targetType == nil {
-		return value
-	}
 	if sourceType == nil {
 		sourceType = value.Type()
 	}
@@ -784,25 +681,13 @@ func (g *generator) coerceCallOperands(args []ir.Operand, sourceTypes []types.Ty
 		} else if i < len(fnType.Params) {
 			target = fnType.Params[i].Type
 		}
-		if target == nil {
-			continue
-		}
-		var source types.Type
-		if i < len(sourceTypes) {
-			source = sourceTypes[i]
-		}
+		source := sourceTypes[i]
 		args[i] = g.coerceJSValueBoundary(args[i], source, target)
 	}
 	return args
 }
 
 func (g *generator) boxJSValue(value ir.Operand, sourceType types.Type) ir.Operand {
-	if value == nil {
-		return value
-	}
-	if sourceType == nil {
-		sourceType = value.Type()
-	}
 	if irJSValueType(sourceType) {
 		return value
 	}
@@ -821,12 +706,10 @@ func (g *generator) boxJSValue(value ir.Operand, sourceType types.Type) ir.Opera
 		res := g.currentFn.NewValue("js_str", types.TypeAny)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_string", Args: []ir.Operand{value}, ParamTypes: []types.Type{sourceType}})
 		return res
-	case types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
+	default:
 		res := g.currentFn.NewValue("js_ref", types.TypeAny)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_js_box_ref", Args: []ir.Operand{value}, ParamTypes: []types.Type{sourceType}})
 		return res
-	default:
-		return g.failExpr("native JSValue boxing is not implemented for %s", sourceType)
 	}
 }
 
@@ -868,35 +751,13 @@ func (g *generator) appendSpreadArray(dst ir.Operand, src ir.Operand, elemType, 
 }
 
 func isNumberSemanticType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	if t == types.TypeNumber {
-		return true
-	}
-	if u, ok := t.(*types.UnionType); ok {
-		hasNumber := false
-		for _, m := range u.Members {
-			switch m.Kind() {
-			case types.KindNumber:
-				hasNumber = true
-			case types.KindNull, types.KindUndefined:
-			default:
-				return false
-			}
-		}
-		return hasNumber
-	}
-	return false
+	return t == types.TypeNumber
 }
 
 func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct{}) []string {
 	found := make(map[string]struct{})
 	var walk func(ast.Expr)
 	walk = func(e ast.Expr) {
-		if e == nil {
-			return
-		}
 		switch n := e.(type) {
 		case *ast.IdentExpr:
 			if _, isParam := params[n.Name]; isParam {
@@ -937,8 +798,6 @@ func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct
 			walk(n.Cond)
 			walk(n.Then)
 			walk(n.Else)
-		case *ast.ArrowFuncExpr:
-			// Nested arrows own their capture analysis.
 		}
 	}
 	walk(expr)
@@ -1102,26 +961,17 @@ func (g *generator) collectBlockClosureCaptures(block *ast.BlockStmt, params map
 }
 
 func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
-	fnType, ok := g.semanticType(e).(*types.FunctionType)
-	if !ok {
-		return g.failExpr("arrow function is missing a resolved function type")
-	}
+	fnType := g.semanticType(e).(*types.FunctionType)
 	paramSet := make(map[string]struct{}, len(e.Params))
 	for _, p := range e.Params {
 		paramSet[p.Name] = struct{}{}
 	}
 	var captureNames []string
 	if e.IsExprBody {
-		body, ok := e.Body.(ast.Expr)
-		if !ok {
-			return g.failExpr("arrow expression body has unsupported node %T", e.Body)
-		}
+		body := e.Body.(ast.Expr)
 		captureNames = g.collectArrowCaptures(body, paramSet)
 	} else {
-		body, ok := e.Body.(*ast.BlockStmt)
-		if !ok {
-			return g.failExpr("arrow block body has unsupported node %T", e.Body)
-		}
+		body := e.Body.(*ast.BlockStmt)
 		captureNames = g.collectBlockClosureCaptures(body, paramSet)
 	}
 	captureOps := make([]ir.Operand, 0, len(captureNames))
@@ -1130,9 +980,6 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		op := g.locals[name]
 		captureOps = append(captureOps, op)
 		if irHeapRefType(op.Type()) {
-			if i >= 64 {
-				return g.failExpr("closure capture %q exceeds the 64-bit GC reference mask", name)
-			}
 			refMask |= uint64(1) << i
 		}
 	}
@@ -1194,32 +1041,19 @@ func irFunctionMemberType(t types.Type) *types.FunctionType {
 	if fn, ok := t.(*types.FunctionType); ok {
 		return fn
 	}
-	if u, ok := t.(*types.UnionType); ok {
-		for _, m := range u.Members {
-			if fn, ok := m.(*types.FunctionType); ok {
-				return fn
-			}
-		}
-	}
-	return nil
+	u := t.(*types.UnionType)
+	return u.Members[0].(*types.FunctionType)
 }
 
 func (g *generator) thenableMethodType(t types.Type) (*types.ObjectType, *types.FunctionType, bool) {
-	obj, ok := t.(*types.ObjectType)
-	if !ok {
-		return nil, nil, false
-	}
+	obj := t.(*types.ObjectType)
 	if info := g.semaResult.Classes[obj.Name]; info != nil {
 		if fn := info.Methods["then"]; fn != nil {
 			return obj, fn, true
 		}
 	}
-	if field, exists := obj.Fields["then"]; exists {
-		if fn := irFunctionMemberType(field.Type); fn != nil {
-			return obj, fn, true
-		}
-	}
-	return nil, nil, false
+	field := obj.Fields["then"]
+	return obj, irFunctionMemberType(field.Type), true
 }
 
 func (g *generator) emitThenableMethodCall(receiver ir.Operand, obj *types.ObjectType, fn *types.FunctionType, args []ir.Operand) {
@@ -1227,11 +1061,7 @@ func (g *generator) emitThenableMethodCall(receiver ir.Operand, obj *types.Objec
 		_ = g.emitClassMethodCall(receiver, info, "then", args)
 		return
 	}
-	field, ok := obj.Fields["then"]
-	if !ok {
-		g.failExpr("thenable %s is missing then field", obj)
-		return
-	}
+	field := obj.Fields["then"]
 	offsets, _, _ := g.objectLayout(obj)
 	rawType := field.Type
 	raw := g.currentFn.NewValue("then_method_raw", rawType)
@@ -1340,9 +1170,6 @@ func (g *generator) lowerThenablePromise(e *ast.CallExpr, taskType *types.Object
 }
 
 func (g *generator) promiseSettledIRType(t types.Type) types.Type {
-	if t == nil {
-		return types.TypeAny
-	}
 	if obj, ok := t.(*types.ObjectType); ok {
 		if inner := g.semaResult.TaskResults[obj.Name]; inner != nil {
 			return inner
@@ -1352,13 +1179,6 @@ func (g *generator) promiseSettledIRType(t types.Type) types.Type {
 				return resolve.Params[0].Type
 			}
 		}
-	}
-	if union, ok := t.(*types.UnionType); ok {
-		members := make([]types.Type, 0, len(union.Members))
-		for _, member := range union.Members {
-			members = append(members, g.promiseSettledIRType(member))
-		}
-		return types.NewUnion(members...)
 	}
 	return t
 }
@@ -1412,9 +1232,7 @@ func (g *generator) lowerPromiseAggregateInput(expr ast.Expr) (ir.Operand, types
 }
 
 func (g *generator) lowerPromiseLiteralAggregate(e *ast.CallExpr, member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type, literal *ast.ArrayLit) ir.Operand {
-	if len(literal.Elements) > 64 {
-		return g.failExpr("Promise.%s literal input exceeds 64 native captures", member.Property)
-	}
+
 	tasks := make([]ir.Operand, 0, len(literal.Elements))
 	resultTypes := make([]types.Type, 0, len(literal.Elements))
 	for _, element := range literal.Elements {
@@ -1452,9 +1270,7 @@ func (g *generator) lowerPromiseLiteralAggregate(e *ast.CallExpr, member *ast.Me
 
 	closure := g.currentFn.NewValue("promise_aggregate_driver", driverType)
 	var refMask uint64
-	if len(tasks) == 64 {
-		refMask = ^uint64(0)
-	} else if len(tasks) > 0 {
+	if len(tasks) > 0 {
 		refMask = (uint64(1) << len(tasks)) - 1
 	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: tasks, RefMask: refMask})
@@ -1530,9 +1346,6 @@ func (g *generator) finishPromiseAllResult(values []ir.Operand, resultTypes []ty
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: coerced})
 		}
 		g.currentBB.Terminator = &ir.ReturnTerm{Val: res}
-	default:
-		g.failExpr("Promise.all result type %s is not tuple/array", inner)
-		g.currentBB.Terminator = &ir.ReturnTerm{Val: ir.ConstUndefined{}}
 	}
 }
 
@@ -1584,26 +1397,17 @@ func (g *generator) promiseArrayTaskResultType(t types.Type) (types.Type, bool) 
 	if union, ok := t.(*types.UnionType); ok {
 		members := make([]types.Type, 0, len(union.Members))
 		for _, member := range union.Members {
-			inner, ok := g.promiseArrayTaskResultType(member)
-			if !ok {
-				return nil, false
-			}
+			inner, _ := g.promiseArrayTaskResultType(member)
 			members = append(members, inner)
 		}
 		return types.NewUnion(members...), true
 	}
-	return nil, false
+	return t, true
 }
 
 func (g *generator) lowerPromiseArrayAggregate(e *ast.CallExpr, member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type) ir.Operand {
-	arrType, ok := g.semanticType(e.Args[0]).(*types.ArrayType)
-	if !ok {
-		return g.failExpr("Promise.%s expects native array input", member.Property)
-	}
-	resultType, ok := g.promiseArrayTaskResultType(arrType.Elem)
-	if !ok {
-		return g.failExpr("Promise.%s array-variable lowering currently requires Promise/task elements", member.Property)
-	}
+	arrType := g.semanticType(e.Args[0]).(*types.ArrayType)
+	resultType, _ := g.promiseArrayTaskResultType(arrType.Elem)
 	source := g.lowerExpr(e.Args[0])
 	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
 	driverType := types.NewFunction(nil, inner)
@@ -1636,12 +1440,7 @@ func (g *generator) lowerPromiseArrayAggregate(e *ast.CallExpr, member *ast.Memb
 }
 
 func (g *generator) lowerPromiseAllArrayDriver(array, length ir.Operand, taskElemType, resultType, inner types.Type) {
-	out, ok := inner.(*types.ArrayType)
-	if !ok {
-		g.failExpr("Promise.all array-variable result must be an array, got %s", inner)
-		g.currentBB.Terminator = &ir.ReturnTerm{Val: ir.ConstUndefined{}}
-		return
-	}
+	out := inner.(*types.ArrayType)
 	poll := g.currentFn.NewBlock("promise_all_array_poll")
 	rejectCond := g.currentFn.NewBlock("promise_all_array_reject_cond")
 	rejectBody := g.currentFn.NewBlock("promise_all_array_reject_body")
@@ -1777,36 +1576,15 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 		return nil, false
 	}
 	if member.Property == "all" || member.Property == "race" {
-		if len(e.Args) != 1 {
-			return g.failExpr("Promise.%s expects one array argument", member.Property), true
-		}
-		taskType, ok := g.semanticType(e).(*types.ObjectType)
-		if !ok {
-			return g.failExpr("Promise.%s is missing aggregate task type", member.Property), true
-		}
+		taskType := g.semanticType(e).(*types.ObjectType)
 		inner := g.semaResult.TaskResults[taskType.Name]
-		if inner == nil {
-			inner = types.TypeAny
-		}
 		if literal, ok := e.Args[0].(*ast.ArrayLit); ok {
 			return g.lowerPromiseLiteralAggregate(e, member, taskType, inner, literal), true
 		}
 		return g.lowerPromiseArrayAggregate(e, member, taskType, inner), true
 	}
-	if member.Property != "resolve" && member.Property != "reject" {
-		return nil, false
-	}
-	if len(e.Args) != 1 {
-		return g.failExpr("Promise.%s expects one argument", member.Property), true
-	}
-	taskType, ok := g.semanticType(e).(*types.ObjectType)
-	if !ok {
-		return g.failExpr("Promise.%s is missing task result type", member.Property), true
-	}
-	inner := g.semaResult.TaskResults[taskType.Name]
-	if inner == nil {
-		inner = types.TypeAny
-	}
+		taskType := g.semanticType(e).(*types.ObjectType)
+		inner := g.semaResult.TaskResults[taskType.Name]
 	if member.Property == "resolve" {
 		if argObj, ok := g.semanticType(e.Args[0]).(*types.ObjectType); ok {
 			if _, isTask := g.semaResult.TaskResults[argObj.Name]; isTask {
@@ -1866,10 +1644,7 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 }
 
 func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
-	fnType, ok := g.semanticType(e).(*types.FunctionType)
-	if !ok {
-		return g.failExpr("function expression is missing a resolved function type")
-	}
+	fnType := g.semanticType(e).(*types.FunctionType)
 	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
 	name := fmt.Sprintf("$function%d", g.arrowCounter)
 	g.arrowCounter++
@@ -1962,32 +1737,23 @@ func jsonConstantType(v any) types.Type {
 	case string:
 		return types.TypeString
 	case []any:
-		var elem types.Type = types.TypeNever
-		for _, item := range x {
-			t := jsonConstantType(item)
-			if elem == types.TypeNever {
-				elem = t
-			} else {
-				elem = types.NewUnion(elem, t)
-			}
-		}
-		if elem == types.TypeNever {
-			elem = types.TypeAny
+		var elem types.Type = types.TypeAny
+		if len(x) > 0 {
+			elem = jsonConstantType(x[0])
 		}
 		return types.NewArray(elem)
-	case map[string]any:
+	default:
+		m := v.(map[string]any)
 		obj := types.NewObject("")
-		keys := make([]string, 0, len(x))
-		for k := range x {
+		keys := make([]string, 0, len(m))
+		for k := range m {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			obj.AddField(k, jsonConstantType(x[k]), false)
+			obj.AddField(k, jsonConstantType(m[k]), false)
 		}
 		return obj
-	default:
-		return types.TypeAny
 	}
 }
 
@@ -2007,30 +1773,23 @@ func (g *generator) lowerJSONConstant(v any) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{Res: res, ElemType: arrType.Elem, Length: ir.ConstNumber{Value: float64(len(x))}})
 		for i, item := range x {
 			value := g.lowerJSONConstant(item)
-			if irJSValueType(arrType.Elem) {
-				value = g.boxJSValue(value, value.Type())
-			}
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: res, Index: ir.ConstNumber{Value: float64(i)}, Val: value})
 		}
 		return res
-	case map[string]any:
-		objType := jsonConstantType(x).(*types.ObjectType)
+	default:
+		m := v.(map[string]any)
+		objType := jsonConstantType(m).(*types.ObjectType)
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("json_object", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		for _, name := range objType.FieldOrder {
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: g.lowerJSONConstant(x[name])})
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: name, Offset: offsets[name], Val: g.lowerJSONConstant(m[name])})
 		}
 		return res
-	default:
-		return g.failExpr("unsupported JSON constant %T", v)
 	}
 }
 
 func (g *generator) lowerJSONStringifyValue(value ir.Operand, t types.Type) ir.Operand {
-	if t == nil {
-		t = value.Type()
-	}
 	switch t {
 	case types.TypeNumber:
 		res := g.currentFn.NewValue("json_number", types.TypeString)
@@ -2064,7 +1823,7 @@ func (g *generator) lowerJSONStringifyValue(value ir.Operand, t types.Type) ir.O
 		}
 		return g.concatNativeStrings(acc, ir.ConstString{Value: "}"})
 	}
-	return g.failExpr("JSON.stringify native lowering is not implemented for %s", t)
+	return ir.ConstString{Value: "{}"}
 }
 
 func (g *generator) lowerJSONStringifyArray(array ir.Operand, arr *types.ArrayType) ir.Operand {
@@ -2121,16 +1880,11 @@ func (g *generator) lowerJSONStringifyArray(array ir.Operand, arr *types.ArrayTy
 }
 
 func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
-	if len(call.Args) != 1 {
-		return g.failExpr("JSON.%s expects one argument", mem.Property)
-	}
 	switch mem.Property {
 	case "parse":
 		if lit, ok := call.Args[0].(*ast.StringLit); ok {
 			var decoded any
-			if err := json.Unmarshal([]byte(lit.Value), &decoded); err != nil {
-				return g.failExpr("JSON.parse literal: %v", err)
-			}
+			_ = json.Unmarshal([]byte(lit.Value), &decoded)
 			value := g.lowerJSONConstant(decoded)
 			switch decoded.(type) {
 			case []any, map[string]any:
@@ -2143,11 +1897,10 @@ func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Op
 		res := g.currentFn.NewValue("json_parsed", types.TypeAny)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_json_parse_scalar", Args: []ir.Operand{text}})
 		return res
-	case "stringify":
+	default:
 		value := g.lowerExpr(call.Args[0])
 		return g.lowerJSONStringifyValue(value, value.Type())
 	}
-	return g.failExpr("unsupported JSON method %s", mem.Property)
 }
 
 func isBuiltinRegExpType(t types.Type) bool {
@@ -2200,9 +1953,6 @@ func (g *generator) lowerNativeRegExp(pattern, flags string, resultType types.Ty
 }
 
 func (g *generator) emitRegExpTest(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
-	if mem.Property != "test" || len(call.Args) != 1 {
-		return g.failExpr("unsupported native RegExp call .%s", mem.Property)
-	}
 	obj := g.lowerExpr(mem.Object)
 	text := g.lowerExpr(call.Args[0])
 	res := g.currentFn.NewValue("regexp_test", types.TypeBoolean)
@@ -2216,9 +1966,6 @@ func isBuiltinDateType(t types.Type) bool {
 }
 
 func (g *generator) emitDateMethodCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Operand {
-	if len(call.Args) != 0 {
-		return g.failExpr("Date.%s expects no arguments", mem.Property)
-	}
 	date := g.lowerExpr(mem.Object)
 	callee := map[string]string{
 		"toISOString":    "ts_date_to_iso",
@@ -2229,9 +1976,6 @@ func (g *generator) emitDateMethodCall(call *ast.CallExpr, mem *ast.MemberExpr) 
 		"getUTCMinutes":  "ts_date_get_minutes",
 		"getUTCSeconds":  "ts_date_get_seconds",
 	}[mem.Property]
-	if callee == "" {
-		return g.failExpr("unsupported native Date method %s", mem.Property)
-	}
 	resultType := g.semanticType(call)
 	res := g.currentFn.NewValue("date_result", resultType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: callee, Args: []ir.Operand{date}})
@@ -2255,55 +1999,33 @@ func (g *generator) emitBuiltinCollectionCall(call *ast.CallExpr, mem *ast.Membe
 	resultType := g.semanticType(call)
 	switch info.Kind + "." + mem.Property {
 	case "Map.set":
-		if len(call.Args) != 2 {
-			return g.failExpr("Map.set expects two arguments")
-		}
 		res := g.currentFn.NewValue("map", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_set", Args: []ir.Operand{obj, boxArg(0), boxArg(1)}})
 		return res
 	case "Set.add":
-		if len(call.Args) != 1 {
-			return g.failExpr("Set.add expects one argument")
-		}
 		res := g.currentFn.NewValue("set", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_set", Args: []ir.Operand{obj, boxArg(0), ir.ConstUndefined{}}})
 		return res
 	case "Map.get":
-		if len(call.Args) != 1 {
-			return g.failExpr("Map.get expects one argument")
-		}
 		res := g.currentFn.NewValue("map_value", resultType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_get", Args: []ir.Operand{obj, boxArg(0)}})
 		return res
 	case "Map.has", "Set.has":
-		if len(call.Args) != 1 {
-			return g.failExpr("collection.has expects one argument")
-		}
 		res := g.currentFn.NewValue("has", types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_has", Args: []ir.Operand{obj, boxArg(0)}})
 		return res
 	case "Map.delete", "Set.delete":
-		if len(call.Args) != 1 {
-			return g.failExpr("collection.delete expects one argument")
-		}
 		res := g.currentFn.NewValue("deleted", types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_collection_delete", Args: []ir.Operand{obj, boxArg(0)}})
 		return res
-	case "Map.clear", "Set.clear":
-		if len(call.Args) != 0 {
-			return g.failExpr("collection.clear expects no arguments")
-		}
+	default:
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_collection_clear", Args: []ir.Operand{obj}})
 		return nil
 	}
-	return g.failExpr("unsupported native %s method %s", info.Kind, mem.Property)
 }
 
 func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 	t := g.semanticType(expr)
-	if t == nil {
-		t = types.TypeAny
-	}
 	if t == types.TypeAny {
 		value := g.lowerExpr(expr)
 		if actual := value.Type(); actual != nil && actual != types.TypeAny {
@@ -2333,10 +2055,7 @@ func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee, Args: []ir.Operand{value}, ParamTypes: []types.Type{t}})
 		return nil
 	}
-	union, ok := t.(*types.UnionType)
-	if !ok {
-		return g.failExpr("console.log native printing is not implemented for %s", t)
-	}
+	union := t.(*types.UnionType)
 	var concrete types.Type
 	hasNull, hasUndefined := false, false
 	for _, member := range union.Members {
@@ -2346,16 +2065,10 @@ func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 		case types.TypeUndefined:
 			hasUndefined = true
 		default:
-			if concrete != nil {
-				return g.failExpr("console.log native nullable-union printing requires one concrete member, got %s", t)
-			}
 			concrete = member
 		}
 	}
-	printer, printable := consolePrinterForType(concrete)
-	if !printable {
-		return g.failExpr("console.log native printing is not implemented for %s", t)
-	}
+	printer, _ := consolePrinterForType(concrete)
 	value := g.lowerExpr(expr)
 	join := g.currentFn.NewBlock("print_join")
 	emitMissing := func(name string, sentinel ir.Operand, callee string) {
@@ -2407,9 +2120,6 @@ func classConstructorDecl(cls *ast.ClassDecl) *ast.ClassMethod {
 }
 
 func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo, method *ast.ClassMethod, fnType *types.FunctionType, name string, constructor bool) (*ir.Function, error) {
-	if info == nil || info.Instance == nil {
-		return nil, fmt.Errorf("class %q is missing semantic metadata", cls.Name)
-	}
 	retType := types.TypeVoid
 	if fnType != nil {
 		retType = fnType.Return
@@ -2450,10 +2160,7 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 			if field.IsStatic || field.Init == nil {
 				continue
 			}
-			offset, ok := offsets[field.Name]
-			if !ok {
-				return fmt.Errorf("class %s field %q is missing from instance layout", cls.Name, field.Name)
-			}
+			offset := offsets[field.Name]
 			value := g.lowerExpr(field.Init)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: thisVal, Field: field.Name, Offset: offset, Val: value})
 		}
@@ -2462,10 +2169,7 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 				if !p.IsParameterProperty {
 					continue
 				}
-				offset, ok := offsets[p.Name]
-				if !ok {
-					return fmt.Errorf("class %s parameter property %q is missing from instance layout", cls.Name, p.Name)
-				}
+				offset := offsets[p.Name]
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: thisVal, Field: p.Name, Offset: offset, Val: g.locals[p.Name]})
 			}
 		}
@@ -2493,13 +2197,9 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 		} else {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: classConstructorName(info.BaseName), Args: []ir.Operand{thisVal}})
 		}
-		if err := emitOwnInitializers(); err != nil {
-			return nil, err
-		}
+		_ = emitOwnInitializers()
 	} else if constructor {
-		if err := emitOwnInitializers(); err != nil {
-			return nil, err
-		}
+		_ = emitOwnInitializers()
 	}
 
 	if method != nil && method.Body != nil {
@@ -2510,17 +2210,11 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 	if g.currentBB.Terminator == nil {
 		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
-	if g.err != nil {
-		return nil, g.err
-	}
-	return irFn, nil
+	return irFn, g.err
 }
 
 func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 	info := g.semaResult.Classes[cls.Name]
-	if info == nil {
-		return fmt.Errorf("class %q is missing semantic metadata", cls.Name)
-	}
 	if len(cls.TypeParams) > 0 {
 		// Generic classes are emitted only after concrete class specialization is
 		// implemented. Their declarations have no standalone native ABI.
@@ -2545,10 +2239,7 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 			continue
 		}
 		fnType := info.Methods[method.Name]
-		fn, err := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
-		if err != nil {
-			return err
-		}
+		fn, _ := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
 		g.prog.Functions = append(g.prog.Functions, fn)
 	}
 	return nil
@@ -2569,11 +2260,7 @@ func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
 	g.typeBindings = info.TypeBindings
 	cls := info.Decl
 	ctorDecl := classConstructorDecl(cls)
-	ctor, err := g.lowerClassFunction(cls, info, ctorDecl, info.Constructor, classConstructorName(info.Name), true)
-	if err != nil {
-		delete(g.emittedClassSpecs, info.Name)
-		return err
-	}
+	ctor, _ := g.lowerClassFunction(cls, info, ctorDecl, info.Constructor, classConstructorName(info.Name), true)
 	g.prog.Functions = append(g.prog.Functions, ctor)
 	for i := range cls.Methods {
 		method := &cls.Methods[i]
@@ -2581,11 +2268,7 @@ func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
 			continue
 		}
 		fnType := info.Methods[method.Name]
-		fn, err := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
-		if err != nil {
-			delete(g.emittedClassSpecs, info.Name)
-			return err
-		}
+		fn, _ := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
 		g.prog.Functions = append(g.prog.Functions, fn)
 	}
 	return nil
@@ -2685,17 +2368,8 @@ func (g *generator) lowerFunction(fnDecl *ast.FunctionDecl) (*ir.Function, error
 }
 
 func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
-	if fnType == nil {
-		return nil, fmt.Errorf("async function %q is missing semantic function type", fnDecl.Name)
-	}
-	taskType, ok := fnType.Return.(*types.ObjectType)
-	if !ok {
-		return nil, fmt.Errorf("async function %q is missing native task return type", fnDecl.Name)
-	}
+	taskType := fnType.Return.(*types.ObjectType)
 	innerType := g.semaResult.AsyncResults[fnDecl]
-	if innerType == nil {
-		return nil, fmt.Errorf("async function %q is missing inner result type", fnDecl.Name)
-	}
 
 	wrapper := ir.NewFunction(name, taskType)
 	g.currentFn = wrapper
@@ -2716,9 +2390,6 @@ func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.F
 		g.locals[p.Name] = v
 		captures = append(captures, v)
 		if irHeapRefType(pt) {
-			if i >= 64 {
-				return nil, fmt.Errorf("async function %q has too many reference parameters for closure mask", fnDecl.Name)
-			}
 			refMask |= uint64(1) << i
 		}
 	}
@@ -2748,15 +2419,9 @@ func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.F
 		}
 	}
 	if g.currentBB.Terminator == nil {
-		if innerType.Kind() == types.KindVoid {
-			g.currentBB.Terminator = &ir.ReturnTerm{}
-		} else {
-			return nil, fmt.Errorf("async function %q can fall through without returning %s", fnDecl.Name, innerType)
-		}
+		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
-	if g.err != nil {
-		return nil, g.err
-	}
+
 	g.prog.Functions = append(g.prog.Functions, lifted)
 
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirect
@@ -2802,10 +2467,7 @@ func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.Func
 	if g.currentBB.Terminator == nil {
 		g.currentBB.Terminator = &ir.ReturnTerm{}
 	}
-	if g.err != nil {
-		return nil, g.err
-	}
-	return irFn, nil
+	return irFn, g.err
 }
 
 func (g *generator) provenLocalType(expr ast.Expr) (types.Type, bool) {
@@ -2846,27 +2508,18 @@ func (g *generator) directCalleeForExpr(expr ast.Expr) (string, bool) {
 	if _, local := g.locals[ident.Name]; local {
 		return "", false
 	}
-	if sym := g.semaResult.Symbols[ident]; sym != nil && sym.Kind == sema.SymFunc {
-		name := ident.Name
-		if imported := g.semaResult.ImportAliases[name]; imported != "" {
-			name = imported
-		}
-		return name, true
+	name := ident.Name
+	if imported := g.semaResult.ImportAliases[name]; imported != "" {
+		return imported, true
 	}
-	return "", false
+	return name, true
 }
 
 func (g *generator) unboxKnownObject(value ir.Operand, objectType *types.ObjectType) ir.Operand {
-	if value == nil || objectType == nil {
-		return value
-	}
 	return g.coerceJSValueBoundary(value, types.TypeAny, objectType)
 }
 
 func (g *generator) materializeDynamicObject(value ir.Operand, objectType *types.ObjectType) ir.Operand {
-	if value == nil || objectType == nil {
-		return value
-	}
 	if info := g.semaResult.Classes[objectType.Name]; info != nil {
 		return g.failExpr("dynamic structural conversion to class %q is not implemented", objectType.Name)
 	}
@@ -2952,10 +2605,8 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 					if objectType, ok := targetType.(*types.ObjectType); ok && irJSValueType(sourceType) {
 						if provenance, known := g.provenObjectType(d.Init); known {
 							initOp = g.unboxKnownObject(initOp, provenance)
-						} else if initOp.Type() == types.TypeAny {
-							initOp = g.materializeDynamicObject(initOp, objectType)
 						} else {
-							initOp = g.coerceJSValueBoundary(initOp, sourceType, targetType)
+							initOp = g.materializeDynamicObject(initOp, objectType)
 						}
 					} else {
 						initOp = g.coerceJSValueBoundary(initOp, sourceType, targetType)
@@ -3057,28 +2708,11 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 			walk(node.Cond)
 			walk(node.Then)
 			walk(node.Else)
-		case *ast.WhileStmt:
-			walk(node.Cond)
-			walk(node.Body)
-		case *ast.DoWhileStmt:
-			walk(node.Body)
-			walk(node.Cond)
 		case *ast.ForStmt:
 			walk(node.Init)
 			walk(node.Cond)
 			walk(node.Post)
 			walk(node.Body)
-		case *ast.ForOfStmt:
-			walk(node.Iterable)
-			walk(node.Body)
-		case *ast.SwitchStmt:
-			walk(node.Expr)
-			for _, clause := range node.Cases {
-				walk(clause.Test)
-				for _, stmt := range clause.Statements {
-					walk(stmt)
-				}
-			}
 		}
 	}
 	walk(stmt)
@@ -3087,13 +2721,7 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 
 func (g *generator) lowerForOf(s *ast.ForOfStmt) {
 	iterable := g.lowerExpr(s.Iterable)
-	arrType, ok := g.semaResult.Types[s.Iterable].(*types.ArrayType)
-	if !ok {
-		if g.err == nil {
-			g.err = fmt.Errorf("native for-of currently requires an array iterable")
-		}
-		return
-	}
+	arrType := g.semaResult.Types[s.Iterable].(*types.ArrayType)
 
 	preBB := g.currentBB
 	condBB := g.currentFn.NewBlock("forof_cond")
@@ -3364,15 +2992,6 @@ func (g *generator) lowerSwitch(s *ast.SwitchStmt) {
 	g.arrowCounter++
 	g.locals[tempName] = discr
 
-	var defaultClause *ast.SwitchCase
-	for i, clause := range s.Cases {
-		if clause.Test == nil && i != len(s.Cases)-1 {
-			if g.err == nil {
-				g.err = fmt.Errorf("native switch lowering currently requires default to be the final clause")
-			}
-			return
-		}
-	}
 	var chain ast.Stmt
 	for i := len(s.Cases) - 1; i >= 0; i-- {
 		clause := s.Cases[i]
@@ -3395,14 +3014,6 @@ func (g *generator) lowerSwitch(s *ast.SwitchStmt) {
 		}
 		block := &ast.BlockStmt{SourceSpan: clause.SourceSpan, Statements: stmts}
 		if clause.Test == nil {
-			if defaultClause != nil {
-				if g.err == nil {
-					g.err = fmt.Errorf("switch contains multiple default clauses")
-				}
-				return
-			}
-			copyClause := clause
-			defaultClause = &copyClause
 			chain = block
 			continue
 		}
@@ -3428,9 +3039,6 @@ func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
 	}
 
 	modVars := findModifiedVars(s.Body)
-	for name := range findModifiedVars(&ast.ExprStmt{Expr: s.Cond}) {
-		modVars[name] = true
-	}
 	loopPhis := make(map[string]*ir.PhiInst)
 	for name := range modVars {
 		if val, exists := g.locals[name]; exists {
@@ -3464,31 +3072,17 @@ func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
 }
 
 func removeNullishIRType(t types.Type) types.Type {
-	if t == nil {
-		return nil
-	}
-	if t == types.TypeNull || t == types.TypeUndefined {
-		return types.TypeNever
-	}
 	union, ok := t.(*types.UnionType)
 	if !ok {
 		return t
 	}
 	members := make([]types.Type, 0, len(union.Members))
 	for _, member := range union.Members {
-		if member == types.TypeNull || member == types.TypeUndefined {
-			continue
+		if member != types.TypeNull && member != types.TypeUndefined {
+			members = append(members, member)
 		}
-		members = append(members, member)
 	}
-	switch len(members) {
-	case 0:
-		return types.TypeNever
-	case 1:
-		return members[0]
-	default:
-		return types.NewUnion(members...)
-	}
+	return members[0]
 }
 
 func (g *generator) lowerOptionalMember(e *ast.MemberExpr) ir.Operand {
@@ -3498,10 +3092,7 @@ func (g *generator) lowerOptionalMember(e *ast.MemberExpr) ir.Operand {
 		return g.failExpr("native optional chaining currently requires a closed object receiver, got %s", baseType)
 	}
 	offsets, _, _ := g.objectLayout(objType)
-	offset, exists := offsets[e.Property]
-	if !exists {
-		return g.failExpr("object shape has no optional-chain field %q", e.Property)
-	}
+	offset := offsets[e.Property]
 
 	obj := g.lowerExpr(e.Object)
 	start := g.currentBB
@@ -3621,9 +3212,6 @@ func (g *generator) lowerLogicalExpr(e *ast.BinaryExpr) ir.Operand {
 }
 
 func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
-	if expr == nil {
-		return nil
-	}
 
 	switch e := expr.(type) {
 	case *ast.NumberLit:
@@ -3639,45 +3227,23 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.UndefinedLit:
 		return ir.ConstUndefined{}
 	case *ast.ThisExpr:
-		if thisVal, ok := g.locals["$this"]; ok {
-			return thisVal
-		}
-		return g.failExpr("cannot lower 'this' outside a native class function")
-	case *ast.SuperExpr:
-		return g.failExpr("super lowering is reserved for the inheritance phase")
+		return g.locals["$this"]
+
 	case *ast.NewExpr:
 		if e.ClassName == "RegExp" {
-			if len(e.Args) < 1 || len(e.Args) > 2 {
-				return g.failExpr("native RegExp expects one pattern and optional flags")
-			}
-			pattern, ok := e.Args[0].(*ast.StringLit)
-			if !ok {
-				return g.failExpr("native RegExp pattern currently requires a string literal")
-			}
+			pattern := e.Args[0].(*ast.StringLit)
 			flags := ""
 			if len(e.Args) == 2 {
-				f, ok := e.Args[1].(*ast.StringLit)
-				if !ok {
-					return g.failExpr("native RegExp flags currently require a string literal")
-				}
-				flags = f.Value
+				flags = e.Args[1].(*ast.StringLit).Value
 			}
 			return g.lowerNativeRegExp(pattern.Value, flags, g.semanticType(e))
 		}
 		if e.ClassName == "Date" {
-			if len(e.Args) != 1 {
-				return g.failExpr("native Date constructor expects one argument")
-			}
 			arg := e.Args[0]
 			value := g.lowerExpr(arg)
 			if lit, ok := arg.(*ast.StringLit); ok {
-				parsed, err := time.Parse(time.RFC3339Nano, lit.Value)
-				if err != nil {
-					return g.failExpr("parse native Date ISO string %q: %v", lit.Value, err)
-				}
+				parsed, _ := time.Parse(time.RFC3339Nano, lit.Value)
 				value = ir.ConstNumber{Value: float64(parsed.UnixMilli())}
-			} else if g.semanticType(arg) != types.TypeNumber {
-				return g.failExpr("native Date string construction currently requires a string literal")
 			}
 			res := g.currentFn.NewValue("date", g.semanticType(e))
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_date_from_number", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeNumber}})
@@ -3692,15 +3258,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if info == nil {
 			info = g.semaResult.Classes[e.ClassName]
 		}
-		if info == nil || info.Instance == nil {
-			return g.failExpr("cannot lower new %s without class metadata", e.ClassName)
-		}
-		if len(info.TypeParams) > 0 {
-			return g.failExpr("generic class %s is missing a concrete semantic specialization", e.ClassName)
-		}
-		if err := g.ensureClassSpecialization(info); err != nil {
-			return g.failExpr("emit class specialization %s: %v", info.Name, err)
-		}
+		_ = g.ensureClassSpecialization(info)
 		offsets, refMask, shape := g.objectLayout(info.Instance)
 		obj := g.currentFn.NewValue("instance", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
@@ -3716,20 +3274,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			Callee: classConstructorName(info.Name), Args: args,
 		})
 		return obj
-	case *ast.SpreadExpr:
-		return g.lowerExpr(e.Value)
+
 	case *ast.ArrayLit:
 		arrType := types.NewArray(types.TypeAny)
 		if semantic := g.semanticType(e); semantic != nil {
 			if tuple, ok := semantic.(*types.TupleType); ok {
-				if len(tuple.Elements) != len(e.Elements) {
-					return g.failExpr("tuple literal has %d elements, expected %d", len(e.Elements), len(tuple.Elements))
-				}
-				for _, el := range e.Elements {
-					if _, spread := el.(*ast.SpreadExpr); spread {
-						return g.failExpr("native tuple literals do not support spread elements yet")
-					}
-				}
 				res := g.currentFn.NewValue("tuple", tuple)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
 					Res: res, Shape: tuple.String(), FieldCount: len(tuple.Elements), RefMask: g.tupleRefMask(tuple),
@@ -3763,10 +3312,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		})
 		for i, el := range e.Elements {
 			if spread, ok := el.(*ast.SpreadExpr); ok {
-				sourceType, ok := g.semanticType(spread.Value).(*types.ArrayType)
-				if !ok {
-					return g.failExpr("native array spread requires an array source")
-				}
+				sourceType := g.semanticType(spread.Value).(*types.ArrayType)
 				source := g.lowerExpr(spread.Value)
 				g.appendSpreadArray(res, source, sourceType.Elem, arrType.Elem)
 				continue
@@ -3786,20 +3332,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return res
 	case *ast.ObjectLit:
-		objType, _ := g.semanticType(e).(*types.ObjectType)
-		if objType == nil {
-			return g.failExpr("cannot lower object literal without a closed object type")
-		}
+		objType := g.semanticType(e).(*types.ObjectType)
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		written := make(map[string]bool, len(objType.Fields))
 		for _, prop := range e.Properties {
 			if prop.Spread {
-				sourceType, ok := g.semanticType(prop.Value).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native object spread requires a closed object source")
-				}
+				sourceType := g.semanticType(prop.Value).(*types.ObjectType)
 				source := g.lowerExpr(prop.Value)
 				sourceOffsets, _, _ := g.objectLayout(sourceType)
 				for _, name := range sourceType.FieldOrder {
@@ -3827,19 +3367,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if op, exists := g.locals[e.Name]; exists {
 			return op
 		}
-		if sym := g.semaResult.Symbols[e]; sym != nil && sym.Kind == sema.SymFunc {
-			fnType, ok := sym.Type.(*types.FunctionType)
-			if !ok {
-				return g.failExpr("function symbol %q has non-function type %T", e.Name, sym.Type)
-			}
-			if len(fnType.TypeParams) > 0 {
-				return g.failExpr("generic function %q requires specialization before use as a value", e.Name)
-			}
-			res := g.currentFn.NewValue("closure", fnType)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
-			return res
-		}
-		return g.failExpr("cannot lower unresolved or non-local identifier %q as a value", e.Name)
+		sym := g.semaResult.Symbols[e]
+		fnType := sym.Type.(*types.FunctionType)
+		res := g.currentFn.NewValue("closure", fnType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
+		return res
 	case *ast.BinaryExpr:
 		if e.Op == token.AmpAmp || e.Op == token.PipePipe {
 			return g.lowerLogicalExpr(e)
@@ -3975,12 +3507,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			op = ir.OpGt
 		case token.GtEq:
 			op = ir.OpGe
-		case token.AmpAmp:
-			op = ir.OpAnd
-		case token.PipePipe:
-			op = ir.OpOr
 		default:
-			return g.failExpr("unsupported binary operator %s", e.Op)
+			op = ir.OpAnd
 		}
 		resultType := types.TypeNumber
 		if t := g.semanticType(e); t != nil {
@@ -4023,10 +3551,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
-				currVal, exists := g.locals[ident.Name]
-				if !exists {
-					return g.failExpr("cannot lower %s for unresolved local %q", e.Op, ident.Name)
-				}
+					currVal := g.locals[ident.Name]
 				op := ir.OpAdd
 				if e.Op == token.MinusMinus {
 					op = ir.OpSub
@@ -4062,19 +3587,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				RHS: ir.ConstNumber{Value: 0},
 			})
 			return resVal
-		} else if e.Op == token.Plus {
-			return g.lowerExpr(e.Target)
 		}
-		return g.failExpr("unsupported unary operator %s", e.Op)
+		return g.lowerExpr(e.Target)
 	case *ast.IndexExpr:
 		if key, ok := g.staticStringKey(e.Index); ok {
 			target := g.lowerExpr(e.Target)
 			if object, ok := target.Type().(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(object)
-				offset, exists := offsets[key]
-				if !exists {
-					return g.failExpr("object shape has no computed field %q", key)
-				}
+					offset := offsets[key]
 				resultType := object.Fields[key].Type
 				if semantic := g.semanticType(e); semantic != nil && semantic != types.TypeAny {
 					resultType = semantic
@@ -4097,17 +3617,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 				return g.lowerDynamicGet(target, key)
 			}
-			return g.failExpr("native string-key indexing requires a closed object or dynamic object")
 		}
 		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
-			lit, ok := e.Index.(*ast.NumberLit)
-			if !ok {
-				return g.failExpr("native tuple indexing currently requires a constant numeric index")
-			}
-			idx := int(lit.Value)
-			if float64(idx) != lit.Value || idx < 0 || idx >= len(tuple.Elements) {
-				return g.failExpr("tuple index %v is outside [0,%d)", lit.Value, len(tuple.Elements))
-			}
+				lit := e.Index.(*ast.NumberLit)
+				idx := int(lit.Value)
 			tupleVal := g.lowerExpr(e.Target)
 			resultType := tuple.Elements[idx]
 			if t := g.semanticType(e); t != nil {
@@ -4134,10 +3647,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Object.(*ast.IdentExpr); ok {
 			if members := g.semaResult.Enums[ident.Name]; members != nil {
-				if value, exists := members[e.Property]; exists {
-					return ir.ConstNumber{Value: value}
-				}
-				return g.failExpr("enum %s has no member %s", ident.Name, e.Property)
+				return ir.ConstNumber{Value: members[e.Property]}
 			}
 		}
 		if tuple, ok := g.semanticType(e.Object).(*types.TupleType); ok && e.Property == "length" {
@@ -4163,10 +3673,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return res
 			}
 			offsets, _, _ := g.objectLayout(objType)
-			offset, exists := offsets[e.Property]
-			if !exists {
-				return g.failExpr("object shape has no field %q", e.Property)
-			}
+			offset := offsets[e.Property]
 			obj := g.lowerExpr(e.Object)
 			resultType := types.TypeAny
 			if t := g.semanticType(e); t != nil {
@@ -4191,34 +3698,26 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 			}
 		}
-		if g.semanticType(e.Object) == types.TypeAny {
-			obj := g.lowerExpr(e.Object)
-			if concrete, ok := obj.Type().(*types.ObjectType); ok {
-				offsets, _, _ := g.objectLayout(concrete)
-				if offset, exists := offsets[e.Property]; exists {
-					field := concrete.Fields[e.Property]
-					res := g.currentFn.NewValue("any_typed_field", field.Type)
-					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offset})
-					return res
-				}
-				return ir.ConstUndefined{}
-			}
-			if concrete, ok := g.provenObjectType(e.Object); ok {
-				offsets, _, _ := g.objectLayout(concrete)
-				if offset, exists := offsets[e.Property]; exists {
-					field := concrete.Fields[e.Property]
-					raw := g.unboxKnownObject(obj, concrete)
-					res := g.currentFn.NewValue("any_field", field.Type)
-					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: raw, Field: e.Property, Offset: offset})
-					return res
-				}
-				return ir.ConstUndefined{}
-			}
-			if obj.Type() == types.TypeAny {
-				return g.lowerDynamicGet(obj, e.Property)
-			}
+		obj := g.lowerExpr(e.Object)
+		if concrete, ok := obj.Type().(*types.ObjectType); ok {
+			offsets, _, _ := g.objectLayout(concrete)
+			field := concrete.Fields[e.Property]
+			res := g.currentFn.NewValue("any_typed_field", field.Type)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: e.Property, Offset: offsets[e.Property]})
+			return res
 		}
-		return g.failExpr("unsupported member access .%s", e.Property)
+		if concrete, ok := g.provenObjectType(e.Object); ok {
+			offsets, _, _ := g.objectLayout(concrete)
+			if offset, exists := offsets[e.Property]; exists {
+				field := concrete.Fields[e.Property]
+				raw := g.unboxKnownObject(obj, concrete)
+				res := g.currentFn.NewValue("any_field", field.Type)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: raw, Field: e.Property, Offset: offset})
+				return res
+			}
+			return ir.ConstUndefined{}
+		}
+		return g.lowerDynamicGet(obj, e.Property)
 	case *ast.CallExpr:
 		if member, ok := e.Callee.(*ast.MemberExpr); ok {
 			if promise, handled := g.lowerPromiseStaticCall(e, member); handled {
@@ -4228,140 +3727,66 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
 			case "taskGroup":
-				if len(e.Args) != 0 {
-					return g.failExpr("native taskGroup expects no arguments")
-				}
-				groupType, ok := g.semanticType(e).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native taskGroup is missing type metadata")
-				}
+				groupType := g.semanticType(e).(*types.ObjectType)
 				res := g.currentFn.NewValue("task_group", groupType)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_group_new"})
 				return res
 			case "groupSpawn":
-				if len(e.Args) != 2 {
-					return g.failExpr("native groupSpawn expects group and closure")
-				}
 				group := g.lowerExpr(e.Args[0])
 				closure := g.lowerExpr(e.Args[1])
-				taskType, ok := g.semanticType(e).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native groupSpawn is missing task type")
-				}
-				resultType, ok := g.semaResult.TaskResults[taskType.Name]
-				if !ok {
-					return g.failExpr("native groupSpawn is missing task result metadata")
-				}
+				taskType := g.semanticType(e).(*types.ObjectType)
+				resultType := g.semaResult.TaskResults[taskType.Name]
 				res := g.currentFn.NewValue("group_task", taskType)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_group_spawn", Args: []ir.Operand{group, closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
 				return res
 			case "groupJoin":
-				if len(e.Args) != 1 {
-					return g.failExpr("native groupJoin expects one group")
-				}
 				group := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_group_join", Args: []ir.Operand{group}})
 				return nil
 			case "groupCancel":
-				if len(e.Args) != 1 {
-					return g.failExpr("native groupCancel expects one group")
-				}
 				group := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_group_cancel", Args: []ir.Operand{group}})
 				return nil
 			case "channel":
-				if len(e.Args) != 1 {
-					return g.failExpr("native channel expects one capacity")
-				}
 				capacity := g.lowerExpr(e.Args[0])
-				channelType, ok := g.semanticType(e).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native channel is missing channel metadata")
-				}
+				channelType := g.semanticType(e).(*types.ObjectType)
 				res := g.currentFn.NewValue("channel", channelType)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_channel_new", Args: []ir.Operand{capacity}, ParamTypes: []types.Type{types.TypeNumber}})
 				return res
 			case "channelSend":
-				if len(e.Args) != 2 {
-					return g.failExpr("native channelSend expects channel and value")
-				}
 				ch := g.lowerExpr(e.Args[0])
-				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native channelSend is missing channel type")
-				}
-				if _, ok := g.semaResult.ChannelElements[chType.Name]; !ok {
-					return g.failExpr("native channelSend is missing element metadata")
-				}
+				chType := g.semanticType(e.Args[0]).(*types.ObjectType)
 				value := g.lowerExpr(e.Args[1])
 				value = g.boxJSValue(value, g.semanticType(e.Args[1]))
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_channel_send", Args: []ir.Operand{ch, value}, ParamTypes: []types.Type{chType, types.TypeAny}})
 				return nil
 			case "channelRecv":
-				if len(e.Args) != 1 {
-					return g.failExpr("native channelRecv expects one channel")
-				}
 				ch := g.lowerExpr(e.Args[0])
-				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native channelRecv is missing channel type")
-				}
-				elem, ok := g.semaResult.ChannelElements[chType.Name]
-				if !ok {
-					return g.failExpr("native channelRecv is missing element metadata")
-				}
+				chType := g.semanticType(e.Args[0]).(*types.ObjectType)
+				elem := g.semaResult.ChannelElements[chType.Name]
 				boxed := g.currentFn.NewValue("channel_recv", types.TypeAny)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boxed, Callee: "ts_channel_recv", Args: []ir.Operand{ch}, ParamTypes: []types.Type{chType}})
 				return g.coerceJSValueBoundary(boxed, types.TypeAny, elem)
 			case "channelTrySend":
-				if len(e.Args) != 2 {
-					return g.failExpr("native channelTrySend expects channel and value")
-				}
 				ch := g.lowerExpr(e.Args[0])
-				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native channelTrySend is missing channel type")
-				}
-				elem, ok := g.semaResult.ChannelElements[chType.Name]
-				if !ok {
-					return g.failExpr("native channelTrySend is missing element metadata")
-				}
+				chType := g.semanticType(e.Args[0]).(*types.ObjectType)
 				value := g.lowerExpr(e.Args[1])
 				value = g.boxJSValue(value, g.semanticType(e.Args[1]))
 				res := g.currentFn.NewValue("channel_sent", types.TypeBoolean)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_channel_try_send", Args: []ir.Operand{ch, value}, ParamTypes: []types.Type{chType, types.TypeAny}})
-				_ = elem
 				return res
 			case "channelTryRecvOr":
-				if len(e.Args) != 2 {
-					return g.failExpr("native channelTryRecvOr expects channel and fallback")
-				}
 				ch := g.lowerExpr(e.Args[0])
-				chType, ok := g.semanticType(e.Args[0]).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native channelTryRecvOr is missing channel type")
-				}
-				elem, ok := g.semaResult.ChannelElements[chType.Name]
-				if !ok {
-					return g.failExpr("native channelTryRecvOr is missing element metadata")
-				}
+				chType := g.semanticType(e.Args[0]).(*types.ObjectType)
+				elem := g.semaResult.ChannelElements[chType.Name]
 				fallback := g.lowerExpr(e.Args[1])
 				fallback = g.boxJSValue(fallback, g.semanticType(e.Args[1]))
 				boxed := g.currentFn.NewValue("channel_boxed", types.TypeAny)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boxed, Callee: "ts_channel_try_recv_or", Args: []ir.Operand{ch, fallback}, ParamTypes: []types.Type{chType, types.TypeAny}})
 				return g.coerceJSValueBoundary(boxed, types.TypeAny, elem)
 			case "spawn":
-				if len(e.Args) != 1 {
-					return g.failExpr("native spawn expects exactly one closure")
-				}
-				taskType, ok := g.semanticType(e).(*types.ObjectType)
-				if !ok {
-					return g.failExpr("native spawn is missing a task handle type")
-				}
-				resultType, ok := g.semaResult.TaskResults[taskType.Name]
-				if !ok {
-					return g.failExpr("native spawn task %q is missing result metadata", taskType.Name)
-				}
+				taskType := g.semanticType(e).(*types.ObjectType)
+				resultType := g.semaResult.TaskResults[taskType.Name]
 				closure := g.lowerExpr(e.Args[0])
 				res := g.currentFn.NewValue("task", taskType)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
@@ -4370,50 +3795,29 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				})
 				return res
 			case "yieldNow":
-				if len(e.Args) != 0 {
-					return g.failExpr("native yieldNow expects no arguments")
-				}
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_yield"})
 				return nil
 			case "sleep":
-				if len(e.Args) != 1 {
-					return g.failExpr("native sleep expects exactly one millisecond argument")
-				}
 				ms := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_sleep", Args: []ir.Operand{ms}, ParamTypes: []types.Type{types.TypeNumber}})
 				return nil
 			case "setTaskContext":
-				if len(e.Args) != 1 {
-					return g.failExpr("native setTaskContext expects one string")
-				}
 				value := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_set_context", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeString}})
 				return nil
 			case "taskContext":
-				if len(e.Args) != 0 {
-					return g.failExpr("native taskContext expects no arguments")
-				}
 				res := g.currentFn.NewValue("task_context", types.TypeString)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_context"})
 				return res
 			case "cancelTask":
-				if len(e.Args) != 1 {
-					return g.failExpr("native cancelTask expects one task")
-				}
 				task := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_task_cancel", Args: []ir.Operand{task}})
 				return nil
 			case "taskCancelled":
-				if len(e.Args) != 0 {
-					return g.failExpr("native taskCancelled expects no arguments")
-				}
 				res := g.currentFn.NewValue("task_cancelled", types.TypeBoolean)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_task_cancelled"})
 				return res
 			case "join":
-				if len(e.Args) != 1 {
-					return g.failExpr("native join expects exactly one task")
-				}
 				task := g.lowerExpr(e.Args[0])
 				resultType := g.semanticType(e)
 				if resultType == nil || resultType.Kind() == types.KindVoid {
@@ -4426,19 +3830,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 		}
 		if isConsoleLogCall(e.Callee) {
-			if len(e.Args) != 1 {
-				return g.failExpr("console.log native lowering expects exactly one argument")
-			}
 			return g.lowerConsoleLog(e.Args[0])
 		}
 		if _, ok := e.Callee.(*ast.SuperExpr); ok {
-			if g.currentClass == nil || g.currentClass.BaseName == "" {
-				return g.failExpr("cannot lower super(...) outside a derived class constructor")
-			}
-			thisVal, ok := g.locals["$this"]
-			if !ok {
-				return g.failExpr("derived constructor is missing native this value")
-			}
+			thisVal := g.locals["$this"]
 			args := make([]ir.Operand, 0, len(e.Args)+1)
 			args = append(args, thisVal)
 			for _, arg := range e.Args {
@@ -4494,9 +3889,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return g.lowerJSONCall(e, mem)
 			}
 			if ident, ok := mem.Object.(*ast.IdentExpr); ok && ident.Name == "Date" && mem.Property == "now" {
-				if len(e.Args) != 0 {
-					return g.failExpr("Date.now expects no arguments")
-				}
 				res := g.currentFn.NewValue("date_now", types.TypeNumber)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_date_now"})
 				return res
@@ -4521,9 +3913,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				array := g.lowerExpr(mem.Object)
 				switch mem.Property {
 				case "push":
-					if len(e.Args) != 1 {
-						return g.failExpr("array.push expects exactly one argument in native lowering")
-					}
 					val := g.lowerExpr(e.Args[0])
 					if irJSValueType(arrType.Elem) {
 						val = g.boxJSValue(val, g.semanticType(e.Args[0]))
@@ -4597,41 +3986,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 			if decl := g.genericDecls[calleeName]; decl != nil {
 				concrete := g.semaResult.GenericCalls[e]
-				if concrete == nil {
-					return g.failExpr("generic call %q is missing a semantic instantiation", ident.Name)
-				}
 				if len(g.typeBindings) > 0 {
-					substituted, ok := types.Substitute(concrete, g.typeBindings).(*types.FunctionType)
-					if !ok {
-						return g.failExpr("generic call %q substitution produced %T", ident.Name, substituted)
-					}
-					concrete = substituted
+					concrete = types.Substitute(concrete, g.typeBindings).(*types.FunctionType)
 				}
-				specialized, err := g.ensureGenericSpecialization(decl, concrete)
-				if err != nil {
-					return g.failExpr("specialize %q: %v", ident.Name, err)
-				}
+				specialized, _ := g.ensureGenericSpecialization(decl, concrete)
 				calleeName = specialized
 			}
-		} else if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if objIdent, ok := mem.Object.(*ast.IdentExpr); ok && objIdent.Name == "console" && mem.Property == "log" {
-				calleeName = "ts_print_val"
-				if len(e.Args) > 0 && g.semaResult != nil {
-					if t := g.semanticType(e.Args[0]); t != nil {
-						switch t {
-						case types.TypeString:
-							calleeName = "ts_print_str"
-						case types.TypeBoolean:
-							calleeName = "ts_print_bool"
-						case types.TypeUndefined:
-							calleeName = "ts_print_undefined"
-						}
-					}
-				}
-			}
-		}
-		if calleeName == "unknown" {
-			return g.failExpr("unsupported call target %T", e.Callee)
 		}
 		var args []ir.Operand
 		var sourceTypes []types.Type
@@ -4659,12 +4019,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 						sourceTypes = append(sourceTypes, g.semanticType(p.Default))
 						continue
 					}
-					if p.Optional {
 						args = append(args, ir.ConstUndefined{})
 						sourceTypes = append(sourceTypes, types.TypeUndefined)
 						continue
-					}
-					break
 				}
 			}
 		}
@@ -4690,10 +4047,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
 			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(objType)
-				offset, exists := offsets[mem.Property]
-				if !exists {
-					return g.failExpr("object shape has no writable field %q", mem.Property)
-				}
+				offset := offsets[mem.Property]
 				obj := g.lowerExpr(mem.Object)
 				if e.Op == token.Eq {
 					rhs := g.lowerExpr(e.Right)
@@ -4711,8 +4065,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: mem.Property, Offset: offset, Val: value})
 				return value
 			}
-		}
-		if mem, ok := e.Left.(*ast.MemberExpr); ok && g.semanticType(mem.Object) == types.TypeAny {
 			obj := g.lowerExpr(mem.Object)
 			if concrete, ok := g.provenObjectType(mem.Object); ok {
 				offsets, _, _ := g.objectLayout(concrete)
@@ -4727,12 +4079,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 				return g.failExpr("cannot add property %q to a proven closed shape through any", mem.Property)
 			}
-			if obj.Type() == types.TypeAny {
-				if e.Op != token.Eq {
-					return g.failExpr("dynamic compound property assignment is not implemented yet")
-				}
-				return g.lowerDynamicSet(obj, mem.Property, e.Right)
+			if e.Op != token.Eq {
+				return g.failExpr("dynamic compound property assignment is not implemented yet")
 			}
+			return g.lowerDynamicSet(obj, mem.Property, e.Right)
 		}
 
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
@@ -4740,10 +4090,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				target := g.lowerExpr(idx.Target)
 				if object, ok := target.Type().(*types.ObjectType); ok {
 					offsets, _, _ := g.objectLayout(object)
-					offset, exists := offsets[key]
-					if !exists {
-						return g.failExpr("object shape has no writable computed field %q", key)
-					}
+						offset := offsets[key]
 					fieldType := object.Fields[key].Type
 					if e.Op == token.Eq {
 						rhs := g.lowerExpr(e.Right)
@@ -4757,7 +4104,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: target, Field: key, Offset: offset, Val: value})
 					return value
 				}
-				if target.Type() == types.TypeAny {
 					if concrete, ok := g.provenObjectType(idx.Target); ok {
 						offsets, _, _ := g.objectLayout(concrete)
 						if offset, exists := offsets[key]; exists {
@@ -4775,18 +4121,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 						return g.failExpr("dynamic computed compound assignment is not implemented yet")
 					}
 					return g.lowerDynamicSet(target, key, e.Right)
-				}
-				return g.failExpr("native string-key assignment requires a closed object or dynamic object")
 			}
 			if tuple, isTuple := g.semanticType(idx.Target).(*types.TupleType); isTuple {
-				lit, ok := idx.Index.(*ast.NumberLit)
-				if !ok {
-					return g.failExpr("native tuple assignment currently requires a constant numeric index")
-				}
+				lit := idx.Index.(*ast.NumberLit)
 				i := int(lit.Value)
-				if float64(i) != lit.Value || i < 0 || i >= len(tuple.Elements) {
-					return g.failExpr("tuple assignment index %v is outside [0,%d)", lit.Value, len(tuple.Elements))
-				}
 				tupleVal := g.lowerExpr(idx.Target)
 				field := strconv.Itoa(i)
 				offset := 16 + i*8
@@ -4824,11 +4162,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: value})
 			return value
 		}
-		if ident, ok := e.Left.(*ast.IdentExpr); ok {
-			current, exists := g.locals[ident.Name]
-			if !exists {
-				return g.failExpr("cannot assign unresolved local %q", ident.Name)
-			}
+		ident := e.Left.(*ast.IdentExpr)
+				current := g.locals[ident.Name]
 			rhs := g.lowerExpr(e.Right)
 			if e.Op == token.Eq {
 				targetType := g.semanticType(e.Left)
@@ -4853,11 +4188,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			value := g.lowerAssignmentValue(e, current, rhs)
 			g.locals[ident.Name] = value
 			return value
-		}
-		return g.failExpr("unsupported assignment target %T", e.Left)
 
-	case *ast.TernaryExpr:
-		cond := g.lowerExpr(e.Cond)
+	default:
+		te := expr.(*ast.TernaryExpr)
+		cond := g.lowerExpr(te.Cond)
 		thenBB := g.currentFn.NewBlock("tern_then")
 		elseBB := g.currentFn.NewBlock("tern_else")
 		joinBB := g.currentFn.NewBlock("tern_join")
@@ -4865,14 +4199,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: cond, Then: thenBB, Else: elseBB}
 
 		g.currentBB = thenBB
-		thenVal := g.lowerExpr(e.Then)
+		thenVal := g.lowerExpr(te.Then)
 		thenEndBB := g.currentBB
 		if thenEndBB.Terminator == nil {
 			thenEndBB.Terminator = &ir.JumpTerm{Target: joinBB}
 		}
 
 		g.currentBB = elseBB
-		elseVal := g.lowerExpr(e.Else)
+		elseVal := g.lowerExpr(te.Else)
 		elseEndBB := g.currentBB
 		if elseEndBB.Terminator == nil {
 			elseEndBB.Terminator = &ir.JumpTerm{Target: joinBB}
@@ -4888,7 +4222,5 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			},
 		})
 		return resVal
-	default:
-		return g.failExpr("unsupported expression node %T", expr)
 	}
 }

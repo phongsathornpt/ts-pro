@@ -254,8 +254,13 @@ func TestInternalBridges(t *testing.T) {
 	// 4. Opt all paths
 	optProg := &ir.Program{}
 	optFn := ir.NewFunction("optFn", types.TypeNumber)
+	optParam := optFn.NewValue("param", types.TypeNumber)
+	optFn.Params = []*ir.Value{optParam}
 	optB := optFn.NewBlock("entry")
 	optV := optFn.NewValue("res", types.TypeNumber)
+	deadV := optFn.NewValue("dead", types.TypeNumber)
+	targetB := optFn.NewBlock("target")
+	targetB.Terminator = &ir.ReturnTerm{Val: optV}
 	optB.Instructions = append(optB.Instructions,
 		&ir.BinaryInst{Res: optV, Op: ir.OpSub, LHS: ir.ConstNumber{Value: 10}, RHS: ir.ConstNumber{Value: 2}},
 		&ir.BinaryInst{Res: optV, Op: ir.OpMul, LHS: ir.ConstNumber{Value: 10}, RHS: ir.ConstNumber{Value: 2}},
@@ -264,8 +269,9 @@ func TestInternalBridges(t *testing.T) {
 		&ir.BinaryInst{Res: optV, Op: ir.OpAnd, LHS: ir.ConstNumber{Value: 10}, RHS: ir.ConstNumber{Value: 2}},
 		&ir.BinaryInst{Res: optV, Op: ir.OpOr, LHS: ir.ConstNumber{Value: 10}, RHS: ir.ConstNumber{Value: 2}},
 		&ir.UnaryInst{Res: optV, Op: "-", Val: ir.ConstNumber{Value: 10}},
+		&ir.BinaryInst{Res: deadV, Op: ir.OpAdd, LHS: optParam, RHS: ir.ConstNumber{Value: 1}},
 	)
-	optB.Terminator = &ir.ReturnTerm{Val: optV}
+	optB.Terminator = &ir.BranchTerm{Cond: ir.ConstBool{Value: true}, Then: targetB, Else: targetB}
 	optProg.Functions = append(optProg.Functions, optFn)
 	opt.Optimize(optProg, opt.Options{Level: 0})
 	opt.Optimize(optProg, opt.Options{Level: 2})
@@ -287,6 +293,8 @@ let ops = + ++ += - -- -= * ** *= / /= % %= ! ~ & && &= | || |= ^ ^= << >> >>> =
 	_, _ = lexer.TokenizeAll(fErr2)
 	fErr3 := fsLex.AddFile("err3.ts", []byte("`unterminated template"))
 	_, _ = lexer.TokenizeAll(fErr3)
+	fUtf8 := fsLex.AddFile("utf8.ts", []byte("let \u4e16\u754c = 1; let \u00fc = \"\\z\"; let t = `\\`hello`; obj.\u4e16; obj."))
+	_, _ = lexer.TokenizeAll(fUtf8)
 	// Exercise ParseFloat helper and Diagnostics accessor
 	_, _ = lexer.ParseFloat("3.14")
 	_, _ = lexer.ParseFloat("not-a-number")

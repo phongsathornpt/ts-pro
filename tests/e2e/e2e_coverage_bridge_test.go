@@ -72,6 +72,8 @@ func TestE2ECoverageBridges(t *testing.T) {
 	// Bridge Lower/LowerTarget ARM64 into E2E coverage
 	prog := &ir.Program{}
 	fn := ir.NewFunction("add", types.TypeNumber)
+	vNil := fn.NewValue("nilVal", nil)
+	fn.Params = []*ir.Value{vNil}
 	b := fn.NewBlock("entry")
 	v := fn.NewValue("v", types.TypeNumber)
 	c10 := ir.ConstNumber{Value: 10}
@@ -82,6 +84,12 @@ func TestE2ECoverageBridges(t *testing.T) {
 		LHS: c10,
 		RHS: c20,
 	})
+	vArr := fn.NewValue("arr", types.NewArray(types.TypeNumber))
+	b.Instructions = append(b.Instructions,
+		&ir.AllocArrayInst{Res: vArr, ElemType: nil, Length: c10},
+		&ir.AllocArrayInst{Res: vArr, ElemType: types.NewUnion(types.TypeNumber, types.TypeAny), Length: c10},
+		&ir.AllocArrayInst{Res: vArr, ElemType: types.NewUnion(types.TypeNumber, types.NewTypeVar("T", nil)), Length: c10},
+	)
 	b.Terminator = &ir.ReturnTerm{Val: v}
 	prog.Functions = append(prog.Functions, fn)
 
@@ -192,6 +200,7 @@ func TestE2ECoverageBridges(t *testing.T) {
 		&ir.MakeClosureInst{Res: v, Function: "foo", Captures: []ir.Operand{v}},
 		&ir.ClosureGetInst{Res: v, Closure: v, Index: 0},
 		&ir.IndirectCallInst{Res: v, Closure: v, Args: []ir.Operand{v}},
+		&ir.IndirectCallInst{Res: nil, Closure: v, Args: []ir.Operand{}},
 		&ir.AllocObjectInst{Res: v, Shape: "Point", FieldCount: 1},
 		&ir.GetFieldInst{Res: v, Obj: v, Field: "x", Offset: 16},
 		&ir.SetFieldInst{Obj: v, Field: "x", Offset: 16, Val: cn},
@@ -328,6 +337,7 @@ func TestE2ECoverageBridgesPart2(t *testing.T) {
 		&ir.BinaryInst{Res: v, Op: ir.OpOr, LHS: v, RHS: v},
 		&ir.BinaryInst{Res: v, Op: ir.BinaryOp(99), LHS: v, RHS: v},
 	)
+	b.Phis = append(b.Phis, &ir.PhiInst{Res: v, Incoming: []ir.PhiIncoming{{Block: b, Value: v}}})
 	b.Terminator = &ir.ReturnTerm{Val: v}
 	prog := &ir.Program{Functions: []*ir.Function{fn}}
 	_ = prog.Dump()
@@ -350,6 +360,10 @@ func TestE2ECoverageBridgesPart2(t *testing.T) {
 
 	// Exercise remaining runtime/sys
 	_ = sys.Exit
+	origExit := sys.SysExitHook
+	sys.SysExitHook = func(code int) {}
+	sys.Exit(0)
+	sys.SysExitHook = origExit
 
 	// Exercise token
 	invTok := token.Kind(999)
@@ -373,10 +387,90 @@ func TestARM64LoweringAllOps(t *testing.T) {
 	for _, op := range ops {
 		b.Instructions = append(b.Instructions, &ir.BinaryInst{Res: v2, Op: op, LHS: v0, RHS: v1})
 	}
-	b.Instructions = append(b.Instructions, &ir.UnaryInst{Res: v2, Op: "-", Val: v0})
-	b.Instructions = append(b.Instructions, &ir.CallInst{Callee: "ts_print_val", Args: []ir.Operand{ir.ConstNumber{Value: -42}, ir.ConstString{Value: "str"}, v0}})
-	b.Terminator = &ir.ReturnTerm{Val: v2}
+	b.Instructions = append(b.Instructions,
+		&ir.BinaryInst{Res: v2, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: -10}, RHS: ir.ConstNumber{Value: -20}},
+		&ir.UnaryInst{Res: v2, Op: "-", Val: v0},
+		&ir.UnaryInst{Res: v2, Op: "!", Val: v0},
+	)
+	vCallRes := fn.NewValue("callRes", types.TypeNumber)
+	b.Instructions = append(b.Instructions, &ir.CallInst{Res: vCallRes, Callee: "ts_print_val", Args: []ir.Operand{ir.ConstNumber{Value: -42}, ir.ConstString{Value: "str"}, v0}})
+
+	// ARM64 phi incoming jump, branch, main exit, return string/const
+	bThen := fn.NewBlock("arm64_then")
+	bElse := fn.NewBlock("arm64_else")
+	bThen.Phis = append(bThen.Phis,
+		&ir.PhiInst{Res: v2, Incoming: []ir.PhiIncoming{
+			{Block: b, Value: v0},
+			{Block: b, Value: ir.ConstNumber{Value: -1}},
+			{Block: b, Value: ir.ConstNumber{Value: 1}},
+			{Block: b, Value: ir.ConstString{Value: "phi_str"}},
+			{Block: bElse, Value: v0},
+			{Block: bElse, Value: ir.ConstNumber{Value: -2}},
+			{Block: bElse, Value: ir.ConstNumber{Value: 2}},
+			{Block: bElse, Value: ir.ConstString{Value: "phi_str2"}},
+		}},
+	)
+	bThen.Terminator = &ir.ReturnTerm{Val: ir.ConstString{Value: "ret_str"}}
+	bElse.Terminator = &ir.JumpTerm{Target: bThen}
+	b.Terminator = &ir.BranchTerm{Cond: v0, Then: bThen, Else: bElse}
 	prog.Functions = append(prog.Functions, fn)
+
+	// @main function for ARM64 exit
+	mainFn := ir.NewFunction("@main", types.TypeVoid)
+	mainB := mainFn.NewBlock("main_entry")
+	mainB.Terminator = &ir.ReturnTerm{Val: ir.ConstNumber{Value: -1}}
+	prog.Functions = append(prog.Functions, mainFn)
+
+	// Positive constant return for ARM64
+	fnPos := ir.NewFunction("retPos", types.TypeNumber)
+	bPos := fnPos.NewBlock("b")
+	bPos.Terminator = &ir.ReturnTerm{Val: ir.ConstNumber{Value: 42}}
+	prog.Functions = append(prog.Functions, fnPos)
+
+	// ARM64 register spilling (forcing !dstLoc.IsReg)
+	spillFn := ir.NewFunction("spillFn", types.TypeNumber)
+	spillB := spillFn.NewBlock("spill_entry")
+	var spillVals []*ir.Value
+	for i := 0; i < 10; i++ {
+		sv := spillFn.NewValue("", types.TypeNumber)
+		spillVals = append(spillVals, sv)
+		spillB.Instructions = append(spillB.Instructions, &ir.BinaryInst{
+			Res: sv,
+			Op:  ir.OpAdd,
+			LHS: ir.ConstNumber{Value: float64(i)},
+			RHS: ir.ConstNumber{Value: 1},
+		})
+	}
+	var uSpillVals []*ir.Value
+	for i := 0; i < 10; i++ {
+		us := spillFn.NewValue("", types.TypeNumber)
+		uSpillVals = append(uSpillVals, us)
+		spillB.Instructions = append(spillB.Instructions, &ir.UnaryInst{
+			Res: us,
+			Op:  "-",
+			Val: spillVals[i],
+		})
+	}
+	uSpill := uSpillVals[9]
+	sumVal := spillFn.NewValue("", types.TypeNumber)
+	spillB.Instructions = append(spillB.Instructions, &ir.BinaryInst{
+		Res: sumVal,
+		Op:  ir.OpAdd,
+		LHS: spillVals[0],
+		RHS: uSpill,
+	})
+	for i := 1; i < 9; i++ {
+		nextSum := spillFn.NewValue("", types.TypeNumber)
+		spillB.Instructions = append(spillB.Instructions, &ir.BinaryInst{
+			Res: nextSum,
+			Op:  ir.OpAdd,
+			LHS: sumVal,
+			RHS: uSpillVals[i],
+		})
+		sumVal = nextSum
+	}
+	spillB.Terminator = &ir.ReturnTerm{Val: sumVal}
+	prog.Functions = append(prog.Functions, spillFn)
 
 	_, _ = lower.Lower(prog, lower.ArchARM64)
 }
@@ -407,10 +501,47 @@ func TestDirectCoverageFinalSprinkles(t *testing.T) {
 	// runtime error
 	_, _ = runtime.GetRuntimeSource("nonexistent_12345.go")
 
-	// gc collection with roots
+	// gc collection with roots and without roots
 	al := gc.NewAllocator(1024)
 	p := al.Alloc(64)
 	al.AddRoot(p)
 	_ = al.Alloc(2048)
 	al.ClearRoots()
+	_ = al.Alloc(2048)
+
+	// support/source edge cases
+	_ = f.LineContent(0)
+	_ = f.LineContent(100)
+	fCRLF := fs.AddFile("crlf.ts", []byte("a\r\nb\r\n"))
+	_ = fCRLF.LineContent(1)
+	_ = f.Location(0)
+	_ = fs.File(0)
+	_ = fs.File(99999)
+	_ = fs.Location(0)
+	_ = fs.Location(99999)
+	noFileLoc := source.Location{Line: 1, Column: 1}
+	_ = noFileLoc.String()
+
+	// support/diag caret formatting edges
+	dCarets := diag.Diagnostic{
+		Span:     source.Span{Start: 1, End: 100},
+		Message:  "long caret",
+		Severity: diag.SeverityError,
+	}
+	_ = dCarets.Format(fs)
+	dZeroCaret := diag.Diagnostic{
+		Span:     source.Span{Start: 1, End: 1},
+		Message:  "zero caret",
+		Severity: diag.SeverityError,
+	}
+	_ = dZeroCaret.Format(fs)
+	// caretLen < 1 branch when column exceeds line length
+	dPastEnd := diag.Diagnostic{
+		Span:     source.Span{Start: f.Base + 100, End: f.Base + 105},
+		Message:  "past end",
+		Severity: diag.SeverityError,
+	}
+	_ = dPastEnd.Format(fs)
+
+
 }

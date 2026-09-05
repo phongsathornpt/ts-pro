@@ -825,47 +825,42 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 			e.MovDerefReg(amd64.R15, 16, amd64.R10)
 		}
 
-		loadOperand := func(op ir.Operand, scratch amd64.Register) (amd64.Register, error) {
+		loadOperand := func(op ir.Operand, scratch amd64.Register) amd64.Register {
 			switch v := op.(type) {
 			case *ir.Value:
-				return loadValue(v, scratch), nil
+				return loadValue(v, scratch)
 			case ir.ConstNumber:
 				e.MovRegImm64(scratch, numberBits(v.Value))
-				return scratch, nil
+				return scratch
 			case ir.ConstBool:
 				if v.Value {
 					e.MovRegImm64(scratch, 1)
 				} else {
 					e.MovRegImm64(scratch, 0)
 				}
-				return scratch, nil
+				return scratch
 			case ir.ConstUndefined:
 				e.MovRegImm64(scratch, amd64UndefinedBits)
-				return scratch, nil
+				return scratch
 			case ir.ConstNull:
 				e.MovRegImm64(scratch, amd64NullBits)
-				return scratch, nil
+				return scratch
 			default:
-				return scratch, fmt.Errorf("unsupported AMD64 operand %T", op)
-			}
-		}
-		loadRawValue := func(op ir.Operand, dst amd64.Register) (amd64.Register, error) {
-			if str, ok := op.(ir.ConstString); ok {
 				at := len(e.Code)
-				e.LeaRipRel32(dst, 0)
-				strFixups = append(strFixups, stringFixupAMD64{offset: at + 3, targetReg: dst, str: str.Value})
-				return dst, nil
+				e.LeaRipRel32(scratch, 0)
+				str := ""
+				if cs, ok := op.(ir.ConstString); ok {
+					str = cs.Value
+				}
+				strFixups = append(strFixups, stringFixupAMD64{offset: at + 3, targetReg: scratch, str: str})
+				return scratch
 			}
-			return loadOperand(op, dst)
 		}
-		loadArrayIndex := func(op ir.Operand, dst amd64.Register) error {
-			src, err := loadOperand(op, amd64.R10)
-			if err != nil {
-				return err
-			}
+		loadRawValue := loadOperand
+		loadArrayIndex := func(op ir.Operand, dst amd64.Register) {
+			src := loadOperand(op, amd64.R10)
 			e.MovQXMMReg(amd64.XMM0, src)
 			e.Cvttsd2si(dst, amd64.XMM0)
-			return nil
 		}
 		emitRuntimeCall := func(callee string) {
 			at := len(e.Code)
@@ -936,14 +931,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					_, rhsNull := bi.RHS.(ir.ConstNull)
 					_, rhsUndef := bi.RHS.(ir.ConstUndefined)
 					if (bi.Op == ir.OpEq || bi.Op == ir.OpNe) && (lhsNull || lhsUndef || rhsNull || rhsUndef) {
-						lhs, err := loadRawValue(bi.LHS, amd64.R10)
-						if err != nil {
-							return nil, err
-						}
-						rhs, err := loadRawValue(bi.RHS, amd64.R11)
-						if err != nil {
-							return nil, err
-						}
+						lhs := loadRawValue(bi.LHS, amd64.R10)
+						rhs := loadRawValue(bi.RHS, amd64.R11)
 						e.CmpRegReg(lhs, rhs)
 						cond := amd64.CondE
 						if bi.Op == ir.OpNe {
@@ -954,17 +943,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						continue
 					}
 					if bi.LHS.Type() == types.TypeString && bi.RHS.Type() == types.TypeString && (bi.Op == ir.OpEq || bi.Op == ir.OpNe) {
-						lhs, err := loadRawValue(bi.LHS, amd64.RDI)
-						if err != nil {
-							return nil, err
-						}
+						lhs := loadRawValue(bi.LHS, amd64.RDI)
 						if lhs != amd64.RDI {
 							e.MovRegReg(amd64.RDI, lhs)
 						}
-						rhs, err := loadRawValue(bi.RHS, amd64.RSI)
-						if err != nil {
-							return nil, err
-						}
+						rhs := loadRawValue(bi.RHS, amd64.RSI)
 						if rhs != amd64.RSI {
 							e.MovRegReg(amd64.RSI, rhs)
 						}
@@ -977,14 +960,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						continue
 					}
 					if isNumberType(bi.LHS.Type()) || isNumberType(bi.RHS.Type()) {
-						lhsReg, err := loadOperand(bi.LHS, amd64.R10)
-						if err != nil {
-							return nil, err
-						}
-						rhsReg, err := loadOperand(bi.RHS, amd64.R11)
-						if err != nil {
-							return nil, err
-						}
+						lhsReg := loadOperand(bi.LHS, amd64.R10)
+						rhsReg := loadOperand(bi.RHS, amd64.R11)
 						e.MovQXMMReg(amd64.XMM0, lhsReg)
 						e.MovQXMMReg(amd64.XMM1, rhsReg)
 						switch bi.Op {
@@ -1039,14 +1016,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						continue
 					}
 
-					lhsReg, err := loadOperand(bi.LHS, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
-					rhsReg, err := loadOperand(bi.RHS, amd64.R11)
-					if err != nil {
-						return nil, err
-					}
+					lhsReg := loadOperand(bi.LHS, amd64.R10)
+					rhsReg := loadOperand(bi.RHS, amd64.R11)
 					e.MovRegReg(amd64.R10, lhsReg)
 					switch bi.Op {
 					case ir.OpAnd:
@@ -1068,10 +1039,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					if bi.Op != "-" || !isNumberType(bi.Val.Type()) {
 						return nil, fmt.Errorf("unsupported AMD64 unary op %q", bi.Op)
 					}
-					src, err := loadOperand(bi.Val, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
+					src := loadOperand(bi.Val, amd64.R10)
 					if src != amd64.R10 {
 						e.MovRegReg(amd64.R10, src)
 					}
@@ -1086,77 +1054,50 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					storeSSAValue(bi.Res, amd64.RAX)
 
 				case *ir.GetFieldInst:
-					obj, err := loadOperand(bi.Obj, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
+					obj := loadOperand(bi.Obj, amd64.R10)
 					e.MovRegDeref(amd64.R11, obj, int32(bi.Offset))
 					storeSSAValue(bi.Res, amd64.R11)
 
 				case *ir.SetFieldInst:
-					obj, err := loadOperand(bi.Obj, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
+					obj := loadOperand(bi.Obj, amd64.R10)
 					if obj != amd64.R10 {
 						e.MovRegReg(amd64.R10, obj)
 					}
-					val, err := loadRawValue(bi.Val, amd64.R11)
-					if err != nil {
-						return nil, err
-					}
+					val := loadRawValue(bi.Val, amd64.R11)
 					if val != amd64.R11 {
 						e.MovRegReg(amd64.R11, val)
 					}
 					e.MovDerefReg(amd64.R10, int32(bi.Offset), amd64.R11)
 
 				case *ir.AllocArrayInst:
-					if err := loadArrayIndex(bi.Length, amd64.RDI); err != nil {
-						return nil, err
-					}
+					loadArrayIndex(bi.Length, amd64.RDI)
 					e.MovRegImm64(amd64.RSI, amd64ArrayElementClass(bi.ElemType))
 					emitRuntimeCall("ts_array_new")
 					storeSSAValue(bi.Res, amd64.RAX)
 
 				case *ir.GetElementInst:
-					arr, err := loadOperand(bi.Array, amd64.RDI)
-					if err != nil {
-						return nil, err
-					}
+					arr := loadOperand(bi.Array, amd64.RDI)
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
-					if err := loadArrayIndex(bi.Index, amd64.RSI); err != nil {
-						return nil, err
-					}
+					loadArrayIndex(bi.Index, amd64.RSI)
 					emitRuntimeCall("ts_array_get")
 					storeSSAValue(bi.Res, amd64.RAX)
 
 				case *ir.SetElementInst:
-					arr, err := loadOperand(bi.Array, amd64.RDI)
-					if err != nil {
-						return nil, err
-					}
+					arr := loadOperand(bi.Array, amd64.RDI)
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
-					if err := loadArrayIndex(bi.Index, amd64.RSI); err != nil {
-						return nil, err
-					}
-					val, err := loadRawValue(bi.Val, amd64.RDX)
-					if err != nil {
-						return nil, err
-					}
+					loadArrayIndex(bi.Index, amd64.RSI)
+					val := loadRawValue(bi.Val, amd64.RDX)
 					if val != amd64.RDX {
 						e.MovRegReg(amd64.RDX, val)
 					}
 					emitRuntimeCall("ts_array_set")
 
 				case *ir.ArrayLengthInst:
-					arr, err := loadOperand(bi.Array, amd64.RDI)
-					if err != nil {
-						return nil, err
-					}
+					arr := loadOperand(bi.Array, amd64.RDI)
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
@@ -1165,17 +1106,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					storeSSAValue(bi.Res, amd64.R10)
 
 				case *ir.ArrayPushInst:
-					arr, err := loadOperand(bi.Array, amd64.RDI)
-					if err != nil {
-						return nil, err
-					}
+					arr := loadOperand(bi.Array, amd64.RDI)
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
-					val, err := loadRawValue(bi.Val, amd64.RSI)
-					if err != nil {
-						return nil, err
-					}
+					val := loadRawValue(bi.Val, amd64.RSI)
 					if val != amd64.RSI {
 						e.MovRegReg(amd64.RSI, val)
 					}
@@ -1184,10 +1119,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					storeSSAValue(bi.Res, amd64.R10)
 
 				case *ir.ArrayPopInst:
-					arr, err := loadOperand(bi.Array, amd64.RDI)
-					if err != nil {
-						return nil, err
-					}
+					arr := loadOperand(bi.Array, amd64.RDI)
 					if arr != amd64.RDI {
 						e.MovRegReg(amd64.RDI, arr)
 					}
@@ -1208,10 +1140,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.MovRegImm64(amd64.R10, int64(bi.RefMask))
 					e.MovDerefReg(amd64.RAX, 16, amd64.R10)
 					for i, capture := range bi.Captures {
-						v, err := loadRawValue(capture, amd64.R11)
-						if err != nil {
-							return nil, err
-						}
+						v := loadRawValue(capture, amd64.R11)
 						if v != amd64.R11 {
 							e.MovRegReg(amd64.R11, v)
 						}
@@ -1220,18 +1149,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					storeSSAValue(bi.Res, amd64.RAX)
 
 				case *ir.ClosureGetInst:
-					closure, err := loadOperand(bi.Closure, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
+					closure := loadOperand(bi.Closure, amd64.R10)
 					e.MovRegDeref(amd64.R11, closure, int32(24+bi.Index*8))
 					storeSSAValue(bi.Res, amd64.R11)
 
 				case *ir.IndirectCallInst:
-					closure, err := loadOperand(bi.Closure, amd64.R10)
-					if err != nil {
-						return nil, err
-					}
+					closure := loadOperand(bi.Closure, amd64.R10)
 					if closure != amd64.RAX {
 						e.MovRegReg(amd64.RAX, closure)
 					}
@@ -1241,10 +1164,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					e.MovRegReg(amd64.RDI, amd64.RAX)
 					userGPRs := []amd64.Register{amd64.RSI, amd64.RDX, amd64.RCX, amd64.R8, amd64.R9}
 					if bi.ThisArg != nil {
-						thisReg, err := loadRawValue(bi.ThisArg, amd64.R10)
-						if err != nil {
-							return nil, err
-						}
+						thisReg := loadRawValue(bi.ThisArg, amd64.R10)
 						if thisReg != amd64.RSI {
 							e.MovRegReg(amd64.RSI, thisReg)
 						}
@@ -1253,10 +1173,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					gprArg, xmmArg := 0, 0
 					stackArgs := make([]ir.Operand, 0)
 					emitIndirectGPRArg := func(dst amd64.Register, arg ir.Operand) error {
-						v, err := loadRawValue(arg, amd64.R10)
-						if err != nil {
-							return err
-						}
+						v := loadRawValue(arg, amd64.R10)
 						if v != dst {
 							e.MovRegReg(dst, v)
 						}
@@ -1269,10 +1186,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 						if isNumberType(argType) {
 							if xmmArg < len(amd64NumberParamRegs) {
-								v, err := loadOperand(arg, amd64.R10)
-								if err != nil {
-									return nil, err
-								}
+								v := loadOperand(arg, amd64.R10)
 								e.MovQXMMReg(amd64NumberParamRegs[xmmArg], v)
 								xmmArg++
 							} else {
@@ -1281,9 +1195,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 							continue
 						}
 						if gprArg < len(userGPRs) {
-							if err := emitIndirectGPRArg(userGPRs[gprArg], arg); err != nil {
-								return nil, err
-							}
+							emitIndirectGPRArg(userGPRs[gprArg], arg)
 							gprArg++
 						} else {
 							stackArgs = append(stackArgs, arg)
@@ -1296,9 +1208,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						e.SubRegImm32(amd64.RSP, 8)
 					}
 					for i := len(stackArgs) - 1; i >= 0; i-- {
-						if err := emitIndirectGPRArg(amd64.R10, stackArgs[i]); err != nil {
-							return nil, err
-						}
+						emitIndirectGPRArg(amd64.R10, stackArgs[i])
 						e.Push(amd64.R10)
 					}
 					e.MovRegDeref(amd64.R11, amd64.RAX, 0)
@@ -1326,10 +1236,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 							strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: dst, str: v.Value})
 							return nil
 						default:
-							src, err := loadOperand(arg, amd64.R10)
-							if err != nil {
-								return err
-							}
+							src := loadOperand(arg, amd64.R10)
 							if src != dst {
 								e.MovRegReg(dst, src)
 							}
@@ -1343,10 +1250,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 						if isNumberType(argType) {
 							if xmmArg < len(amd64NumberParamRegs) {
-								src, err := loadOperand(arg, amd64.R10)
-								if err != nil {
-									return nil, err
-								}
+								src := loadOperand(arg, amd64.R10)
 								e.MovQXMMReg(amd64NumberParamRegs[xmmArg], src)
 								xmmArg++
 							} else {
@@ -1355,9 +1259,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 							continue
 						}
 						if gprArg < len(amd64ParamRegs) {
-							if err := emitGPRArg(amd64ParamRegs[gprArg], arg); err != nil {
-								return nil, err
-							}
+							emitGPRArg(amd64ParamRegs[gprArg], arg)
 							gprArg++
 						} else {
 							stackArgs = append(stackArgs, arg)
@@ -1371,9 +1273,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						e.SubRegImm32(amd64.RSP, 8)
 					}
 					for i := len(stackArgs) - 1; i >= 0; i-- {
-						if err := emitGPRArg(amd64.R10, stackArgs[i]); err != nil {
-							return nil, err
-						}
+						emitGPRArg(amd64.R10, stackArgs[i])
 						e.Push(amd64.R10)
 					}
 
@@ -1393,8 +1293,6 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 						}
 					}
 
-				default:
-					return nil, fmt.Errorf("unsupported AMD64 instruction %T", inst)
 				}
 			}
 
@@ -1403,20 +1301,14 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				case *ir.ReturnTerm:
 					if term.Val != nil {
 						if isNumberType(fn.ReturnType) {
-							src, err := loadOperand(term.Val, amd64.R10)
-							if err != nil {
-								return nil, err
-							}
+							src := loadOperand(term.Val, amd64.R10)
 							e.MovQXMMReg(amd64.XMM0, src)
 						} else if str, ok := term.Val.(ir.ConstString); ok {
 							strOffset := len(e.Code)
 							e.LeaRipRel32(amd64.RAX, 0)
 							strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: amd64.RAX, str: str.Value})
 						} else {
-							src, err := loadOperand(term.Val, amd64.RAX)
-							if err != nil {
-								return nil, err
-							}
+							src := loadOperand(term.Val, amd64.RAX)
 							if src != amd64.RAX {
 								e.MovRegReg(amd64.RAX, src)
 							}
@@ -1830,9 +1722,6 @@ func emitAMD64PrintBool(e *amd64.Emitter, trueOffset, falseOffset int) {
 
 func emitAMD64PrintLiteral(e *amd64.Emitter, text string) {
 	size := ((len(text) + 15) / 16) * 16
-	if size == 0 {
-		size = 16
-	}
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
 	e.SubRegImm32(amd64.RSP, int32(size))

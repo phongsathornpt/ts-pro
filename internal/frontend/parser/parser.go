@@ -43,13 +43,6 @@ func (p *Parser) current() token.Token {
 	return p.tokens[p.cursor]
 }
 
-func (p *Parser) peek() token.Token {
-	if p.cursor+1 >= len(p.tokens) {
-		return token.Token{Kind: token.EOF}
-	}
-	return p.tokens[p.cursor+1]
-}
-
 func (p *Parser) advance() token.Token {
 	tok := p.current()
 	if p.cursor < len(p.tokens) {
@@ -88,13 +81,17 @@ func (p *Parser) error(span source.Span, msg string) {
 	})
 }
 
-func (p *Parser) ensureProgress(start int, context string) {
+func (p *Parser) EnsureProgress(start int, context string) {
 	if p.cursor != start || p.current().Kind == token.EOF {
 		return
 	}
 	tok := p.current()
 	p.error(tok.Span, fmt.Sprintf("parser made no progress while parsing %s at %s", context, tok.Kind))
 	p.advance()
+}
+
+func (p *Parser) ensureProgress(start int, context string) {
+	p.EnsureProgress(start, context)
 }
 
 // Parse parses the whole program.
@@ -105,11 +102,7 @@ func (p *Parser) Parse() (*ast.Program, diag.DiagnosticList) {
 	for p.current().Kind != token.EOF {
 		loopStart := p.cursor
 		stmt := p.parseStatement()
-		if stmt != nil {
-			stmts = append(stmts, stmt)
-		} else {
-			p.advance() // recover
-		}
+		stmts = append(stmts, stmt)
 		p.ensureProgress(loopStart, "top-level statement")
 	}
 
@@ -314,9 +307,6 @@ func (p *Parser) parseTypeArgsAfterLt() []ast.TypeNode {
 }
 
 func (p *Parser) tryParseCallTypeArgs() ([]ast.TypeNode, bool) {
-	if p.current().Kind != token.Lt {
-		return nil, false
-	}
 	savedCursor := p.cursor
 	savedDiagLen := len(p.diagnostics)
 	p.advance()
@@ -588,11 +578,7 @@ func (p *Parser) parseBlock() *ast.BlockStmt {
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
 		loopStart := p.cursor
 		stmt := p.parseStatement()
-		if stmt != nil {
-			stmts = append(stmts, stmt)
-		} else {
-			p.advance()
-		}
+		stmts = append(stmts, stmt)
 		p.ensureProgress(loopStart, "block statement")
 	}
 	rbrace := p.expect(token.RBrace)
@@ -913,9 +899,7 @@ func (p *Parser) tryParseArrowExpr() (ast.Expr, bool) {
 	startDiags := len(p.diagnostics)
 	start := p.current().Span.Start
 
-	if !p.match(token.LParen) {
-		return nil, false
-	}
+	p.advance() // consume '('
 	params := p.parseParams()
 	if p.current().Kind != token.RParen {
 		p.cursor = startCursor
@@ -952,9 +936,7 @@ func (p *Parser) tryParseFunctionType() (ast.TypeNode, bool) {
 	startCursor := p.cursor
 	startDiags := len(p.diagnostics)
 	start := p.current().Span.Start
-	if !p.match(token.LParen) {
-		return nil, false
-	}
+	p.advance() // consume '('
 	// A nested '(' immediately after the opening paren means this is type
 	// grouping such as (() => number), not a function parameter list.
 	if p.current().Kind == token.LParen {

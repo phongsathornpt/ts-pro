@@ -42,3 +42,19 @@ func TestSysWrite(t *testing.T) {
 		t.Fatalf("read pipe failed: %v, got %q", err, string(buf))
 	}
 }
+
+func TestSysExit(t *testing.T) {
+	called := false
+	orig := SysExitHook
+	defer func() { SysExitHook = orig }()
+	SysExitHook = func(code int) {
+		called = true
+		if code != 42 {
+			t.Errorf("expected exit code 42, got %d", code)
+		}
+	}
+	Exit(42)
+	if !called {
+		t.Errorf("SysExitHook was not called")
+	}
+}

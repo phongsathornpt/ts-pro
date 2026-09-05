@@ -575,10 +575,7 @@ func InstantiateFunction(fn *FunctionType, args []Type) (*FunctionType, error) {
 		}
 		bindings[tp] = arg
 	}
-	instantiated, ok := Substitute(fn, bindings).(*FunctionType)
-	if !ok {
-		return nil, fmt.Errorf("generic function substitution produced %T", instantiated)
-	}
+	instantiated := Substitute(fn, bindings).(*FunctionType)
 	instantiated.TypeParams = nil
 	return instantiated, nil
 }

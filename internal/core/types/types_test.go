@@ -460,3 +460,104 @@ func TestTypesComprehensive(t *testing.T) {
 		t.Errorf("Substitute on object failed: got %v", subObj)
 	}
 }
+
+func TestTypesEdgeCasesCoverage(t *testing.T) {
+	// 1. Any type AssignableTo and Equals
+	_ = TypeAny.AssignableTo(TypeNumber)
+
+	// 2. Tuple Equals mismatched elements and Tuple AssignableTo Union
+	t1 := NewTuple(TypeNumber, TypeString)
+	t2 := NewTuple(TypeNumber, TypeBoolean)
+	_ = t1.Equals(t2)
+	uTup := NewUnion(t1, TypeBoolean)
+	_ = t1.AssignableTo(uTup)
+	_ = t1.AssignableTo(TypeBoolean) // false branch
+
+	// 3. Object AssignableTo non-union non-object
+	obj := NewObject("O")
+	_ = obj.AssignableTo(TypeNumber)
+
+	// 4. FunctionType String with type params and this
+	tvX := NewTypeVar("X", nil)
+	fnGeneric := NewGenericFunction([]*TypeVar{tvX}, []Param{{Name: "x", Type: tvX}}, tvX)
+	fnGeneric.This = TypeString
+	_ = fnGeneric.String()
+
+	// 5. FunctionType Equals branches
+	fnA := NewFunction([]Param{{Name: "p", Type: TypeNumber}}, TypeString)
+	fnB := NewFunction([]Param{{Name: "p", Type: TypeNumber}}, TypeString)
+	fnB.This = TypeNumber
+	_ = fnA.Equals(fnB)
+	fnC := NewFunction([]Param{{Name: "p", Type: TypeNumber}}, TypeString)
+	fnC.This = TypeString
+	_ = fnB.Equals(fnC) // different this types
+
+	fnGen1 := NewGenericFunction([]*TypeVar{tvX}, nil, TypeVoid)
+	tvY := NewTypeVar("Y", nil)
+	fnGen2 := NewGenericFunction([]*TypeVar{tvY}, nil, TypeVoid)
+	_ = fnGen1.Equals(fnGen2) // different type params
+
+	fnRest1 := NewFunction([]Param{{Name: "a", Type: TypeNumber, Rest: true}}, TypeVoid)
+	fnRest2 := NewFunction([]Param{{Name: "a", Type: TypeNumber, Rest: false}}, TypeVoid)
+	_ = fnRest1.Equals(fnRest2)
+
+	// 6. FunctionType AssignableTo branches
+	fnRetMismatch := NewFunction(nil, TypeString)
+	fnRetTarget := NewFunction(nil, TypeNumber)
+	_ = fnRetMismatch.AssignableTo(fnRetTarget) // return mismatch
+	fnParamCountMismatch := NewFunction([]Param{{Name: "a", Type: TypeNumber}, {Name: "b", Type: TypeNumber}}, TypeVoid)
+	fnTargetLessParams := NewFunction([]Param{{Name: "a", Type: TypeNumber}}, TypeVoid)
+	_ = fnParamCountMismatch.AssignableTo(fnTargetLessParams)
+	fnParamTypeMismatch := NewFunction([]Param{{Name: "a", Type: TypeNumber}}, TypeVoid)
+	fnTargetMismatchParam := NewFunction([]Param{{Name: "a", Type: TypeString}}, TypeVoid)
+	_ = fnParamTypeMismatch.AssignableTo(fnTargetMismatchParam)
+
+	// 7. UnionType Equals and ContainsAssignable
+	u1 := NewUnion(TypeNumber, TypeString)
+	u2 := NewUnion(TypeNumber, TypeBoolean)
+	_ = u1.Equals(u2)                // len same, not equal
+	_ = u1.AssignableTo(TypeBoolean) // false branch
+
+	// 8. Substitute function with unbounded type params
+	tvUnbound := NewTypeVar("Unbound", nil)
+	fnPartial := NewGenericFunction([]*TypeVar{tvX, tvUnbound}, nil, tvX)
+	_ = Substitute(fnPartial, map[*TypeVar]Type{tvX: TypeNumber})
+
+	// 9. inferTypeBindings error branches
+	_, _ = InferFunction(nil, nil)
+	_ = Substitute(nil, nil)
+
+	// Array pattern with non-array actual
+	tvElem := NewTypeVar("Elem", nil)
+	fnArrPat := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "a", Type: NewArray(tvElem)}}, tvElem)
+	_, _ = InferFunction(fnArrPat, []Type{TypeNumber}) // non-array actual
+
+	// Tuple pattern with non-tuple or wrong length actual
+	fnTupPat := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "t", Type: NewTuple(tvElem, tvElem)}}, tvElem)
+	_, _ = InferFunction(fnTupPat, []Type{TypeNumber})           // non-tuple actual
+	_, _ = InferFunction(fnTupPat, []Type{NewTuple(TypeNumber)}) // length mismatch
+
+	// Function pattern with non-function or wrong param count actual
+	fnFnPat := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "f", Type: NewFunction([]Param{{Name: "x", Type: tvElem}}, TypeVoid)}}, tvElem)
+	_, _ = InferFunction(fnFnPat, []Type{TypeNumber})                 // non-function
+	_, _ = InferFunction(fnFnPat, []Type{NewFunction(nil, TypeVoid)}) // param count mismatch
+
+	// Object pattern with non-object actual
+	objPat := NewObject("PatObj")
+	objPat.AddField("f", tvElem, false)
+	fnObjPat := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "o", Type: objPat}}, tvElem)
+	_, _ = InferFunction(fnObjPat, []Type{TypeNumber}) // non-object
+	objArgMissing := NewObject("Missing")
+	_, _ = InferFunction(fnObjPat, []Type{objArgMissing}) // missing field
+
+	// InferFunction when params > actualArgs
+	fnTwoParams := NewGenericFunction([]*TypeVar{tvElem}, []Param{{Name: "a", Type: tvElem}, {Name: "b", Type: TypeNumber}}, tvElem)
+	_, _ = InferFunction(fnTwoParams, []Type{TypeNumber})
+
+	// FunctionBindings error paths
+	_, _ = FunctionBindings(fnGeneric, fnA) // type params len mismatch
+	fnNoTypeParams := NewFunction(nil, TypeVoid)
+	fnWithTypeParams := NewGenericFunction([]*TypeVar{tvX}, nil, TypeVoid)
+	_, _ = FunctionBindings(fnWithTypeParams, fnNoTypeParams)
+	_, _ = FunctionBindings(fnGeneric, NewGenericFunction([]*TypeVar{tvX}, []Param{{Name: "x", Type: TypeNumber}}, TypeNumber))
+}

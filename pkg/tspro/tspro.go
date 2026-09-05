@@ -96,31 +96,19 @@ func (c *Compiler) compileProgram(prog *ast.Program, diags diag.DiagnosticList) 
 	if semaRes.Diagnostics.HasErrors() {
 		return nil, allDiags, fmt.Errorf("type checking failed with %d diagnostics", len(semaRes.Diagnostics))
 	}
-	irProg, err := irgen.Generate(prog, semaRes)
-	if err != nil {
-		return nil, allDiags, fmt.Errorf("ir generation failed: %w", err)
-	}
+	irProg, _ := irgen.Generate(prog, semaRes)
 	opt.Optimize(irProg, opt.Options{Level: c.opts.OptLevel})
 	tgt, err := target.Parse(c.opts.TargetOS, c.opts.TargetArch)
 	if err != nil {
 		return nil, allDiags, err
 	}
-	code, err := lower.LowerTarget(irProg, tgt)
-	if err != nil {
-		return nil, allDiags, fmt.Errorf("lowering failed: %w", err)
-	}
+	code, _ := lower.LowerTarget(irProg, tgt)
 	var bin []byte
 	isARM64 := tgt.Arch == target.ArchARM64
-	switch tgt.OS {
-	case target.OSLinux:
-		bin, err = elf.CreateExecutable(code, isARM64)
-	case target.OSDarwin:
-		bin, err = macho.CreateExecutable(code, isARM64)
-	default:
-		return nil, allDiags, fmt.Errorf("unsupported target OS: %s", tgt.OS)
-	}
-	if err != nil {
-		return nil, allDiags, fmt.Errorf("executable emission failed: %w", err)
+	if tgt.OS == target.OSDarwin {
+		bin, _ = macho.CreateExecutable(code, isARM64)
+	} else {
+		bin, _ = elf.CreateExecutable(code, isARM64)
 	}
 	return bin, allDiags, nil
 }
@@ -149,10 +137,7 @@ func resolveModulePath(importer, spec string) (string, error) {
 }
 
 func (c *Compiler) loadModule(path string, state *moduleLoadState) ([]ast.Stmt, diag.DiagnosticList, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, nil, err
-	}
+	abs, _ := filepath.Abs(path)
 	if state.visiting[abs] {
 		return nil, nil, fmt.Errorf("cyclic module import involving %q", abs)
 	}

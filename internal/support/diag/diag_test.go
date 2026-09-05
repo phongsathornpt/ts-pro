@@ -53,4 +53,20 @@ func TestDiagnosticFormat(t *testing.T) {
 	// Format without fileset or invalid span
 	dNoSpan := Diagnostic{Message: "plain message"}
 	_ = dNoSpan.Format(nil)
+
+	// Format without code
+	dNoCode := Diagnostic{Span: source.Span{Start: cPos, End: cPos + 1}, Message: "no code"}
+	_ = dNoCode.Format(fs)
+
+	// Format with unknown span (file == nil)
+	dUnknown := Diagnostic{Span: source.Span{Start: 99999, End: 100000}, Message: "unknown"}
+	_ = dUnknown.Format(fs)
+
+	// Format with zero-width span
+	dZero := Diagnostic{Span: source.Span{Start: cPos, End: cPos}, Message: "zero width"}
+	_ = dZero.Format(fs)
+
+	// Format with long caret clamped
+	dClamped := Diagnostic{Span: source.Span{Start: cPos, End: cPos + 500}, Message: "clamped"}
+	_ = dClamped.Format(fs)
 }

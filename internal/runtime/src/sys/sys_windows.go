@@ -28,9 +28,14 @@ func Write(fd int, p []byte) (int, error) {
 	return int(done), err
 }
 
+// SysExitHook allows intercepting Exit in tests.
+var SysExitHook = func(code int) {
+	procExitProcess.Call(uintptr(code))
+}
+
 // Exit exits the process.
 func Exit(code int) {
-	procExitProcess.Call(uintptr(code))
+	SysExitHook(code)
 }
 
 // Mmap allocates virtual memory pages via VirtualAlloc.

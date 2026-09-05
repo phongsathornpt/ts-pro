@@ -13,3 +13,5 @@
 /.tspro/
 /examples/concurrency/__test_*.ts
 
+.claude
+.codex

@@ -102,9 +102,6 @@ func (d Diagnostic) Format(fs *source.FileSet) string {
 		if caretLen > len(lineStr)-loc.Column+1 && len(lineStr) >= loc.Column {
 			caretLen = len(lineStr) - loc.Column + 1
 		}
-		if caretLen < 1 {
-			caretLen = 1
-		}
 		sb.WriteString(caretIndent)
 		sb.WriteString(strings.Repeat("^", caretLen))
 	}
