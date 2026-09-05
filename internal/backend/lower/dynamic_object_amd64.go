@@ -10,7 +10,8 @@ const (
 	amd64DynamicCount     int32 = 0
 	amd64DynamicCapacity  int32 = 8
 	amd64DynamicEntries   int32 = 16
-	amd64DynamicPayload   int32 = 24
+	amd64DynamicLastIndex int32 = 24
+	amd64DynamicPayload   int32 = 32
 	amd64DynamicEntrySize       = 16
 )
 
@@ -58,6 +59,8 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R10)
 	e.MovDerefReg(amd64.RBX, amd64DynamicCapacity, amd64.R12)
 	e.MovDerefReg(amd64.RBX, amd64DynamicEntries, amd64.RAX)
+	e.MovRegImm64(amd64.R10, -1)
+	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R10)
 
 	// Unlink temporary root frame and box the stable object payload.
 	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
@@ -99,6 +102,39 @@ func emitAMD64DynamicGet(e *amd64.Emitter, stringEqOffset int) {
 	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
 	e.AndRegReg(amd64.RBX, amd64.R10)
 	e.MovRegReg(amd64.R12, amd64.RSI)
+
+	// Repeated property access is common in loops. Probe the last successful
+	// slot first, then fall back to the linear table scan on a cache miss.
+	e.MovRegDeref(amd64.R13, amd64.RBX, amd64DynamicLastIndex)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
+	e.CmpRegReg(amd64.R13, amd64.R10)
+	cacheInvalid := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
+	e.MovRegReg(amd64.R11, amd64.R13)
+	for range 4 {
+		e.AddRegReg(amd64.R11, amd64.R11)
+	}
+	e.AddRegReg(amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	e.MovRegReg(amd64.RSI, amd64.R12)
+	cacheEqCall := len(e.Code)
+	e.CallRel32(int32(stringEqOffset - (cacheEqCall + 5)))
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	cacheMiss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
+	e.MovRegReg(amd64.R11, amd64.R13)
+	for range 4 {
+		e.AddRegReg(amd64.R11, amd64.R11)
+	}
+	e.AddRegReg(amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.RAX, amd64.R10, 8)
+	emitReturn()
+
+	linearScan := len(e.Code)
+	patchJcc(cacheInvalid, linearScan)
+	patchJcc(cacheMiss, linearScan)
 	e.MovRegImm64(amd64.R13, 0)
 
 	loop := len(e.Code)
@@ -126,6 +162,7 @@ func emitAMD64DynamicGet(e *amd64.Emitter, stringEqOffset int) {
 
 	foundLabel := len(e.Code)
 	patchJcc(found, foundLabel)
+	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R13)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
 	e.MovRegReg(amd64.R11, amd64.R13)
 	for range 4 {
@@ -168,6 +205,38 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	e.AndRegReg(amd64.RBX, amd64.R10)
 	e.MovRegReg(amd64.R12, amd64.RSI)
 	e.MovRegReg(amd64.R13, amd64.RDX)
+
+	e.MovRegDeref(amd64.R14, amd64.RBX, amd64DynamicLastIndex)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
+	e.CmpRegReg(amd64.R14, amd64.R10)
+	cacheInvalid := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
+	e.MovRegReg(amd64.R11, amd64.R14)
+	for range 4 {
+		e.AddRegReg(amd64.R11, amd64.R11)
+	}
+	e.AddRegReg(amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	e.MovRegReg(amd64.RSI, amd64.R12)
+	cacheEqCall := len(e.Code)
+	e.CallRel32(int32(stringEqOffset - (cacheEqCall + 5)))
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	cacheMiss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
+	e.MovRegReg(amd64.R11, amd64.R14)
+	for range 4 {
+		e.AddRegReg(amd64.R11, amd64.R11)
+	}
+	e.AddRegReg(amd64.R10, amd64.R11)
+	e.MovDerefReg(amd64.R10, 8, amd64.R13)
+	e.MovRegReg(amd64.RAX, amd64.R13)
+	emitReturn()
+
+	linearSearch := len(e.Code)
+	patchJcc(cacheInvalid, linearSearch)
+	patchJcc(cacheMiss, linearSearch)
 	e.MovRegImm64(amd64.R14, 0)
 
 	search := len(e.Code)
@@ -195,6 +264,7 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 
 	foundLabel := len(e.Code)
 	patchJcc(found, foundLabel)
+	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R14)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
 	e.MovRegReg(amd64.R11, amd64.R14)
 	for range 4 {
@@ -281,6 +351,7 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	e.AddRegReg(amd64.R10, amd64.R11)
 	e.MovDerefReg(amd64.R10, 0, amd64.R12)
 	e.MovDerefReg(amd64.R10, 8, amd64.R13)
+	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R14)
 	e.AddRegImm32(amd64.R14, 1)
 	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R14)
 	e.MovRegReg(amd64.RAX, amd64.R13)
