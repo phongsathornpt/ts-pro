@@ -1888,10 +1888,8 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 	e.MovRegImm64(amd64.R11, -16)
 	e.AndRegReg(amd64.RBX, amd64.R11)
 
-	// Reclaimed blocks are preferred over fresh bump space.
-	emitFreeSearch()
-
-	// Fast bump allocation from the current chunk.
+	// Keep the common allocation path O(1): consume fresh bump space before
+	// consulting the reclaimed-block list. Fragment reuse is a pressure path.
 	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTCursor)
 	e.MovRegReg(amd64.R10, amd64.RAX)
 	e.AddRegReg(amd64.R10, amd64.RBX)
@@ -1906,9 +1904,12 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
 	emitReturn()
 
-	// On pressure, collect before mapping another chunk.
+	// On bump-space pressure, reuse a reclaimed block before paying for GC.
 	collectLabel := len(e.Code)
 	patchJcc(collect, collectLabel)
+	emitFreeSearch()
+
+	// No reusable block fits, so collect before mapping another chunk.
 	callAt := len(e.Code)
 	e.CallRel32(int32(gcOffset - (callAt + 5)))
 	emitFreeSearch()
