@@ -117,7 +117,7 @@ func TestE2ECoverageBridges(t *testing.T) {
 	span := source.Span{Start: 1, End: 10}
 	astExprs := []ast.Expr{
 		&ast.IdentExpr{SourceSpan: span, Name: "x"},
-		&ast.NumberLit{SourceSpan: span, Value: 42, Raw: "42"},
+		&ast.NumberLit{SourceSpan: span, Value: 42},
 		&ast.StringLit{SourceSpan: span, Value: "hello"},
 		&ast.RegexLit{SourceSpan: span, Pattern: "abc", Flags: "g"},
 		&ast.BoolLit{SourceSpan: span, Value: true},

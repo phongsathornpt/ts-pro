@@ -12,7 +12,7 @@ func TestAllASTNodes(t *testing.T) {
 
 	exprs := []Expr{
 		&IdentExpr{SourceSpan: span, Name: "x"},
-		&NumberLit{SourceSpan: span, Value: 42, Raw: "42"},
+		&NumberLit{SourceSpan: span, Value: 42},
 		&StringLit{SourceSpan: span, Value: "hello"},
 		&RegexLit{SourceSpan: span, Pattern: "abc", Flags: "g"},
 		&BoolLit{SourceSpan: span, Value: true},

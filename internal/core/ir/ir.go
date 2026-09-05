@@ -387,8 +387,6 @@ type BasicBlock struct {
 	Phis         []*PhiInst
 	Instructions []Instruction
 	Terminator   Terminator
-	Predecessors []*BasicBlock
-	Successors   []*BasicBlock
 }
 
 // Function represents a compiled function in IR.
