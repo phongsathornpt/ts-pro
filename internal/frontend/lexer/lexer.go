@@ -1,7 +1,6 @@
 package lexer
 
 import (
-	"strconv"
 	"unicode"
 	"unicode/utf8"
 
@@ -362,7 +361,6 @@ func (l *Lexer) scanNumber(startPos source.Pos) token.Token {
 
 func (l *Lexer) scanString(startPos source.Pos, quote rune) token.Token {
 	l.nextChar() // consume opening quote
-	start := l.offset
 	var buf []rune
 	for l.ch != quote && l.ch != -1 && l.ch != '\n' {
 		if l.ch == '\\' {
@@ -400,7 +398,6 @@ func (l *Lexer) scanString(startPos source.Pos, quote rune) token.Token {
 		l.nextChar() // consume closing quote
 	}
 
-	_ = start
 	return token.Token{
 		Kind: token.String,
 		Span: source.Span{Start: startPos, End: l.currentPos()},
@@ -464,9 +461,4 @@ func TokenizeAll(file *source.File) ([]token.Token, diag.DiagnosticList) {
 		}
 	}
 	return list, lex.Diagnostics()
-}
-
-// ParseFloat converts token text to float64 value.
-func ParseFloat(text string) (float64, error) {
-	return strconv.ParseFloat(text, 64)
 }

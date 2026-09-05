@@ -9,8 +9,7 @@ import (
 type TypeKind uint8
 
 const (
-	KindInvalid TypeKind = iota
-	KindAny
+	KindAny TypeKind = iota
 	KindUnknown
 	KindNever
 	KindVoid

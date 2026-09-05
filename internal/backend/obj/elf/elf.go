@@ -7,15 +7,10 @@ import (
 
 // Linux ELF64 constants
 const (
-	EI_MAG0    = 0
-	EI_MAG1    = 1
-	EI_MAG2    = 2
-	EI_MAG3    = 3
 	EI_CLASS   = 4
 	EI_DATA    = 5
 	EI_VERSION = 6
 	EI_OSABI   = 7
-	EI_NIDENT  = 16
 
 	ELFCLASS64    = 2
 	ELFDATA2LSB   = 1
@@ -29,7 +24,6 @@ const (
 
 	PT_LOAD = 1
 	PF_X    = 1
-	PF_W    = 2
 	PF_R    = 4
 )
 

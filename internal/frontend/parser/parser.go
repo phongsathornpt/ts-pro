@@ -32,10 +32,6 @@ func New(file *source.File) *Parser {
 	}
 }
 
-func (p *Parser) Diagnostics() diag.DiagnosticList {
-	return p.diagnostics
-}
-
 func (p *Parser) current() token.Token {
 	if p.cursor >= len(p.tokens) {
 		return token.Token{Kind: token.EOF}
@@ -240,7 +236,7 @@ func (p *Parser) parseVarDecl() *ast.VarDeclStmt {
 				var expr ast.Expr
 				if arrayPattern {
 					i, _ := strconv.Atoi(bind.sourceName)
-					expr = &ast.IndexExpr{SourceSpan: bind.span, Target: base, Index: &ast.NumberLit{SourceSpan: bind.span, Value: float64(i), Raw: bind.sourceName}}
+					expr = &ast.IndexExpr{SourceSpan: bind.span, Target: base, Index: &ast.NumberLit{SourceSpan: bind.span, Value: float64(i)}}
 				} else {
 					expr = &ast.MemberExpr{SourceSpan: bind.span, Object: base, Property: bind.sourceName}
 				}
@@ -1029,7 +1025,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 				SourceSpan: source.Span{Start: expr.Span().Start, End: propTok.Span.End},
 				Object:     expr,
 				Property:   propTok.Text,
-				Computed:   false,
 			}
 		case token.QuestionDot:
 			p.advance()
@@ -1038,7 +1033,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 				SourceSpan: source.Span{Start: expr.Span().Start, End: propTok.Span.End},
 				Object:     expr,
 				Property:   propTok.Text,
-				Computed:   false,
 				Optional:   true,
 			}
 		case token.LBracket:
@@ -1192,7 +1186,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case token.Number:
 		p.advance()
 		val, _ := strconv.ParseFloat(tok.Text, 64)
-		return &ast.NumberLit{SourceSpan: tok.Span, Value: val, Raw: tok.Text}
+		return &ast.NumberLit{SourceSpan: tok.Span, Value: val}
 	case token.String:
 		p.advance()
 		return &ast.StringLit{SourceSpan: tok.Span, Value: tok.Text}

@@ -19,7 +19,6 @@ const (
 	LC_LOAD_DYLINKER = 0xE
 	LC_LOAD_DYLIB    = 0xC
 
-	VM_PROT_NONE    = 0x0
 	VM_PROT_READ    = 0x1
 	VM_PROT_WRITE   = 0x2
 	VM_PROT_EXECUTE = 0x4
@@ -108,7 +107,7 @@ func CreateExecutable(code []byte, isARM64 bool) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	cpuType := uint32(CPU_TYPE_X86_64)
-	cpuSubtype := uint32(3) // CPU_SUBTYPE_X86_64_ALL
+	cpuSubtype := uint32(CPU_SUBTYPE_ALL)
 	if isARM64 {
 		cpuType = CPU_TYPE_ARM64
 		cpuSubtype = 0 // CPU_SUBTYPE_ARM64_ALL

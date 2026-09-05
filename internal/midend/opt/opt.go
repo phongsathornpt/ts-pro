@@ -17,11 +17,11 @@ func Optimize(prog *ir.Program, opts Options) {
 	}
 
 	for _, fn := range prog.Functions {
-		optimizeFunction(fn, opts)
+		optimizeFunction(fn)
 	}
 }
 
-func optimizeFunction(fn *ir.Function, opts Options) {
+func optimizeFunction(fn *ir.Function) {
 	changed := true
 	for i := 0; i < 5 && changed; i++ {
 		changed = false

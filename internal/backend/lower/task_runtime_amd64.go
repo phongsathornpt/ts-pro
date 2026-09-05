@@ -34,11 +34,8 @@ const (
 	amd64TaskWakeNS     int32 = 192
 	amd64TaskPayload    int32 = 200
 
-	amd64TaskResultVoid   int64 = 0
 	amd64TaskResultNumber int64 = 1
-	amd64TaskResultScalar int64 = 2
 	amd64TaskResultRef    int64 = 3
-	amd64TaskResultJS     int64 = 4
 
 	amd64TaskStackBytes int64 = 1 << 20
 )

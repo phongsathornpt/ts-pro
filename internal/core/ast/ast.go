@@ -54,7 +54,6 @@ type (
 	NumberLit struct {
 		SourceSpan source.Span
 		Value      float64
-		Raw        string
 	}
 
 	StringLit struct {
@@ -126,7 +125,6 @@ type (
 		SourceSpan source.Span
 		Object     Expr
 		Property   string
-		Computed   bool
 		Optional   bool
 	}
 
@@ -340,7 +338,6 @@ type (
 		SourceSpan source.Span
 		Name       string
 		TypeParams []string
-		Extends    []string
 		Fields     []InterfaceField
 	}
 

@@ -19,9 +19,6 @@ const (
 	Number
 	String
 	TemplateNoSubst
-	TemplateHead
-	TemplateMiddle
-	TemplateTail
 
 	// Keywords
 	KwLet
@@ -124,9 +121,6 @@ var tokens = [...]string{
 	Number:          "NUMBER",
 	String:          "STRING",
 	TemplateNoSubst: "TEMPLATE",
-	TemplateHead:    "TEMPLATE_HEAD",
-	TemplateMiddle:  "TEMPLATE_MIDDLE",
-	TemplateTail:    "TEMPLATE_TAIL",
 
 	KwLet:        "let",
 	KwConst:      "const",
@@ -232,7 +226,7 @@ func (k Kind) IsKeyword() bool {
 
 // IsLiteral reports whether the token is a literal.
 func (k Kind) IsLiteral() bool {
-	return k >= Ident && k <= TemplateTail
+	return k >= Ident && k <= TemplateNoSubst
 }
 
 // IsOperator reports whether the token is an operator.

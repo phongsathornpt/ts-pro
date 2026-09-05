@@ -96,19 +96,28 @@ func (c *Compiler) compileProgram(prog *ast.Program, diags diag.DiagnosticList) 
 	if semaRes.Diagnostics.HasErrors() {
 		return nil, allDiags, fmt.Errorf("type checking failed with %d diagnostics", len(semaRes.Diagnostics))
 	}
-	irProg, _ := irgen.Generate(prog, semaRes)
+	irProg, err := irgen.Generate(prog, semaRes)
+	if err != nil {
+		return nil, allDiags, err
+	}
 	opt.Optimize(irProg, opt.Options{Level: c.opts.OptLevel})
 	tgt, err := target.Parse(c.opts.TargetOS, c.opts.TargetArch)
 	if err != nil {
 		return nil, allDiags, err
 	}
-	code, _ := lower.LowerTarget(irProg, tgt)
+	code, err := lower.LowerTarget(irProg, tgt)
+	if err != nil {
+		return nil, allDiags, err
+	}
 	var bin []byte
 	isARM64 := tgt.Arch == target.ArchARM64
 	if tgt.OS == target.OSDarwin {
-		bin, _ = macho.CreateExecutable(code, isARM64)
+		bin, err = macho.CreateExecutable(code, isARM64)
 	} else {
-		bin, _ = elf.CreateExecutable(code, isARM64)
+		bin, err = elf.CreateExecutable(code, isARM64)
+	}
+	if err != nil {
+		return nil, allDiags, err
 	}
 	return bin, allDiags, nil
 }
