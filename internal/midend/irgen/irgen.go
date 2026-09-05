@@ -1231,7 +1231,7 @@ func (g *generator) lowerPromiseAggregateInput(expr ast.Expr) (ir.Operand, types
 	return g.makeImmediatePromiseTask(value, sourceType, settledType), settledType
 }
 
-func (g *generator) lowerPromiseLiteralAggregate(e *ast.CallExpr, member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type, literal *ast.ArrayLit) ir.Operand {
+func (g *generator) lowerPromiseLiteralAggregate(member *ast.MemberExpr, taskType *types.ObjectType, inner types.Type, literal *ast.ArrayLit) ir.Operand {
 
 	tasks := make([]ir.Operand, 0, len(literal.Elements))
 	resultTypes := make([]types.Type, 0, len(literal.Elements))
@@ -1579,7 +1579,7 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 		taskType := g.semanticType(e).(*types.ObjectType)
 		inner := g.semaResult.TaskResults[taskType.Name]
 		if literal, ok := e.Args[0].(*ast.ArrayLit); ok {
-			return g.lowerPromiseLiteralAggregate(e, member, taskType, inner, literal), true
+			return g.lowerPromiseLiteralAggregate(member, taskType, inner, literal), true
 		}
 		return g.lowerPromiseArrayAggregate(e, member, taskType, inner), true
 	}
@@ -3507,6 +3507,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			op = ir.OpGt
 		case token.GtEq:
 			op = ir.OpGe
+		case token.Pipe:
+			op = ir.OpOr
+		case token.Amp:
+			op = ir.OpAnd
 		default:
 			op = ir.OpAnd
 		}

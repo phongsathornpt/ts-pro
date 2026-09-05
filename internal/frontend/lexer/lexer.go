@@ -362,7 +362,6 @@ func (l *Lexer) scanNumber(startPos source.Pos) token.Token {
 
 func (l *Lexer) scanString(startPos source.Pos, quote rune) token.Token {
 	l.nextChar() // consume opening quote
-	start := l.offset
 	var buf []rune
 	for l.ch != quote && l.ch != -1 && l.ch != '\n' {
 		if l.ch == '\\' {
@@ -400,7 +399,6 @@ func (l *Lexer) scanString(startPos source.Pos, quote rune) token.Token {
 		l.nextChar() // consume closing quote
 	}
 
-	_ = start
 	return token.Token{
 		Kind: token.String,
 		Span: source.Span{Start: startPos, End: l.currentPos()},

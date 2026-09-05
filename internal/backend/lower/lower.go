@@ -117,7 +117,6 @@ type branchFixupAMD64 struct {
 	offset   int
 	targetBB *ir.BasicBlock
 	isCond   bool
-	condReg  amd64.Register
 }
 
 type stringFixupARM64 struct {

@@ -898,8 +898,7 @@ func (c *Checker) checkBlock(b *ast.BlockStmt) {
 }
 
 func (c *Checker) checkIf(s *ast.IfStmt) {
-	condType := c.checkExpr(s.Cond)
-	_ = condType
+	c.checkExpr(s.Cond)
 	c.checkStatement(s.Then)
 	if s.Else != nil {
 		c.checkStatement(s.Else)
