@@ -1171,12 +1171,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 					}
 					gprArg, xmmArg := 0, 0
 					stackArgs := make([]ir.Operand, 0)
-					emitIndirectGPRArg := func(dst amd64.Register, arg ir.Operand) error {
+					emitIndirectGPRArg := func(dst amd64.Register, arg ir.Operand) {
 						v := loadRawValue(arg, amd64.R10)
 						if v != dst {
 							e.MovRegReg(dst, v)
 						}
-						return nil
 					}
 					for i, arg := range bi.Args {
 						argType := arg.Type()
@@ -1227,19 +1226,17 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				case *ir.CallInst:
 					gprArg, xmmArg := 0, 0
 					stackArgs := make([]ir.Operand, 0)
-					emitGPRArg := func(dst amd64.Register, arg ir.Operand) error {
+					emitGPRArg := func(dst amd64.Register, arg ir.Operand) {
 						switch v := arg.(type) {
 						case ir.ConstString:
 							strOffset := len(e.Code)
 							e.LeaRipRel32(dst, 0)
 							strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: dst, str: v.Value})
-							return nil
 						default:
 							src := loadOperand(arg, amd64.R10)
 							if src != dst {
 								e.MovRegReg(dst, src)
 							}
-							return nil
 						}
 					}
 					for i, arg := range bi.Args {

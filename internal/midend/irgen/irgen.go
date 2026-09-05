@@ -434,12 +434,12 @@ func genericSpecializationKey(name string, fn *types.FunctionType) string {
 	return name + "(" + strings.Join(parts, ",") + ")->" + fn.Return.String()
 }
 
-func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete *types.FunctionType) (string, error) {
+func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete *types.FunctionType) string {
 	generic := g.semaResult.Types[decl].(*types.FunctionType)
 	bindings, _ := types.FunctionBindings(generic, concrete)
 	key := genericSpecializationKey(decl.Name, concrete)
 	if name, ok := g.genericSpecs[key]; ok {
-		return name, nil
+		return name
 	}
 	name := fmt.Sprintf("%s$spec%d", decl.Name, g.genericSpecCount)
 	g.genericSpecCount++
@@ -451,7 +451,7 @@ func (g *generator) ensureGenericSpecialization(decl *ast.FunctionDecl, concrete
 	fn, _ := g.lowerFunctionAs(decl, concrete, name)
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings = outerFn, outerBB, outerLocals, outerProvenance, outerBindings
 	g.prog.Functions = append(g.prog.Functions, fn)
-	return name, nil
+	return name
 }
 
 func (g *generator) lowerAssignmentValue(e *ast.AssignExpr, current, rhs ir.Operand) ir.Operand {
@@ -2155,7 +2155,7 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 	}
 
 	offsets, _, _ := g.objectLayout(info.Instance)
-	emitOwnInitializers := func() error {
+	emitOwnInitializers := func() {
 		for _, field := range cls.Fields {
 			if field.IsStatic || field.Init == nil {
 				continue
@@ -2173,7 +2173,6 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: thisVal, Field: p.Name, Offset: offset, Val: g.locals[p.Name]})
 			}
 		}
-		return nil
 	}
 
 	bodyStart := 0
@@ -2197,9 +2196,9 @@ func (g *generator) lowerClassFunction(cls *ast.ClassDecl, info *sema.ClassInfo,
 		} else {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: classConstructorName(info.BaseName), Args: []ir.Operand{thisVal}})
 		}
-		_ = emitOwnInitializers()
+		emitOwnInitializers()
 	} else if constructor {
-		_ = emitOwnInitializers()
+		emitOwnInitializers()
 	}
 
 	if method != nil && method.Body != nil {
@@ -2245,12 +2244,12 @@ func (g *generator) lowerClassDecl(cls *ast.ClassDecl) error {
 	return nil
 }
 
-func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
+func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) {
 	if info == nil || info.GenericBase == "" {
-		return nil
+		return
 	}
 	if g.emittedClassSpecs[info.Name] {
-		return nil
+		return
 	}
 	g.emittedClassSpecs[info.Name] = true
 	outerFn, outerBB, outerLocals, outerProvenance, outerBindings, outerClass := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.typeBindings, g.currentClass
@@ -2271,7 +2270,6 @@ func (g *generator) ensureClassSpecialization(info *sema.ClassInfo) error {
 		fn, _ := g.lowerClassFunction(cls, info, method, fnType, classMethodName(info.Name, method.Name), false)
 		g.prog.Functions = append(g.prog.Functions, fn)
 	}
-	return nil
 }
 
 // Generate lowers an AST program and its semantic facts into SSA IR.
@@ -2362,12 +2360,12 @@ func (g *generator) lowerTopLevel(stmts []ast.Stmt) *ir.Function {
 func (g *generator) lowerFunction(fnDecl *ast.FunctionDecl) (*ir.Function, error) {
 	fnType, _ := g.semaResult.Types[fnDecl].(*types.FunctionType)
 	if fnDecl.IsAsync {
-		return g.lowerAsyncFunction(fnDecl, fnType, fnDecl.Name)
+		return g.lowerAsyncFunction(fnDecl, fnType, fnDecl.Name), nil
 	}
 	return g.lowerFunctionAs(fnDecl, fnType, fnDecl.Name)
 }
 
-func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
+func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) *ir.Function {
 	taskType := fnType.Return.(*types.ObjectType)
 	innerType := g.semaResult.AsyncResults[fnDecl]
 
@@ -2430,7 +2428,7 @@ func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.F
 	task := wrapper.NewValue("async_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(innerType)}}})
 	g.currentBB.Terminator = &ir.ReturnTerm{Val: task}
-	return wrapper, nil
+	return wrapper
 }
 
 func (g *generator) lowerFunctionAs(fnDecl *ast.FunctionDecl, fnType *types.FunctionType, name string) (*ir.Function, error) {
@@ -3258,7 +3256,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if info == nil {
 			info = g.semaResult.Classes[e.ClassName]
 		}
-		_ = g.ensureClassSpecialization(info)
+		g.ensureClassSpecialization(info)
 		offsets, refMask, shape := g.objectLayout(info.Instance)
 		obj := g.currentFn.NewValue("instance", info.Instance)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
@@ -3993,7 +3991,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				if len(g.typeBindings) > 0 {
 					concrete = types.Substitute(concrete, g.typeBindings).(*types.FunctionType)
 				}
-				specialized, _ := g.ensureGenericSpecialization(decl, concrete)
+				specialized := g.ensureGenericSpecialization(decl, concrete)
 				calleeName = specialized
 			}
 		}

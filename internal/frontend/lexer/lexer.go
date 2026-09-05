@@ -1,7 +1,6 @@
 package lexer
 
 import (
-	"strconv"
 	"unicode"
 	"unicode/utf8"
 
@@ -462,9 +461,4 @@ func TokenizeAll(file *source.File) ([]token.Token, diag.DiagnosticList) {
 		}
 	}
 	return list, lex.Diagnostics()
-}
-
-// ParseFloat converts token text to float64 value.
-func ParseFloat(text string) (float64, error) {
-	return strconv.ParseFloat(text, 64)
 }

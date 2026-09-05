@@ -32,10 +32,6 @@ func New(file *source.File) *Parser {
 	}
 }
 
-func (p *Parser) Diagnostics() diag.DiagnosticList {
-	return p.diagnostics
-}
-
 func (p *Parser) current() token.Token {
 	if p.cursor >= len(p.tokens) {
 		return token.Token{Kind: token.EOF}

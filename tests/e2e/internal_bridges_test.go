@@ -295,13 +295,8 @@ let ops = + ++ += - -- -= * ** *= / /= % %= ! ~ & && &= | || |= ^ ^= << >> >>> =
 	_, _ = lexer.TokenizeAll(fErr3)
 	fUtf8 := fsLex.AddFile("utf8.ts", []byte("let \u4e16\u754c = 1; let \u00fc = \"\\z\"; let t = `\\`hello`; obj.\u4e16; obj."))
 	_, _ = lexer.TokenizeAll(fUtf8)
-	// Exercise ParseFloat helper and Diagnostics accessor
-	_, _ = lexer.ParseFloat("3.14")
-	_, _ = lexer.ParseFloat("not-a-number")
 	lx := lexer.New(fLex)
 	_ = lx.Diagnostics()
-	pTmp := parser.New(fLex)
-	_ = pTmp.Diagnostics()
 
 	// 6. Parser all paths
 	fsParse := source.NewFileSet()
