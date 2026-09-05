@@ -210,19 +210,8 @@ func emitAMD64ArraySet(e *amd64.Emitter, allocOffset int) {
 	growTypeDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[growTypeDoneJump+1:], uint32(int32(growTypeDone-(growTypeDoneJump+5))))
 
-	// Clear the complete replacement store so skipped slots do not retain stale
-	// pointers from a reclaimed block, then copy the live old prefix.
-	e.MovRegReg(amd64.R10, amd64.R9)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	e.MovRegImm64(amd64.RAX, 0)
-	zeroLoop := len(e.Code)
-	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
-	e.AddRegImm32(amd64.R10, 8)
-	e.SubRegImm32(amd64.R11, 1)
-	zeroBack := len(e.Code)
-	e.JccRel32(amd64.CondNE, 0)
-	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
-
+	// Copy the live prefix first. Only the unused tail needs clearing: reused
+	// blocks may contain stale references, while the copied prefix is overwritten.
 	e.MovRegDeref(amd64.R8, amd64.RBX, amd64ArrayData)
 	e.MovRegReg(amd64.R10, amd64.R9)
 	e.MovRegDeref(amd64.R11, amd64.RBX, amd64ArrayLength)
@@ -240,6 +229,24 @@ func emitAMD64ArraySet(e *amd64.Emitter, allocOffset int) {
 	binary.LittleEndian.PutUint32(e.Code[copyBack+2:], uint32(int32(copyLoop-(copyBack+6))))
 	copyDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[copyDoneIfZero+2:], uint32(int32(copyDone-(copyDoneIfZero+6))))
+
+	// R10 already points just past the copied prefix. Clear only capacity-length.
+	e.MovRegReg(amd64.R11, amd64.R14)
+	e.MovRegDeref(amd64.RAX, amd64.RBX, amd64ArrayLength)
+	e.SubRegReg(amd64.R11, amd64.RAX)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	clearTailDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.RAX, 0)
+	clearTailLoop := len(e.Code)
+	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	e.SubRegImm32(amd64.R11, 1)
+	clearTailBack := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	binary.LittleEndian.PutUint32(e.Code[clearTailBack+2:], uint32(int32(clearTailLoop-(clearTailBack+6))))
+	clearTailDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[clearTailDone+2:], uint32(int32(clearTailDoneLabel-(clearTailDone+6))))
 
 	e.MovDerefReg(amd64.RBX, amd64ArrayData, amd64.R9)
 	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)
@@ -333,18 +340,8 @@ func emitAMD64ArrayPush(e *amd64.Emitter, allocOffset int) {
 	growTypeDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[growTypeDoneJump+1:], uint32(int32(growTypeDone-(growTypeDoneJump+5))))
 
-	// Zero new capacity, then copy live old elements.
-	e.MovRegReg(amd64.R10, amd64.R9)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	e.MovRegImm64(amd64.RAX, 0)
-	growZero := len(e.Code)
-	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
-	e.AddRegImm32(amd64.R10, 8)
-	e.SubRegImm32(amd64.R11, 1)
-	growZeroBack := len(e.Code)
-	e.JccRel32(amd64.CondNE, 0)
-	binary.LittleEndian.PutUint32(e.Code[growZeroBack+2:], uint32(int32(growZero-(growZeroBack+6))))
-
+	// Copy the live prefix first; clearing it before immediately overwriting it
+	// only burns memory bandwidth on every growth.
 	e.MovRegDeref(amd64.R8, amd64.RBX, amd64ArrayData)
 	e.MovRegReg(amd64.R10, amd64.R9)
 	e.MovRegReg(amd64.R11, amd64.R13)
@@ -362,6 +359,25 @@ func emitAMD64ArrayPush(e *amd64.Emitter, allocOffset int) {
 	binary.LittleEndian.PutUint32(e.Code[copyBack+2:], uint32(int32(copyLoop-(copyBack+6))))
 	copyDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[copyDoneIfZero+2:], uint32(int32(copyDone-(copyDoneIfZero+6))))
+
+	// R10 points at the first unused slot. Clear only the new tail so reclaimed
+	// blocks cannot retain stale references while avoiding duplicate prefix writes.
+	e.MovRegReg(amd64.R11, amd64.R14)
+	e.SubRegReg(amd64.R11, amd64.R13)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	clearTailDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.RAX, 0)
+	clearTailLoop := len(e.Code)
+	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	e.SubRegImm32(amd64.R11, 1)
+	clearTailBack := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	binary.LittleEndian.PutUint32(e.Code[clearTailBack+2:], uint32(int32(clearTailLoop-(clearTailBack+6))))
+	clearTailDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[clearTailDone+2:], uint32(int32(clearTailDoneLabel-(clearTailDone+6))))
+
 	e.MovDerefReg(amd64.RBX, amd64ArrayData, amd64.R9)
 	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)
 	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
