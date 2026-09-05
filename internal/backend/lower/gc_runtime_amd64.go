@@ -31,6 +31,29 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegReg(amd64.R10, amd64.RDI)
 	e.SubRegImm32(amd64.R10, amd64ObjectHeaderSize)
+
+	// Most references during graph traversal have chunk locality. Probe the last
+	// successful chunk first, then fall back to the complete linked chunk list.
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTMarkChunk)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	cacheEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegReg(amd64.RAX, amd64.R11)
+	e.AddRegImm32(amd64.RAX, amd64ChunkSize)
+	e.CmpRegReg(amd64.R10, amd64.RAX)
+	cacheBelow := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64ChunkUsed)
+	e.CmpRegReg(amd64.R10, amd64.RAX)
+	cacheAbove := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	cacheHit := len(e.Code)
+	e.JmpRel32(0)
+
+	scanStart := len(e.Code)
+	patchJcc(cacheEmpty, scanStart)
+	patchJcc(cacheBelow, scanStart)
+	patchJcc(cacheAbove, scanStart)
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
 	loop := len(e.Code)
 	e.TestRegReg(amd64.R11, amd64.R11)
@@ -45,6 +68,10 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.CmpRegReg(amd64.R10, amd64.RAX)
 	nextAbove := len(e.Code)
 	e.JccRel32(amd64.CondAE, 0)
+	// Cache the successful chunk for subsequent nearby references.
+	e.MovDerefReg(amd64.R15, amd64RTMarkChunk, amd64.R11)
+	found := len(e.Code)
+	patchJmp(cacheHit, found)
 	e.MovRegDeref(amd64.RAX, amd64.R10, amd64ObjectFlags)
 	e.CmpRegImm32(amd64.RAX, 1)
 	alreadyMarked := len(e.Code)
@@ -100,6 +127,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	// worklist so tracing needs no allocation and each live object is visited once.
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.RAX)
+	// Start pointer validation from the current chunk, then retain locality hints
+	// as marking walks into older chunks.
+	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTChunkHead)
+	e.MovDerefReg(amd64.R15, amd64RTMarkChunk, amd64.RAX)
 
 	// Mark exact roots from the linked shadow-root frames.
 	e.MovRegDeref(amd64.R12, amd64.R15, amd64RTRootHead)
