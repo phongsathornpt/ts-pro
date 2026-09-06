@@ -61,8 +61,15 @@ func (c *Compiler) FileSet() *source.FileSet {
 	return c.fileSet
 }
 
+func (c *Compiler) beginCompilation() {
+	// Source spans are compilation-scoped. Replacing the FileSet releases source
+	// buffers and line tables from previous invocations on long-lived compilers.
+	c.fileSet = source.NewFileSet()
+}
+
 // Check validates TypeScript source and returns semantic diagnostics.
 func (c *Compiler) Check(filename string, src []byte) diag.DiagnosticList {
+	c.beginCompilation()
 	file := c.fileSet.AddFile(filename, src)
 	p := parser.New(file)
 	prog, diags := p.Parse()
@@ -76,6 +83,7 @@ func (c *Compiler) Check(filename string, src []byte) diag.DiagnosticList {
 // CompileSource compiles TypeScript source code into an executable binary image.
 // Relative imports require CompileFile so the compiler has a filesystem module root.
 func (c *Compiler) CompileSource(filename string, src []byte) ([]byte, diag.DiagnosticList, error) {
+	c.beginCompilation()
 	file := c.fileSet.AddFile(filename, src)
 	p := parser.New(file)
 	prog, diags := p.Parse()
@@ -207,6 +215,7 @@ func (c *Compiler) loadModuleProgram(inputPath string) (*ast.Program, diag.Diagn
 
 // CompileFile compiles a TypeScript source file on disk to a native executable file.
 func (c *Compiler) CompileFile(inputPath string, outputPath string) (diag.DiagnosticList, error) {
+	c.beginCompilation()
 	prog, diags, err := c.loadModuleProgram(inputPath)
 	if err != nil {
 		return diags, err

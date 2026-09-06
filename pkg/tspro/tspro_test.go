@@ -229,3 +229,20 @@ func TestTsproDirect100Cover(t *testing.T) {
 		t.Error("expected error for non-relative import")
 	}
 }
+
+func TestCompilerReleasesPreviousCompilationFileSet(t *testing.T) {
+	c := New(Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
+	src := []byte(`function add(a: number, b: number): number { return a + b; }`)
+
+	var previous = c.FileSet()
+	for i := 0; i < 64; i++ {
+		if _, diags, err := c.CompileSource("repeat.ts", src); err != nil {
+			t.Fatalf("compile %d: %v (%s)", i, err, diags.Format(c.FileSet()))
+		}
+		current := c.FileSet()
+		if current == previous {
+			t.Fatalf("compile %d reused FileSet; previous sources would remain retained", i)
+		}
+		previous = current
+	}
+}
