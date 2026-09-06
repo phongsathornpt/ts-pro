@@ -40,6 +40,10 @@ func amd64ArrayElementClass(t types.Type) int64 {
 }
 
 func amd64RootSlots(fn *ir.Function) map[int]int {
+	return amd64RootSlotsWithLiveOut(fn, amd64RootLiveOut(fn))
+}
+
+func amd64RootSlotsWithLiveOut(fn *ir.Function, liveOut map[*ir.BasicBlock]map[int]struct{}) map[int]int {
 	ids := make(map[int]struct{})
 	addID := func(v *ir.Value) {
 		if v != nil && isAMD64HeapRefType(v.Type()) {
@@ -62,7 +66,6 @@ func amd64RootSlots(fn *ir.Function) map[int]int {
 	// touched by, defined in, or live through the same basic block interferes.
 	// This intentionally gives up some intra-block reuse so root-slot coloring
 	// never relies on instruction-level lifetime guesses.
-	liveOut := amd64RootLiveOut(fn)
 	interferes := make(map[int]map[int]struct{}, len(ids))
 	for id := range ids {
 		interferes[id] = map[int]struct{}{}

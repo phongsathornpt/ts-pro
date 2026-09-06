@@ -783,9 +783,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		ra := regalloc.New(len(amd64ScratchRegs))
 		locs := ra.Allocate(fn)
 		spillBytes := ra.StackFrameSlots() * 8
-		rootSlots := amd64RootSlots(fn)
-		rootSlotCount := amd64RootSlotCount(rootSlots)
 		rootLiveOut := amd64RootLiveOut(fn)
+		rootSlots := amd64RootSlotsWithLiveOut(fn, rootLiveOut)
+		rootSlotCount := amd64RootSlotCount(rootSlots)
 		rootFrameBytes := 0
 		rootFrameBaseOffset := int32(0)
 		if rootSlotCount != 0 {
