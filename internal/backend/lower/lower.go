@@ -1501,8 +1501,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_free_insert"] = len(e.Code)
 	emitAMD64FreeInsert(e)
+	fnOffsets["ts_gc_set_allocation_start"] = len(e.Code)
+	emitAMD64GCSetAllocationStart(e)
 	fnOffsets["ts_free_take"] = len(e.Code)
-	emitAMD64FreeTake(e, fnOffsets["ts_free_insert"])
+	emitAMD64FreeTake(e, fnOffsets["ts_free_insert"], fnOffsets["ts_gc_set_allocation_start"])
 
 	fnOffsets["ts_gc_mark_payload"] = len(e.Code)
 	emitAMD64GCMarkPayload(e)
@@ -1906,7 +1908,7 @@ func emitAMD64FreeInsert(e *amd64.Emitter) {
 	prepend(amd64RTFree8192)
 }
 
-func emitAMD64FreeTake(e *amd64.Emitter, freeInsertOffset int) {
+func emitAMD64FreeTake(e *amd64.Emitter, freeInsertOffset, setAllocationStartOffset int) {
 	patchJcc := func(at, target int) {
 		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
 	}
@@ -1998,6 +2000,8 @@ func emitAMD64FreeTake(e *amd64.Emitter, freeInsertOffset int) {
 		e.MovDerefReg(amd64.RAX, amd64ObjectType, amd64.R10)
 		e.MovDerefReg(amd64.R13, amd64ObjectSize, amd64.RBX)
 		e.MovRegReg(amd64.RDI, amd64.RAX)
+		setStartCall := len(e.Code)
+		e.CallRel32(int32(setAllocationStartOffset - (setStartCall + 5)))
 		callInsert := len(e.Code)
 		e.CallRel32(int32(freeInsertOffset - (callInsert + 5)))
 		noSplitLabel := len(e.Code)
@@ -2082,6 +2086,8 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset, freeTakeOffset int) {
 	e.MovDerefReg(amd64.R15, amd64RTCursor, amd64.R10)
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
 	e.MovDerefReg(amd64.R11, amd64ChunkUsed, amd64.R10)
+	emitAMD64ChunkBitIndex(e, amd64.R9, amd64.R11, amd64.RAX)
+	e.BtsDerefReg(amd64.R11, amd64ChunkAllocBitmap, amd64.R9)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
 	e.MovRegImm64(amd64.RDX, 0) // fresh bump memory
 	emitReturn()
@@ -2148,7 +2154,10 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset, freeTakeOffset int) {
 	e.AddRegReg(amd64.R10, amd64.RSI)
 	e.MovDerefReg(amd64.R15, amd64RTMappedBytes, amd64.R10)
 
-	// First object in the new chunk.
+	// First object in the new chunk. Reserve its allocation-start bit before
+	// header initialization clobbers temporary registers.
+	emitAMD64ChunkBitIndex(e, amd64.R9, amd64.RAX, amd64.R11)
+	e.BtsDerefReg(amd64.RAX, amd64ChunkAllocBitmap, amd64.R9)
 	e.MovRegReg(amd64.RAX, amd64.R11)
 	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)

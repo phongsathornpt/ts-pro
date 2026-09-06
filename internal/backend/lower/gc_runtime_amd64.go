@@ -7,9 +7,11 @@ import (
 )
 
 func emitAMD64GCMarkPayload(e *amd64.Emitter) {
-	// Internal tracing loops keep R8 live across marker calls. Preserve it even
-	// though it is caller-saved in SysV; this helper has a narrower runtime ABI.
+	// Internal tracing loops keep R8/R9 live across marker calls. Preserve both
+	// even though they are caller-saved in SysV; this helper has a narrower
+	// runtime ABI than ordinary generated calls.
 	e.Push(amd64.R8)
+	e.Push(amd64.R9)
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	// Accept raw payload pointers and NaN-boxed JSValue references.
@@ -76,29 +78,13 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	foundChunk := len(e.Code)
 	patchJmp(cacheHit, foundChunk)
 
-	// Range membership alone is insufficient: an interior pointer can land
-	// inside a valid chunk and make payload bytes look like a fake header. Walk
-	// the chunk's object chain and require an exact allocation-start match.
-	e.MovRegReg(amd64.R8, amd64.R11)
-	e.AddRegImm32(amd64.R8, amd64ChunkSize)
-	objectStartLoop := len(e.Code)
-	e.CmpRegReg(amd64.R8, amd64.R10)
-	exactStart := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegReg(amd64.R8, amd64.R10)
-	interiorMiss := len(e.Code)
-	e.JccRel32(amd64.CondA, 0)
-	e.MovRegDeref(amd64.RAX, amd64.R8, amd64ObjectSize)
-	e.TestRegReg(amd64.RAX, amd64.RAX)
-	zeroSizeMiss := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.AddRegReg(amd64.R8, amd64.RAX)
-	objectStartBack := len(e.Code)
-	e.JmpRel32(0)
-	patchJmp(objectStartBack, objectStartLoop)
-
-	exactStartLabel := len(e.Code)
-	patchJcc(exactStart, exactStartLabel)
+	// Range membership alone is insufficient: require the allocation-start
+	// bitmap bit for this 16-byte-aligned header. This keeps exact interior-
+	// pointer rejection O(1) instead of walking every prior object in the chunk.
+	emitAMD64ChunkBitIndex(e, amd64.R9, amd64.R11, amd64.R10)
+	e.BtDerefReg(amd64.R11, amd64ChunkAllocBitmap, amd64.R9)
+	allocationStartMiss := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
 	e.MovRegDeref(amd64.RAX, amd64.R10, amd64ObjectFlags)
 	e.CmpRegImm32(amd64.RAX, 1)
 	alreadyMarked := len(e.Code)
@@ -113,6 +99,7 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTMarkStack)
 	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.R10)
+	e.Pop(amd64.R9)
 	e.Pop(amd64.R8)
 	e.Ret()
 	next := len(e.Code)
@@ -125,11 +112,11 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	zero := len(e.Code)
 	patchJcc(nilJump, zero)
 	patchJcc(missJump, zero)
-	patchJcc(interiorMiss, zero)
-	patchJcc(zeroSizeMiss, zero)
+	patchJcc(allocationStartMiss, zero)
 	patchJcc(alreadyMarked, zero)
 	patchJcc(freeJump, zero)
 	e.MovRegImm64(amd64.RAX, 0)
+	e.Pop(amd64.R9)
 	e.Pop(amd64.R8)
 	e.Ret()
 }
@@ -617,6 +604,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.CmpRegReg(amd64.RDX, amd64.R10)
 	notAdjacent := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
+	// Current header is absorbed into the preceding free block. Remove its
+	// allocation-start bit so an interior pointer can never resurrect it later.
+	emitAMD64ChunkBitIndex(e, amd64.RDX, amd64.R13, amd64.R10)
+	e.BtrDerefReg(amd64.R13, amd64ChunkAllocBitmap, amd64.RDX)
 	e.AddRegReg(amd64.RAX, amd64.RBX)
 	e.MovDerefReg(amd64.R8, amd64ObjectSize, amd64.RAX)
 	mergedJump := len(e.Code)

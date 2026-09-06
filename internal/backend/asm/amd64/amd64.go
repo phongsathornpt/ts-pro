@@ -296,6 +296,27 @@ func (e *Emitter) BtsRegReg(base, bit Register) { e.emitBitRegReg(0xAB, base, bi
 // BtrRegReg tests and resets bit index in base, storing the old bit in CF.
 func (e *Emitter) BtrRegReg(base, bit Register) { e.emitBitRegReg(0xB3, base, bit) }
 
+func (e *Emitter) emitBitDerefReg(opcode byte, base Register, disp int32, bit Register) {
+	e.emitByte(rex(true, bit >= 8, false, base >= 8))
+	e.emitBytes(0x0F, opcode)
+	e.emitBaseDisp(bit, base, disp)
+}
+
+// BtDerefReg tests a bit in the memory bit-string rooted at [base+disp].
+func (e *Emitter) BtDerefReg(base Register, disp int32, bit Register) {
+	e.emitBitDerefReg(0xA3, base, disp, bit)
+}
+
+// BtsDerefReg tests and sets a bit in the memory bit-string rooted at [base+disp].
+func (e *Emitter) BtsDerefReg(base Register, disp int32, bit Register) {
+	e.emitBitDerefReg(0xAB, base, disp, bit)
+}
+
+// BtrDerefReg tests and resets a bit in the memory bit-string rooted at [base+disp].
+func (e *Emitter) BtrDerefReg(base Register, disp int32, bit Register) {
+	e.emitBitDerefReg(0xB3, base, disp, bit)
+}
+
 // Setcc sets dst to a canonical 0/1 value. SETcc writes only the low byte,
 // so MOVZX is emitted immediately afterwards to clear the upper bits.
 func (e *Emitter) Setcc(cond Cond, dst Register) {

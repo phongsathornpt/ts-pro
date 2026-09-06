@@ -352,10 +352,13 @@ const (
 	amd64RTFree2048    int32 = 184
 	amd64RTFree8192    int32 = 192
 
-	amd64ChunkNext int32 = 0
-	amd64ChunkEnd  int32 = 8
-	amd64ChunkUsed int32 = 16
-	amd64ChunkSize int32 = 32
+	amd64ChunkNext        int32 = 0
+	amd64ChunkEnd         int32 = 8
+	amd64ChunkUsed        int32 = 16
+	amd64ChunkAllocBitmap int32 = 32
+	amd64ChunkBitmapBytes int32 = 8192
+	amd64ChunkMarkBitmap  int32 = amd64ChunkAllocBitmap + amd64ChunkBitmapBytes
+	amd64ChunkSize        int32 = amd64ChunkMarkBitmap + amd64ChunkBitmapBytes
 
 	amd64ObjectSize       int32 = 0
 	amd64ObjectFlags      int32 = 8

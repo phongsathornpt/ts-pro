@@ -148,3 +148,17 @@ func TestAMD64GCLayoutDescriptorsCoverEveryObjectType(t *testing.T) {
 		t.Fatal("unknown object type must not resolve to a GC layout")
 	}
 }
+
+func TestAMD64ChunkBitmapLayoutCoversDefaultChunk(t *testing.T) {
+	if amd64ChunkSize%16 != 0 {
+		t.Fatalf("chunk metadata size %d must preserve 16-byte object alignment", amd64ChunkSize)
+	}
+	if amd64ChunkMarkBitmap != amd64ChunkAllocBitmap+amd64ChunkBitmapBytes {
+		t.Fatalf("mark bitmap offset = %d, want %d", amd64ChunkMarkBitmap, amd64ChunkAllocBitmap+amd64ChunkBitmapBytes)
+	}
+	objectSlots := ((1 << 20) - int(amd64ChunkSize)) / 16
+	bitmapSlots := int(amd64ChunkBitmapBytes) * 8
+	if objectSlots > bitmapSlots {
+		t.Fatalf("default chunk has %d object slots but bitmap covers %d", objectSlots, bitmapSlots)
+	}
+}
