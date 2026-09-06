@@ -282,6 +282,20 @@ func (e *Emitter) OrRegReg(dst, src Register) {
 	e.emitByte(modRM(0b11, src, dst))
 }
 
+func (e *Emitter) emitBitRegReg(opcode byte, base, bit Register) {
+	e.emitByte(rex(true, bit >= 8, false, base >= 8))
+	e.emitBytes(0x0F, opcode, modRM(0x3, bit, base))
+}
+
+// BtRegReg tests bit index in base and stores the old bit in CF.
+func (e *Emitter) BtRegReg(base, bit Register) { e.emitBitRegReg(0xA3, base, bit) }
+
+// BtsRegReg tests and sets bit index in base, storing the old bit in CF.
+func (e *Emitter) BtsRegReg(base, bit Register) { e.emitBitRegReg(0xAB, base, bit) }
+
+// BtrRegReg tests and resets bit index in base, storing the old bit in CF.
+func (e *Emitter) BtrRegReg(base, bit Register) { e.emitBitRegReg(0xB3, base, bit) }
+
 // Setcc sets dst to a canonical 0/1 value. SETcc writes only the low byte,
 // so MOVZX is emitted immediately afterwards to clear the upper bits.
 func (e *Emitter) Setcc(cond Cond, dst Register) {

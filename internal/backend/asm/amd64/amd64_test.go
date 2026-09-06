@@ -260,3 +260,18 @@ func TestAMD64MoreEncoders(t *testing.T) {
 	e.FldST0()
 	e.FcomipST1()
 }
+
+func TestBitRegisterInstructions(t *testing.T) {
+	e := NewEmitter()
+	e.BtRegReg(RAX, RCX)
+	e.BtsRegReg(R12, R13)
+	e.BtrRegReg(R8, R9)
+	want := []byte{
+		0x48, 0x0f, 0xa3, 0xc8,
+		0x4d, 0x0f, 0xab, 0xec,
+		0x4d, 0x0f, 0xb3, 0xc8,
+	}
+	if !bytes.Equal(e.Code, want) {
+		t.Fatalf("bit ops = % x, want % x", e.Code, want)
+	}
+}
