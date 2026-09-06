@@ -362,6 +362,28 @@ func (p *Parser) parseRegexLiteral(tok token.Token) ast.Expr {
 	}
 }
 
+func parseNumericLiteral(text string) float64 {
+	if len(text) > 2 && text[0] == '0' {
+		base := 0
+		switch text[1] {
+		case 'x', 'X':
+			base = 16
+		case 'b', 'B':
+			base = 2
+		case 'o', 'O':
+			base = 8
+		}
+		if base != 0 {
+			v, err := strconv.ParseUint(text[2:], base, 64)
+			if err == nil {
+				return float64(v)
+			}
+		}
+	}
+	v, _ := strconv.ParseFloat(text, 64)
+	return v
+}
+
 func (p *Parser) parsePrimary() ast.Expr {
 	tok := p.current()
 
@@ -371,7 +393,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		return &ast.IdentExpr{SourceSpan: tok.Span, Name: tok.Text}
 	case token.Number:
 		p.advance()
-		val, _ := strconv.ParseFloat(tok.Text, 64)
+		val := parseNumericLiteral(tok.Text)
 		return &ast.NumberLit{SourceSpan: tok.Span, Value: val}
 	case token.String:
 		p.advance()

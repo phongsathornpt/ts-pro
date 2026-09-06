@@ -334,6 +334,14 @@ func (l *Lexer) scanNumber(startPos source.Pos) token.Token {
 			}
 			text := string(l.src[start:l.offset])
 			return token.Token{Kind: token.Number, Span: source.Span{Start: startPos, End: l.currentPos()}, Text: text}
+		} else if p == 'o' || p == 'O' {
+			l.nextChar()
+			l.nextChar()
+			for l.ch >= '0' && l.ch <= '7' {
+				l.nextChar()
+			}
+			text := string(l.src[start:l.offset])
+			return token.Token{Kind: token.Number, Span: source.Span{Start: startPos, End: l.currentPos()}, Text: text}
 		}
 	}
 
