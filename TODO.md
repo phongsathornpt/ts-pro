@@ -88,7 +88,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 ## Optional next roadmap (new scope, not active blockers)
 
-The active raw-native fixture roadmap is complete. Subsequent WinterTC/performance coverage has expanded the current native suite to **146 / 146 PASS**; the original **125 / 125** milestone remains the acceptance point for the completed core roadmap.
+The active raw-native fixture roadmap is complete. Subsequent WinterTC/performance coverage has expanded the current native suite to **151 / 151 PASS**; the original **125 / 125** milestone remains the acceptance point for the completed core roadmap.
 
 - [ ] Performance: reduce GPR/XMM payload shuffling, benchmark allocator/GC/scheduler behavior, improve register allocation/code layout, and evaluate PGO/LTO where useful.
 - [ ] Language/ecosystem expansion: broaden TypeScript/ECMAScript syntax, built-in APIs, package/module resolution, and uncommon dynamic edge cases beyond the current fixture set.
@@ -604,6 +604,28 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] `Blob.prototype.stream()` readable stream backing.
   - [x] Streams conformance suite and differential testing matching Node.js v26.8.1.
 - [ ] Phase 6: Headers, Request, Response and fetch with cancellation/streaming semantics.
+  - [ ] Finish `Headers` conformance and add a dedicated WinterTC fixture before marking it complete; core implementation is present but does not yet have its own acceptance fixture.
+  - [ ] Add `Request` constructor, method/url/headers/body state, cloning, body-use semantics, and AbortSignal integration.
+  - [ ] Add `Response` constructor, status/statusText/headers/body state, cloning, redirect/error/json helpers, and body-use semantics.
+  - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
+  - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
+  - [ ] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
+  - [ ] Finish `Performance` inheritance/surface that depends on EventTarget and verify ECMA-429-required members.
+  - [ ] Add OS randomness foundation and `crypto.getRandomValues()` / `randomUUID()`.
+  - [ ] Add `CryptoKey` / `SubtleCrypto` algorithms required by the WinterTC target with explicit unsupported-algorithm errors.
+  - [ ] Add `CompressionStream` / `DecompressionStream` on top of the Streams foundation.
+  - [ ] Add crypto/compression conformance fixtures and deterministic known-answer tests.
 - [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.
+  - [ ] Add MessageChannel/MessagePort lifecycle, FIFO delivery, transfer/close semantics, and EventTarget integration.
+  - [ ] Integrate Promise jobs with the Web microtask queue and implement `unhandledrejection` / `rejectionhandled` ordering.
+  - [ ] Complete required WebAssembly globals/interfaces and native execution/linking coverage.
+  - [ ] Add messaging/rejection/WebAssembly conformance fixtures.
 - [ ] Phase 9: close conformance matrix, differential/integration suite and documented server-runtime deviations.
+  - [ ] Audit every ECMA-429 global/interface/member against `docs/WINTERTC.md`; no name-only/stub rows may be marked conformant.
+  - [ ] Run full native fixture, Node differential, local-network integration, GC stress, and performance regression gates.
+  - [ ] Document intentional server-runtime deviations and unsupported optional browser-only behavior.
+  - [ ] Mark WinterTC target complete only when the matrix has no unchecked required rows.
+
+Current WinterTC execution order (2026-09-07): **Phase 6 Headers conformance -> Request -> Response -> fetch -> Phase 7 -> Phase 8 -> Phase 9**.
+Current acceptance baseline: **151 / 151 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.
