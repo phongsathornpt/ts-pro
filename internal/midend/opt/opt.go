@@ -39,7 +39,7 @@ func optimizeFunction(fn *ir.Function) {
 
 func constantFold(fn *ir.Function) bool {
 	changed := false
-	constMap := make(map[int]ir.Operand)
+	constMap := make(map[int]float64)
 
 	for _, bb := range fn.Blocks {
 		var newInsts []ir.Instruction
@@ -73,7 +73,7 @@ func constantFold(fn *ir.Function) bool {
 						valid = false
 					}
 					if valid && bi.Res != nil {
-						constMap[bi.Res.ID] = ir.ConstNumber{Value: res}
+						constMap[bi.Res.ID] = res
 						changed = true
 						continue // Folded! Do not keep the instruction
 					}
@@ -84,7 +84,7 @@ func constantFold(fn *ir.Function) bool {
 			case *ir.UnaryInst:
 				val := resolveConst(bi.Val, constMap)
 				if c, ok := val.(ir.ConstNumber); ok && bi.Op == "-" && bi.Res != nil {
-					constMap[bi.Res.ID] = ir.ConstNumber{Value: -c.Value}
+					constMap[bi.Res.ID] = -c.Value
 					changed = true
 					continue
 				}
@@ -126,10 +126,10 @@ func constantFold(fn *ir.Function) bool {
 	return changed
 }
 
-func resolveConst(op ir.Operand, constMap map[int]ir.Operand) ir.Operand {
+func resolveConst(op ir.Operand, constMap map[int]float64) ir.Operand {
 	if v, ok := op.(*ir.Value); ok {
 		if c, exists := constMap[v.ID]; exists {
-			return c
+			return ir.ConstNumber{Value: c}
 		}
 	}
 	return op
