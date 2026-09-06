@@ -73,7 +73,16 @@ For 100,000 four-part concatenation chains:
 
 This is roughly a 2.4x improvement for the measured chain workload.
 
-Loop-carried `s = s + x` still has immutable-string O(n^2) aggregate copying. Solving that requires a proven unique/temporary builder or rope representation and is separate representation work, not a safe local runtime micro-optimization.
+Loop-carried string accumulation now has a conservative owned-buffer optimization for compiler-proven patterns such as `let s = ""; for (...) { s = s + "x"; }`. The compiler seeds a private heap string, derives spare capacity from the hidden allocator object size, and grows geometrically. The visible string ABI remains `[len][bytes]`, and loops with observable reads/calls or unsupported aliasing shapes retain immutable concatenation.
+
+For 20,000 single-character loop appends on the Ryzen 9 7940HS test host:
+
+| implementation | runtime |
+| --- | ---: |
+| immutable prefix copy each iteration | ~361-364 ms |
+| proven-owned geometric append | ~0.188-0.193 ms |
+
+The measured hot pattern is roughly 1,880-1,930x faster because aggregate copying changes from O(n^2) to amortized O(n). A 100,000-append e2e case and number-to-string suffix coercion case cover repeated growth and allocation/rooting behavior. General alias-aware builder conversion remains future representation work; the optimization deliberately falls back when ownership is not proven.
 
 ### Register allocation
 

@@ -169,7 +169,7 @@ console.log(pick7("a","b","c","d","e","f","stack-ok"));
 }
 
 func TestLinuxAMD64ArenaAllocator(t *testing.T) {
-	for _, n := range []int{1000, 2500} {
+	for _, n := range []int{1000, 2500, 100000} {
 		t.Run(fmt.Sprintf("concat_%d", n), func(t *testing.T) {
 			runLinuxAMD64(t, linuxAMD64Case{
 				name: fmt.Sprintf("arena_concat_%d", n),
@@ -182,6 +182,20 @@ console.log(s);
 			})
 		})
 	}
+}
+
+func TestLinuxAMD64OwnedStringAppendCoercesLoopSuffix(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "owned_string_append_number_suffix",
+		source: `
+let s = "";
+for (let i = 0; i < 10; i = i + 1) {
+  s = s + i;
+}
+console.log(s);
+`,
+		expected: "0123456789\n",
+	})
 }
 
 func TestLinuxAMD64NumberToStringShortestRoundTrip(t *testing.T) {

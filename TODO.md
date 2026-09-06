@@ -84,6 +84,7 @@ The active raw-native fixture roadmap is complete. The items below are optional 
 - [ ] Production hardening: security review, reproducible benchmarks/releases, cross-compilation ergonomics, and performance regression tracking.
   - [x] 2026-09 native performance sweep: allocator fast path, worklist GC, chunk-locality validation, runtime allocation benchmarks, dynamic hash tables, fresh-allocation zero skipping, array/collection copy unrolling, string-concat chain fusion, compiler source-set/module-resolution retention fixes, and measured regalloc/optimizer reductions.
   - [x] Add `make bench-performance` as the reproducible local performance regression entry point.
+  - [x] Eliminate O(n^2) copying for proven-owned loop string accumulators with ABI-compatible geometric growth; retain immutable fallback when ownership is not proven.
 
 > These are intentionally unchecked because they define **future scope**, not unfinished work in the completed active roadmap.
 
