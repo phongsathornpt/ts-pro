@@ -2021,18 +2021,19 @@ console.log(s.marker);
 	})
 }
 
-func TestLinuxAMD64WinterTCBtoa(t *testing.T) {
+func TestLinuxAMD64WinterTCBase64(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
-		name: "wintertc_btoa",
+		name: "wintertc_base64",
 		source: `
 console.log(btoa("hello"));
 console.log(btoa("ÿ"));
-try {
-  console.log(btoa("✓"));
-} catch (err: any) {
-  console.log(err.name);
-}
+console.log(atob("aGVsbG8="));
+console.log(atob("YQ"));
+console.log(atob(" YW Jj\n"));
+console.log(atob("/w=="));
+try { console.log(btoa("✓")); } catch (err: any) { console.log(err.name); }
+try { console.log(atob("A")); } catch (err: any) { console.log(err.name); }
 `,
-		expected: "aGVsbG8=\n/w==\nInvalidCharacterError\n",
+		expected: "aGVsbG8=\n/w==\nhello\na\nabc\nÿ\nInvalidCharacterError\nInvalidCharacterError\n",
 	})
 }

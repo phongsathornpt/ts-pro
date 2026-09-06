@@ -3936,6 +3936,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "atob":
+				input := g.lowerExpr(e.Args[0])
+				valid := g.currentFn.NewValue("atob_valid", types.TypeBoolean)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: valid, Callee: "ts_atob_valid", Args: []ir.Operand{input}, ParamTypes: []types.Type{types.TypeString}})
+				okBB := g.currentFn.NewBlock("atob_decode")
+				errBB := g.currentFn.NewBlock("atob_invalid")
+				g.currentBB.Terminator = &ir.BranchTerm{Cond: valid, Then: okBB, Else: errBB}
+				g.currentBB = errBB
+				errObj := g.newDOMException(ir.ConstString{Value: "The string to be decoded is not correctly encoded."}, ir.ConstString{Value: "InvalidCharacterError"})
+				g.routeThrownValue(g.boxJSValue(errObj, g.semaResult.DOMExceptionType))
+				g.currentBB = okBB
+				res := g.currentFn.NewValue("atob_result", types.TypeString)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_atob", Args: []ir.Operand{input}, ParamTypes: []types.Type{types.TypeString}})
+				return res
 			case "btoa":
 				input := g.lowerExpr(e.Args[0])
 				valid := g.currentFn.NewValue("btoa_valid", types.TypeBoolean)

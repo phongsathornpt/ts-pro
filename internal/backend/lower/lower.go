@@ -1660,6 +1660,17 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_btoa"] = len(e.Code)
 	emitAMD64Btoa(e, fnOffsets["ts_alloc"], fnOffsets["ts_latin1_next"], fnOffsets["ts_base64_char"])
 
+	fnOffsets["ts_ascii_whitespace"] = len(e.Code)
+	emitAMD64ASCIIWhitespace(e)
+	fnOffsets["ts_base64_value"] = len(e.Code)
+	emitAMD64Base64Value(e)
+	fnOffsets["ts_atob_valid"] = len(e.Code)
+	emitAMD64AtobValid(e, fnOffsets["ts_ascii_whitespace"], fnOffsets["ts_base64_value"])
+	fnOffsets["ts_latin1_write_utf8"] = len(e.Code)
+	emitAMD64Latin1WriteUTF8(e)
+	fnOffsets["ts_atob"] = len(e.Code)
+	emitAMD64Atob(e, fnOffsets["ts_alloc"], fnOffsets["ts_ascii_whitespace"], fnOffsets["ts_base64_value"], fnOffsets["ts_latin1_write_utf8"])
+
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_string_concat3"] = len(e.Code)
