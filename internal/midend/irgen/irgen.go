@@ -1075,9 +1075,15 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	if e.IsExprBody {
 		body := e.Body.(ast.Expr)
 		ret := g.lowerExpr(body)
-		ret = g.coerceJSValueBoundary(ret, g.semanticType(body), fnType.Return)
-		if g.currentBB.Terminator == nil {
-			g.currentBB.Terminator = &ir.ReturnTerm{Val: ret}
+		if fnType.Return == types.TypeVoid {
+			if g.currentBB.Terminator == nil {
+				g.currentBB.Terminator = &ir.ReturnTerm{}
+			}
+		} else {
+			ret = g.coerceJSValueBoundary(ret, g.semanticType(body), fnType.Return)
+			if g.currentBB.Terminator == nil {
+				g.currentBB.Terminator = &ir.ReturnTerm{Val: ret}
+			}
 		}
 	} else {
 		body := e.Body.(*ast.BlockStmt)
@@ -3361,6 +3367,214 @@ func (g *generator) lowerLogicalExpr(e *ast.BinaryExpr) ir.Operand {
 	return res
 }
 
+func (g *generator) eventField(obj ir.Operand, name string, resultType types.Type) ir.Operand {
+	offsets, _, _ := g.objectLayout(g.semaResult.EventType)
+	res := g.currentFn.NewValue("event_"+strings.TrimPrefix(name, "$"), resultType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: name, Offset: offsets[name]})
+	return res
+}
+
+func (g *generator) setEventField(obj ir.Operand, name string, value ir.Operand) {
+	offsets, _, _ := g.objectLayout(g.semaResult.EventType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: name, Offset: offsets[name], Val: value})
+}
+
+func (g *generator) lowerEventInitBool(init ast.Expr, initValue ir.Operand, name string) ir.Operand {
+	if init == nil {
+		return ir.ConstBool{Value: false}
+	}
+	if objType, ok := g.semanticType(init).(*types.ObjectType); ok {
+		field, exists := objType.Fields[name]
+		if !exists {
+			return ir.ConstBool{Value: false}
+		}
+		offsets, _, _ := g.objectLayout(objType)
+		res := g.currentFn.NewValue("event_init_"+name, field.Type)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: initValue, Field: name, Offset: offsets[name]})
+		if field.Type != types.TypeBoolean {
+			return g.coerceJSValueBoundary(res, field.Type, types.TypeBoolean)
+		}
+		return res
+	}
+	if irJSValueType(initValue.Type()) {
+		boxed := g.lowerDynamicGet(initValue, name)
+		return g.coerceJSValueBoundary(boxed, types.TypeAny, types.TypeBoolean)
+	}
+	return ir.ConstBool{Value: false}
+}
+
+func (g *generator) lowerEventConstructor(e *ast.NewExpr) ir.Operand {
+	eventType := g.semaResult.EventType
+	typeValue := g.lowerExpr(e.Args[0])
+	var initExpr ast.Expr
+	var initValue ir.Operand
+	if len(e.Args) > 1 {
+		initExpr = e.Args[1]
+		initValue = g.lowerExpr(initExpr)
+	}
+	bubbles := g.lowerEventInitBool(initExpr, initValue, "bubbles")
+	cancelable := g.lowerEventInitBool(initExpr, initValue, "cancelable")
+	composed := g.lowerEventInitBool(initExpr, initValue, "composed")
+	offsets, refMask, shape := g.objectLayout(eventType)
+	obj := g.currentFn.NewValue("event", eventType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: obj, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+	g.setEventField(obj, "type", typeValue)
+	g.setEventField(obj, "bubbles", bubbles)
+	g.setEventField(obj, "cancelable", cancelable)
+	g.setEventField(obj, "composed", composed)
+	g.setEventField(obj, "currentTarget", ir.ConstNull{})
+	g.setEventField(obj, "target", ir.ConstNull{})
+	g.setEventField(obj, "defaultPrevented", ir.ConstBool{Value: false})
+	g.setEventField(obj, "eventPhase", ir.ConstNumber{Value: 0})
+	g.setEventField(obj, "isTrusted", ir.ConstBool{Value: false})
+	timestamp := g.currentFn.NewValue("event_timestamp", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: timestamp, Callee: "ts_performance_now"})
+	g.setEventField(obj, "timeStamp", timestamp)
+	g.setEventField(obj, "$dispatching", ir.ConstBool{Value: false})
+	g.setEventField(obj, "$stopImmediate", ir.ConstBool{Value: false})
+	g.setEventField(obj, "$stopPropagation", ir.ConstBool{Value: false})
+	return obj
+}
+
+func (g *generator) nullRef(t types.Type) ir.Operand {
+	res := g.currentFn.NewValue("null_ref", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_null_ref"})
+	return res
+}
+
+func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$Event" {
+		return nil, false
+	}
+	event := g.lowerExpr(mem.Object)
+	switch mem.Property {
+	case "preventDefault":
+		cancelable := g.eventField(event, "cancelable", types.TypeBoolean)
+		setBB := g.currentFn.NewBlock("event_prevent_default")
+		doneBB := g.currentFn.NewBlock("event_prevent_default_done")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: cancelable, Then: setBB, Else: doneBB}
+		g.currentBB = setBB
+		g.setEventField(event, "defaultPrevented", ir.ConstBool{Value: true})
+		setBB.Terminator = &ir.JumpTerm{Target: doneBB}
+		g.currentBB = doneBB
+		return nil, true
+	case "stopPropagation":
+		g.setEventField(event, "$stopPropagation", ir.ConstBool{Value: true})
+		return nil, true
+	case "stopImmediatePropagation":
+		g.setEventField(event, "$stopPropagation", ir.ConstBool{Value: true})
+		g.setEventField(event, "$stopImmediate", ir.ConstBool{Value: true})
+		return nil, true
+	case "composedPath":
+		arrType := types.NewArray(types.TypeAny)
+		arr := g.currentFn.NewValue("event_path", arrType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{Res: arr, Length: ir.ConstNumber{Value: 0}, ElemType: types.TypeAny})
+		target := g.eventField(event, "target", types.TypeAny)
+		length := g.currentFn.NewValue("event_path_len", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: length, Array: arr, Val: target})
+		return arr, true
+	}
+	return nil, false
+}
+
+func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$EventTarget" {
+		return nil, false
+	}
+	target := g.lowerExpr(mem.Object)
+	switch mem.Property {
+	case "addEventListener":
+		typeArg := g.lowerExpr(e.Args[0])
+		callback := g.lowerExpr(e.Args[1])
+		once := ir.Operand(ir.ConstBool{Value: false})
+		if len(e.Args) > 2 {
+			options := g.lowerExpr(e.Args[2])
+			once = g.lowerEventInitBool(e.Args[2], options, "once")
+		}
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Callee: "ts_event_target_add", Args: []ir.Operand{target, typeArg, callback, once},
+		})
+		return nil, true
+	case "removeEventListener":
+		typeArg := g.lowerExpr(e.Args[0])
+		callback := g.lowerExpr(e.Args[1])
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Callee: "ts_event_target_remove", Args: []ir.Operand{target, typeArg, callback},
+		})
+		return nil, true
+	case "dispatchEvent":
+		return g.lowerEventDispatch(target, g.lowerExpr(e.Args[0])), true
+	}
+	return nil, false
+}
+
+func (g *generator) lowerEventDispatch(target, event ir.Operand) ir.Operand {
+	eventType := g.semaResult.EventType
+	listenerType := types.NewObject("$EventListener")
+	listenerFn := types.NewFunction([]types.Param{{Name: "event", Type: eventType}}, types.TypeVoid)
+	g.setEventField(event, "target", g.boxJSValue(target, g.semaResult.EventTargetType))
+	g.setEventField(event, "currentTarget", g.boxJSValue(target, g.semaResult.EventTargetType))
+	g.setEventField(event, "eventPhase", ir.ConstNumber{Value: 2})
+	g.setEventField(event, "$dispatching", ir.ConstBool{Value: true})
+	g.setEventField(event, "$stopImmediate", ir.ConstBool{Value: false})
+	g.setEventField(event, "$stopPropagation", ir.ConstBool{Value: false})
+	boundary := g.currentFn.NewValue("event_listener_boundary", listenerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boundary, Callee: "ts_event_target_tail", Args: []ir.Operand{target}})
+
+	entry := g.currentBB
+	loopBB := g.currentFn.NewBlock("event_listener_loop")
+	bodyBB := g.currentFn.NewBlock("event_listener_body")
+	onceBB := g.currentFn.NewBlock("event_listener_once")
+	invokeBB := g.currentFn.NewBlock("event_listener_invoke")
+	doneBB := g.currentFn.NewBlock("event_dispatch_done")
+	entry.Terminator = &ir.JumpTerm{Target: loopBB}
+
+	prev := g.currentFn.NewValue("event_prev_listener", listenerType)
+	loopBB.Phis = append(loopBB.Phis, &ir.PhiInst{Res: prev, Incoming: []ir.PhiIncoming{{Block: entry, Value: g.nullRefAt(entry, listenerType)}}})
+	eventName := g.currentFn.NewValue("event_type_for_listener", types.TypeString)
+	eventOffsets, _, _ := g.objectLayout(eventType)
+	loopBB.Instructions = append(loopBB.Instructions, &ir.GetFieldInst{Res: eventName, Obj: event, Field: "type", Offset: eventOffsets["type"]})
+	next := g.currentFn.NewValue("event_listener", listenerType)
+	loopBB.Instructions = append(loopBB.Instructions, &ir.CallInst{Res: next, Callee: "ts_event_target_next", Args: []ir.Operand{target, eventName, prev}})
+	loopBB.Terminator = &ir.BranchTerm{Cond: next, Then: bodyBB, Else: doneBB}
+
+	once := g.currentFn.NewValue("event_listener_once", types.TypeBoolean)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.CallInst{Res: once, Callee: "ts_event_listener_once", Args: []ir.Operand{next}})
+	bodyBB.Terminator = &ir.BranchTerm{Cond: once, Then: onceBB, Else: invokeBB}
+	onceBB.Instructions = append(onceBB.Instructions, &ir.CallInst{Callee: "ts_event_listener_remove", Args: []ir.Operand{next}})
+	onceBB.Terminator = &ir.JumpTerm{Target: invokeBB}
+
+	callback := g.currentFn.NewValue("event_callback", listenerFn)
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.CallInst{Res: callback, Callee: "ts_event_listener_callback", Args: []ir.Operand{next}})
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.IndirectCallInst{Closure: callback, Args: []ir.Operand{event}, ParamTypes: []types.Type{eventType}})
+	stop := g.currentFn.NewValue("event_stop_immediate", types.TypeBoolean)
+	offsets, _, _ := g.objectLayout(eventType)
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.GetFieldInst{Res: stop, Obj: event, Field: "$stopImmediate", Offset: offsets["$stopImmediate"]})
+	atBoundary := g.currentFn.NewValue("event_at_boundary", types.TypeBoolean)
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.BinaryInst{Res: atBoundary, Op: ir.OpEq, LHS: next, RHS: boundary})
+	finish := g.currentFn.NewValue("event_finish_dispatch", types.TypeBoolean)
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.BinaryInst{Res: finish, Op: ir.OpOr, LHS: stop, RHS: atBoundary})
+	invokeBB.Terminator = &ir.BranchTerm{Cond: finish, Then: doneBB, Else: loopBB}
+	loopBB.Phis[0].Incoming = append(loopBB.Phis[0].Incoming, ir.PhiIncoming{Block: invokeBB, Value: next})
+
+	g.currentBB = doneBB
+	g.setEventField(event, "currentTarget", ir.ConstNull{})
+	g.setEventField(event, "eventPhase", ir.ConstNumber{Value: 0})
+	g.setEventField(event, "$dispatching", ir.ConstBool{Value: false})
+	defaultPrevented := g.eventField(event, "defaultPrevented", types.TypeBoolean)
+	result := g.currentFn.NewValue("event_dispatch_result", types.TypeBoolean)
+	doneBB.Instructions = append(doneBB.Instructions, &ir.BinaryInst{Res: result, Op: ir.OpEq, LHS: defaultPrevented, RHS: ir.ConstBool{Value: false}})
+	return result
+}
+
+func (g *generator) nullRefAt(bb *ir.BasicBlock, t types.Type) ir.Operand {
+	res := g.currentFn.NewValue("null_ref", t)
+	bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: res, Callee: "ts_null_ref"})
+	return res
+}
+
 func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 	switch e := expr.(type) {
@@ -3380,6 +3594,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.locals["$this"]
 
 	case *ast.NewExpr:
+		if e.ClassName == "EventTarget" {
+			t := g.semaResult.EventTargetType
+			res := g.currentFn.NewValue("event_target", t)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_event_target_new"})
+			return res
+		}
+		if e.ClassName == "Event" {
+			return g.lowerEventConstructor(e)
+		}
 		if e.ClassName == "DOMException" {
 			message := ir.Operand(ir.ConstString{Value: ""})
 			name := ir.Operand(ir.ConstString{Value: "Error"})
@@ -3844,6 +4067,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if objType.Name == "$Event" {
+				if _, method := g.semaResult.EventType.Fields[e.Property]; method {
+					obj := g.lowerExpr(e.Object)
+					resultType := g.semanticType(e)
+					return g.eventField(obj, e.Property, resultType)
+				}
+			}
 			if objType.Name == "$DOMException" {
 				raw := g.lowerExpr(e.Object)
 				boxed := g.boxJSValue(raw, objType)
@@ -4101,6 +4331,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if res, handled := g.lowerEventMethodCall(e, mem); handled {
+				return res
+			}
+			if res, handled := g.lowerEventTargetMethodCall(e, mem); handled {
+				return res
+			}
 			if proven, ok := g.provenObjectType(mem.Object); ok {
 				if field, exists := proven.Fields[mem.Property]; exists {
 					if fnType, ok := field.Type.(*types.FunctionType); ok {

@@ -68,6 +68,19 @@ func (p *Parser) expect(kind token.Kind) token.Token {
 	return tok
 }
 
+func (p *Parser) expectIdentifierName() token.Token {
+	tok := p.current()
+	if tok.Kind == token.Ident || tok.Kind.IsKeyword() {
+		p.advance()
+		return tok
+	}
+	p.error(tok.Span, fmt.Sprintf("expected identifier name, got %s", tok.Kind))
+	if tok.Kind != token.EOF {
+		p.advance()
+	}
+	return tok
+}
+
 func (p *Parser) error(span source.Span, msg string) {
 	p.diagnostics = append(p.diagnostics, diag.Diagnostic{
 		Span:     span,
@@ -531,7 +544,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	var fields []ast.InterfaceField
 	for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
 		loopStart := p.cursor
-		fieldTok := p.expect(token.Ident)
+		fieldTok := p.expectIdentifierName()
 		optional := p.match(token.Question)
 		p.expect(token.Colon)
 		t := p.parseType()
@@ -1020,7 +1033,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 		case token.Dot:
 			p.advance()
-			propTok := p.expect(token.Ident)
+			propTok := p.expectIdentifierName()
 			expr = &ast.MemberExpr{
 				SourceSpan: source.Span{Start: expr.Span().Start, End: propTok.Span.End},
 				Object:     expr,
@@ -1028,7 +1041,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 		case token.QuestionDot:
 			p.advance()
-			propTok := p.expect(token.Ident)
+			propTok := p.expectIdentifierName()
 			expr = &ast.MemberExpr{
 				SourceSpan: source.Span{Start: expr.Span().Start, End: propTok.Span.End},
 				Object:     expr,
@@ -1295,10 +1308,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 				})
 			} else {
 				var keyTok token.Token
-				if p.current().Kind == token.Ident || p.current().Kind == token.String {
+				if p.current().Kind == token.Ident || p.current().Kind == token.String || p.current().Kind.IsKeyword() {
 					keyTok = p.advance()
 				} else {
-					keyTok = p.expect(token.Ident)
+					keyTok = p.expectIdentifierName()
 				}
 				p.expect(token.Colon)
 				val := p.parseExpression()
@@ -1395,7 +1408,7 @@ func (p *Parser) parsePrimaryType() ast.TypeNode {
 		var fields []ast.InterfaceField
 		for p.current().Kind != token.RBrace && p.current().Kind != token.EOF {
 			loopStart := p.cursor
-			fieldTok := p.expect(token.Ident)
+			fieldTok := p.expectIdentifierName()
 			optional := p.match(token.Question)
 			p.expect(token.Colon)
 			fieldType := p.parseType()

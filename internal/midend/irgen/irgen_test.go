@@ -383,3 +383,24 @@ for (let i = 0; i < 10; i = i + 1) {
 		t.Fatalf("expected observable loop accumulator to retain immutable concat, got:\n%s", dump)
 	}
 }
+
+func TestIRGenVoidExpressionArrow(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("void-arrow.ts", []byte(`const log = (value: string): void => console.log(value); log("ok");`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	if !strings.Contains(irProg.Dump(), "define @$arrow") {
+		t.Fatalf("missing lifted arrow:\n%s", irProg.Dump())
+	}
+}

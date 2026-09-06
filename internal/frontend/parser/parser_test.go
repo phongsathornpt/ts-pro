@@ -400,3 +400,25 @@ const box = {
 		t.Fatalf("expected typed arrow, got %T", lit.Properties[2].Value)
 	}
 }
+
+func TestParseKeywordMemberNames(t *testing.T) {
+	fs := source.NewFileSet()
+	file := fs.AddFile("member-keyword.ts", []byte(`const event = { type: "tick" }; console.log(event.type); console.log(event?.default);`))
+	p := New(file)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diagnostics: %s", diags.Format(fs))
+	}
+	if len(prog.Statements) != 3 {
+		t.Fatalf("statements = %d, want 3", len(prog.Statements))
+	}
+	call := prog.Statements[1].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	member := call.Args[0].(*ast.MemberExpr)
+	if member.Property != "type" {
+		t.Fatalf("member property = %q, want type", member.Property)
+	}
+	optional := prog.Statements[2].(*ast.ExprStmt).Expr.(*ast.CallExpr).Args[0].(*ast.MemberExpr)
+	if optional.Property != "default" || !optional.Optional {
+		t.Fatalf("optional member = %#v", optional)
+	}
+}

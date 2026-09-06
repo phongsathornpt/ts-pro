@@ -99,6 +99,8 @@ type Result struct {
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
 	DOMExceptionType   *types.ObjectType
+	EventType          *types.ObjectType
+	EventTargetType    *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
 	RootScope          *Scope
 	Diagnostics        diag.DiagnosticList
@@ -570,6 +572,68 @@ func (c *Checker) builtinDOMExceptionType() *types.ObjectType {
 	return c.result.DOMExceptionType
 }
 
+func (c *Checker) builtinEventType() *types.ObjectType {
+	if c.result.EventType == nil {
+		e := types.NewObject("$Event")
+		e.AddField("bubbles", types.TypeBoolean, false)
+		e.AddField("cancelable", types.TypeBoolean, false)
+		e.AddField("composed", types.TypeBoolean, false)
+		e.AddField("currentTarget", types.TypeAny, false)
+		e.AddField("defaultPrevented", types.TypeBoolean, false)
+		e.AddField("eventPhase", types.TypeNumber, false)
+		e.AddField("isTrusted", types.TypeBoolean, false)
+		e.AddField("target", types.TypeAny, false)
+		e.AddField("timeStamp", types.TypeNumber, false)
+		e.AddField("type", types.TypeString, false)
+		// Internal dispatch state lives in the physical object but is deliberately
+		// hidden by lookupMemberType for the public Event surface.
+		e.AddField("$dispatching", types.TypeBoolean, false)
+		e.AddField("$stopImmediate", types.TypeBoolean, false)
+		e.AddField("$stopPropagation", types.TypeBoolean, false)
+		c.result.EventType = e
+	}
+	return c.result.EventType
+}
+
+func (c *Checker) builtinEventTargetType() *types.ObjectType {
+	if c.result.EventTargetType == nil {
+		c.result.EventTargetType = types.NewObject("$EventTarget")
+	}
+	return c.result.EventTargetType
+}
+
+func (c *Checker) builtinEventMember(property string) (types.Type, bool) {
+	switch property {
+	case "type":
+		return types.TypeString, true
+	case "target", "currentTarget":
+		return types.TypeAny, true
+	case "bubbles", "cancelable", "defaultPrevented", "composed", "isTrusted":
+		return types.TypeBoolean, true
+	case "eventPhase", "timeStamp":
+		return types.TypeNumber, true
+	case "preventDefault", "stopPropagation", "stopImmediatePropagation":
+		return types.NewFunction(nil, types.TypeVoid), true
+	case "composedPath":
+		return types.NewFunction(nil, types.NewArray(types.TypeAny)), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinEventTargetMember(property string) (types.Type, bool) {
+	event := c.builtinEventType()
+	listener := types.NewFunction([]types.Param{{Name: "event", Type: event}}, types.TypeVoid)
+	switch property {
+	case "addEventListener":
+		return types.NewFunction([]types.Param{{Name: "type", Type: types.TypeString}, {Name: "callback", Type: listener}, {Name: "options", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	case "removeEventListener":
+		return types.NewFunction([]types.Param{{Name: "type", Type: types.TypeString}, {Name: "callback", Type: listener}}, types.TypeVoid), true
+	case "dispatchEvent":
+		return types.NewFunction([]types.Param{{Name: "event", Type: event}}, types.TypeBoolean), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinDateType() *types.ObjectType {
 	if c.result.DateType == nil {
 		c.result.DateType = types.NewObject("$Date")
@@ -651,6 +715,12 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 			return types.NewFunction(nil, t.Elem), true
 		}
 	case *types.ObjectType:
+		if t.Name == "$Event" {
+			return c.builtinEventMember(property)
+		}
+		if t.Name == "$EventTarget" {
+			return c.builtinEventTargetMember(property)
+		}
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
 				return member, true
@@ -1041,6 +1111,29 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = base.Constructor
 		return base.Constructor
 	case *ast.NewExpr:
+		if e.ClassName == "EventTarget" {
+			if len(e.Args) != 0 {
+				c.error(e.Span(), "TS2554", "EventTarget expects no arguments.")
+			}
+			t := c.builtinEventTargetType()
+			c.result.Types[e] = t
+			return t
+		}
+		if e.ClassName == "Event" {
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				c.error(e.Span(), "TS2554", "Event expects a type and optional EventInit.")
+			} else {
+				if c.checkExpr(e.Args[0]) != types.TypeString {
+					c.error(e.Args[0].Span(), "TS2345", "Event type must be a string.")
+				}
+				if len(e.Args) == 2 {
+					c.checkExpr(e.Args[1])
+				}
+			}
+			t := c.builtinEventType()
+			c.result.Types[e] = t
+			return t
+		}
 		if e.ClassName == "DOMException" {
 			if len(e.Args) > 2 {
 				c.error(e.Span(), "TS2554", "DOMException expects optional message and name arguments.")
@@ -2105,6 +2198,15 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeNull
 		}
 	case *ast.TypeRefNode:
+		if t.Name == "Event" {
+			return c.builtinEventType()
+		}
+		if t.Name == "EventTarget" {
+			return c.builtinEventTargetType()
+		}
+		if t.Name == "DOMException" {
+			return c.builtinDOMExceptionType()
+		}
 		if t.Name == "Promise" || t.Name == "PromiseLike" {
 			return c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))
 		}
