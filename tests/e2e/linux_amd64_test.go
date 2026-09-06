@@ -2020,3 +2020,19 @@ console.log(s.marker);
 		expected: "true\nalive\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCBtoa(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_btoa",
+		source: `
+console.log(btoa("hello"));
+console.log(btoa("ÿ"));
+try {
+  console.log(btoa("✓"));
+} catch (err: any) {
+  console.log(err.name);
+}
+`,
+		expected: "aGVsbG8=\n/w==\nInvalidCharacterError\n",
+	})
+}

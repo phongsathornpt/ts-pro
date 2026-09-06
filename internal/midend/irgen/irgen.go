@@ -2610,6 +2610,26 @@ func (g *generator) materializeDynamicObject(value ir.Operand, objectType *types
 	return res
 }
 
+func (g *generator) newDOMException(message, name ir.Operand) ir.Operand {
+	t := g.semaResult.DOMExceptionType
+	dyn := g.currentFn.NewValue("dom_exception_dynamic", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: dyn, Callee: "ts_dynamic_object_new"})
+	for key, value := range map[string]ir.Operand{
+		"code": ir.ConstNumber{Value: 0}, "message": message, "name": name,
+	} {
+		boxed := value
+		if !irJSValueType(value.Type()) {
+			boxed = g.boxJSValue(value, value.Type())
+		}
+		set := g.currentFn.NewValue("dom_exception_set", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: set, Callee: "ts_dynamic_set", Args: []ir.Operand{dyn, ir.ConstString{Value: key}, boxed},
+			ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
+		})
+	}
+	return g.coerceJSValueBoundary(dyn, types.TypeAny, t)
+}
+
 func (g *generator) lowerDynamicObjectLiteral(lit *ast.ObjectLit) ir.Operand {
 	obj := g.currentFn.NewValue("dynamic_object", types.TypeAny)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: obj, Callee: "ts_dynamic_object_new"})
@@ -3361,9 +3381,6 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 	case *ast.NewExpr:
 		if e.ClassName == "DOMException" {
-			t := g.semanticType(e).(*types.ObjectType)
-			dyn := g.currentFn.NewValue("dom_exception_dynamic", types.TypeAny)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: dyn, Callee: "ts_dynamic_object_new"})
 			message := ir.Operand(ir.ConstString{Value: ""})
 			name := ir.Operand(ir.ConstString{Value: "Error"})
 			if len(e.Args) > 0 {
@@ -3372,22 +3389,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if len(e.Args) > 1 {
 				name = g.lowerExpr(e.Args[1])
 			}
-			for key, value := range map[string]ir.Operand{
-				"code": ir.ConstNumber{Value: 0}, "message": message, "name": name,
-			} {
-				boxed := value
-				valueType := value.Type()
-				if !irJSValueType(valueType) {
-					boxed = g.boxJSValue(value, valueType)
-				}
-				set := g.currentFn.NewValue("dom_exception_set", types.TypeAny)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-					Res: set, Callee: "ts_dynamic_set",
-					Args:       []ir.Operand{dyn, ir.ConstString{Value: key}, boxed},
-					ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
-				})
-			}
-			return g.coerceJSValueBoundary(dyn, types.TypeAny, t)
+			return g.newDOMException(message, name)
 		}
 		if e.ClassName == "RegExp" {
 			pattern := e.Args[0].(*ast.StringLit)
@@ -3934,6 +3936,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "btoa":
+				input := g.lowerExpr(e.Args[0])
+				valid := g.currentFn.NewValue("btoa_valid", types.TypeBoolean)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: valid, Callee: "ts_btoa_valid", Args: []ir.Operand{input}, ParamTypes: []types.Type{types.TypeString}})
+				okBB := g.currentFn.NewBlock("btoa_encode")
+				errBB := g.currentFn.NewBlock("btoa_invalid")
+				g.currentBB.Terminator = &ir.BranchTerm{Cond: valid, Then: okBB, Else: errBB}
+				g.currentBB = errBB
+				errObj := g.newDOMException(ir.ConstString{Value: "The string to be encoded contains characters outside of the Latin1 range."}, ir.ConstString{Value: "InvalidCharacterError"})
+				g.routeThrownValue(g.boxJSValue(errObj, g.semaResult.DOMExceptionType))
+				g.currentBB = okBB
+				res := g.currentFn.NewValue("btoa_result", types.TypeString)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_btoa", Args: []ir.Operand{input}, ParamTypes: []types.Type{types.TypeString}})
+				return res
 			case "taskGroup":
 				groupType := g.semanticType(e).(*types.ObjectType)
 				res := g.currentFn.NewValue("task_group", groupType)

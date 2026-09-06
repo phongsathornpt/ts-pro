@@ -1360,6 +1360,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "btoa":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "btoa expects exactly one string argument.")
+				} else if argType := c.checkExpr(e.Args[0]); argType != types.TypeString {
+					c.error(e.Args[0].Span(), "TS2345", "btoa expects a string.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeString
+				return types.TypeString
 			case "taskGroup":
 				if len(e.Args) != 0 {
 					c.error(e.Span(), "TS2554", "taskGroup expects no arguments.")
