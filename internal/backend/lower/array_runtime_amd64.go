@@ -77,7 +77,10 @@ func emitAMD64ArrayNew(e *amd64.Emitter, allocOffset int) {
 	typeDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[typeDoneJump+1:], uint32(int32(typeDone-(typeDoneJump+5))))
 
-	// Reused free blocks may contain stale payloads; zero the full capacity.
+	// mmap/bump memory is already zero. Only reclaimed blocks need clearing.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	zeroDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.MovRegReg(amd64.R10, amd64.R9)
 	e.MovRegReg(amd64.R11, amd64.R14)
 	e.MovRegImm64(amd64.RAX, 0)
@@ -88,6 +91,8 @@ func emitAMD64ArrayNew(e *amd64.Emitter, allocOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
+	zeroDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[zeroDone+2:], uint32(int32(zeroDoneLabel-(zeroDone+6))))
 
 	e.MovDerefReg(amd64.RBX, amd64ArrayLength, amd64.R12)
 	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)
@@ -230,6 +235,10 @@ func emitAMD64ArraySet(e *amd64.Emitter, allocOffset int) {
 	copyDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[copyDoneIfZero+2:], uint32(int32(copyDone-(copyDoneIfZero+6))))
 
+	// Fresh backing stores already have a zero tail. Reclaimed stores must clear it.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	clearFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	// R10 already points just past the copied prefix. Clear only capacity-length.
 	e.MovRegReg(amd64.R11, amd64.R14)
 	e.MovRegDeref(amd64.RAX, amd64.RBX, amd64ArrayLength)
@@ -247,6 +256,7 @@ func emitAMD64ArraySet(e *amd64.Emitter, allocOffset int) {
 	binary.LittleEndian.PutUint32(e.Code[clearTailBack+2:], uint32(int32(clearTailLoop-(clearTailBack+6))))
 	clearTailDoneLabel := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[clearTailDone+2:], uint32(int32(clearTailDoneLabel-(clearTailDone+6))))
+	binary.LittleEndian.PutUint32(e.Code[clearFreshDone+2:], uint32(int32(clearTailDoneLabel-(clearFreshDone+6))))
 
 	e.MovDerefReg(amd64.RBX, amd64ArrayData, amd64.R9)
 	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)
@@ -360,8 +370,11 @@ func emitAMD64ArrayPush(e *amd64.Emitter, allocOffset int) {
 	copyDone := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[copyDoneIfZero+2:], uint32(int32(copyDone-(copyDoneIfZero+6))))
 
-	// R10 points at the first unused slot. Clear only the new tail so reclaimed
-	// blocks cannot retain stale references while avoiding duplicate prefix writes.
+	// Fresh backing stores already have a zero tail. Reclaimed stores must clear it.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	pushFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	// R10 points at the first unused slot. Clear only the new tail.
 	e.MovRegReg(amd64.R11, amd64.R14)
 	e.SubRegReg(amd64.R11, amd64.R13)
 	e.TestRegReg(amd64.R11, amd64.R11)
@@ -377,6 +390,7 @@ func emitAMD64ArrayPush(e *amd64.Emitter, allocOffset int) {
 	binary.LittleEndian.PutUint32(e.Code[clearTailBack+2:], uint32(int32(clearTailLoop-(clearTailBack+6))))
 	clearTailDoneLabel := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[clearTailDone+2:], uint32(int32(clearTailDoneLabel-(clearTailDone+6))))
+	binary.LittleEndian.PutUint32(e.Code[pushFreshDone+2:], uint32(int32(clearTailDoneLabel-(pushFreshDone+6))))
 
 	e.MovDerefReg(amd64.RBX, amd64ArrayData, amd64.R9)
 	e.MovDerefReg(amd64.RBX, amd64ArrayCapacity, amd64.R14)

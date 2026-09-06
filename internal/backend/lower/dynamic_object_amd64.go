@@ -43,6 +43,10 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.CallRel32(int32(allocOffset - (callEntries + 5)))
 	emitAMD64SetObjectType(e, amd64.RAX, amd64ObjectTypeDynamicEntries)
 
+	// Fresh bump/mmap memory is already zero; reclaimed entry tables are not.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	zeroFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	// Clear 4 {key,value} pairs.
 	e.MovRegReg(amd64.R10, amd64.RAX)
 	e.MovRegImm64(amd64.R11, 8)
@@ -54,6 +58,8 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
+	zeroFreshDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[zeroFreshDone+2:], uint32(int32(zeroFreshDoneLabel-(zeroFreshDone+6))))
 
 	e.MovRegImm64(amd64.R10, 0)
 	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R10)
@@ -303,7 +309,11 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	e.MovRegReg(amd64.R9, amd64.RAX)
 	emitAMD64SetObjectType(e, amd64.R9, amd64ObjectTypeDynamicEntries)
 
-	// Clear new table.
+	// Fresh backing tables are zero from mmap/bump allocation.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	growZeroFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	// Reclaimed tables may contain stale keys/JSValues and must be cleared.
 	e.MovRegReg(amd64.R10, amd64.R9)
 	e.MovRegDeref(amd64.R11, amd64.RSP, 40)
 	e.AddRegReg(amd64.R11, amd64.R11) // two qwords per entry
@@ -315,6 +325,8 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	patchJcc(zeroBack, zeroLoop)
+	growZeroFreshDoneLabel := len(e.Code)
+	patchJcc(growZeroFreshDone, growZeroFreshDoneLabel)
 
 	// Copy the live old prefix.
 	e.MovRegDeref(amd64.R8, amd64.RBX, amd64DynamicEntries)

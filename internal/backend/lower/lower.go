@@ -1868,6 +1868,7 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		e.MovDerefReg(amd64.R13, amd64ObjectType, amd64.R10)
 		e.MovRegReg(amd64.RAX, amd64.R13)
 		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+		e.MovRegImm64(amd64.RDX, 1) // reclaimed block
 		emitReturn()
 
 		missLabel := len(e.Code)
@@ -1902,6 +1903,7 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTChunkHead)
 	e.MovDerefReg(amd64.R11, amd64ChunkUsed, amd64.R10)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+	e.MovRegImm64(amd64.RDX, 0) // fresh bump memory
 	emitReturn()
 
 	// On bump-space pressure, reuse a reclaimed block before paying for GC.
@@ -1954,6 +1956,7 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 	e.MovRegReg(amd64.RAX, amd64.R11)
 	emitAMD64InitObjectHeader(e, amd64.RAX, amd64.RBX)
 	e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+	e.MovRegImm64(amd64.RDX, 0) // fresh mmap memory
 	emitReturn()
 }
 

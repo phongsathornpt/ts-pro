@@ -102,6 +102,10 @@ func emitAMD64CollectionNew(e *amd64.Emitter, allocOffset int) {
 	callEntries := len(e.Code)
 	e.CallRel32(int32(allocOffset - (callEntries + 5)))
 	emitAMD64SetObjectType(e, amd64.RAX, amd64ObjectTypeJSValueData)
+	// Fresh bump/mmap memory is already zero; only reclaimed tables need clearing.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	zeroFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	// Clear 8 JSValue slots.
 	e.MovRegReg(amd64.R10, amd64.RAX)
 	e.MovRegImm64(amd64.R11, 8)
@@ -113,6 +117,8 @@ func emitAMD64CollectionNew(e *amd64.Emitter, allocOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
+	zeroFreshDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[zeroFreshDone+2:], uint32(int32(zeroFreshDoneLabel-(zeroFreshDone+6))))
 	e.MovRegImm64(amd64.R10, 0)
 	e.MovDerefReg(amd64.RBX, amd64CollectionCount, amd64.R10)
 	e.MovRegImm64(amd64.R10, 4)
@@ -238,6 +244,10 @@ func emitAMD64CollectionSet(e *amd64.Emitter, allocOffset, findOffset int) {
 	e.CallRel32(int32(allocOffset - (callAlloc + 5)))
 	e.MovRegReg(amd64.R9, amd64.RAX)
 	emitAMD64SetObjectType(e, amd64.R9, amd64ObjectTypeJSValueData)
+	// Fresh tables are already zero; reclaimed tables must be scrubbed before GC sees them.
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	growZeroFreshDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	// Zero new table: capacity R10 was caller-clobbered, reload old cap and double.
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64CollectionCapacity)
 	e.AddRegReg(amd64.R10, amd64.R10)
@@ -252,6 +262,11 @@ func emitAMD64CollectionSet(e *amd64.Emitter, allocOffset, findOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	patchJcc(zeroBack, zeroLoop)
+	growZeroFreshDoneLabel := len(e.Code)
+	patchJcc(growZeroFreshDone, growZeroFreshDoneLabel)
+	// Capacity is needed below even when the clear was skipped.
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64CollectionCapacity)
+	e.AddRegReg(amd64.R10, amd64.R10)
 	// Copy used entries (count * 2 qwords).
 	e.MovRegDeref(amd64.R8, amd64.RBX, amd64CollectionEntries)
 	e.MovRegReg(amd64.R11, amd64.R14)
