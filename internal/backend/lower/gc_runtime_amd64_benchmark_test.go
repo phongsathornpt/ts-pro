@@ -153,3 +153,81 @@ func buildAMD64GCFragmentedReuseBenchmark(tb testing.TB) string {
 	}
 	return path
 }
+
+func BenchmarkAMD64GCMarkLocality(b *testing.B) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		b.Skip("native Linux AMD64 execution required")
+	}
+	const cycles = 20
+	path := buildAMD64GCMarkLocalityBenchmark(b, 65521, cycles)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out, err := exec.Command(path).CombinedOutput(); err != nil {
+			b.Fatalf("execute: %v\n%s", err, out)
+		}
+	}
+	b.ReportMetric(cycles, "gc-cycles/op")
+}
+
+func buildAMD64GCMarkLocalityBenchmark(tb testing.TB, objects, cycles int) string {
+	tb.Helper()
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	entry := fn.NewBlock("entry")
+	refs := fn.NewValue("refs", types.NewArray(types.TypeString))
+	entry.Instructions = append(entry.Instructions, &ir.AllocArrayInst{Res: refs, ElemType: types.TypeString, Length: ir.ConstNumber{Value: float64(objects)}})
+
+	cond := fn.NewBlock("fill_cond")
+	body := fn.NewBlock("fill_body")
+	post := fn.NewBlock("fill_post")
+	afterFill := fn.NewBlock("after_fill")
+	i := fn.NewValue("fill_i", types.TypeNumber)
+	next := fn.NewValue("fill_next", types.TypeNumber)
+	cond.Phis = append(cond.Phis, &ir.PhiInst{Res: i, Incoming: []ir.PhiIncoming{{Block: entry, Value: ir.ConstNumber{Value: 0}}, {Block: post, Value: next}}})
+	entry.Terminator = &ir.JumpTerm{Target: cond}
+	less := fn.NewValue("fill_less", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: less, Op: ir.OpLt, LHS: i, RHS: ir.ConstNumber{Value: float64(objects)}})
+	cond.Terminator = &ir.BranchTerm{Cond: less, Then: body, Else: afterFill}
+	value := fn.NewValue("live_string", types.TypeString)
+	body.Instructions = append(body.Instructions, &ir.CallInst{Res: value, Callee: "ts_string_concat", Args: []ir.Operand{ir.ConstString{Value: "ab"}, ir.ConstString{Value: "cd"}}})
+	mixed := fn.NewValue("mixed_index", types.TypeNumber)
+	body.Instructions = append(body.Instructions, &ir.BinaryInst{Res: mixed, Op: ir.OpMul, LHS: i, RHS: ir.ConstNumber{Value: 32719}})
+	index := fn.NewValue("index", types.TypeNumber)
+	body.Instructions = append(body.Instructions, &ir.BinaryInst{Res: index, Op: ir.OpMod, LHS: mixed, RHS: ir.ConstNumber{Value: float64(objects)}})
+	body.Instructions = append(body.Instructions, &ir.SetElementInst{Array: refs, Index: index, Val: value})
+	body.Terminator = &ir.JumpTerm{Target: post}
+	post.Instructions = append(post.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+	post.Terminator = &ir.JumpTerm{Target: cond}
+
+	gcCond := fn.NewBlock("gc_cond")
+	gcBody := fn.NewBlock("gc_body")
+	gcPost := fn.NewBlock("gc_post")
+	exit := fn.NewBlock("exit")
+	g := fn.NewValue("gc_i", types.TypeNumber)
+	gNext := fn.NewValue("gc_next", types.TypeNumber)
+	gcCond.Phis = append(gcCond.Phis, &ir.PhiInst{Res: g, Incoming: []ir.PhiIncoming{{Block: afterFill, Value: ir.ConstNumber{Value: 0}}, {Block: gcPost, Value: gNext}}})
+	afterFill.Terminator = &ir.JumpTerm{Target: gcCond}
+	gcLess := fn.NewValue("gc_less", types.TypeBoolean)
+	gcCond.Instructions = append(gcCond.Instructions, &ir.BinaryInst{Res: gcLess, Op: ir.OpLt, LHS: g, RHS: ir.ConstNumber{Value: float64(cycles)}})
+	gcCond.Terminator = &ir.BranchTerm{Cond: gcLess, Then: gcBody, Else: exit}
+	gcBody.Instructions = append(gcBody.Instructions, &ir.CallInst{Callee: "ts_gc_collect"})
+	gcBody.Terminator = &ir.JumpTerm{Target: gcPost}
+	gcPost.Instructions = append(gcPost.Instructions, &ir.BinaryInst{Res: gNext, Op: ir.OpAdd, LHS: g, RHS: ir.ConstNumber{Value: 1}})
+	gcPost.Terminator = &ir.JumpTerm{Target: gcCond}
+	exit.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+
+	code, err := lowerAMD64(prog)
+	if err != nil {
+		tb.Fatalf("lower: %v", err)
+	}
+	bin, err := elf.CreateExecutable(code, false)
+	if err != nil {
+		tb.Fatalf("elf: %v", err)
+	}
+	path := filepath.Join(tb.TempDir(), "gc-mark-locality-bench")
+	if err := os.WriteFile(path, bin, 0o755); err != nil {
+		tb.Fatalf("write executable: %v", err)
+	}
+	return path
+}
