@@ -2037,3 +2037,25 @@ try { console.log(atob("A")); } catch (err: any) { console.log(err.name); }
 		expected: "aGVsbG8=\n/w==\nhello\na\nabc\nÿ\nInvalidCharacterError\nInvalidCharacterError\n",
 	})
 }
+
+func TestLinuxAMD64TopLevelThrowExitsCleanly(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("requires linux/amd64 execution")
+	}
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "top-level-throw")
+	compiler := tspro.New(tspro.Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
+	bin, diags, err := compiler.CompileSource("top-level-throw.ts", []byte(`throw new DOMException("bad", "InvalidStateError");`))
+	if err != nil {
+		t.Fatalf("compile top-level throw: %v, diagnostics: %s", err, diags.Format(compiler.FileSet()))
+	}
+	if err := os.WriteFile(binPath, bin, 0o755); err != nil {
+		t.Fatalf("write top-level throw binary: %v", err)
+	}
+	cmd := exec.Command(binPath)
+	err = cmd.Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("top-level throw exit = %v, want exit code 1", err)
+	}
+}

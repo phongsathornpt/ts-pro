@@ -515,9 +515,18 @@ func emitAMD64TaskYield(e *amd64.Emitter, runOneOffset, suspendOffset int) {
 
 func emitAMD64TaskReject(e *amd64.Emitter) {
 	// RDI = NaN-boxed JSValue rejection reason. Reject the currently running
-	// task and restore the context that resumed it. This helper never returns to
-	// the throwing task.
+	// task and restore the context that resumed it. A synchronous top-level
+	// throw has no current task; terminate cleanly instead of dereferencing a
+	// null task pointer.
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTCurrentTask)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	hasTask := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegImm64(amd64.RDI, 1)
+	e.MovRegImm64(amd64.RAX, 60) // Linux sys_exit
+	e.Syscall()
+	hasTaskLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[hasTask+2:], uint32(int32(hasTaskLabel-(hasTask+6))))
 	e.MovDerefReg(amd64.R11, amd64TaskResult, amd64.RDI)
 	e.MovRegImm64(amd64.R10, 3)
 	e.MovDerefReg(amd64.R11, amd64TaskState, amd64.R10)
