@@ -69,6 +69,185 @@ func amd64RootSlots(fn *ir.Function) map[int]int {
 	return slots
 }
 
+func amd64RootOperandValue(op ir.Operand) *ir.Value {
+	v, _ := op.(*ir.Value)
+	if v != nil && isAMD64HeapRefType(v.Type()) {
+		return v
+	}
+	return nil
+}
+
+func amd64RootInstructionUses(inst ir.Instruction) []*ir.Value {
+	uses := make([]*ir.Value, 0, 4)
+	add := func(op ir.Operand) {
+		if v := amd64RootOperandValue(op); v != nil {
+			uses = append(uses, v)
+		}
+	}
+	switch i := inst.(type) {
+	case *ir.BinaryInst:
+		add(i.LHS)
+		add(i.RHS)
+	case *ir.UnaryInst:
+		add(i.Val)
+	case *ir.CallInst:
+		for _, arg := range i.Args {
+			add(arg)
+		}
+	case *ir.MakeClosureInst:
+		for _, capture := range i.Captures {
+			add(capture)
+		}
+	case *ir.ClosureGetInst:
+		add(i.Closure)
+	case *ir.IndirectCallInst:
+		add(i.Closure)
+		add(i.ThisArg)
+		for _, arg := range i.Args {
+			add(arg)
+		}
+	case *ir.GetFieldInst:
+		add(i.Obj)
+	case *ir.SetFieldInst:
+		add(i.Obj)
+		add(i.Val)
+	case *ir.AllocArrayInst:
+		add(i.Length)
+	case *ir.GetElementInst:
+		add(i.Array)
+		add(i.Index)
+	case *ir.SetElementInst:
+		add(i.Array)
+		add(i.Index)
+		add(i.Val)
+	case *ir.ArrayLengthInst:
+		add(i.Array)
+	case *ir.ArrayPushInst:
+		add(i.Array)
+		add(i.Val)
+	case *ir.ArrayPopInst:
+		add(i.Array)
+	}
+	return uses
+}
+
+func amd64RootTerminatorUses(term ir.Terminator) []*ir.Value {
+	if term == nil {
+		return nil
+	}
+	switch t := term.(type) {
+	case *ir.ReturnTerm:
+		if v := amd64RootOperandValue(t.Val); v != nil {
+			return []*ir.Value{v}
+		}
+	case *ir.BranchTerm:
+		if v := amd64RootOperandValue(t.Cond); v != nil {
+			return []*ir.Value{v}
+		}
+	}
+	return nil
+}
+
+func amd64RootLiveOut(fn *ir.Function) map[*ir.BasicBlock]map[int]struct{} {
+	defs := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	uses := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	liveIn := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	liveOut := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	edgeUses := make(map[*ir.BasicBlock]map[*ir.BasicBlock]map[int]struct{})
+	for _, bb := range fn.Blocks {
+		defs[bb], uses[bb], liveIn[bb], liveOut[bb] = map[int]struct{}{}, map[int]struct{}{}, map[int]struct{}{}, map[int]struct{}{}
+		if len(fn.Blocks) != 0 && bb == fn.Blocks[0] {
+			for _, param := range fn.Params {
+				if isAMD64HeapRefType(param.Type()) {
+					defs[bb][param.ID] = struct{}{}
+				}
+			}
+		}
+		for _, phi := range bb.Phis {
+			if phi.Res != nil && isAMD64HeapRefType(phi.Res.Type()) {
+				defs[bb][phi.Res.ID] = struct{}{}
+			}
+		}
+		for _, inst := range bb.Instructions {
+			for _, v := range amd64RootInstructionUses(inst) {
+				if _, defined := defs[bb][v.ID]; !defined {
+					uses[bb][v.ID] = struct{}{}
+				}
+			}
+			if res := inst.Result(); res != nil && isAMD64HeapRefType(res.Type()) {
+				defs[bb][res.ID] = struct{}{}
+			}
+		}
+		for _, v := range amd64RootTerminatorUses(bb.Terminator) {
+			if _, defined := defs[bb][v.ID]; !defined {
+				uses[bb][v.ID] = struct{}{}
+			}
+		}
+	}
+	for _, pred := range fn.Blocks {
+		if pred.Terminator == nil {
+			continue
+		}
+		for _, succ := range pred.Terminator.Successors() {
+			if edgeUses[pred] == nil {
+				edgeUses[pred] = map[*ir.BasicBlock]map[int]struct{}{}
+			}
+			set := map[int]struct{}{}
+			for _, phi := range succ.Phis {
+				for _, inc := range phi.Incoming {
+					if inc.Block == pred {
+						if v := amd64RootOperandValue(inc.Value); v != nil {
+							set[v.ID] = struct{}{}
+						}
+					}
+				}
+			}
+			edgeUses[pred][succ] = set
+		}
+	}
+	equal := func(a, b map[int]struct{}) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for k := range a {
+			if _, ok := b[k]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	for changed := true; changed; {
+		changed = false
+		for i := len(fn.Blocks) - 1; i >= 0; i-- {
+			bb := fn.Blocks[i]
+			newOut := map[int]struct{}{}
+			if bb.Terminator != nil {
+				for _, succ := range bb.Terminator.Successors() {
+					for id := range liveIn[succ] {
+						newOut[id] = struct{}{}
+					}
+					for id := range edgeUses[bb][succ] {
+						newOut[id] = struct{}{}
+					}
+				}
+			}
+			newIn := map[int]struct{}{}
+			for id := range uses[bb] {
+				newIn[id] = struct{}{}
+			}
+			for id := range newOut {
+				if _, defined := defs[bb][id]; !defined {
+					newIn[id] = struct{}{}
+				}
+			}
+			if !equal(newOut, liveOut[bb]) || !equal(newIn, liveIn[bb]) {
+				liveOut[bb], liveIn[bb], changed = newOut, newIn, true
+			}
+		}
+	}
+	return liveOut
+}
+
 const (
 	amd64RTCursor      int32 = 0
 	amd64RTEnd         int32 = 8

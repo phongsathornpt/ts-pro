@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/arm64"
@@ -784,6 +785,12 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		locs := ra.Allocate(fn)
 		spillBytes := ra.StackFrameSlots() * 8
 		rootSlots := amd64RootSlots(fn)
+		rootLiveOut := amd64RootLiveOut(fn)
+		rootIDs := make([]int, 0, len(rootSlots))
+		for id := range rootSlots {
+			rootIDs = append(rootIDs, id)
+		}
+		sort.Slice(rootIDs, func(i, j int) bool { return rootSlots[rootIDs[i]] < rootSlots[rootIDs[j]] })
 		rootFrameBytes := 0
 		rootFrameBaseOffset := int32(0)
 		if len(rootSlots) != 0 {
@@ -827,6 +834,30 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 			}
 			e.MovRegDeref(amd64.R10, amd64.RBP, rootFrameBaseOffset)
 			e.MovDerefReg(amd64.R15, 16, amd64.R10)
+		}
+		clearDeadRoots := func(bb *ir.BasicBlock) {
+			if len(rootSlots) == 0 {
+				return
+			}
+			keep := make(map[int]struct{}, len(rootLiveOut[bb])+1)
+			for id := range rootLiveOut[bb] {
+				keep[id] = struct{}{}
+			}
+			for _, v := range amd64RootTerminatorUses(bb.Terminator) {
+				keep[v.ID] = struct{}{}
+			}
+			zeroLoaded := false
+			for _, id := range rootIDs {
+				if _, ok := keep[id]; ok {
+					continue
+				}
+				if !zeroLoaded {
+					e.MovRegImm64(amd64.R11, 0)
+					zeroLoaded = true
+				}
+				slot := rootSlots[id]
+				e.MovDerefReg(amd64.RBP, rootFrameBaseOffset+16+int32(slot*8), amd64.R11)
+			}
 		}
 
 		loadOperand := func(op ir.Operand, scratch amd64.Register) amd64.Register {
@@ -1297,6 +1328,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 				}
 			}
 
+			clearDeadRoots(bb)
 			if bb.Terminator != nil {
 				switch term := bb.Terminator.(type) {
 				case *ir.ReturnTerm:

@@ -49,3 +49,45 @@ func TestAMD64HeapRefTypeRecognizesReferenceUnion(t *testing.T) {
 		t.Fatalf("number|string array element class = %d, want JSValue class 2", got)
 	}
 }
+
+func TestAMD64RootLiveOutTracksPhiEdges(t *testing.T) {
+	fn := ir.NewFunction("root_phi_edges", types.TypeString)
+	entry := fn.NewBlock("entry")
+	left := fn.NewBlock("left")
+	right := fn.NewBlock("right")
+	join := fn.NewBlock("join")
+
+	leftVal := fn.NewValue("left_ref", types.TypeString)
+	rightVal := fn.NewValue("right_ref", types.TypeString)
+	left.Instructions = append(left.Instructions, &ir.CallInst{Res: leftVal, Callee: "make_left"})
+	right.Instructions = append(right.Instructions, &ir.CallInst{Res: rightVal, Callee: "make_right"})
+	entry.Terminator = &ir.BranchTerm{Cond: ir.ConstBool{Value: true}, Then: left, Else: right}
+	left.Terminator = &ir.JumpTerm{Target: join}
+	right.Terminator = &ir.JumpTerm{Target: join}
+	phi := fn.NewValue("joined", types.TypeString)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: phi, Incoming: []ir.PhiIncoming{{Block: left, Value: leftVal}, {Block: right, Value: rightVal}}})
+	join.Terminator = &ir.ReturnTerm{Val: phi}
+
+	liveOut := amd64RootLiveOut(fn)
+	if _, ok := liveOut[left][leftVal.ID]; !ok {
+		t.Fatal("left phi incoming must be live on left->join edge")
+	}
+	if _, ok := liveOut[right][rightVal.ID]; !ok {
+		t.Fatal("right phi incoming must be live on right->join edge")
+	}
+	if _, ok := liveOut[left][rightVal.ID]; ok {
+		t.Fatal("right-only value must not be live on left edge")
+	}
+}
+
+func TestAMD64RootLiveOutDropsDeadBlockLocal(t *testing.T) {
+	fn := ir.NewFunction("root_dead_local", types.TypeVoid)
+	entry := fn.NewBlock("entry")
+	dead := fn.NewValue("dead", types.TypeString)
+	entry.Instructions = append(entry.Instructions, &ir.CallInst{Res: dead, Callee: "make_string"})
+	entry.Instructions = append(entry.Instructions, &ir.CallInst{Callee: "consume", Args: []ir.Operand{dead}})
+	entry.Terminator = &ir.ReturnTerm{}
+	if _, ok := amd64RootLiveOut(fn)[entry][dead.ID]; ok {
+		t.Fatal("dead local must not remain live out of return block")
+	}
+}
