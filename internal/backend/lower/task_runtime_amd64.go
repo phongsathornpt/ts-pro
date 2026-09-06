@@ -33,7 +33,8 @@ const (
 	amd64TaskContext    int32 = 176
 	amd64TaskGroupNext  int32 = 184
 	amd64TaskWakeNS     int32 = 192
-	amd64TaskPayload    int32 = 200
+	amd64TaskTimer      int32 = 200
+	amd64TaskPayload    int32 = 208
 
 	amd64TaskResultNumber int64 = 1
 	amd64TaskResultRef    int64 = 3
@@ -77,7 +78,7 @@ func emitAMD64TaskSpawnQueued(e *amd64.Emitter, allocOffset int, queueHead, queu
 	e.MovRegDeref(amd64.R10, amd64.RSP, 16)
 	e.MovDerefReg(amd64.RBX, amd64TaskClosure, amd64.R10)
 	e.MovRegImm64(amd64.R10, 0)
-	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext, amd64TaskWakeNS} {
+	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext, amd64TaskWakeNS, amd64TaskTimer} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
 	e.MovDerefReg(amd64.RBX, amd64TaskKind, amd64.R12)
@@ -134,11 +135,28 @@ func emitAMD64TaskTrampoline(e *amd64.Emitter) {
 	// result, mark completion, then restore the scheduler context and RET to the
 	// call site after ts_task_resume.
 	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskTimer)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	runClosureNonTimer := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskCancelled)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	runClosureTimer := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.RAX, 0)
+	skipClosure := len(e.Code)
+	e.JmpRel32(0)
+
+	runClosureLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[runClosureNonTimer+2:], uint32(int32(runClosureLabel-(runClosureNonTimer+6))))
+	binary.LittleEndian.PutUint32(e.Code[runClosureTimer+2:], uint32(int32(runClosureLabel-(runClosureTimer+6))))
 	e.MovRegDeref(amd64.R12, amd64.R10, amd64TaskClosure)
 	e.MovRegReg(amd64.RDI, amd64.R12)
 	e.MovRegDeref(amd64.R11, amd64.R12, 0)
 	e.CallReg(amd64.R11)
 
+	afterClosure := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[skipClosure+1:], uint32(int32(afterClosure-(skipClosure+5))))
 	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTCurrentTask)
 	e.MovRegDeref(amd64.R11, amd64.R10, amd64TaskKind)
 	e.CmpRegImm32(amd64.R11, int32(amd64TaskResultNumber))

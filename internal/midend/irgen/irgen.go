@@ -3936,6 +3936,19 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "setTimeout":
+				closure := g.lowerExpr(e.Args[0])
+				delay := ir.Operand(ir.ConstNumber{Value: 0})
+				if len(e.Args) == 2 {
+					delay = g.lowerExpr(e.Args[1])
+				}
+				res := g.currentFn.NewValue("timer_id", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_set_timeout", Args: []ir.Operand{closure, delay}})
+				return res
+			case "clearTimeout":
+				id := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_timeout", Args: []ir.Operand{id}})
+				return nil
 			case "queueMicrotask":
 				closure := g.lowerExpr(e.Args[0])
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{

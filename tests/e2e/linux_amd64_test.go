@@ -2072,3 +2072,17 @@ spawn((): void => { console.log("task"); });
 		expected: "sync\nmicro-1\nmicro-2\ntask\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCTimerOrderingAndCancellation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_timers",
+		source: `
+console.log("sync");
+const cancelled = setTimeout((): void => { console.log("cancelled"); }, 0);
+clearTimeout(cancelled);
+setTimeout((): void => { console.log("timer"); }, 0);
+queueMicrotask((): void => { console.log("micro"); });
+`,
+		expected: "sync\nmicro\ntimer\n",
+	})
+}
