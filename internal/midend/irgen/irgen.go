@@ -3802,6 +3802,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.lowerOptionalMember(e)
 		}
 		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			if ident.Name == "navigator" && e.Property == "userAgent" {
+				return ir.ConstString{Value: "ts-pro"}
+			}
 			if members := g.semaResult.Enums[ident.Name]; members != nil {
 				return ir.ConstNumber{Value: members[e.Property]}
 			}

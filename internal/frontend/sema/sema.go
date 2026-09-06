@@ -1157,6 +1157,12 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e] = obj
 				return obj
 			}
+			if e.Name == "navigator" {
+				obj := types.NewObject("$Navigator")
+				obj.AddField("userAgent", types.TypeString, false)
+				c.result.Types[e] = obj
+				return obj
+			}
 			c.error(e.Span(), "TS2304", fmt.Sprintf("Cannot find name '%s'.", e.Name))
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny

@@ -1990,3 +1990,11 @@ try {
 		expected: "Error\n\nInvalidCharacterError\nbad byte\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCNavigatorUserAgent(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_navigator_user_agent",
+		source:   `console.log(navigator.userAgent);`,
+		expected: "ts-pro\n",
+	})
+}
