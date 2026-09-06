@@ -7,6 +7,9 @@ import (
 )
 
 func emitAMD64GCMarkPayload(e *amd64.Emitter) {
+	// Internal tracing loops keep R8 live across marker calls. Preserve it even
+	// though it is caller-saved in SysV; this helper has a narrower runtime ABI.
+	e.Push(amd64.R8)
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	// Accept raw payload pointers and NaN-boxed JSValue references.
@@ -70,8 +73,32 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondAE, 0)
 	// Cache the successful chunk for subsequent nearby references.
 	e.MovDerefReg(amd64.R15, amd64RTMarkChunk, amd64.R11)
-	found := len(e.Code)
-	patchJmp(cacheHit, found)
+	foundChunk := len(e.Code)
+	patchJmp(cacheHit, foundChunk)
+
+	// Range membership alone is insufficient: an interior pointer can land
+	// inside a valid chunk and make payload bytes look like a fake header. Walk
+	// the chunk's object chain and require an exact allocation-start match.
+	e.MovRegReg(amd64.R8, amd64.R11)
+	e.AddRegImm32(amd64.R8, amd64ChunkSize)
+	objectStartLoop := len(e.Code)
+	e.CmpRegReg(amd64.R8, amd64.R10)
+	exactStart := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegReg(amd64.R8, amd64.R10)
+	interiorMiss := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64ObjectSize)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	zeroSizeMiss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.AddRegReg(amd64.R8, amd64.RAX)
+	objectStartBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(objectStartBack, objectStartLoop)
+
+	exactStartLabel := len(e.Code)
+	patchJcc(exactStart, exactStartLabel)
 	e.MovRegDeref(amd64.RAX, amd64.R10, amd64ObjectFlags)
 	e.CmpRegImm32(amd64.RAX, 1)
 	alreadyMarked := len(e.Code)
@@ -86,6 +113,7 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTFreeList)
 	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R10)
+	e.Pop(amd64.R8)
 	e.Ret()
 	next := len(e.Code)
 	patchJcc(nextBelow, next)
@@ -97,9 +125,12 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	zero := len(e.Code)
 	patchJcc(nilJump, zero)
 	patchJcc(missJump, zero)
+	patchJcc(interiorMiss, zero)
+	patchJcc(zeroSizeMiss, zero)
 	patchJcc(alreadyMarked, zero)
 	patchJcc(freeJump, zero)
 	e.MovRegImm64(amd64.RAX, 0)
+	e.Pop(amd64.R8)
 	e.Ret()
 }
 

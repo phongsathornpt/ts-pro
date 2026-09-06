@@ -1865,7 +1865,46 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 
 		foundLabel := len(e.Code)
 		patchJcc(found, foundLabel)
+		// R10 = original block size, RBX = requested aligned total size. Split
+		// when the tail is large enough to remain a useful free object; sweep
+		// requires every byte in the object region to remain header-addressable.
 		e.MovRegDeref(amd64.R14, amd64.R13, amd64ObjectNextFree)
+		e.MovRegReg(amd64.R11, amd64.R10)
+		e.SubRegReg(amd64.R11, amd64.RBX)
+		e.CmpRegImm32(amd64.R11, 48)
+		noSplit := len(e.Code)
+		e.JccRel32(amd64.CondL, 0)
+
+		// Tail header lives immediately after the newly allocated prefix.
+		e.MovRegReg(amd64.RAX, amd64.R13)
+		e.AddRegReg(amd64.RAX, amd64.RBX)
+		e.MovDerefReg(amd64.RAX, amd64ObjectSize, amd64.R11)
+		e.MovRegImm64(amd64.R10, 2)
+		e.MovDerefReg(amd64.RAX, amd64ObjectFlags, amd64.R10)
+		e.MovDerefReg(amd64.RAX, amd64ObjectNextFree, amd64.R14)
+		e.MovRegImm64(amd64.R10, 0)
+		e.MovDerefReg(amd64.RAX, amd64ObjectType, amd64.R10)
+
+		// Replace the old free-list node with the tail remainder.
+		e.TestRegReg(amd64.R12, amd64.R12)
+		splitHasPrev := len(e.Code)
+		e.JccRel32(amd64.CondNE, 0)
+		e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.RAX)
+		splitLinked := len(e.Code)
+		e.JmpRel32(0)
+		splitHasPrevLabel := len(e.Code)
+		patchJcc(splitHasPrev, splitHasPrevLabel)
+		e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.RAX)
+		splitLinkedLabel := len(e.Code)
+		patchJmp(splitLinked, splitLinkedLabel)
+		e.MovDerefReg(amd64.R13, amd64ObjectSize, amd64.RBX)
+		splitDone := len(e.Code)
+		e.JmpRel32(0)
+
+		noSplitLabel := len(e.Code)
+		patchJcc(noSplit, noSplitLabel)
+		// The small unusable tail stays part of this allocation, so unlink the
+		// whole block and scrub its entire payload below.
 		e.TestRegReg(amd64.R12, amd64.R12)
 		hasPrev := len(e.Code)
 		e.JccRel32(amd64.CondNE, 0)
@@ -1877,10 +1916,32 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.R14)
 		unlinkDone := len(e.Code)
 		patchJmp(unlinked, unlinkDone)
+
+		splitDoneLabel := len(e.Code)
+		patchJmp(splitDone, splitDoneLabel)
+		// Reset header metadata and scrub the full reused payload. This also
+		// protects unsplittable blocks whose physical size exceeds the request.
 		e.MovRegImm64(amd64.R10, 0)
 		e.MovDerefReg(amd64.R13, amd64ObjectFlags, amd64.R10)
 		e.MovDerefReg(amd64.R13, amd64ObjectNextFree, amd64.R10)
 		e.MovDerefReg(amd64.R13, amd64ObjectType, amd64.R10)
+		e.MovRegDeref(amd64.R11, amd64.R13, amd64ObjectSize)
+		e.SubRegImm32(amd64.R11, amd64ObjectHeaderSize)
+		e.ShrRegImm8(amd64.R11, 3)
+		e.MovRegReg(amd64.RAX, amd64.R13)
+		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+		e.TestRegReg(amd64.R11, amd64.R11)
+		scrubDone := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		scrubLoop := len(e.Code)
+		e.MovDerefReg(amd64.RAX, 0, amd64.R10)
+		e.AddRegImm32(amd64.RAX, 8)
+		e.SubRegImm32(amd64.R11, 1)
+		scrubBack := len(e.Code)
+		e.JccRel32(amd64.CondNE, 0)
+		patchJcc(scrubBack, scrubLoop)
+		scrubDoneLabel := len(e.Code)
+		patchJcc(scrubDone, scrubDoneLabel)
 		e.MovRegReg(amd64.RAX, amd64.R13)
 		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
 		e.MovRegImm64(amd64.RDX, 1) // reclaimed block
