@@ -153,8 +153,8 @@ func TestAMD64ChunkBitmapLayoutCoversDefaultChunk(t *testing.T) {
 	if amd64ChunkSize%16 != 0 {
 		t.Fatalf("chunk metadata size %d must preserve 16-byte object alignment", amd64ChunkSize)
 	}
-	if amd64ChunkMarkBitmap != amd64ChunkAllocBitmap+amd64ChunkBitmapBytes {
-		t.Fatalf("mark bitmap offset = %d, want %d", amd64ChunkMarkBitmap, amd64ChunkAllocBitmap+amd64ChunkBitmapBytes)
+	if amd64ChunkDenseHead != amd64ChunkAllocBitmap+amd64ChunkBitmapBytes {
+		t.Fatalf("dense metadata offset = %d, want %d", amd64ChunkDenseHead, amd64ChunkAllocBitmap+amd64ChunkBitmapBytes)
 	}
 	objectSlots := ((1 << 20) - int(amd64ChunkSize)) / 16
 	bitmapSlots := int(amd64ChunkBitmapBytes) * 8

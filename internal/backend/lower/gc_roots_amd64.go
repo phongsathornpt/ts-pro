@@ -358,8 +358,7 @@ const (
 	amd64ChunkUsed        int32 = 16
 	amd64ChunkAllocBitmap int32 = 32
 	amd64ChunkBitmapBytes int32 = 8192
-	amd64ChunkMarkBitmap  int32 = amd64ChunkAllocBitmap + amd64ChunkBitmapBytes
-	amd64ChunkDenseHead   int32 = amd64ChunkMarkBitmap + amd64ChunkBitmapBytes
+	amd64ChunkDenseHead   int32 = amd64ChunkAllocBitmap + amd64ChunkBitmapBytes
 	amd64ChunkDenseNext   int32 = amd64ChunkDenseHead + 8
 	amd64ChunkDenseCount  int32 = amd64ChunkDenseNext + 8
 	amd64ChunkDenseQueued int32 = amd64ChunkDenseCount + 8
