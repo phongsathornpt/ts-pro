@@ -114,4 +114,5 @@ const (
 	amd64ObjectTypeTask           int64 = 9
 	amd64ObjectTypeChannel        int64 = 10
 	amd64ObjectTypeTaskGroup      int64 = 11
+	amd64ObjectTypeCollection     int64 = 12
 )

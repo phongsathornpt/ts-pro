@@ -250,6 +250,9 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeTaskGroup))
 	isTaskGroup := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeCollection))
+	isCollection := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	traceAfterChildrenJump := len(e.Code)
 	e.JmpRel32(0)
 
@@ -532,6 +535,15 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	traceTaskResultDone := len(e.Code)
 	e.JmpRel32(0)
 
+	traceCollection := len(e.Code)
+	patchJcc(isCollection, traceCollection)
+	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64CollectionEntries)
+	markCollectionEntriesCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markCollectionEntriesCall + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
+	traceCollectionDone := len(e.Code)
+	e.JmpRel32(0)
+
 	traceTaskGroup := len(e.Code)
 	patchJcc(isTaskGroup, traceTaskGroup)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskGroupHead)
@@ -567,6 +579,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	patchJmp(traceTaskResultDone, traceChildrenDone)
 	patchJmp(traceChannelDone, traceChildrenDone)
 	patchJmp(traceTaskGroupDone, traceChildrenDone)
+	patchJmp(traceCollectionDone, traceChildrenDone)
 	traceWorkBack := len(e.Code)
 	e.JmpRel32(0)
 	patchJmp(traceWorkBack, traceWorkLoop)

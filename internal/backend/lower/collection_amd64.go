@@ -90,7 +90,7 @@ func emitAMD64CollectionNew(e *amd64.Emitter, allocOffset int) {
 	callObj := len(e.Code)
 	e.CallRel32(int32(allocOffset - (callObj + 5)))
 	e.MovRegReg(amd64.RBX, amd64.RAX)
-	emitAMD64SetObjectType(e, amd64.RBX, amd64ObjectTypeDynamicObject)
+	emitAMD64SetObjectType(e, amd64.RBX, amd64ObjectTypeCollection)
 	// Root collection while allocating entries.
 	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
 	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
