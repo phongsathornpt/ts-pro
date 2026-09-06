@@ -95,6 +95,15 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RAX, 1)
 	e.MovDerefReg(amd64.R10, amd64ObjectFlags, amd64.RAX)
 
+	// Atomic layouts are complete once marked and expose no child references.
+	e.MovRegDeref(amd64.RAX, amd64.R10, amd64ObjectType)
+	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeAtomic))
+	atomicMarked := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeArrayData))
+	atomicArrayDataMarked := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+
 	// Keep sparse discovery on the existing object-work fast path. Only after a
 	// chunk has accumulated enough newly marked objects do later discoveries go
 	// to its local pending list, amortizing queue metadata over dense work.
@@ -129,6 +138,8 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 
 	markQueuedLabel := len(e.Code)
 	patchJmp(markQueued, markQueuedLabel)
+	patchJcc(atomicMarked, markQueuedLabel)
+	patchJcc(atomicArrayDataMarked, markQueuedLabel)
 	e.Pop(amd64.R9)
 	e.Pop(amd64.R8)
 	e.Ret()
