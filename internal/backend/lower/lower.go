@@ -760,7 +760,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 176)
+	e.SubRegImm32(amd64.RSP, 208)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1499,10 +1499,15 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_runtime_init"] = len(e.Code)
 	emitAMD64RuntimeInit(e)
 
+	fnOffsets["ts_free_insert"] = len(e.Code)
+	emitAMD64FreeInsert(e)
+	fnOffsets["ts_free_take"] = len(e.Code)
+	emitAMD64FreeTake(e, fnOffsets["ts_free_insert"])
+
 	fnOffsets["ts_gc_mark_payload"] = len(e.Code)
 	emitAMD64GCMarkPayload(e)
 	fnOffsets["ts_gc_collect"] = len(e.Code)
-	emitAMD64GCCollect(e, fnOffsets["ts_gc_mark_payload"])
+	emitAMD64GCCollect(e, fnOffsets["ts_gc_mark_payload"], fnOffsets["ts_free_insert"])
 	fnOffsets["ts_gc_collections"] = len(e.Code)
 	emitAMD64GCMetricNumber(e, amd64RTCollections)
 	fnOffsets["ts_gc_reclaimed"] = len(e.Code)
@@ -1513,7 +1518,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	// Allocation reuses swept blocks first, then bumps in the current chunk,
 	// collecting before a new mmap chunk is added.
 	fnOffsets["ts_alloc"] = len(e.Code)
-	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"])
+	emitAMD64Alloc(e, fnOffsets["ts_gc_collect"], fnOffsets["ts_free_take"])
 	fnOffsets["ts_task_trampoline"] = len(e.Code)
 	emitAMD64TaskTrampoline(e)
 	fnOffsets["ts_task_resume"] = len(e.Code)
@@ -1855,13 +1860,53 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
-	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack} {
+	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack, amd64RTFree128, amd64RTFree512, amd64RTFree2048, amd64RTFree8192} {
 		e.MovDerefReg(amd64.R15, off, amd64.R11)
 	}
 	e.Ret()
 }
 
-func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
+func emitAMD64FreeInsert(e *amd64.Emitter) {
+	patchJcc := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
+	}
+	prepend := func(offset int32) {
+		e.MovRegDeref(amd64.R10, amd64.R15, offset)
+		e.MovDerefReg(amd64.RDI, amd64ObjectNextFree, amd64.R10)
+		e.MovDerefReg(amd64.R15, offset, amd64.RDI)
+		e.Ret()
+	}
+
+	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64ObjectSize)
+	e.CmpRegImm32(amd64.RAX, 128)
+	to128 := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+	e.CmpRegImm32(amd64.RAX, 512)
+	to512 := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+	e.CmpRegImm32(amd64.RAX, 2048)
+	to2048 := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+	e.CmpRegImm32(amd64.RAX, 8192)
+	to8192 := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+	prepend(amd64RTFreeList)
+
+	bin128 := len(e.Code)
+	patchJcc(to128, bin128)
+	prepend(amd64RTFree128)
+	bin512 := len(e.Code)
+	patchJcc(to512, bin512)
+	prepend(amd64RTFree512)
+	bin2048 := len(e.Code)
+	patchJcc(to2048, bin2048)
+	prepend(amd64RTFree2048)
+	bin8192 := len(e.Code)
+	patchJcc(to8192, bin8192)
+	prepend(amd64RTFree8192)
+}
+
+func emitAMD64FreeTake(e *amd64.Emitter, freeInsertOffset int) {
 	patchJcc := func(at, target int) {
 		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
 	}
@@ -1876,9 +1921,35 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		e.Pop(amd64.RBP)
 		e.Ret()
 	}
-	emitFreeSearch := func() {
+
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.MovRegReg(amd64.RBX, amd64.RDI) // requested aligned total size
+
+	type freeClass struct {
+		limit  int32
+		offset int32
+	}
+	classes := []freeClass{
+		{128, amd64RTFree128},
+		{512, amd64RTFree512},
+		{2048, amd64RTFree2048},
+		{8192, amd64RTFree8192},
+		{0, amd64RTFreeList},
+	}
+	for _, class := range classes {
+		skipClass := -1
+		if class.limit != 0 {
+			e.CmpRegImm32(amd64.RBX, class.limit)
+			skipClass = len(e.Code)
+			e.JccRel32(amd64.CondA, 0)
+		}
 		e.MovRegImm64(amd64.R12, 0) // previous header
-		e.MovRegDeref(amd64.R13, amd64.R15, amd64RTFreeList)
+		e.MovRegDeref(amd64.R13, amd64.R15, class.offset)
 		loop := len(e.Code)
 		e.TestRegReg(amd64.R13, amd64.R13)
 		miss := len(e.Code)
@@ -1895,50 +1966,13 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 
 		foundLabel := len(e.Code)
 		patchJcc(found, foundLabel)
-		// R10 = original block size, RBX = requested aligned total size. Split
-		// when the tail is large enough to remain a useful free object; sweep
-		// requires every byte in the object region to remain header-addressable.
 		e.MovRegDeref(amd64.R14, amd64.R13, amd64ObjectNextFree)
-		e.MovRegReg(amd64.R11, amd64.R10)
-		e.SubRegReg(amd64.R11, amd64.RBX)
-		e.CmpRegImm32(amd64.R11, 48)
-		noSplit := len(e.Code)
-		e.JccRel32(amd64.CondL, 0)
-
-		// Tail header lives immediately after the newly allocated prefix.
-		e.MovRegReg(amd64.RAX, amd64.R13)
-		e.AddRegReg(amd64.RAX, amd64.RBX)
-		e.MovDerefReg(amd64.RAX, amd64ObjectSize, amd64.R11)
-		e.MovRegImm64(amd64.R10, 2)
-		e.MovDerefReg(amd64.RAX, amd64ObjectFlags, amd64.R10)
-		e.MovDerefReg(amd64.RAX, amd64ObjectNextFree, amd64.R14)
-		e.MovRegImm64(amd64.R10, 0)
-		e.MovDerefReg(amd64.RAX, amd64ObjectType, amd64.R10)
-
-		// Replace the old free-list node with the tail remainder.
-		e.TestRegReg(amd64.R12, amd64.R12)
-		splitHasPrev := len(e.Code)
-		e.JccRel32(amd64.CondNE, 0)
-		e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.RAX)
-		splitLinked := len(e.Code)
-		e.JmpRel32(0)
-		splitHasPrevLabel := len(e.Code)
-		patchJcc(splitHasPrev, splitHasPrevLabel)
-		e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.RAX)
-		splitLinkedLabel := len(e.Code)
-		patchJmp(splitLinked, splitLinkedLabel)
-		e.MovDerefReg(amd64.R13, amd64ObjectSize, amd64.RBX)
-		splitDone := len(e.Code)
-		e.JmpRel32(0)
-
-		noSplitLabel := len(e.Code)
-		patchJcc(noSplit, noSplitLabel)
-		// The small unusable tail stays part of this allocation, so unlink the
-		// whole block and scrub its entire payload below.
+		// Unlink selected block from this class list before potentially
+		// reclassifying a split remainder.
 		e.TestRegReg(amd64.R12, amd64.R12)
 		hasPrev := len(e.Code)
 		e.JccRel32(amd64.CondNE, 0)
-		e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R14)
+		e.MovDerefReg(amd64.R15, class.offset, amd64.R14)
 		unlinked := len(e.Code)
 		e.JmpRel32(0)
 		hasPrevLabel := len(e.Code)
@@ -1947,10 +1981,29 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		unlinkDone := len(e.Code)
 		patchJmp(unlinked, unlinkDone)
 
-		splitDoneLabel := len(e.Code)
-		patchJmp(splitDone, splitDoneLabel)
-		// Reset header metadata and scrub the full reused payload. This also
-		// protects unsplittable blocks whose physical size exceeds the request.
+		// Split a useful tail and return it to the appropriate size class.
+		e.MovRegDeref(amd64.R10, amd64.R13, amd64ObjectSize)
+		e.MovRegReg(amd64.R11, amd64.R10)
+		e.SubRegReg(amd64.R11, amd64.RBX)
+		e.CmpRegImm32(amd64.R11, 48)
+		noSplit := len(e.Code)
+		e.JccRel32(amd64.CondL, 0)
+		e.MovRegReg(amd64.RAX, amd64.R13)
+		e.AddRegReg(amd64.RAX, amd64.RBX)
+		e.MovDerefReg(amd64.RAX, amd64ObjectSize, amd64.R11)
+		e.MovRegImm64(amd64.R10, 2)
+		e.MovDerefReg(amd64.RAX, amd64ObjectFlags, amd64.R10)
+		e.MovRegImm64(amd64.R10, 0)
+		e.MovDerefReg(amd64.RAX, amd64ObjectNextFree, amd64.R10)
+		e.MovDerefReg(amd64.RAX, amd64ObjectType, amd64.R10)
+		e.MovDerefReg(amd64.R13, amd64ObjectSize, amd64.RBX)
+		e.MovRegReg(amd64.RDI, amd64.RAX)
+		callInsert := len(e.Code)
+		e.CallRel32(int32(freeInsertOffset - (callInsert + 5)))
+		noSplitLabel := len(e.Code)
+		patchJcc(noSplit, noSplitLabel)
+
+		// Reset metadata and scrub the entire physical payload visible to GC.
 		e.MovRegImm64(amd64.R10, 0)
 		e.MovDerefReg(amd64.R13, amd64ObjectFlags, amd64.R10)
 		e.MovDerefReg(amd64.R13, amd64ObjectNextFree, amd64.R10)
@@ -1974,11 +2027,32 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 		patchJcc(scrubDone, scrubDoneLabel)
 		e.MovRegReg(amd64.RAX, amd64.R13)
 		e.AddRegImm32(amd64.RAX, amd64ObjectHeaderSize)
-		e.MovRegImm64(amd64.RDX, 1) // reclaimed block
+		e.MovRegImm64(amd64.RDX, 1)
 		emitReturn()
 
-		missLabel := len(e.Code)
-		patchJcc(miss, missLabel)
+		nextClass := len(e.Code)
+		patchJcc(miss, nextClass)
+		if skipClass >= 0 {
+			patchJcc(skipClass, nextClass)
+		}
+	}
+
+	e.MovRegImm64(amd64.RAX, 0)
+	e.MovRegImm64(amd64.RDX, 0)
+	emitReturn()
+}
+
+func emitAMD64Alloc(e *amd64.Emitter, gcOffset, freeTakeOffset int) {
+	patchJcc := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
+	}
+	emitReturn := func() {
+		e.Pop(amd64.R14)
+		e.Pop(amd64.R13)
+		e.Pop(amd64.R12)
+		e.Pop(amd64.RBX)
+		e.Pop(amd64.RBP)
+		e.Ret()
 	}
 
 	// Preserve callee-saved temporaries and keep call sites 16-byte aligned.
@@ -2015,12 +2089,28 @@ func emitAMD64Alloc(e *amd64.Emitter, gcOffset int) {
 	// On bump-space pressure, reuse a reclaimed block before paying for GC.
 	collectLabel := len(e.Code)
 	patchJcc(collect, collectLabel)
-	emitFreeSearch()
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	freeCall := len(e.Code)
+	e.CallRel32(int32(freeTakeOffset - (freeCall + 5)))
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	freeMiss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	emitReturn()
 
 	// No reusable block fits, so collect before mapping another chunk.
+	gcLabel := len(e.Code)
+	patchJcc(freeMiss, gcLabel)
 	callAt := len(e.Code)
 	e.CallRel32(int32(gcOffset - (callAt + 5)))
-	emitFreeSearch()
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	freeAfterGCCall := len(e.Code)
+	e.CallRel32(int32(freeTakeOffset - (freeAfterGCCall + 5)))
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	mapMiss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	emitReturn()
+	mapMissLabel := len(e.Code)
+	patchJcc(mapMiss, mapMissLabel)
 
 	// No reusable block fits. Refill with max(1 MiB, object + chunk header).
 	e.MovRegReg(amd64.RSI, amd64.RBX)

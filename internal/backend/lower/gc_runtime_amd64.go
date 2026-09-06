@@ -134,7 +134,7 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
+func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	patchJcc := func(at, target int) {
 		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
 	}
@@ -674,7 +674,29 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 
 	sweepDone := len(e.Code)
 	patchJcc(sweepDoneJump, sweepDone)
-	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R12)
+
+	// Partition the coalesced sweep list into size-class heads. Keeping
+	// coalescing single-list based avoids class migration while adjacent free
+	// objects are still being merged.
+	e.MovRegImm64(amd64.RAX, 0)
+	for _, off := range []int32{amd64RTFreeList, amd64RTFree128, amd64RTFree512, amd64RTFree2048, amd64RTFree8192} {
+		e.MovDerefReg(amd64.R15, off, amd64.RAX)
+	}
+	partitionLoop := len(e.Code)
+	e.TestRegReg(amd64.R12, amd64.R12)
+	partitionDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R13, amd64.R12, amd64ObjectNextFree)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	insertCall := len(e.Code)
+	e.CallRel32(int32(freeInsertOffset - (insertCall + 5)))
+	e.MovRegReg(amd64.R12, amd64.R13)
+	partitionBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(partitionBack, partitionLoop)
+	partitionDoneLabel := len(e.Code)
+	patchJcc(partitionDone, partitionDoneLabel)
+
 	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTReclaimed)
 	e.AddRegReg(amd64.RAX, amd64.R14)
 	e.MovDerefReg(amd64.R15, amd64RTReclaimed, amd64.RAX)

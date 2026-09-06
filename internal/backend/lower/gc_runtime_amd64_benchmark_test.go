@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/phongsathornpt/ts-pro/internal/backend/obj/elf"
@@ -77,6 +78,76 @@ func buildAMD64GCChurnBenchmark(tb testing.TB, iterations int) string {
 	}
 
 	path := filepath.Join(tb.TempDir(), "gc-bench")
+	if err := os.WriteFile(path, bin, 0o755); err != nil {
+		tb.Fatalf("write executable: %v", err)
+	}
+	return path
+}
+
+func BenchmarkAMD64GCFragmentedFreeListReuse(b *testing.B) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		b.Skip("native Linux AMD64 execution required")
+	}
+	path := buildAMD64GCFragmentedReuseBenchmark(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if out, err := exec.Command(path).CombinedOutput(); err != nil {
+			b.Fatalf("execute: %v\n%s", err, out)
+		}
+	}
+	b.ReportMetric(10000, "target-allocs/op")
+}
+
+func buildAMD64GCFragmentedReuseBenchmark(tb testing.TB) string {
+	tb.Helper()
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	entry := fn.NewBlock("entry")
+	keepers := fn.NewValue("keepers", types.NewArray(types.TypeString))
+	entry.Instructions = append(entry.Instructions, &ir.AllocArrayInst{Res: keepers, ElemType: types.TypeString, Length: ir.ConstNumber{Value: 0}})
+
+	appendPhase := func(prefix string, start *ir.BasicBlock, iterations int, deadPayload string, keep bool) *ir.BasicBlock {
+		cond := fn.NewBlock(prefix + "_cond")
+		body := fn.NewBlock(prefix + "_body")
+		post := fn.NewBlock(prefix + "_post")
+		exit := fn.NewBlock(prefix + "_exit")
+		i := fn.NewValue(prefix+"_i", types.TypeNumber)
+		next := fn.NewValue(prefix+"_next", types.TypeNumber)
+		cond.Phis = append(cond.Phis, &ir.PhiInst{Res: i, Incoming: []ir.PhiIncoming{{Block: start, Value: ir.ConstNumber{Value: 0}}, {Block: post, Value: next}}})
+		start.Terminator = &ir.JumpTerm{Target: cond}
+		less := fn.NewValue(prefix+"_less", types.TypeBoolean)
+		cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: less, Op: ir.OpLt, LHS: i, RHS: ir.ConstNumber{Value: float64(iterations)}})
+		cond.Terminator = &ir.BranchTerm{Cond: less, Then: body, Else: exit}
+		if keep {
+			keeper := fn.NewValue(prefix+"_keeper", types.TypeString)
+			body.Instructions = append(body.Instructions, &ir.CallInst{Res: keeper, Callee: "ts_string_concat", Args: []ir.Operand{ir.ConstString{Value: "k"}, ir.ConstString{Value: "v"}}})
+			push := fn.NewValue(prefix+"_push", types.TypeNumber)
+			body.Instructions = append(body.Instructions, &ir.ArrayPushInst{Res: push, Array: keepers, Val: keeper})
+		}
+		dead := fn.NewValue(prefix+"_dead", types.TypeString)
+		body.Instructions = append(body.Instructions, &ir.CallInst{Res: dead, Callee: "ts_string_concat", Args: []ir.Operand{ir.ConstString{Value: deadPayload}, ir.ConstString{Value: "x"}}})
+		body.Terminator = &ir.JumpTerm{Target: post}
+		post.Instructions = append(post.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+		post.Terminator = &ir.JumpTerm{Target: cond}
+		return exit
+	}
+
+	largeExit := appendPhase("large", entry, 1200, strings.Repeat("L", 4096), true)
+	smallExit := appendPhase("small", largeExit, 5000, strings.Repeat("s", 32), true)
+	smallExit.Instructions = append(smallExit.Instructions, &ir.CallInst{Callee: "ts_gc_collect"})
+	targetExit := appendPhase("target", smallExit, 10000, strings.Repeat("m", 768), false)
+	targetExit.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+
+	code, err := lowerAMD64(prog)
+	if err != nil {
+		tb.Fatalf("lower: %v", err)
+	}
+	bin, err := elf.CreateExecutable(code, false)
+	if err != nil {
+		tb.Fatalf("elf: %v", err)
+	}
+	path := filepath.Join(tb.TempDir(), "gc-fragmented-reuse-bench")
 	if err := os.WriteFile(path, bin, 0o755); err != nil {
 		tb.Fatalf("write executable: %v", err)
 	}

@@ -30,7 +30,7 @@ bench-performance:
 	$(GO) test ./pkg/tspro -run '^$$' -bench 'Benchmark(CompileSource|DynamicProperty|ArrayGrowth|String)' -benchmem -benchtime=250ms -count=1
 	$(GO) test ./internal/backend/regalloc -run '^$$' -bench BenchmarkAllocateLoopHeavy -benchmem -benchtime=250ms -count=1
 	$(GO) test ./internal/midend/opt -run '^$$' -bench BenchmarkOptimizeLinearIR -benchmem -benchtime=250ms -count=1
-	$(GO) test ./internal/backend/lower -run '^$$' -bench BenchmarkAMD64GCStringAllocationChurn -benchmem -benchtime=250ms -count=1
+	$(GO) test ./internal/backend/lower -run '^$$' -bench 'BenchmarkAMD64GC(StringAllocationChurn|FragmentedFreeListReuse)' -benchmem -benchtime=250ms -count=1
 
 clean:
 	rm -rf build

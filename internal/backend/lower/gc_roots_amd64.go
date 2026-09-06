@@ -347,6 +347,10 @@ const (
 	amd64RTTimerHead   int32 = 144
 	amd64RTMarkChunk   int32 = 152
 	amd64RTMarkStack   int32 = 160
+	amd64RTFree128     int32 = 168
+	amd64RTFree512     int32 = 176
+	amd64RTFree2048    int32 = 184
+	amd64RTFree8192    int32 = 192
 
 	amd64ChunkNext int32 = 0
 	amd64ChunkEnd  int32 = 8
