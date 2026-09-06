@@ -345,3 +345,41 @@ function grouped(): string {
 		t.Fatalf("expected grouped numeric addition to preserve a binary concat, got:\n%s", dump)
 	}
 }
+
+func TestIRGenUsesOwnedStringAppendOnlyForProvenLoopAccumulator(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("owned-string-loop.ts", []byte(`
+let fast = "";
+for (let i = 0; i < 10; i = i + 1) {
+  fast = fast + "x";
+}
+let slow = "";
+for (let i = 0; i < 10; i = i + 1) {
+  console.log(slow);
+  slow = slow + "x";
+}
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	if strings.Count(dump, "call @ts_string_builder_seed") != 1 {
+		t.Fatalf("expected exactly one owned string seed, got:\n%s", dump)
+	}
+	if strings.Count(dump, "call @ts_string_append_owned") != 1 {
+		t.Fatalf("expected exactly one owned string append, got:\n%s", dump)
+	}
+	if !strings.Contains(dump, "call @ts_string_concat") {
+		t.Fatalf("expected observable loop accumulator to retain immutable concat, got:\n%s", dump)
+	}
+}

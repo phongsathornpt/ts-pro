@@ -446,9 +446,14 @@ func lowerARM64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_alloc"] = len(e.Code)
 	emitARM64Alloc(e)
 
-	// Emit ts_string_concat (string concatenator)
+	// Emit ts_string_concat (string concatenator). ARM64 keeps the owned-loop
+	// builder helpers semantically correct but currently falls back to immutable
+	// concat; the mutable-capacity fast path is Linux AMD64 specific.
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitARM64StringConcat(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_string_append_owned"] = fnOffsets["ts_string_concat"]
+	fnOffsets["ts_string_builder_seed"] = len(e.Code)
+	e.Ret()
 
 	// Emit ts_sys_exit
 	fnOffsets["ts_sys_exit"] = len(e.Code)
@@ -1609,6 +1614,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64StringConcatFixed(e, fnOffsets["ts_alloc"], 3)
 	fnOffsets["ts_string_concat4"] = len(e.Code)
 	emitAMD64StringConcatFixed(e, fnOffsets["ts_alloc"], 4)
+	fnOffsets["ts_string_builder_seed"] = len(e.Code)
+	emitAMD64StringBuilderSeed(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_string_append_owned"] = len(e.Code)
+	emitAMD64StringAppendOwned(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_js_array_to_string"] = len(e.Code)
 	emitAMD64JSArrayToString(e, fnOffsets["ts_js_array_to_string"], fnOffsets["ts_alloc"], fnOffsets["ts_number_to_string"], fnOffsets["ts_bool_to_string"], fnOffsets["ts_string_concat"])
 	fnOffsets["ts_js_to_string"] = len(e.Code)
@@ -2008,6 +2017,140 @@ func emitAMD64CopyStringBytes(e *amd64.Emitter, src, length amd64.Register) {
 	binary.LittleEndian.PutUint32(e.Code[byteBack+2:], uint32(int32(byteLoop-(byteBack+6))))
 	doneLabel := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[done+2:], uint32(int32(doneLabel-(done+6))))
+}
+
+func emitAMD64StringBuilderSeed(e *amd64.Emitter, allocOffset int) {
+	// Clone a proven-unaliased literal into a normal string allocation with spare
+	// capacity. The public string ABI stays [len][bytes]; capacity is derived from
+	// the allocator object's total size in the hidden 32-byte object header.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.SubRegImm32(amd64.RSP, 40)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+
+	// Precise root for the source across ts_alloc.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	e.MovRegDeref(amd64.R11, amd64.RBX, 0)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R11)
+	e.MovRegReg(amd64.RDI, amd64.R11)
+	e.AddRegImm32(amd64.RDI, 8)
+	e.CmpRegImm32(amd64.RDI, 72) // 64 bytes of initial data capacity.
+	enough := len(e.Code)
+	e.JccRel32(amd64.CondGE, 0)
+	e.MovRegImm64(amd64.RDI, 72)
+	enoughLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[enough+2:], uint32(int32(enoughLabel-(enough+6))))
+	callAt := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAt + 5)))
+
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 32, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 24)
+	e.MovDerefReg(amd64.RAX, 0, amd64.R11)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	emitAMD64CopyStringBytes(e, amd64.RBX, amd64.R11)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 32)
+	e.AddRegImm32(amd64.RSP, 40)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64StringAppendOwned(e *amd64.Emitter, allocOffset int) {
+	// This helper is only emitted for compiler-proven owned loop accumulators.
+	// In-place growth therefore cannot mutate a string value observable through
+	// another TypeScript binding.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.Push(amd64.R15)
+	e.SubRegImm32(amd64.RSP, 40)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegReg(amd64.R12, amd64.RSI)
+	e.MovRegDeref(amd64.R13, amd64.RBX, 0)
+	e.MovRegDeref(amd64.R14, amd64.R12, 0)
+	e.MovRegReg(amd64.R11, amd64.R13)
+	e.AddRegReg(amd64.R11, amd64.R14) // new length
+	e.MovDerefReg(amd64.RSP, 32, amd64.R11)
+
+	// Capacity = object total size - hidden header - visible length word.
+	e.MovRegReg(amd64.R10, amd64.RBX)
+	e.SubRegImm32(amd64.R10, amd64ObjectHeaderSize)
+	e.MovRegDeref(amd64.R10, amd64.R10, amd64ObjectSize)
+	e.SubRegImm32(amd64.R10, amd64ObjectHeaderSize+8)
+	e.CmpRegReg(amd64.R11, amd64.R10)
+	grow := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+
+	// Fits: append the suffix directly into spare owned capacity.
+	e.MovRegReg(amd64.R10, amd64.RBX)
+	e.AddRegImm32(amd64.R10, 8)
+	e.AddRegReg(amd64.R10, amd64.R13)
+	emitAMD64CopyStringBytes(e, amd64.R12, amd64.R14)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 32)
+	e.MovDerefReg(amd64.RBX, 0, amd64.R11)
+	e.MovRegReg(amd64.RAX, amd64.RBX)
+	done := len(e.Code)
+	e.JmpRel32(0)
+
+	growLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[grow+2:], uint32(int32(growLabel-(grow+6))))
+	// Root both strings before allocation. Grow geometrically to make repeated
+	// self-append amortized O(n) instead of copying the whole prefix each time.
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R11)
+	e.MovRegImm64(amd64.R11, 2)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R11)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R12)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	e.AddRegReg(amd64.R10, amd64.R10) // doubled capacity
+	e.MovRegDeref(amd64.R11, amd64.RSP, 32)
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	capEnough := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegReg(amd64.R10, amd64.R11)
+	capEnoughLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[capEnough+2:], uint32(int32(capEnoughLabel-(capEnough+6))))
+	e.MovRegReg(amd64.RDI, amd64.R10)
+	e.AddRegImm32(amd64.RDI, 8)
+	callAt := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAt + 5)))
+
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 24, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 32)
+	e.MovDerefReg(amd64.RAX, 0, amd64.R11)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	emitAMD64CopyStringBytes(e, amd64.RBX, amd64.R13)
+	emitAMD64CopyStringBytes(e, amd64.R12, amd64.R14)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 24)
+
+	doneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[done+1:], uint32(int32(doneLabel-(done+5))))
+	e.AddRegImm32(amd64.RSP, 40)
+	e.Pop(amd64.R15)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
 }
 
 func emitAMD64StringConcatFixed(e *amd64.Emitter, allocOffset, count int) {

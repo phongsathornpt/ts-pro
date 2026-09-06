@@ -2845,6 +2845,47 @@ func (g *generator) lowerForOf(s *ast.ForOfStmt) {
 	g.currentBB = exitBB
 }
 
+func (g *generator) ownedStringAppendCandidate(s *ast.ForStmt) (string, ast.Expr, bool) {
+	body, ok := s.Body.(*ast.BlockStmt)
+	if !ok || len(body.Statements) != 1 {
+		return "", nil, false
+	}
+	exprStmt, ok := body.Statements[0].(*ast.ExprStmt)
+	if !ok {
+		return "", nil, false
+	}
+	assign, ok := exprStmt.Expr.(*ast.AssignExpr)
+	if !ok || assign.Op != token.Eq {
+		return "", nil, false
+	}
+	left, ok := assign.Left.(*ast.IdentExpr)
+	if !ok {
+		return "", nil, false
+	}
+	bin, ok := assign.Right.(*ast.BinaryExpr)
+	if !ok || bin.Op != token.Plus || g.semanticType(bin) != types.TypeString {
+		return "", nil, false
+	}
+	base, ok := bin.Left.(*ast.IdentExpr)
+	if !ok || base.Name != left.Name {
+		return "", nil, false
+	}
+	if _, ok := g.locals[left.Name].(ir.ConstString); !ok {
+		return "", nil, false
+	}
+	// Keep the first ownership proof intentionally narrow. Pure literals and a
+	// different local cannot observe or alias the accumulator during append.
+	switch suffix := bin.Right.(type) {
+	case *ast.StringLit, *ast.NumberLit, *ast.BoolLit:
+		return left.Name, suffix, true
+	case *ast.IdentExpr:
+		if suffix.Name != left.Name {
+			return left.Name, suffix, true
+		}
+	}
+	return "", nil, false
+}
+
 func (g *generator) lowerFor(s *ast.ForStmt) {
 	if s.Init != nil {
 		g.lowerStatement(s.Init)
@@ -2860,6 +2901,14 @@ func (g *generator) lowerFor(s *ast.ForStmt) {
 	}
 
 	modVars := findModifiedVars(s.Body)
+	ownedStringName, ownedStringSuffix, ownedStringAppend := g.ownedStringAppendCandidate(s)
+	if ownedStringAppend {
+		seed := g.currentFn.NewValue("str_owned", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: seed, Callee: "ts_string_builder_seed", Args: []ir.Operand{g.locals[ownedStringName]},
+		})
+		g.locals[ownedStringName] = seed
+	}
 	if s.Post != nil {
 		for k, v := range findModifiedVars(&ast.ExprStmt{Expr: s.Post}) {
 			if v {
@@ -2893,7 +2942,17 @@ func (g *generator) lowerFor(s *ast.ForStmt) {
 	}
 
 	g.currentBB = bodyBB
-	g.lowerStatement(s.Body)
+	if ownedStringAppend {
+		suffix := g.lowerExpr(ownedStringSuffix)
+		suffix = g.coerceStringOperand(ownedStringSuffix, suffix)
+		res := g.currentFn.NewValue("str_append", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: res, Callee: "ts_string_append_owned", Args: []ir.Operand{g.locals[ownedStringName], suffix},
+		})
+		g.locals[ownedStringName] = res
+	} else {
+		g.lowerStatement(s.Body)
+	}
 	if g.currentBB.Terminator == nil {
 		g.currentBB.Terminator = &ir.JumpTerm{Target: postBB}
 	}
