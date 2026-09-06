@@ -527,3 +527,17 @@ contains no C or assembly implementation dependency.
 8. [x] Return to true interior-pointer/address-taking stack-allocation extensions once MIR exposes those operations.
 
 All roadmap and critical path items are 100% complete.
+
+## WinterTC Minimum Common Web API
+
+Target: ECMA-429 / WinterTC Minimum Common Web API draft 31 July 2026. This is a Web-interoperability target, not Cloudflare Workers compatibility.
+
+- [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
+- [ ] Phase 2: DOM events and abort primitives.
+- [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
+- [ ] Phase 4: Blob, File, FormData and body byte/string primitives.
+- [ ] Phase 5: Streams interfaces required by ECMA-429.
+- [ ] Phase 6: Headers, Request, Response and fetch with cancellation/streaming semantics.
+- [ ] Phase 7: WebCrypto, Performance and Compression APIs.
+- [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.
+- [ ] Phase 9: close conformance matrix, differential/integration suite and documented server-runtime deviations.
