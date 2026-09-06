@@ -159,11 +159,21 @@ func emitAMD64TaskTrampoline(e *amd64.Emitter) {
 	e.MovRegDeref(amd64.R13, amd64.R11, amd64TaskReturnR13)
 	e.MovRegDeref(amd64.R14, amd64.R11, amd64TaskReturnR14)
 	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskReturnRsp)
+	// Capture the private stack mapping before clearing task metadata. The task
+	// stack cannot be unmapped until RSP has been restored to the caller stack.
+	e.MovRegDeref(amd64.RDX, amd64.R11, amd64TaskStackTop)
+	e.SubRegImm32(amd64.RDX, int32(amd64TaskStackBytes))
 	e.MovRegImm64(amd64.R10, 0)
 	e.MovDerefReg(amd64.R11, amd64TaskReturnRoot, amd64.R10)
 	e.MovDerefReg(amd64.R11, amd64TaskParent, amd64.R10)
 	e.MovDerefReg(amd64.R11, amd64TaskReturnRsp, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskStackTop, amd64.R10)
 	e.MovRegReg(amd64.RSP, amd64.RAX)
+	// munmap(privateStackBase, 1 MiB) after switching away from it.
+	e.MovRegReg(amd64.RDI, amd64.RDX)
+	e.MovRegImm64(amd64.RSI, amd64TaskStackBytes)
+	e.MovRegImm64(amd64.RAX, 11) // Linux munmap
+	e.Syscall()
 	e.Ret()
 }
 
@@ -484,11 +494,18 @@ func emitAMD64TaskReject(e *amd64.Emitter) {
 	e.MovRegDeref(amd64.R13, amd64.R11, amd64TaskReturnR13)
 	e.MovRegDeref(amd64.R14, amd64.R11, amd64TaskReturnR14)
 	e.MovRegDeref(amd64.RAX, amd64.R11, amd64TaskReturnRsp)
+	e.MovRegDeref(amd64.RDX, amd64.R11, amd64TaskStackTop)
+	e.SubRegImm32(amd64.RDX, int32(amd64TaskStackBytes))
 	e.MovRegImm64(amd64.R10, 0)
 	e.MovDerefReg(amd64.R11, amd64TaskReturnRoot, amd64.R10)
 	e.MovDerefReg(amd64.R11, amd64TaskParent, amd64.R10)
 	e.MovDerefReg(amd64.R11, amd64TaskReturnRsp, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskStackTop, amd64.R10)
 	e.MovRegReg(amd64.RSP, amd64.RAX)
+	e.MovRegReg(amd64.RDI, amd64.RDX)
+	e.MovRegImm64(amd64.RSI, amd64TaskStackBytes)
+	e.MovRegImm64(amd64.RAX, 11) // Linux munmap
+	e.Syscall()
 	e.Ret()
 }
 

@@ -1924,3 +1924,38 @@ console.log(1 + 2 + "x");
 		expected: "a1truez\n3x\n",
 	})
 }
+
+func TestLinuxAMD64CompletedTaskStacksAreUnmapped(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("native Linux AMD64 execution required")
+	}
+	const src = `
+let total = 0;
+for (let i = 0; i < 256; i = i + 1) {
+  const task = spawn((): number => 1);
+  total = total + join(task);
+}
+console.log(total);
+`
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "task-stack-reclaim")
+	compiler := tspro.New(tspro.Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
+	bin, diags, err := compiler.CompileSource("task-stack-reclaim.ts", []byte(src))
+	if err != nil {
+		t.Fatalf("compile: %v, diagnostics: %s", err, diags.Format(compiler.FileSet()))
+	}
+	if err := os.WriteFile(binPath, bin, 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	// Each task reserves a 1 MiB private stack. Without reclamation, 256
+	// sequential tasks exceed this address-space limit even though only one task
+	// is live at a time.
+	cmd := exec.Command("bash", "-c", "ulimit -v 131072; exec \"$1\"", "bash", binPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("limited-address-space execution failed: %v\nOutput:\n%s", err, out)
+	}
+	if string(out) != "256\n" {
+		t.Fatalf("stdout: got %q, want %q", out, "256\\n")
+	}
+}
