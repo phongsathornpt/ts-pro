@@ -85,6 +85,11 @@ The active raw-native fixture roadmap is complete. The items below are optional 
   - [x] 2026-09 native performance sweep: allocator fast path, worklist GC, chunk-locality validation, runtime allocation benchmarks, dynamic hash tables, fresh-allocation zero skipping, array/collection copy unrolling, string-concat chain fusion, compiler source-set/module-resolution retention fixes, and measured regalloc/optimizer reductions.
   - [x] Add `make bench-performance` as the reproducible local performance regression entry point.
   - [x] Eliminate O(n^2) copying for proven-owned loop string accumulators with ABI-compatible geometric growth; retain immutable fallback when ownership is not proven.
+  - [x] Green-Tea foundation: central GC layout descriptors plus per-chunk allocation-start bitmap validation; fragmented GC reuse falls from roughly 28.6 ms to roughly 2.8-3.0 ms by replacing object-chain boundary walks with O(1) bitmap tests.
+  - [x] Add `BenchmarkAMD64GCMarkLocality` and include it in `make bench-performance` so future span/chunk batching changes are measured against randomized multi-chunk live-reference traversal.
+  - [ ] Green-Tea locality follow-up: keep the object-work fast path, accumulate per-chunk/span density, and promote only dense work to batched scanning. Do not reintroduce the rejected always-chunk-queued policy, which measured roughly 11-20% slower on the locality benchmark.
+  - [ ] Add same-layout batch scanners after hybrid span promotion proves beneficial; evaluate vectorized small-object/reference scanning only on supported AMD64 CPUs after scalar batch benchmarks establish a gain.
+  - [ ] Evaluate concurrent marking, write barriers, pacing, and mutator assist only after the single-threaded locality/metadata path is measurably better; these remain future scope rather than current blockers.
 
 > These are intentionally unchecked because they define **future scope**, not unfinished work in the completed active roadmap.
 

@@ -26,11 +26,15 @@ Runtime process benchmarks include executable launch overhead, so compare the sa
 
 - Allocation now uses bump space as the O(1) common path. Reclaimed free-list blocks are searched only under bump-space pressure.
 - Major tracing uses an intrusive mark worklist rather than repeated full-heap fixed-point rescans.
-- Heap-pointer validation caches the most recently matching chunk, preserving validation semantics while avoiding repeated linked-list walks for local reference graphs.
+- Heap-pointer validation caches the most recently matching chunk and validates exact object starts through a per-chunk allocation bitmap. This replaces the previous object-chain walk with O(1) boundary checks while retaining interior-pointer rejection.
+- GC object types are described by a single layout descriptor table used to generate tracing dispatch. Atomic layouts, reference arrays, JSValue data, closures, tasks, channels, collections, and dynamic-entry tables therefore share one type-to-trace-kind source of truth.
+- Reclaimed blocks are split, adjacent free blocks are coalesced, and free search is segregated into size classes. A fragmented-reuse benchmark improved from roughly 42.3-42.8 ms before size classes to roughly 28.7 ms, then to roughly 2.8-3.0 ms after allocation-start bitmap validation removed repeated object-chain walks.
 - `ts_alloc` reports whether memory is fresh or reclaimed. Arrays, dynamic-property tables, and Map/Set tables skip redundant clearing for zero-filled fresh bump/mmap memory.
-- A native allocation-churn benchmark exercises 50,000 allocations per executable run.
+- Native GC benchmarks now cover 50,000-allocation churn, fragmented reclaimed-block reuse, and randomized multi-chunk mark locality.
 
-An exact-reference GC marker was prototyped and rejected. The current runtime can contain allocator-owned references, static string references, boxed JSValues, and layouts shared at dynamic boundaries. Broad exact classification caused native crashes, including Map/Set cases. The validated marker plus chunk-locality cache remains the safer measured design.
+An earlier broad exact-reference classifier was rejected because runtime values may mix allocator-owned references, static strings, boxed JSValues, and dynamic-boundary layouts. The current design instead validates exact heap object starts with allocation metadata and then dispatches tracing from explicit layout descriptors.
+
+Green-Tea-style experiments are benchmark-gated rather than accepted on architecture alone. Moving marked state from object headers into a chunk mark bitmap increased measured GC cost and was reverted. A naive policy that forced every discovered object through a chunk-local pending queue also regressed the dedicated mark-locality benchmark by roughly 11-20% and was reverted. The next locality experiment should retain the object-work fast path and promote only sufficiently dense chunk/span work into batches.
 
 ### Dynamic objects
 
