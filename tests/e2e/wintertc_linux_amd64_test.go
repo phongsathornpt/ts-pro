@@ -470,3 +470,21 @@ catch (err) { console.log(err.name); }
 		expected: "https://example.com:8443/a/b?x=1#top\nhttps://example.com:8443\nhttps:\nexample.com:8443\nexample.com\n8443\n/a/b\n?x=1\n#top\nhttps://example.com:8443/a/b?x=1#top\nhttp://example.com/a\n\nhttps://example.com/\n\nTypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLRelativeResolution(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_relative_resolution",
+		source: `
+const base = new URL("https://example.com/a/b/c?old=1#old");
+console.log(new URL("child", base).href);
+console.log(new URL("../up", base).href);
+console.log(new URL("/root/./x/../y", base).href);
+console.log(new URL("?q=2", base).href);
+console.log(new URL("#frag", base).href);
+console.log(new URL("//other.example/x", base).href);
+console.log(new URL("", base).href);
+console.log(new URL("leaf", "https://example.com/a/b/").href);
+`,
+		expected: "https://example.com/a/b/child\nhttps://example.com/a/up\nhttps://example.com/root/y\nhttps://example.com/a/b/c?q=2\nhttps://example.com/a/b/c?old=1#frag\nhttps://other.example/x\nhttps://example.com/a/b/c?old=1\nhttps://example.com/a/b/leaf\n",
+	})
+}

@@ -262,3 +262,41 @@ func emitAMD64StringASCIILower(e *amd64.Emitter, allocOffset int) {
 	e.Pop(amd64.RBP)
 	e.Ret()
 }
+
+func emitAMD64StringFindLastByte(e *amd64.Emitter) {
+	patchJcc := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
+	}
+	e.Cvttsd2si(amd64.R8, amd64.XMM0) // byte
+	e.MovRegDeref(amd64.R9, amd64.RDI, 0)
+	e.TestRegReg(amd64.R9, amd64.R9)
+	empty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.SubRegImm32(amd64.R9, 1)
+	loop := len(e.Code)
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.AddRegImm32(amd64.R10, 8)
+	e.AddRegReg(amd64.R10, amd64.R9)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R10, 0)
+	e.CmpRegReg(amd64.RAX, amd64.R8)
+	found := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.TestRegReg(amd64.R9, amd64.R9)
+	miss := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.SubRegImm32(amd64.R9, 1)
+	back := len(e.Code)
+	e.JmpRel32(0)
+	binary.LittleEndian.PutUint32(e.Code[back+1:], uint32(int32(loop-(back+5))))
+	foundLabel := len(e.Code)
+	patchJcc(found, foundLabel)
+	e.MovRegReg(amd64.RAX, amd64.R9)
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+	e.Ret()
+	missLabel := len(e.Code)
+	patchJcc(empty, missLabel)
+	patchJcc(miss, missLabel)
+	e.MovRegImm64(amd64.RAX, -1)
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+	e.Ret()
+}

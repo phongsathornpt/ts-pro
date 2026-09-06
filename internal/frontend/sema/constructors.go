@@ -9,12 +9,20 @@ import (
 
 func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 	if e.ClassName == "URL" {
-		if len(e.Args) != 1 {
-			c.error(e.Span(), "TS2554", "URL currently expects exactly one absolute URL string.")
-		} else if c.checkExpr(e.Args[0]) != types.TypeString {
-			c.error(e.Args[0].Span(), "TS2345", "URL input must be a string.")
-		}
 		t := c.builtinURLType()
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "URL expects an input and optional base URL.")
+		} else {
+			if c.checkExpr(e.Args[0]) != types.TypeString {
+				c.error(e.Args[0].Span(), "TS2345", "URL input must be a string.")
+			}
+			if len(e.Args) == 2 {
+				baseType := c.checkExpr(e.Args[1])
+				if baseType != types.TypeString && baseType != t {
+					c.error(e.Args[1].Span(), "TS2345", "URL base must be a string or URL.")
+				}
+			}
+		}
 		c.result.Types[e] = t
 		return t
 	}

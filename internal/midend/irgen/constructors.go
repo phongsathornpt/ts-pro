@@ -11,7 +11,19 @@ import (
 
 func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 	if e.ClassName == "URL" {
-		return g.lowerURLNew(g.lowerExpr(e.Args[0]))
+		input := g.lowerExpr(e.Args[0])
+		if len(e.Args) == 1 {
+			return g.lowerURLNew(input)
+		}
+		var base ir.Operand
+		baseType := g.semanticType(e.Args[1])
+		if obj, ok := baseType.(*types.ObjectType); ok && obj.Name == "$URL" {
+			base = g.lowerExpr(e.Args[1])
+		} else {
+			base = g.lowerURLNew(g.lowerExpr(e.Args[1]))
+		}
+		resolved := g.lowerURLResolveInput(input, base)
+		return g.lowerURLNew(resolved)
 	}
 	if e.ClassName == "ArrayBuffer" {
 		length := g.lowerExpr(e.Args[0])

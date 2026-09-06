@@ -271,7 +271,8 @@ func (g *generator) lowerURLNew(input ir.Operand) ir.Operand {
 	}})
 
 	g.currentBB = fragmentJoin
-	result := g.lowerURLAllocRecord(canonicalScheme, canonicalHostname, normalizedPort, pathname, query, fragment)
+	normalizedPathname := g.lowerURLNormalizePath(pathname)
+	result := g.lowerURLAllocRecord(canonicalScheme, canonicalHostname, normalizedPort, normalizedPathname, query, fragment)
 	resultBB := g.currentBB
 
 	g.currentBB = invalid
@@ -419,4 +420,302 @@ func (g *generator) lowerURLNormalizePort(scheme, port ir.Operand) ir.Operand {
 	}})
 	g.currentBB = joinBB
 	return result
+}
+
+func (g *generator) urlStringFindLastByte(value ir.Operand, ch byte) ir.Operand {
+	res := g.currentFn.NewValue("url_string_find_last", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_string_find_last_byte",
+		Args:       []ir.Operand{value, ir.ConstNumber{Value: float64(ch)}},
+		ParamTypes: []types.Type{types.TypeString, types.TypeNumber},
+	})
+	return res
+}
+
+func (g *generator) urlStringEqual(lhs ir.Operand, rhs string) ir.Operand {
+	res := g.currentFn.NewValue("url_string_equal", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_string_eq",
+		Args:       []ir.Operand{lhs, ir.ConstString{Value: rhs}},
+		ParamTypes: []types.Type{types.TypeString, types.TypeString},
+	})
+	return res
+}
+
+func (g *generator) lowerURLNormalizePath(path ir.Operand) ir.Operand {
+	segmentsType := types.NewArray(types.TypeString)
+	segments := g.currentFn.NewValue("url_path_segments", segmentsType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
+		Res: segments, ElemType: types.TypeString, Length: ir.ConstNumber{Value: 0},
+	})
+	total := g.urlStringLen(path)
+	entry := g.currentBB
+	condBB := g.currentFn.NewBlock("url_path_norm_cond")
+	scanBB := g.currentFn.NewBlock("url_path_norm_scan")
+	slashBB := g.currentFn.NewBlock("url_path_norm_slash")
+	lastBB := g.currentFn.NewBlock("url_path_norm_last")
+	segmentBB := g.currentFn.NewBlock("url_path_norm_segment")
+	dotBB := g.currentFn.NewBlock("url_path_norm_dot")
+	dotDotBB := g.currentFn.NewBlock("url_path_norm_dotdot")
+	normalBB := g.currentFn.NewBlock("url_path_norm_normal")
+	advanceBB := g.currentFn.NewBlock("url_path_norm_advance")
+	serializeBB := g.currentFn.NewBlock("url_path_norm_serialize")
+	entry.Terminator = &ir.JumpTerm{Target: condBB}
+
+	offset := g.currentFn.NewValue("url_path_norm_offset", types.TypeNumber)
+	nextOffset := g.currentFn.NewValue("url_path_norm_next_offset", types.TypeNumber)
+	condBB.Phis = append(condBB.Phis, &ir.PhiInst{Res: offset, Incoming: []ir.PhiIncoming{
+		{Block: entry, Value: ir.ConstNumber{Value: 1}},
+		{Block: advanceBB, Value: nextOffset},
+	}})
+	more := g.currentFn.NewValue("url_path_norm_more", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{
+		Res: more, Op: ir.OpLe, LHS: offset, RHS: total,
+	})
+	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: scanBB, Else: serializeBB}
+	g.currentBB = scanBB
+	slash := g.urlStringFindByte(path, ir.ConstNumber{Value: '/'}, offset, total)
+	hasSlash := g.currentFn.NewValue("url_path_norm_has_slash", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+		Res: hasSlash, Op: ir.OpGe, LHS: slash, RHS: ir.ConstNumber{Value: 0},
+	})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasSlash, Then: slashBB, Else: lastBB}
+	slashBB.Terminator = &ir.JumpTerm{Target: segmentBB}
+	lastBB.Terminator = &ir.JumpTerm{Target: segmentBB}
+	segmentEnd := g.currentFn.NewValue("url_path_norm_segment_end", types.TypeNumber)
+	segmentBB.Phis = append(segmentBB.Phis, &ir.PhiInst{Res: segmentEnd, Incoming: []ir.PhiIncoming{
+		{Block: slashBB, Value: slash}, {Block: lastBB, Value: total},
+	}})
+
+	g.currentBB = segmentBB
+	segment := g.urlStringSlice(path, offset, segmentEnd)
+	isDot := g.urlStringEqual(segment, ".")
+	isDotDot := g.urlStringEqual(segment, "..")
+	dotOrDotDot := g.currentFn.NewValue("url_path_norm_dot_kind", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+		Res: dotOrDotDot, Op: ir.OpOr, LHS: isDot, RHS: isDotDot,
+	})
+	dotKindBB := g.currentFn.NewBlock("url_path_norm_dot_kind")
+	segmentBB.Terminator = &ir.BranchTerm{Cond: dotOrDotDot, Then: dotKindBB, Else: normalBB}
+	dotKindBB.Terminator = &ir.BranchTerm{Cond: isDotDot, Then: dotDotBB, Else: dotBB}
+	lastSegment := g.currentFn.NewValue("url_path_norm_last_segment", types.TypeBoolean)
+	dotBB.Instructions = append(dotBB.Instructions, &ir.BinaryInst{
+		Res: lastSegment, Op: ir.OpEq, LHS: segmentEnd, RHS: total,
+	})
+	dotTrailingBB := g.currentFn.NewBlock("url_path_norm_dot_trailing")
+	dotBB.Terminator = &ir.BranchTerm{Cond: lastSegment, Then: dotTrailingBB, Else: advanceBB}
+	g.currentBB = dotTrailingBB
+	g.pushArrayOperand(segments, ir.ConstString{Value: ""})
+	dotTrailingEnd := g.currentBB
+	dotTrailingEnd.Terminator = &ir.JumpTerm{Target: advanceBB}
+
+	segmentCount := g.currentFn.NewValue("url_path_norm_segment_count", types.TypeNumber)
+	dotDotBB.Instructions = append(dotDotBB.Instructions, &ir.ArrayLengthInst{Res: segmentCount, Array: segments})
+	hasPrevious := g.currentFn.NewValue("url_path_norm_has_previous", types.TypeBoolean)
+	dotDotBB.Instructions = append(dotDotBB.Instructions, &ir.BinaryInst{
+		Res: hasPrevious, Op: ir.OpGt, LHS: segmentCount, RHS: ir.ConstNumber{Value: 0},
+	})
+	popBB := g.currentFn.NewBlock("url_path_norm_pop")
+	afterPopBB := g.currentFn.NewBlock("url_path_norm_after_pop")
+	dotDotBB.Terminator = &ir.BranchTerm{Cond: hasPrevious, Then: popBB, Else: afterPopBB}
+	popped := g.currentFn.NewValue("url_path_norm_popped", types.TypeString)
+	popBB.Instructions = append(popBB.Instructions, &ir.ArrayPopInst{Res: popped, Array: segments})
+	popBB.Terminator = &ir.JumpTerm{Target: afterPopBB}
+	lastDotDot := g.currentFn.NewValue("url_path_norm_last_dotdot", types.TypeBoolean)
+	afterPopBB.Instructions = append(afterPopBB.Instructions, &ir.BinaryInst{
+		Res: lastDotDot, Op: ir.OpEq, LHS: segmentEnd, RHS: total,
+	})
+	dotDotTrailingBB := g.currentFn.NewBlock("url_path_norm_dotdot_trailing")
+	afterPopBB.Terminator = &ir.BranchTerm{Cond: lastDotDot, Then: dotDotTrailingBB, Else: advanceBB}
+	g.currentBB = dotDotTrailingBB
+	g.pushArrayOperand(segments, ir.ConstString{Value: ""})
+	dotDotTrailingEnd := g.currentBB
+	dotDotTrailingEnd.Terminator = &ir.JumpTerm{Target: advanceBB}
+
+	g.currentBB = normalBB
+	g.pushArrayOperand(segments, segment)
+	normalEnd := g.currentBB
+	normalEnd.Terminator = &ir.JumpTerm{Target: advanceBB}
+
+	advanceBB.Instructions = append(advanceBB.Instructions, &ir.BinaryInst{
+		Res: nextOffset, Op: ir.OpAdd, LHS: segmentEnd, RHS: ir.ConstNumber{Value: 1},
+	})
+	advanceBB.Terminator = &ir.JumpTerm{Target: condBB}
+
+	g.currentBB = serializeBB
+	return g.lowerURLSerializePathSegments(segments)
+}
+
+func (g *generator) lowerURLSerializePathSegments(segments ir.Operand) ir.Operand {
+	entry := g.currentBB
+	length := g.currentFn.NewValue("url_path_segments_len", types.TypeNumber)
+	entry.Instructions = append(entry.Instructions, &ir.ArrayLengthInst{Res: length, Array: segments})
+	condBB := g.currentFn.NewBlock("url_path_serialize_cond")
+	bodyBB := g.currentFn.NewBlock("url_path_serialize_body")
+	firstBB := g.currentFn.NewBlock("url_path_serialize_first")
+	restBB := g.currentFn.NewBlock("url_path_serialize_rest")
+	nextBB := g.currentFn.NewBlock("url_path_serialize_next")
+	doneBB := g.currentFn.NewBlock("url_path_serialize_done")
+	entry.Terminator = &ir.JumpTerm{Target: condBB}
+
+	index := g.currentFn.NewValue("url_path_serialize_i", types.TypeNumber)
+	nextIndex := g.currentFn.NewValue("url_path_serialize_next_i", types.TypeNumber)
+	acc := g.currentFn.NewValue("url_path_serialize_acc", types.TypeString)
+	nextAcc := g.currentFn.NewValue("url_path_serialize_next_acc", types.TypeString)
+	condBB.Phis = append(condBB.Phis,
+		&ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: entry, Value: ir.ConstNumber{Value: 0}}}},
+		&ir.PhiInst{Res: acc, Incoming: []ir.PhiIncoming{{Block: entry, Value: ir.ConstString{Value: "/"}}}},
+	)
+	more := g.currentFn.NewValue("url_path_serialize_more", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: length})
+	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: bodyBB, Else: doneBB}
+	g.currentBB = bodyBB
+	segment := g.currentFn.NewValue("url_path_serialize_segment", types.TypeString)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.GetElementInst{Res: segment, Array: segments, Index: index})
+	isFirst := g.currentFn.NewValue("url_path_serialize_is_first", types.TypeBoolean)
+	bodyBB.Instructions = append(bodyBB.Instructions, &ir.BinaryInst{
+		Res: isFirst, Op: ir.OpEq, LHS: index, RHS: ir.ConstNumber{Value: 0},
+	})
+	bodyBB.Terminator = &ir.BranchTerm{Cond: isFirst, Then: firstBB, Else: restBB}
+
+	g.currentBB = firstBB
+	firstAcc := g.concatNativeStrings(acc, segment)
+	firstEnd := g.currentBB
+	firstEnd.Terminator = &ir.JumpTerm{Target: nextBB}
+
+	g.currentBB = restBB
+	withSlash := g.concatNativeStrings(ir.ConstString{Value: "/"}, segment)
+	restAcc := g.concatNativeStrings(acc, withSlash)
+	restEnd := g.currentBB
+	restEnd.Terminator = &ir.JumpTerm{Target: nextBB}
+
+	nextBB.Phis = append(nextBB.Phis, &ir.PhiInst{Res: nextAcc, Incoming: []ir.PhiIncoming{
+		{Block: firstEnd, Value: firstAcc}, {Block: restEnd, Value: restAcc},
+	}})
+	nextBB.Instructions = append(nextBB.Instructions, &ir.BinaryInst{
+		Res: nextIndex, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1},
+	})
+	nextBB.Terminator = &ir.JumpTerm{Target: condBB}
+	condBB.Phis[0].Incoming = append(condBB.Phis[0].Incoming, ir.PhiIncoming{Block: nextBB, Value: nextIndex})
+	condBB.Phis[1].Incoming = append(condBB.Phis[1].Incoming, ir.PhiIncoming{Block: nextBB, Value: nextAcc})
+	g.currentBB = doneBB
+	return acc
+}
+
+func (g *generator) lowerURLResolveInput(input, base ir.Operand) ir.Operand {
+	total := g.urlStringLen(input)
+	colon := g.urlStringFindByte(input, ir.ConstNumber{Value: ':'}, ir.ConstNumber{Value: 0}, total)
+	firstDelimiter := g.urlStringFindFirstDelimiter(input, ir.ConstNumber{Value: 0})
+	colonPositive := g.currentFn.NewValue("url_resolve_colon_positive", types.TypeBoolean)
+	colonBeforeDelimiter := g.currentFn.NewValue("url_resolve_colon_before_delimiter", types.TypeBoolean)
+	hasScheme := g.currentFn.NewValue("url_resolve_has_scheme", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: colonPositive, Op: ir.OpGt, LHS: colon, RHS: ir.ConstNumber{Value: 0}},
+		&ir.BinaryInst{Res: colonBeforeDelimiter, Op: ir.OpLt, LHS: colon, RHS: firstDelimiter},
+		&ir.BinaryInst{Res: hasScheme, Op: ir.OpAnd, LHS: colonPositive, RHS: colonBeforeDelimiter},
+	)
+	entry := g.currentBB
+	absoluteBB := g.currentFn.NewBlock("url_resolve_absolute")
+	relativeBB := g.currentFn.NewBlock("url_resolve_relative")
+	joinBB := g.currentFn.NewBlock("url_resolve_join")
+	entry.Terminator = &ir.BranchTerm{Cond: hasScheme, Then: absoluteBB, Else: relativeBB}
+	absoluteBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = relativeBB
+	origin := g.lowerURLOrigin(base)
+	basePath := g.lowerURLField(base, "$pathname")
+	baseQuery := g.lowerURLField(base, "$query")
+	baseSearch := g.lowerURLPrefixedValue(baseQuery, "?")
+	baseScheme := g.lowerURLField(base, "$scheme")
+	first := g.urlStringByteAt(input, ir.ConstNumber{Value: 0})
+	second := g.urlStringByteAt(input, ir.ConstNumber{Value: 1})
+	isSlash := g.currentFn.NewValue("url_resolve_slash", types.TypeBoolean)
+	isSecondSlash := g.currentFn.NewValue("url_resolve_second_slash", types.TypeBoolean)
+	isDoubleSlash := g.currentFn.NewValue("url_resolve_double_slash", types.TypeBoolean)
+	isQuery := g.currentFn.NewValue("url_resolve_query", types.TypeBoolean)
+	isHash := g.currentFn.NewValue("url_resolve_hash", types.TypeBoolean)
+	isEmpty := g.currentFn.NewValue("url_resolve_empty", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: isSlash, Op: ir.OpEq, LHS: first, RHS: ir.ConstNumber{Value: '/'}},
+		&ir.BinaryInst{Res: isSecondSlash, Op: ir.OpEq, LHS: second, RHS: ir.ConstNumber{Value: '/'}},
+		&ir.BinaryInst{Res: isDoubleSlash, Op: ir.OpAnd, LHS: isSlash, RHS: isSecondSlash},
+		&ir.BinaryInst{Res: isQuery, Op: ir.OpEq, LHS: first, RHS: ir.ConstNumber{Value: '?'}},
+		&ir.BinaryInst{Res: isHash, Op: ir.OpEq, LHS: first, RHS: ir.ConstNumber{Value: '#'}},
+		&ir.BinaryInst{Res: isEmpty, Op: ir.OpEq, LHS: total, RHS: ir.ConstNumber{Value: 0}},
+	)
+	doubleSlashBB := g.currentFn.NewBlock("url_resolve_scheme_relative")
+	slashCheckBB := g.currentFn.NewBlock("url_resolve_slash_check")
+	rootSlashBB := g.currentFn.NewBlock("url_resolve_root_relative")
+	queryCheckBB := g.currentFn.NewBlock("url_resolve_query_check")
+	queryBB := g.currentFn.NewBlock("url_resolve_query_relative")
+	hashCheckBB := g.currentFn.NewBlock("url_resolve_hash_check")
+	hashBB := g.currentFn.NewBlock("url_resolve_hash_relative")
+	emptyCheckBB := g.currentFn.NewBlock("url_resolve_empty_check")
+	emptyBB := g.currentFn.NewBlock("url_resolve_empty_relative")
+	pathBB := g.currentFn.NewBlock("url_resolve_path_relative")
+	relativeJoin := g.currentFn.NewBlock("url_resolve_relative_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isDoubleSlash, Then: doubleSlashBB, Else: slashCheckBB}
+	slashCheckBB.Terminator = &ir.BranchTerm{Cond: isSlash, Then: rootSlashBB, Else: queryCheckBB}
+	queryCheckBB.Terminator = &ir.BranchTerm{Cond: isQuery, Then: queryBB, Else: hashCheckBB}
+	hashCheckBB.Terminator = &ir.BranchTerm{Cond: isHash, Then: hashBB, Else: emptyCheckBB}
+	emptyCheckBB.Terminator = &ir.BranchTerm{Cond: isEmpty, Then: emptyBB, Else: pathBB}
+
+	g.currentBB = doubleSlashBB
+	schemePrefix := g.concatNativeStrings(baseScheme, ir.ConstString{Value: ":"})
+	schemeRelative := g.concatNativeStrings(schemePrefix, input)
+	doubleSlashEnd := g.currentBB
+	doubleSlashEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	g.currentBB = rootSlashBB
+	rootRelative := g.concatNativeStrings(origin, input)
+	rootSlashEnd := g.currentBB
+	rootSlashEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	g.currentBB = queryBB
+	queryBase := g.concatNativeStrings(origin, basePath)
+	queryRelative := g.concatNativeStrings(queryBase, input)
+	queryEnd := g.currentBB
+	queryEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	g.currentBB = hashBB
+	hashBase := g.concatNativeStrings(g.concatNativeStrings(origin, basePath), baseSearch)
+	hashRelative := g.concatNativeStrings(hashBase, input)
+	hashEnd := g.currentBB
+	hashEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	g.currentBB = emptyBB
+	emptyRelative := g.concatNativeStrings(g.concatNativeStrings(origin, basePath), baseSearch)
+	emptyEnd := g.currentBB
+	emptyEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	g.currentBB = pathBB
+	lastSlash := g.urlStringFindLastByte(basePath, '/')
+	directoryEnd := g.currentFn.NewValue("url_resolve_directory_end", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+		Res: directoryEnd, Op: ir.OpAdd, LHS: lastSlash, RHS: ir.ConstNumber{Value: 1},
+	})
+	directory := g.urlStringSlice(basePath, ir.ConstNumber{Value: 0}, directoryEnd)
+	pathBase := g.concatNativeStrings(origin, directory)
+	pathRelative := g.concatNativeStrings(pathBase, input)
+	pathEnd := g.currentBB
+	pathEnd.Terminator = &ir.JumpTerm{Target: relativeJoin}
+
+	resolvedRelative := g.currentFn.NewValue("url_resolved_relative", types.TypeString)
+	relativeJoin.Phis = append(relativeJoin.Phis, &ir.PhiInst{Res: resolvedRelative, Incoming: []ir.PhiIncoming{
+		{Block: doubleSlashEnd, Value: schemeRelative},
+		{Block: rootSlashEnd, Value: rootRelative},
+		{Block: queryEnd, Value: queryRelative},
+		{Block: hashEnd, Value: hashRelative},
+		{Block: emptyEnd, Value: emptyRelative},
+		{Block: pathEnd, Value: pathRelative},
+	}})
+	relativeJoin.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	resolved := g.currentFn.NewValue("url_resolved_input", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: resolved, Incoming: []ir.PhiIncoming{
+		{Block: absoluteBB, Value: input},
+		{Block: relativeJoin, Value: resolvedRelative},
+	}})
+	g.currentBB = joinBB
+	return resolved
 }
