@@ -34,6 +34,25 @@ func emitAMD64DynamicEntryAddress(e *amd64.Emitter, dst, base, index, scratch am
 	e.AddRegReg(dst, scratch)
 }
 
+func emitAMD64GlobalObject(e *amd64.Emitter, dynamicNewOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTGlobalObject)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	have := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	callAt := len(e.Code)
+	e.CallRel32(int32(dynamicNewOffset - (callAt + 5)))
+	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
+	e.AndRegReg(amd64.RAX, amd64.R10)
+	e.MovDerefReg(amd64.R15, amd64RTGlobalObject, amd64.RAX)
+	haveLabel := len(e.Code)
+	patchJcc(have, haveLabel)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)

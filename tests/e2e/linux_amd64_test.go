@@ -2003,3 +2003,20 @@ func TestLinuxAMD64WinterTCNavigatorUserAgent(t *testing.T) {
 		expected: "ts-pro\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCGlobalScopeIdentity(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_global_scope_identity",
+		source: `
+console.log(globalThis === self);
+const g: any = globalThis;
+g.marker = "alive";
+for (let i = 0; i < 50000; i = i + 1) {
+  const dead = "value-" + i;
+}
+const s: any = self;
+console.log(s.marker);
+`,
+		expected: "true\nalive\n",
+	})
+}

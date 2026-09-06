@@ -286,6 +286,9 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.MovRegDeref(amd64.RDI, amd64.R15, amd64RTCurrentTask)
 	markCurrentTaskCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markCurrentTaskCall + 5)))
+	e.MovRegDeref(amd64.RDI, amd64.R15, amd64RTGlobalObject)
+	markGlobalObjectCall := len(e.Code)
+	e.CallRel32(int32(markOffset - (markGlobalObjectCall + 5)))
 
 	// Drain ordinary object work first. If it empties, take one pending object
 	// from the current dense chunk; the chunk remains queued until its local list

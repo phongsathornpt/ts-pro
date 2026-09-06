@@ -1135,6 +1135,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.IdentExpr:
 		sym := c.currentScope.Resolve(e.Name)
 		if sym == nil {
+			if e.Name == "globalThis" || e.Name == "self" {
+				obj := types.NewObject("$GlobalScope")
+				c.result.Types[e] = obj
+				return obj
+			}
 			if e.Name == "Date" {
 				ctor := types.NewObject("$DateConstructor")
 				c.result.Types[e] = ctor

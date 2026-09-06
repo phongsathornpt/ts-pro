@@ -2538,6 +2538,18 @@ func (g *generator) provenLocalType(expr ast.Expr) (types.Type, bool) {
 	return t, ok && t != nil
 }
 
+func dynamicBackedObjectType(t *types.ObjectType) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Name {
+	case "$GlobalScope", "$DOMException":
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *generator) provenObjectType(expr ast.Expr) (*types.ObjectType, bool) {
 	t, ok := g.provenLocalType(expr)
 	if !ok {
@@ -2673,7 +2685,7 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 					if irJSValueType(targetType) {
 						switch concrete := sourceType.(type) {
 						case *types.ObjectType:
-							if _, dynamicLiteral := d.Init.(*ast.ObjectLit); !dynamicLiteral {
+							if _, dynamicLiteral := d.Init.(*ast.ObjectLit); !dynamicLiteral && !dynamicBackedObjectType(concrete) {
 								g.localProvenance[d.Name] = concrete
 							}
 						case *types.FunctionType:
@@ -3511,6 +3523,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return res
 	case *ast.IdentExpr:
+		if e.Name == "globalThis" || e.Name == "self" {
+			t := g.semanticType(e)
+			res := g.currentFn.NewValue("global_scope", t)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_global_object"})
+			return res
+		}
 		if op, exists := g.locals[e.Name]; exists {
 			return op
 		}
