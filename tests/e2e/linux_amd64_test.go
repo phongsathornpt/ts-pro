@@ -1899,3 +1899,14 @@ console.log(false);
 		expected: "true\nfalse\n",
 	})
 }
+
+func TestLinuxAMD64StringConcatFusionSemantics(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "string_concat_fusion",
+		source: `
+console.log("a" + 1 + true + "z");
+console.log(1 + 2 + "x");
+`,
+		expected: "a1truez\n3x\n",
+	})
+}

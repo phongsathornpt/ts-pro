@@ -1605,6 +1605,10 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_string_concat3"] = len(e.Code)
+	emitAMD64StringConcatFixed(e, fnOffsets["ts_alloc"], 3)
+	fnOffsets["ts_string_concat4"] = len(e.Code)
+	emitAMD64StringConcatFixed(e, fnOffsets["ts_alloc"], 4)
 	fnOffsets["ts_js_array_to_string"] = len(e.Code)
 	emitAMD64JSArrayToString(e, fnOffsets["ts_js_array_to_string"], fnOffsets["ts_alloc"], fnOffsets["ts_number_to_string"], fnOffsets["ts_bool_to_string"], fnOffsets["ts_string_concat"])
 	fnOffsets["ts_js_to_string"] = len(e.Code)
@@ -2004,6 +2008,54 @@ func emitAMD64CopyStringBytes(e *amd64.Emitter, src, length amd64.Register) {
 	binary.LittleEndian.PutUint32(e.Code[byteBack+2:], uint32(int32(byteLoop-(byteBack+6))))
 	doneLabel := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[done+2:], uint32(int32(doneLabel-(done+6))))
+}
+
+func emitAMD64StringConcatFixed(e *amd64.Emitter, allocOffset, count int) {
+	// Fixed-arity concat helpers keep inputs in a precise-root frame across the
+	// single result allocation. SysV argument registers cover the supported 3/4
+	// operand forms without a secondary argument array.
+	args := []amd64.Register{amd64.RDI, amd64.RSI, amd64.RDX, amd64.RCX}
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.SubRegImm32(amd64.RSP, 64)
+
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, int64(count))
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	for i := 0; i < count; i++ {
+		e.MovDerefReg(amd64.RSP, int32(16+i*8), args[i])
+	}
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	e.MovRegImm64(amd64.R10, 0)
+	for i := 0; i < count; i++ {
+		e.MovRegDeref(amd64.R11, amd64.RSP, int32(16+i*8))
+		e.MovRegDeref(amd64.R11, amd64.R11, 0)
+		e.AddRegReg(amd64.R10, amd64.R11)
+	}
+	e.MovDerefReg(amd64.RSP, 48, amd64.R10)
+	e.MovRegReg(amd64.RDI, amd64.R10)
+	e.AddRegImm32(amd64.RDI, 8)
+	callAt := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAt + 5)))
+
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 56, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 48)
+	e.MovDerefReg(amd64.RAX, 0, amd64.R11)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.AddRegImm32(amd64.R10, 8)
+	for i := 0; i < count; i++ {
+		e.MovRegDeref(amd64.RDI, amd64.RSP, int32(16+i*8))
+		e.MovRegDeref(amd64.R11, amd64.RDI, 0)
+		emitAMD64CopyStringBytes(e, amd64.RDI, amd64.R11)
+	}
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 56)
+	e.AddRegImm32(amd64.RSP, 64)
+	e.Pop(amd64.RBP)
+	e.Ret()
 }
 
 func emitAMD64StringConcat(e *amd64.Emitter, allocOffset int) {

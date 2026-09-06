@@ -313,3 +313,35 @@ console.log(identity(7));
 		t.Fatalf("expected calls to specialized identity functions:\n%s", dump)
 	}
 }
+
+func TestIRGenFusesNativeStringConcatChains(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("concat-chain.ts", []byte(`
+function fused(n: number): string {
+  return "a" + n + true + "z";
+}
+function grouped(): string {
+  return 1 + 2 + "x";
+}
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	if !strings.Contains(dump, "call @ts_string_concat4") {
+		t.Fatalf("expected concat4 fusion, got:\n%s", dump)
+	}
+	if strings.Count(dump, "call @ts_string_concat") < 1 {
+		t.Fatalf("expected grouped numeric addition to preserve a binary concat, got:\n%s", dump)
+	}
+}

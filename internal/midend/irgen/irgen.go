@@ -555,6 +555,67 @@ func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand
 	return g.coerceStringType(t, op)
 }
 
+func (g *generator) canFuseStringConcat(expr ast.Expr) bool {
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok || bin.Op != token.Plus || g.semanticType(bin) != types.TypeString {
+		return false
+	}
+	// Dynamic JSValue addition owns ToPrimitive/addition semantics and must stay
+	// on ts_js_add rather than being flattened into native string concatenation.
+	return !irJSValueType(g.semanticType(bin.Left)) && !irJSValueType(g.semanticType(bin.Right))
+}
+
+func (g *generator) collectStringConcatParts(expr ast.Expr, parts *[]ast.Expr) {
+	if g.canFuseStringConcat(expr) {
+		bin := expr.(*ast.BinaryExpr)
+		g.collectStringConcatParts(bin.Left, parts)
+		g.collectStringConcatParts(bin.Right, parts)
+		return
+	}
+	*parts = append(*parts, expr)
+}
+
+func (g *generator) lowerStringConcatChain(expr *ast.BinaryExpr) (ir.Operand, bool) {
+	var parts []ast.Expr
+	g.collectStringConcatParts(expr, &parts)
+	if len(parts) < 3 {
+		return nil, false
+	}
+	ops := make([]ir.Operand, 0, len(parts))
+	for _, part := range parts {
+		op := g.lowerExpr(part)
+		ops = append(ops, g.coerceStringOperand(part, op))
+	}
+	emit := func(args []ir.Operand) ir.Operand {
+		callee := "ts_string_concat"
+		switch len(args) {
+		case 3:
+			callee = "ts_string_concat3"
+		case 4:
+			callee = "ts_string_concat4"
+		}
+		res := g.currentFn.NewValue("str", types.TypeString)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: callee, Args: args})
+		return res
+	}
+	if len(ops) <= 4 {
+		return emit(ops), true
+	}
+	current := emit(ops[:4])
+	for i := 4; i < len(ops); {
+		n := len(ops) - i
+		if n > 3 {
+			n = 3
+		}
+		args := make([]ir.Operand, 1, n+1)
+		args[0] = current
+		args = append(args, ops[i:i+n]...)
+		current = emit(args)
+		i += n
+	}
+	return current, true
+}
+
 func nativeTaskResultKind(t types.Type) float64 {
 	if t == nil || t.Kind() == types.KindVoid {
 		return float64(amd64TaskResultVoidIR)
@@ -1583,8 +1644,8 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 		}
 		return g.lowerPromiseArrayAggregate(e, member, taskType, inner), true
 	}
-		taskType := g.semanticType(e).(*types.ObjectType)
-		inner := g.semaResult.TaskResults[taskType.Name]
+	taskType := g.semanticType(e).(*types.ObjectType)
+	inner := g.semaResult.TaskResults[taskType.Name]
 	if member.Property == "resolve" {
 		if argObj, ok := g.semanticType(e.Args[0]).(*types.ObjectType); ok {
 			if _, isTask := g.semaResult.TaskResults[argObj.Name]; isTask {
@@ -3377,6 +3438,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		if e.Op == token.QuestionQuestion {
 			return g.lowerNullishExpr(e)
 		}
+		if g.canFuseStringConcat(e) {
+			if fused, ok := g.lowerStringConcatChain(e); ok {
+				return fused
+			}
+		}
 
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
@@ -3553,7 +3619,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
-					currVal := g.locals[ident.Name]
+				currVal := g.locals[ident.Name]
 				op := ir.OpAdd
 				if e.Op == token.MinusMinus {
 					op = ir.OpSub
@@ -3596,7 +3662,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			target := g.lowerExpr(e.Target)
 			if object, ok := target.Type().(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(object)
-					offset := offsets[key]
+				offset := offsets[key]
 				resultType := object.Fields[key].Type
 				if semantic := g.semanticType(e); semantic != nil && semantic != types.TypeAny {
 					resultType = semantic
@@ -3621,8 +3687,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			}
 		}
 		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
-				lit := e.Index.(*ast.NumberLit)
-				idx := int(lit.Value)
+			lit := e.Index.(*ast.NumberLit)
+			idx := int(lit.Value)
 			tupleVal := g.lowerExpr(e.Target)
 			resultType := tuple.Elements[idx]
 			if t := g.semanticType(e); t != nil {
@@ -4021,9 +4087,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 						sourceTypes = append(sourceTypes, g.semanticType(p.Default))
 						continue
 					}
-						args = append(args, ir.ConstUndefined{})
-						sourceTypes = append(sourceTypes, types.TypeUndefined)
-						continue
+					args = append(args, ir.ConstUndefined{})
+					sourceTypes = append(sourceTypes, types.TypeUndefined)
+					continue
 				}
 			}
 		}
@@ -4092,7 +4158,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				target := g.lowerExpr(idx.Target)
 				if object, ok := target.Type().(*types.ObjectType); ok {
 					offsets, _, _ := g.objectLayout(object)
-						offset := offsets[key]
+					offset := offsets[key]
 					fieldType := object.Fields[key].Type
 					if e.Op == token.Eq {
 						rhs := g.lowerExpr(e.Right)
@@ -4106,23 +4172,23 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: target, Field: key, Offset: offset, Val: value})
 					return value
 				}
-					if concrete, ok := g.provenObjectType(idx.Target); ok {
-						offsets, _, _ := g.objectLayout(concrete)
-						if offset, exists := offsets[key]; exists {
-							if e.Op != token.Eq {
-								return g.failExpr("compound computed assignment through any alias is not implemented yet")
-							}
-							rhs := g.lowerExpr(e.Right)
-							raw := g.unboxKnownObject(target, concrete)
-							g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: raw, Field: key, Offset: offset, Val: rhs})
-							return rhs
+				if concrete, ok := g.provenObjectType(idx.Target); ok {
+					offsets, _, _ := g.objectLayout(concrete)
+					if offset, exists := offsets[key]; exists {
+						if e.Op != token.Eq {
+							return g.failExpr("compound computed assignment through any alias is not implemented yet")
 						}
-						return g.failExpr("cannot add computed property %q to a proven closed shape through any", key)
+						rhs := g.lowerExpr(e.Right)
+						raw := g.unboxKnownObject(target, concrete)
+						g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: raw, Field: key, Offset: offset, Val: rhs})
+						return rhs
 					}
-					if e.Op != token.Eq {
-						return g.failExpr("dynamic computed compound assignment is not implemented yet")
-					}
-					return g.lowerDynamicSet(target, key, e.Right)
+					return g.failExpr("cannot add computed property %q to a proven closed shape through any", key)
+				}
+				if e.Op != token.Eq {
+					return g.failExpr("dynamic computed compound assignment is not implemented yet")
+				}
+				return g.lowerDynamicSet(target, key, e.Right)
 			}
 			if tuple, isTuple := g.semanticType(idx.Target).(*types.TupleType); isTuple {
 				lit := idx.Index.(*ast.NumberLit)
@@ -4165,31 +4231,31 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return value
 		}
 		ident := e.Left.(*ast.IdentExpr)
-				current := g.locals[ident.Name]
-			rhs := g.lowerExpr(e.Right)
-			if e.Op == token.Eq {
-				targetType := g.semanticType(e.Left)
-				sourceType := g.semanticType(e.Right)
-				rhs = g.coerceJSValueBoundary(rhs, sourceType, targetType)
-				g.locals[ident.Name] = rhs
-				delete(g.localProvenance, ident.Name)
-				delete(g.localDirectCallee, ident.Name)
-				if irJSValueType(targetType) {
-					switch concrete := sourceType.(type) {
-					case *types.ObjectType:
-						g.localProvenance[ident.Name] = concrete
-					case *types.FunctionType:
-						g.localProvenance[ident.Name] = concrete
-						if target, ok := g.directCalleeForExpr(e.Right); ok {
-							g.localDirectCallee[ident.Name] = target
-						}
+		current := g.locals[ident.Name]
+		rhs := g.lowerExpr(e.Right)
+		if e.Op == token.Eq {
+			targetType := g.semanticType(e.Left)
+			sourceType := g.semanticType(e.Right)
+			rhs = g.coerceJSValueBoundary(rhs, sourceType, targetType)
+			g.locals[ident.Name] = rhs
+			delete(g.localProvenance, ident.Name)
+			delete(g.localDirectCallee, ident.Name)
+			if irJSValueType(targetType) {
+				switch concrete := sourceType.(type) {
+				case *types.ObjectType:
+					g.localProvenance[ident.Name] = concrete
+				case *types.FunctionType:
+					g.localProvenance[ident.Name] = concrete
+					if target, ok := g.directCalleeForExpr(e.Right); ok {
+						g.localDirectCallee[ident.Name] = target
 					}
 				}
-				return rhs
 			}
-			value := g.lowerAssignmentValue(e, current, rhs)
-			g.locals[ident.Name] = value
-			return value
+			return rhs
+		}
+		value := g.lowerAssignmentValue(e, current, rhs)
+		g.locals[ident.Name] = value
+		return value
 
 	default:
 		te := expr.(*ast.TernaryExpr)
