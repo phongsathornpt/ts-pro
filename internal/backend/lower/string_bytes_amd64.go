@@ -157,3 +157,108 @@ func emitAMD64StringFindByte(e *amd64.Emitter) {
 	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
 	e.Ret()
 }
+
+func emitAMD64StringFindFirstOf3(e *amd64.Emitter) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+	e.Cvttsd2si(amd64.R8, amd64.XMM0) // start
+	e.MovRegDeref(amd64.R9, amd64.RDI, 0)
+	loop := len(e.Code)
+	e.CmpRegReg(amd64.R8, amd64.R9)
+	end := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.AddRegImm32(amd64.R10, 8)
+	e.AddRegReg(amd64.R10, amd64.R8)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R10, 0)
+	var found []int
+	for _, ch := range []int32{'/', '?', '#'} {
+		e.CmpRegImm32(amd64.RAX, ch)
+		at := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		found = append(found, at)
+	}
+	e.AddRegImm32(amd64.R8, 1)
+	back := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(back, loop)
+	foundLabel := len(e.Code)
+	for _, at := range found {
+		patchJcc(at, foundLabel)
+	}
+	e.MovRegReg(amd64.RAX, amd64.R8)
+	foundDone := len(e.Code)
+	e.JmpRel32(0)
+	endLabel := len(e.Code)
+	patchJcc(end, endLabel)
+	e.MovRegReg(amd64.RAX, amd64.R9)
+	done := len(e.Code)
+	patchJmp(foundDone, done)
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+	e.Ret()
+}
+
+func emitAMD64StringASCIILower(e *amd64.Emitter, allocOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.SubRegImm32(amd64.RSP, 32)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegDeref(amd64.R12, amd64.RBX, 0)
+	// Root source across destination allocation.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	e.AddRegImm32(amd64.RDI, 8)
+	callAlloc := len(e.Code)
+	e.CallRel32(int32(allocOffset - (callAlloc + 5)))
+	e.MovRegReg(amd64.R13, amd64.RAX)
+	e.MovDerefReg(amd64.R13, 0, amd64.R12)
+
+	e.MovRegReg(amd64.R8, amd64.RBX)
+	e.AddRegImm32(amd64.R8, 8)
+	e.MovRegReg(amd64.R9, amd64.R13)
+	e.AddRegImm32(amd64.R9, 8)
+	e.MovRegReg(amd64.R10, amd64.R12)
+	loop := len(e.Code)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	done := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R8, 0)
+	e.CmpRegImm32(amd64.RAX, 'A')
+	belowA := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	e.CmpRegImm32(amd64.RAX, 'Z')
+	aboveZ := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+	e.AddRegImm32(amd64.RAX, 32)
+	copyLabel := len(e.Code)
+	patchJcc(belowA, copyLabel)
+	patchJcc(aboveZ, copyLabel)
+	e.MovDerefReg8(amd64.R9, 0, amd64.RAX)
+	e.AddRegImm32(amd64.R8, 1)
+	e.AddRegImm32(amd64.R9, 1)
+	e.SubRegImm32(amd64.R10, 1)
+	back := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(back, loop)
+
+	patchJcc(done, len(e.Code))
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovRegReg(amd64.RAX, amd64.R13)
+	e.AddRegImm32(amd64.RSP, 32)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}

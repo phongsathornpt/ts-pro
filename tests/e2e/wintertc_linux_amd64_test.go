@@ -442,3 +442,31 @@ console.log("" > "😀");
 		expected: "a=ascii&%F0%9F%98%80=first&%F0%9F%98%80=second&%EE%80%80=late\ntrue\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLAbsoluteCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_absolute_core",
+		source: `
+const u = new URL("https://EXAMPLE.COM:8443/a/b?x=1#top");
+console.log(u.href);
+console.log(u.origin);
+console.log(u.protocol);
+console.log(u.host);
+console.log(u.hostname);
+console.log(u.port);
+console.log(u.pathname);
+console.log(u.search);
+console.log(u.hash);
+console.log(u.toString());
+const a = new URL("HTTP://EXAMPLE.COM:80/a");
+console.log(a.href);
+console.log(a.port);
+const b = new URL("https://EXAMPLE.COM:443");
+console.log(b.href);
+console.log(b.port);
+try { new URL("ftp://example.com/file"); console.log("bad"); }
+catch (err) { console.log(err.name); }
+`,
+		expected: "https://example.com:8443/a/b?x=1#top\nhttps://example.com:8443\nhttps:\nexample.com:8443\nexample.com\n8443\n/a/b\n?x=1\n#top\nhttps://example.com:8443/a/b?x=1#top\nhttp://example.com/a\n\nhttps://example.com/\n\nTypeError\n",
+	})
+}

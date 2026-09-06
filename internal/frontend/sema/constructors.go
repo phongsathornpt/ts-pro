@@ -8,6 +8,16 @@ import (
 )
 
 func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
+	if e.ClassName == "URL" {
+		if len(e.Args) != 1 {
+			c.error(e.Span(), "TS2554", "URL currently expects exactly one absolute URL string.")
+		} else if c.checkExpr(e.Args[0]) != types.TypeString {
+			c.error(e.Args[0].Span(), "TS2345", "URL input must be a string.")
+		}
+		t := c.builtinURLType()
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "ArrayBuffer" {
 		if len(e.Args) != 1 {
 			c.error(e.Span(), "TS2554", "ArrayBuffer expects exactly one byteLength argument.")

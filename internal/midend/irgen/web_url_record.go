@@ -1,0 +1,422 @@
+package irgen
+
+import (
+	"github.com/phongsathornpt/ts-pro/internal/core/ast"
+	"github.com/phongsathornpt/ts-pro/internal/core/ir"
+	"github.com/phongsathornpt/ts-pro/internal/core/types"
+)
+
+func (g *generator) urlStringByteAt(value, index ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_string_byte", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_string_byte_at", Args: []ir.Operand{value, index},
+		ParamTypes: []types.Type{types.TypeString, types.TypeNumber},
+	})
+	return res
+}
+
+func (g *generator) urlStringFindFirstDelimiter(value, start ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_first_delimiter", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_string_find_first_of3", Args: []ir.Operand{value, start},
+		ParamTypes: []types.Type{types.TypeString, types.TypeNumber},
+	})
+	return res
+}
+
+func (g *generator) lowerURLAllocRecord(scheme, hostname, port, pathname, query, fragment ir.Operand) ir.Operand {
+	t := g.semaResult.URLType
+	offsets, refMask, shape := g.objectLayout(t)
+	res := g.currentFn.NewValue("url_record", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{
+		Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask,
+	})
+	for field, value := range map[string]ir.Operand{
+		"$scheme": scheme, "$hostname": hostname, "$port": port,
+		"$pathname": pathname, "$query": query, "$fragment": fragment,
+	} {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+			Obj: res, Field: field, Offset: offsets[field], Val: value,
+		})
+	}
+	return res
+}
+
+func (g *generator) lowerURLField(url ir.Operand, field string) ir.Operand {
+	t := g.semaResult.URLType
+	offsets, _, _ := g.objectLayout(t)
+	res := g.currentFn.NewValue("url_field", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+		Res: res, Obj: url, Field: field, Offset: offsets[field],
+	})
+	return res
+}
+
+func (g *generator) lowerURLNew(input ir.Operand) ir.Operand {
+	total := g.urlStringLen(input)
+	start := g.currentBB
+	invalid := g.currentFn.NewBlock("url_invalid")
+	schemeBB := g.currentFn.NewBlock("url_scheme")
+	colon := g.urlStringFindByte(input, ir.ConstNumber{Value: ':'}, ir.ConstNumber{Value: 0}, total)
+	hasScheme := g.currentFn.NewValue("url_has_scheme", types.TypeBoolean)
+	start.Instructions = append(start.Instructions, &ir.BinaryInst{Res: hasScheme, Op: ir.OpGt, LHS: colon, RHS: ir.ConstNumber{Value: 0}})
+	start.Terminator = &ir.BranchTerm{Cond: hasScheme, Then: schemeBB, Else: invalid}
+
+	g.currentBB = schemeBB
+	rawScheme := g.urlStringSlice(input, ir.ConstNumber{Value: 0}, colon)
+	schemeLen := g.urlStringLen(rawScheme)
+	len4 := g.currentFn.NewValue("url_scheme_len4", types.TypeBoolean)
+	len5 := g.currentFn.NewValue("url_scheme_len5", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: len4, Op: ir.OpEq, LHS: schemeLen, RHS: ir.ConstNumber{Value: 4}},
+		&ir.BinaryInst{Res: len5, Op: ir.OpEq, LHS: schemeLen, RHS: ir.ConstNumber{Value: 5}},
+	)
+	matchHTTP := g.currentFn.NewValue("url_http_match", types.TypeBoolean)
+	matchHTTPS := g.currentFn.NewValue("url_https_match", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: matchHTTP, Callee: "ts_encoding_label_eq", Args: []ir.Operand{rawScheme, ir.ConstString{Value: "http"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}},
+		&ir.CallInst{Res: matchHTTPS, Callee: "ts_encoding_label_eq", Args: []ir.Operand{rawScheme, ir.ConstString{Value: "https"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}},
+	)
+
+	httpOK := g.currentFn.NewValue("url_http_ok", types.TypeBoolean)
+	httpsOK := g.currentFn.NewValue("url_https_ok", types.TypeBoolean)
+	validScheme := g.currentFn.NewValue("url_scheme_valid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: httpOK, Op: ir.OpAnd, LHS: len4, RHS: matchHTTP},
+		&ir.BinaryInst{Res: httpsOK, Op: ir.OpAnd, LHS: len5, RHS: matchHTTPS},
+		&ir.BinaryInst{Res: validScheme, Op: ir.OpOr, LHS: httpOK, RHS: httpsOK},
+	)
+	httpBB := g.currentFn.NewBlock("url_http")
+	httpsBB := g.currentFn.NewBlock("url_https")
+	schemeJoin := g.currentFn.NewBlock("url_scheme_join")
+	schemeKind := g.currentFn.NewBlock("url_scheme_kind")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: validScheme, Then: schemeKind, Else: invalid}
+	schemeKind.Terminator = &ir.BranchTerm{Cond: httpOK, Then: httpBB, Else: httpsBB}
+	httpBB.Terminator = &ir.JumpTerm{Target: schemeJoin}
+	httpsBB.Terminator = &ir.JumpTerm{Target: schemeJoin}
+	canonicalScheme := g.currentFn.NewValue("url_scheme_canonical", types.TypeString)
+	schemeJoin.Phis = append(schemeJoin.Phis, &ir.PhiInst{Res: canonicalScheme, Incoming: []ir.PhiIncoming{
+		{Block: httpBB, Value: ir.ConstString{Value: "http"}},
+		{Block: httpsBB, Value: ir.ConstString{Value: "https"}},
+	}})
+
+	g.currentBB = schemeJoin
+	slash1Index := g.currentFn.NewValue("url_slash1_index", types.TypeNumber)
+	slash2Index := g.currentFn.NewValue("url_slash2_index", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: slash1Index, Op: ir.OpAdd, LHS: colon, RHS: ir.ConstNumber{Value: 1}},
+		&ir.BinaryInst{Res: slash2Index, Op: ir.OpAdd, LHS: colon, RHS: ir.ConstNumber{Value: 2}},
+	)
+	slash1 := g.urlStringByteAt(input, slash1Index)
+	slash2 := g.urlStringByteAt(input, slash2Index)
+	isSlash1 := g.currentFn.NewValue("url_slash1", types.TypeBoolean)
+	isSlash2 := g.currentFn.NewValue("url_slash2", types.TypeBoolean)
+	bothSlashes := g.currentFn.NewValue("url_slashes", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: isSlash1, Op: ir.OpEq, LHS: slash1, RHS: ir.ConstNumber{Value: '/'}},
+		&ir.BinaryInst{Res: isSlash2, Op: ir.OpEq, LHS: slash2, RHS: ir.ConstNumber{Value: '/'}},
+		&ir.BinaryInst{Res: bothSlashes, Op: ir.OpAnd, LHS: isSlash1, RHS: isSlash2},
+	)
+	authorityBB := g.currentFn.NewBlock("url_authority")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: bothSlashes, Then: authorityBB, Else: invalid}
+
+	g.currentBB = authorityBB
+	authorityStart := g.currentFn.NewValue("url_authority_start", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: authorityStart, Op: ir.OpAdd, LHS: colon, RHS: ir.ConstNumber{Value: 3}})
+	authorityEnd := g.urlStringFindFirstDelimiter(input, authorityStart)
+	hasAuthority := g.currentFn.NewValue("url_has_authority", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasAuthority, Op: ir.OpGt, LHS: authorityEnd, RHS: authorityStart})
+	hostBB := g.currentFn.NewBlock("url_host")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasAuthority, Then: hostBB, Else: invalid}
+
+	g.currentBB = hostBB
+	portColon := g.urlStringFindByte(input, ir.ConstNumber{Value: ':'}, authorityStart, authorityEnd)
+	hasPort := g.currentFn.NewValue("url_has_port", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasPort, Op: ir.OpGe, LHS: portColon, RHS: ir.ConstNumber{Value: 0}})
+	withPortBB := g.currentFn.NewBlock("url_with_port")
+	noPortBB := g.currentFn.NewBlock("url_no_port")
+	hostJoin := g.currentFn.NewBlock("url_host_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasPort, Then: withPortBB, Else: noPortBB}
+
+	g.currentBB = withPortBB
+	hostWithPort := g.urlStringSlice(input, authorityStart, portColon)
+	portStart := g.currentFn.NewValue("url_port_start", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: portStart, Op: ir.OpAdd, LHS: portColon, RHS: ir.ConstNumber{Value: 1}})
+	portValue := g.urlStringSlice(input, portStart, authorityEnd)
+	withPortEnd := g.currentBB
+	withPortEnd.Terminator = &ir.JumpTerm{Target: hostJoin}
+
+	g.currentBB = noPortBB
+	hostNoPort := g.urlStringSlice(input, authorityStart, authorityEnd)
+	noPortEnd := g.currentBB
+	noPortEnd.Terminator = &ir.JumpTerm{Target: hostJoin}
+	hostname := g.currentFn.NewValue("url_hostname", types.TypeString)
+	port := g.currentFn.NewValue("url_port", types.TypeString)
+	hostJoin.Phis = append(hostJoin.Phis,
+		&ir.PhiInst{Res: hostname, Incoming: []ir.PhiIncoming{{Block: withPortEnd, Value: hostWithPort}, {Block: noPortEnd, Value: hostNoPort}}},
+		&ir.PhiInst{Res: port, Incoming: []ir.PhiIncoming{{Block: withPortEnd, Value: portValue}, {Block: noPortEnd, Value: ir.ConstString{Value: ""}}}},
+	)
+
+	g.currentBB = hostJoin
+	canonicalHostname := g.currentFn.NewValue("url_hostname_canonical", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: canonicalHostname, Callee: "ts_string_ascii_lower", Args: []ir.Operand{hostname}, ParamTypes: []types.Type{types.TypeString}})
+	normalizedPort := g.lowerURLNormalizePort(canonicalScheme, port)
+	hostLen := g.urlStringLen(canonicalHostname)
+	hostNonEmpty := g.currentFn.NewValue("url_hostname_nonempty", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hostNonEmpty, Op: ir.OpGt, LHS: hostLen, RHS: ir.ConstNumber{Value: 0}})
+	componentsBB := g.currentFn.NewBlock("url_components")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hostNonEmpty, Then: componentsBB, Else: invalid}
+
+	g.currentBB = componentsBB
+	queryAt := g.urlStringFindByte(input, ir.ConstNumber{Value: '?'}, authorityEnd, total)
+	hashAt := g.urlStringFindByte(input, ir.ConstNumber{Value: '#'}, authorityEnd, total)
+	queryFound := g.currentFn.NewValue("url_query_found", types.TypeBoolean)
+	hashFound := g.currentFn.NewValue("url_hash_found", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: queryFound, Op: ir.OpGe, LHS: queryAt, RHS: ir.ConstNumber{Value: 0}},
+		&ir.BinaryInst{Res: hashFound, Op: ir.OpGe, LHS: hashAt, RHS: ir.ConstNumber{Value: 0}},
+	)
+	queryBeforeHash := g.currentFn.NewValue("url_query_before_hash", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: queryBeforeHash, Op: ir.OpLt, LHS: queryAt, RHS: hashAt})
+	noHash := g.currentFn.NewValue("url_no_hash", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: noHash, Op: ir.OpEq, LHS: hashFound, RHS: ir.ConstBool{Value: false}})
+	queryPositionOK := g.currentFn.NewValue("url_query_position_ok", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: queryPositionOK, Op: ir.OpOr, LHS: noHash, RHS: queryBeforeHash})
+	queryValid := g.currentFn.NewValue("url_query_valid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: queryValid, Op: ir.OpAnd, LHS: queryFound, RHS: queryPositionOK})
+
+	pathQEndBB := g.currentFn.NewBlock("url_path_query_end")
+	pathNoQBB := g.currentFn.NewBlock("url_path_no_query")
+	pathHashEndBB := g.currentFn.NewBlock("url_path_hash_end")
+	pathTotalEndBB := g.currentFn.NewBlock("url_path_total_end")
+	pathEndJoin := g.currentFn.NewBlock("url_path_end_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: queryValid, Then: pathQEndBB, Else: pathNoQBB}
+	pathQEndBB.Terminator = &ir.JumpTerm{Target: pathEndJoin}
+	pathNoQBB.Terminator = &ir.BranchTerm{Cond: hashFound, Then: pathHashEndBB, Else: pathTotalEndBB}
+	pathHashEndBB.Terminator = &ir.JumpTerm{Target: pathEndJoin}
+	pathTotalEndBB.Terminator = &ir.JumpTerm{Target: pathEndJoin}
+	pathEnd := g.currentFn.NewValue("url_path_end", types.TypeNumber)
+	pathEndJoin.Phis = append(pathEndJoin.Phis, &ir.PhiInst{Res: pathEnd, Incoming: []ir.PhiIncoming{
+		{Block: pathQEndBB, Value: queryAt},
+		{Block: pathHashEndBB, Value: hashAt},
+		{Block: pathTotalEndBB, Value: total},
+	}})
+
+	g.currentBB = pathEndJoin
+	delim := g.urlStringByteAt(input, authorityEnd)
+	hasPath := g.currentFn.NewValue("url_has_path", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasPath, Op: ir.OpEq, LHS: delim, RHS: ir.ConstNumber{Value: '/'}})
+	pathSliceBB := g.currentFn.NewBlock("url_path_slice")
+	pathDefaultBB := g.currentFn.NewBlock("url_path_default")
+	pathJoin := g.currentFn.NewBlock("url_path_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasPath, Then: pathSliceBB, Else: pathDefaultBB}
+	g.currentBB = pathSliceBB
+	pathValue := g.urlStringSlice(input, authorityEnd, pathEnd)
+	pathSliceEnd := g.currentBB
+	pathSliceEnd.Terminator = &ir.JumpTerm{Target: pathJoin}
+	pathDefaultBB.Terminator = &ir.JumpTerm{Target: pathJoin}
+	pathname := g.currentFn.NewValue("url_pathname", types.TypeString)
+	pathJoin.Phis = append(pathJoin.Phis, &ir.PhiInst{Res: pathname, Incoming: []ir.PhiIncoming{
+		{Block: pathSliceEnd, Value: pathValue},
+		{Block: pathDefaultBB, Value: ir.ConstString{Value: "/"}},
+	}})
+
+	g.currentBB = pathJoin
+	queryBB := g.currentFn.NewBlock("url_query_value")
+	queryEmptyBB := g.currentFn.NewBlock("url_query_empty")
+	queryJoin := g.currentFn.NewBlock("url_query_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: queryValid, Then: queryBB, Else: queryEmptyBB}
+
+	g.currentBB = queryBB
+	queryStart := g.currentFn.NewValue("url_query_start", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: queryStart, Op: ir.OpAdd, LHS: queryAt, RHS: ir.ConstNumber{Value: 1}})
+	queryHashBB := g.currentFn.NewBlock("url_query_hash_end")
+	queryTotalBB := g.currentFn.NewBlock("url_query_total_end")
+	queryEndJoin := g.currentFn.NewBlock("url_query_end_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hashFound, Then: queryHashBB, Else: queryTotalBB}
+	queryHashBB.Terminator = &ir.JumpTerm{Target: queryEndJoin}
+	queryTotalBB.Terminator = &ir.JumpTerm{Target: queryEndJoin}
+	queryEnd := g.currentFn.NewValue("url_query_end", types.TypeNumber)
+	queryEndJoin.Phis = append(queryEndJoin.Phis, &ir.PhiInst{Res: queryEnd, Incoming: []ir.PhiIncoming{
+		{Block: queryHashBB, Value: hashAt},
+		{Block: queryTotalBB, Value: total},
+	}})
+	g.currentBB = queryEndJoin
+	queryValue := g.urlStringSlice(input, queryStart, queryEnd)
+	queryValueEnd := g.currentBB
+	queryValueEnd.Terminator = &ir.JumpTerm{Target: queryJoin}
+	queryEmptyBB.Terminator = &ir.JumpTerm{Target: queryJoin}
+	query := g.currentFn.NewValue("url_query", types.TypeString)
+	queryJoin.Phis = append(queryJoin.Phis, &ir.PhiInst{Res: query, Incoming: []ir.PhiIncoming{
+		{Block: queryValueEnd, Value: queryValue},
+		{Block: queryEmptyBB, Value: ir.ConstString{Value: ""}},
+	}})
+
+	g.currentBB = queryJoin
+	fragmentBB := g.currentFn.NewBlock("url_fragment_value")
+	fragmentEmptyBB := g.currentFn.NewBlock("url_fragment_empty")
+	fragmentJoin := g.currentFn.NewBlock("url_fragment_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hashFound, Then: fragmentBB, Else: fragmentEmptyBB}
+	g.currentBB = fragmentBB
+	fragmentStart := g.currentFn.NewValue("url_fragment_start", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: fragmentStart, Op: ir.OpAdd, LHS: hashAt, RHS: ir.ConstNumber{Value: 1}})
+	fragmentValue := g.urlStringSlice(input, fragmentStart, total)
+	fragmentValueEnd := g.currentBB
+	fragmentValueEnd.Terminator = &ir.JumpTerm{Target: fragmentJoin}
+	fragmentEmptyBB.Terminator = &ir.JumpTerm{Target: fragmentJoin}
+	fragment := g.currentFn.NewValue("url_fragment", types.TypeString)
+	fragmentJoin.Phis = append(fragmentJoin.Phis, &ir.PhiInst{Res: fragment, Incoming: []ir.PhiIncoming{
+		{Block: fragmentValueEnd, Value: fragmentValue},
+		{Block: fragmentEmptyBB, Value: ir.ConstString{Value: ""}},
+	}})
+
+	g.currentBB = fragmentJoin
+	result := g.lowerURLAllocRecord(canonicalScheme, canonicalHostname, normalizedPort, pathname, query, fragment)
+	resultBB := g.currentBB
+
+	g.currentBB = invalid
+	err := g.newWebError(ir.ConstString{Value: "Invalid URL"}, ir.ConstString{Value: "TypeError"})
+	g.routeThrownValue(err)
+	g.currentBB = resultBB
+	return result
+}
+
+func (g *generator) lowerURLHost(url ir.Operand) ir.Operand {
+	hostname := g.lowerURLField(url, "$hostname")
+	port := g.lowerURLField(url, "$port")
+	isEmpty := g.currentFn.NewValue("url_port_empty", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: isEmpty, Callee: "ts_string_eq", Args: []ir.Operand{port, ir.ConstString{Value: ""}},
+		ParamTypes: []types.Type{types.TypeString, types.TypeString},
+	})
+	emptyBB := g.currentFn.NewBlock("url_host_no_port")
+	portBB := g.currentFn.NewBlock("url_host_with_port")
+	joinBB := g.currentFn.NewBlock("url_host_join_value")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isEmpty, Then: emptyBB, Else: portBB}
+	emptyBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = portBB
+	withPort := g.concatNativeStrings(g.concatNativeStrings(hostname, ir.ConstString{Value: ":"}), port)
+	portEnd := g.currentBB
+	portEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	result := g.currentFn.NewValue("url_host_value", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: emptyBB, Value: hostname}, {Block: portEnd, Value: withPort},
+	}})
+	g.currentBB = joinBB
+	return result
+}
+
+func (g *generator) lowerURLPrefixedValue(value ir.Operand, prefix string) ir.Operand {
+	isEmpty := g.currentFn.NewValue("url_component_empty", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: isEmpty, Callee: "ts_string_eq", Args: []ir.Operand{value, ir.ConstString{Value: ""}},
+		ParamTypes: []types.Type{types.TypeString, types.TypeString},
+	})
+	emptyBB := g.currentFn.NewBlock("url_component_empty_value")
+	valueBB := g.currentFn.NewBlock("url_component_prefixed_value")
+	joinBB := g.currentFn.NewBlock("url_component_prefix_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isEmpty, Then: emptyBB, Else: valueBB}
+	emptyBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = valueBB
+	prefixed := g.concatNativeStrings(ir.ConstString{Value: prefix}, value)
+	valueEnd := g.currentBB
+	valueEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	result := g.currentFn.NewValue("url_prefixed_value", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: emptyBB, Value: ir.ConstString{Value: ""}}, {Block: valueEnd, Value: prefixed},
+	}})
+	g.currentBB = joinBB
+	return result
+}
+
+func (g *generator) lowerURLOrigin(url ir.Operand) ir.Operand {
+	scheme := g.lowerURLField(url, "$scheme")
+	host := g.lowerURLHost(url)
+	return g.concatNativeStrings(g.concatNativeStrings(scheme, ir.ConstString{Value: "://"}), host)
+}
+
+func (g *generator) lowerURLHref(url ir.Operand) ir.Operand {
+	origin := g.lowerURLOrigin(url)
+	pathname := g.lowerURLField(url, "$pathname")
+	query := g.lowerURLField(url, "$query")
+	fragment := g.lowerURLField(url, "$fragment")
+	search := g.lowerURLPrefixedValue(query, "?")
+	hash := g.lowerURLPrefixedValue(fragment, "#")
+	return g.concatNativeStrings(g.concatNativeStrings(g.concatNativeStrings(origin, pathname), search), hash)
+}
+
+func (g *generator) lowerURLMember(url ir.Operand, property string) (ir.Operand, bool) {
+	switch property {
+	case "href":
+		return g.lowerURLHref(url), true
+	case "origin":
+		return g.lowerURLOrigin(url), true
+	case "protocol":
+		return g.concatNativeStrings(g.lowerURLField(url, "$scheme"), ir.ConstString{Value: ":"}), true
+	case "host":
+		return g.lowerURLHost(url), true
+	case "hostname":
+		return g.lowerURLField(url, "$hostname"), true
+	case "port":
+		return g.lowerURLField(url, "$port"), true
+	case "pathname":
+		return g.lowerURLField(url, "$pathname"), true
+	case "search":
+		return g.lowerURLPrefixedValue(g.lowerURLField(url, "$query"), "?"), true
+	case "hash":
+		return g.lowerURLPrefixedValue(g.lowerURLField(url, "$fragment"), "#"), true
+	}
+	return nil, false
+}
+
+func (g *generator) lowerURLMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$URL" {
+		return nil, false
+	}
+	if mem.Property != "toString" && mem.Property != "toJSON" {
+		return nil, false
+	}
+	return g.lowerURLHref(g.lowerExpr(mem.Object)), true
+}
+
+func (g *generator) lowerURLNormalizePort(scheme, port ir.Operand) ir.Operand {
+	isHTTP := g.currentFn.NewValue("url_port_http", types.TypeBoolean)
+	isHTTPS := g.currentFn.NewValue("url_port_https", types.TypeBoolean)
+	is80 := g.currentFn.NewValue("url_port_80", types.TypeBoolean)
+	is443 := g.currentFn.NewValue("url_port_443", types.TypeBoolean)
+	for _, spec := range []struct {
+		res *ir.Value
+		lhs ir.Operand
+		rhs string
+	}{
+		{isHTTP, scheme, "http"}, {isHTTPS, scheme, "https"}, {is80, port, "80"}, {is443, port, "443"},
+	} {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: spec.res, Callee: "ts_string_eq", Args: []ir.Operand{spec.lhs, ir.ConstString{Value: spec.rhs}},
+			ParamTypes: []types.Type{types.TypeString, types.TypeString},
+		})
+	}
+	httpDefault := g.currentFn.NewValue("url_http_default_port", types.TypeBoolean)
+	httpsDefault := g.currentFn.NewValue("url_https_default_port", types.TypeBoolean)
+	isDefault := g.currentFn.NewValue("url_default_port", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: httpDefault, Op: ir.OpAnd, LHS: isHTTP, RHS: is80},
+		&ir.BinaryInst{Res: httpsDefault, Op: ir.OpAnd, LHS: isHTTPS, RHS: is443},
+		&ir.BinaryInst{Res: isDefault, Op: ir.OpOr, LHS: httpDefault, RHS: httpsDefault},
+	)
+
+	emptyBB := g.currentFn.NewBlock("url_default_port_empty")
+	keepBB := g.currentFn.NewBlock("url_default_port_keep")
+	joinBB := g.currentFn.NewBlock("url_default_port_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isDefault, Then: emptyBB, Else: keepBB}
+	emptyBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	keepBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	result := g.currentFn.NewValue("url_normalized_port", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: emptyBB, Value: ir.ConstString{Value: ""}},
+		{Block: keepBB, Value: port},
+	}})
+	g.currentBB = joinBB
+	return result
+}

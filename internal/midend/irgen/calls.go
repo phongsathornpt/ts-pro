@@ -199,6 +199,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		return nil
 	}
 	if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+		if res, handled := g.lowerURLMethodCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerArrayBufferMethodCall(e, mem); handled {
 			return res
 		}

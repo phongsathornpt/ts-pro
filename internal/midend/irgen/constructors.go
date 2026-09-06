@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
+	if e.ClassName == "URL" {
+		return g.lowerURLNew(g.lowerExpr(e.Args[0]))
+	}
 	if e.ClassName == "ArrayBuffer" {
 		length := g.lowerExpr(e.Args[0])
 		data := g.currentFn.NewValue("array_buffer_data", g.semaResult.ByteBufferType)

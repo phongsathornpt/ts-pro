@@ -302,3 +302,24 @@ func (c *Checker) builtinAbortSignalStaticMember(property string) (types.Type, b
 	}
 	return nil, false
 }
+
+func (c *Checker) builtinURLType() *types.ObjectType {
+	if c.result.URLType == nil {
+		t := types.NewObject("$URL")
+		for _, name := range []string{"$scheme", "$hostname", "$port", "$pathname", "$query", "$fragment"} {
+			t.AddField(name, types.TypeString, false)
+		}
+		c.result.URLType = t
+	}
+	return c.result.URLType
+}
+
+func (c *Checker) builtinURLMember(property string) (types.Type, bool) {
+	switch property {
+	case "href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash":
+		return types.TypeString, true
+	case "toString", "toJSON":
+		return types.NewFunction(nil, types.TypeString), true
+	}
+	return nil, false
+}

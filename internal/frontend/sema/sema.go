@@ -111,6 +111,7 @@ type Result struct {
 	TextEncoderType     *types.ObjectType
 	TextDecoderType     *types.ObjectType
 	URLSearchParamsType *types.ObjectType
+	URLType             *types.ObjectType
 	VarTypes            map[*ast.VarDeclStmt][]types.Type
 	RootScope           *Scope
 	Diagnostics         diag.DiagnosticList
@@ -447,6 +448,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$URLSearchParams" {
 			return c.builtinURLSearchParamsMember(property)
 		}
+		if t.Name == "$URL" {
+			return c.builtinURLMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -654,6 +658,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "URLSearchParams" {
 			return c.builtinURLSearchParamsType()
+		}
+		if t.Name == "URL" {
+			return c.builtinURLType()
 		}
 		if t.Name == "DOMException" {
 			return c.builtinDOMExceptionType()
