@@ -2,6 +2,7 @@ package lower
 
 import (
 	"encoding/binary"
+	"math"
 
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
 )
@@ -249,6 +250,19 @@ func emitAMD64TaskSuspend(e *amd64.Emitter) {
 	e.MovDerefReg(amd64.R11, amd64TaskParent, amd64.R10)
 	e.MovDerefReg(amd64.R11, amd64TaskReturnRsp, amd64.R10)
 	e.MovRegReg(amd64.RSP, amd64.RAX)
+	e.Ret()
+}
+
+func emitAMD64PerformanceNow(e *amd64.Emitter, clockOffset int) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	callAt := len(e.Code)
+	e.CallRel32(int32(clockOffset - (callAt + 5)))
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+	e.MovRegImm64(amd64.R10, int64(math.Float64bits(1_000_000)))
+	e.MovQXMMReg(amd64.XMM1, amd64.R10)
+	e.DivSD(amd64.XMM0, amd64.XMM1)
+	e.Pop(amd64.RBP)
 	e.Ret()
 }
 

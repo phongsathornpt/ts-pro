@@ -1531,6 +1531,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_clock_now_ns"] = len(e.Code)
 	emitAMD64ClockNowNS(e)
+	fnOffsets["ts_performance_now"] = len(e.Code)
+	emitAMD64PerformanceNow(e, fnOffsets["ts_clock_now_ns"])
 	fnOffsets["ts_nanosleep_ns"] = len(e.Code)
 	emitAMD64NanosleepNS(e)
 	fnOffsets["ts_task_run_one"] = len(e.Code)

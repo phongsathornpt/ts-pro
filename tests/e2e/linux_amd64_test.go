@@ -1959,3 +1959,16 @@ console.log(total);
 		t.Fatalf("stdout: got %q, want %q", out, "256\\n")
 	}
 }
+
+func TestLinuxAMD64WinterTCPerformanceNow(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_performance_now",
+		source: `
+const start = performance.now();
+const end = performance.now();
+console.log(start >= 0);
+console.log(end >= start);
+`,
+		expected: "true\ntrue\n",
+	})
+}

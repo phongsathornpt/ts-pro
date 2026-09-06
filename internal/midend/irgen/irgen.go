@@ -3847,6 +3847,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.lowerDynamicGet(obj, e.Property)
 	case *ast.CallExpr:
 		if member, ok := e.Callee.(*ast.MemberExpr); ok {
+			if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" && member.Property == "now" {
+				res := g.currentFn.NewValue("performance_now", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_performance_now"})
+				return res
+			}
 			if promise, handled := g.lowerPromiseStaticCall(e, member); handled {
 				return promise
 			}

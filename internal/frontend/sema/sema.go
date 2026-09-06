@@ -1126,6 +1126,12 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e] = obj
 				return obj
 			}
+			if e.Name == "performance" {
+				obj := types.NewObject("$Performance")
+				obj.AddField("now", types.NewFunction(nil, types.TypeNumber), false)
+				c.result.Types[e] = obj
+				return obj
+			}
 			c.error(e.Span(), "TS2304", fmt.Sprintf("Cannot find name '%s'.", e.Name))
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
@@ -2074,4 +2080,3 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		return fn
 	}
 }
-
