@@ -34,7 +34,11 @@ Runtime process benchmarks include executable launch overhead, so compare the sa
 
 An earlier broad exact-reference classifier was rejected because runtime values may mix allocator-owned references, static strings, boxed JSValues, and dynamic-boundary layouts. The current design instead validates exact heap object starts with allocation metadata and then dispatches tracing from explicit layout descriptors.
 
-Green-Tea-style experiments are benchmark-gated rather than accepted on architecture alone. Moving marked state from object headers into a chunk mark bitmap increased measured GC cost and was reverted. A naive policy that forced every discovered object through a chunk-local pending queue also regressed the dedicated mark-locality benchmark by roughly 11-20% and was reverted. The next locality experiment should retain the object-work fast path and promote only sufficiently dense chunk/span work into batches.
+Green-Tea-style experiments are benchmark-gated rather than accepted on architecture alone. Moving marked state from object headers into a chunk mark bitmap increased measured GC cost and was reverted. A naive policy that forced every discovered object through a chunk-local pending queue also regressed the dedicated mark-locality benchmark by roughly 11-20% and was reverted.
+
+The accepted hybrid keeps ordinary object work as the first-priority fast path and promotes a chunk only after 64 newly marked objects. In paired baseline/hybrid locality runs, median time improved from roughly 3.82 ms to 3.33 ms per 20 GC cycles (about 12-13%) while sparse heaps retain the original work-stack behavior. Atomic layouts are now completed directly in the marker instead of entering scan work, bringing representative locality runs into roughly the 2.9 ms range. RefData and JSValueData share a four-qword scalar batch scanner, which trims another few percent in stable samples.
+
+Vectorization was evaluated on the Zen 4 benchmark host, which exposes AVX2 and AVX-512. An interleaved 8-slot scalar widening experiment was consistently slower than the four-slot scanner, showing that the dominant cost remains each candidate's scalar marker call, allocation-bitmap validation, and mark dedup rather than memory loads alone. A SIMD scanner is therefore deferred until the runtime has a genuine batch-marker ABI that can validate and mark several candidates without immediately scalarizing them again. The unused 8 KiB experimental mark bitmap was removed from every chunk after that design was rejected.
 
 ### Dynamic objects
 
