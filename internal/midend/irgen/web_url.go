@@ -450,6 +450,7 @@ func (g *generator) lowerURLSearchParamsMethodCall(e *ast.CallExpr, mem *ast.Mem
 		value := g.lowerExpr(e.Args[1])
 		g.pushArrayOperand(entries, name)
 		g.pushArrayOperand(entries, value)
+		g.lowerURLSearchParamsSyncOwner(params)
 		return nil, true
 	case "get":
 		return g.lowerURLSearchParamsGet(params, g.lowerExpr(e.Args[0])), true
@@ -459,14 +460,17 @@ func (g *generator) lowerURLSearchParamsMethodCall(e *ast.CallExpr, mem *ast.Mem
 		return g.lowerURLSearchParamsHas(params, g.lowerExpr(e.Args[0])), true
 	case "delete":
 		g.lowerURLSearchParamsRebuild(params, g.lowerExpr(e.Args[0]), nil, false)
+		g.lowerURLSearchParamsSyncOwner(params)
 		return nil, true
 	case "set":
 		g.lowerURLSearchParamsRebuild(params, g.lowerExpr(e.Args[0]), g.lowerExpr(e.Args[1]), true)
+		g.lowerURLSearchParamsSyncOwner(params)
 		return nil, true
 	case "toString":
 		return g.lowerURLSearchParamsSerialize(params), true
 	case "sort":
 		g.lowerURLSearchParamsSort(params)
+		g.lowerURLSearchParamsSyncOwner(params)
 		return nil, true
 	}
 	return nil, false
@@ -553,4 +557,52 @@ func (g *generator) lowerURLSearchParamsSort(params ir.Operand) {
 	outerNext.Instructions = append(outerNext.Instructions, &ir.BinaryInst{Res: nextI, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 2}})
 	outerNext.Terminator = &ir.JumpTerm{Target: outerCond}
 	g.currentBB = doneBB
+}
+
+func (g *generator) urlSearchParamsOwner(params ir.Operand) ir.Operand {
+	t := g.semaResult.URLSearchParamsType
+	offsets, _, _ := g.objectLayout(t)
+	owner := g.currentFn.NewValue("url_search_owner", g.semaResult.URLType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+		Res: owner, Obj: params, Field: "$url", Offset: offsets["$url"],
+	})
+	return owner
+}
+
+func (g *generator) lowerURLSearchParamsSyncOwner(params ir.Operand) {
+	owner := g.urlSearchParamsOwner(params)
+	nullOwner := g.nullRef(g.semaResult.URLType)
+	isNull := g.currentFn.NewValue("url_search_owner_null", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+		Res: isNull, Op: ir.OpEq, LHS: owner, RHS: nullOwner,
+	})
+	skipBB := g.currentFn.NewBlock("url_search_sync_skip")
+	syncBB := g.currentFn.NewBlock("url_search_sync_owner")
+	joinBB := g.currentFn.NewBlock("url_search_sync_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isNull, Then: skipBB, Else: syncBB}
+	skipBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = syncBB
+	query := g.lowerURLSearchParamsSerialize(params)
+	urlOffsets, _, _ := g.objectLayout(g.semaResult.URLType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+		Obj: owner, Field: "$query", Offset: urlOffsets["$query"], Val: query,
+	})
+	syncEnd := g.currentBB
+	syncEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = joinBB
+}
+
+func (g *generator) lowerURLSearchParamsReplace(params, input ir.Operand) {
+	t := g.semaResult.URLSearchParamsType
+	offsets, _, _ := g.objectLayout(t)
+	entriesType := types.NewArray(types.TypeString)
+	entries := g.currentFn.NewValue("url_search_replace_entries", entriesType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{
+		Res: entries, ElemType: types.TypeString, Length: ir.ConstNumber{Value: 0},
+	})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+		Obj: params, Field: "$entries", Offset: offsets["$entries"], Val: entries,
+	})
+	g.lowerURLSearchParamsParse(entries, input)
 }

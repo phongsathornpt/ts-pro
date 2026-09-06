@@ -187,8 +187,9 @@ func (c *Checker) builtinTextDecoderMember(property string) (types.Type, bool) {
 func (c *Checker) builtinURLSearchParamsType() *types.ObjectType {
 	if c.result.URLSearchParamsType == nil {
 		t := types.NewObject("$URLSearchParams")
-		t.AddField("$entries", types.NewArray(types.TypeString), false)
 		c.result.URLSearchParamsType = t
+		t.AddField("$entries", types.NewArray(types.TypeString), false)
+		t.AddField("$url", c.builtinURLType(), false)
 	}
 	return c.result.URLSearchParamsType
 }
@@ -306,10 +307,11 @@ func (c *Checker) builtinAbortSignalStaticMember(property string) (types.Type, b
 func (c *Checker) builtinURLType() *types.ObjectType {
 	if c.result.URLType == nil {
 		t := types.NewObject("$URL")
+		c.result.URLType = t
 		for _, name := range []string{"$scheme", "$hostname", "$port", "$pathname", "$query", "$fragment"} {
 			t.AddField(name, types.TypeString, false)
 		}
-		c.result.URLType = t
+		t.AddField("$searchParams", c.builtinURLSearchParamsType(), false)
 	}
 	return c.result.URLType
 }
@@ -318,6 +320,8 @@ func (c *Checker) builtinURLMember(property string) (types.Type, bool) {
 	switch property {
 	case "href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash":
 		return types.TypeString, true
+	case "searchParams":
+		return c.builtinURLSearchParamsType(), true
 	case "toString", "toJSON":
 		return types.NewFunction(nil, types.TypeString), true
 	}

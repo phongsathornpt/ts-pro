@@ -443,6 +443,39 @@ console.log("" > "😀");
 	})
 }
 
+func TestLinuxAMD64WinterTCURLSearchParamsSync(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_search_params_sync",
+		source: `
+const url = new URL("https://example.com/a/b?old=1#frag");
+const params = url.searchParams;
+console.log(params.get("old"));
+console.log(url.search);
+params.append("new", "a b");
+console.log(url.search);
+console.log(url.href);
+params.delete("old");
+console.log(url.search);
+params.set("new", "z");
+params.sort();
+console.log(url.search);
+url.search = "?q=9&r=0";
+console.log(url.searchParams.toString());
+console.log(url.searchParams.get("q"));
+console.log(url.href);
+url.search = "k=1";
+console.log(url.search);
+console.log(url.searchParams.size);
+const bare = new URL("https://example.com/x");
+console.log(bare.searchParams.size);
+bare.searchParams.append("a", "1");
+console.log(bare.search);
+console.log(bare.href);
+`,
+		expected: "1\n?old=1\n?old=1&new=a+b\nhttps://example.com/a/b?old=1&new=a+b#frag\n?new=a+b\n?new=z\nq=9&r=0\n9\nhttps://example.com/a/b?q=9&r=0#frag\n?k=1\n1\n0\n?a=1\nhttps://example.com/x?a=1\n",
+	})
+}
+
 func TestLinuxAMD64WinterTCURLAbsoluteCore(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "wintertc_url_absolute_core",

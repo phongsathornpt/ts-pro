@@ -39,6 +39,12 @@ func (g *generator) lowerURLAllocRecord(scheme, hostname, port, pathname, query,
 			Obj: res, Field: field, Offset: offsets[field], Val: value,
 		})
 	}
+	params := g.lowerURLSearchParamsNew(query)
+	paramsOffsets, _, _ := g.objectLayout(g.semaResult.URLSearchParamsType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: res, Field: "$searchParams", Offset: offsets["$searchParams"], Val: params},
+		&ir.SetFieldInst{Obj: params, Field: "$url", Offset: paramsOffsets["$url"], Val: res},
+	)
 	return res
 }
 
@@ -366,6 +372,13 @@ func (g *generator) lowerURLMember(url ir.Operand, property string) (ir.Operand,
 		return g.lowerURLPrefixedValue(g.lowerURLField(url, "$query"), "?"), true
 	case "hash":
 		return g.lowerURLPrefixedValue(g.lowerURLField(url, "$fragment"), "#"), true
+	case "searchParams":
+		offsets, _, _ := g.objectLayout(g.semaResult.URLType)
+		params := g.currentFn.NewValue("url_search_params", g.semaResult.URLSearchParamsType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+			Res: params, Obj: url, Field: "$searchParams", Offset: offsets["$searchParams"],
+		})
+		return params, true
 	}
 	return nil, false
 }
@@ -718,4 +731,53 @@ func (g *generator) lowerURLResolveInput(input, base ir.Operand) ir.Operand {
 	}})
 	g.currentBB = joinBB
 	return resolved
+}
+
+func (g *generator) lowerURLStripLeadingByte(value ir.Operand, ch byte) ir.Operand {
+	total := g.urlStringLen(value)
+	first := g.urlStringByteAt(value, ir.ConstNumber{Value: 0})
+	matches := g.currentFn.NewValue("url_strip_prefix_match", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+		Res: matches, Op: ir.OpEq, LHS: first, RHS: ir.ConstNumber{Value: float64(ch)},
+	})
+	stripBB := g.currentFn.NewBlock("url_strip_prefix_strip")
+	keepBB := g.currentFn.NewBlock("url_strip_prefix_keep")
+	joinBB := g.currentFn.NewBlock("url_strip_prefix_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: matches, Then: stripBB, Else: keepBB}
+	g.currentBB = stripBB
+	stripped := g.urlStringSlice(value, ir.ConstNumber{Value: 1}, total)
+	stripEnd := g.currentBB
+	stripEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	keepBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	result := g.currentFn.NewValue("url_stripped_value", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: stripEnd, Value: stripped}, {Block: keepBB, Value: value},
+	}})
+	g.currentBB = joinBB
+	return result
+}
+
+func (g *generator) lowerURLSetSearch(url, value ir.Operand) ir.Operand {
+	query := g.lowerURLStripLeadingByte(value, '?')
+	offsets, _, _ := g.objectLayout(g.semaResult.URLType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+		Obj: url, Field: "$query", Offset: offsets["$query"], Val: query,
+	})
+	params := g.currentFn.NewValue("url_search_params_for_set", g.semaResult.URLSearchParamsType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+		Res: params, Obj: url, Field: "$searchParams", Offset: offsets["$searchParams"],
+	})
+	g.lowerURLSearchParamsReplace(params, query)
+	return value
+}
+
+func (g *generator) lowerURLMemberAssignment(url ir.Operand, property string, rhs ir.Operand) ir.Operand {
+	switch property {
+	case "search":
+		return g.lowerURLSetSearch(url, rhs)
+	case "origin", "searchParams":
+		return g.failExpr("URL.%s is read-only", property)
+	default:
+		return g.failExpr("URL.%s setter is not implemented yet", property)
+	}
 }

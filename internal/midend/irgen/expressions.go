@@ -430,6 +430,14 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.lowerCallExpr(e)
 	case *ast.AssignExpr:
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
+			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok && objType.Name == "$URL" {
+				if e.Op != token.Eq {
+					return g.failExpr("compound assignment to URL.%s is not supported", mem.Property)
+				}
+				url := g.lowerExpr(mem.Object)
+				rhs := g.lowerExpr(e.Right)
+				return g.lowerURLMemberAssignment(url, mem.Property, rhs)
+			}
 			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok && objType.Name == "$AbortSignal" && mem.Property == "onabort" {
 				if e.Op != token.Eq {
 					return g.failExpr("compound assignment to AbortSignal.onabort is not supported")
