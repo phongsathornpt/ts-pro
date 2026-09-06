@@ -723,6 +723,19 @@ func (c *Checker) builtinAbortControllerMember(property string) (types.Type, boo
 	return nil, false
 }
 
+func (c *Checker) builtinAbortSignalStaticMember(property string) (types.Type, bool) {
+	signal := c.builtinAbortSignalType()
+	switch property {
+	case "abort":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, signal), true
+	case "timeout":
+		return types.NewFunction([]types.Param{{Name: "milliseconds", Type: types.TypeNumber}}, signal), true
+	case "any":
+		return types.NewFunction([]types.Param{{Name: "signals", Type: types.NewArray(signal)}}, signal), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinDateType() *types.ObjectType {
 	if c.result.DateType == nil {
 		c.result.DateType = types.NewObject("$Date")
@@ -841,6 +854,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		}
 		if t.Name == "$AbortController" {
 			return c.builtinAbortControllerMember(property)
+		}
+		if t.Name == "$AbortSignalConstructor" {
+			return c.builtinAbortSignalStaticMember(property)
 		}
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
@@ -1384,6 +1400,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				obj := types.NewObject("$GlobalScope")
 				c.result.Types[e] = obj
 				return obj
+			}
+			if e.Name == "AbortSignal" {
+				ctor := types.NewObject("$AbortSignalConstructor")
+				c.result.Types[e] = ctor
+				return ctor
 			}
 			if e.Name == "Date" {
 				ctor := types.NewObject("$DateConstructor")

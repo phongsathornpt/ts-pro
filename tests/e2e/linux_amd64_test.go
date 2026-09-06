@@ -2150,3 +2150,11 @@ func TestLinuxAMD64WinterTCAbortController(t *testing.T) {
 		expected: "false\nabort\ntrue\nstop\nstop\nstop\nAbortError\nonabort\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCAbortSignalStatics(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_abort_signal_statics",
+		source:   mustReadExample(t, "../../examples/wintertc/abort_static.ts"),
+		expected: "true\nstatic\nAbortError\nsecond\nsecond\nfirst\nTimeoutError\n",
+	})
+}
