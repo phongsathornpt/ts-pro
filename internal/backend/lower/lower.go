@@ -1617,6 +1617,25 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_object_new"] = len(e.Code)
 	emitAMD64ObjectNew(e, fnOffsets["ts_alloc"])
 
+	fnOffsets["ts_byte_buffer_new"] = len(e.Code)
+	emitAMD64ByteBufferNew(e, fnOffsets["ts_object_new"], fnOffsets["ts_alloc"])
+	fnOffsets["ts_byte_buffer_len"] = len(e.Code)
+	emitAMD64ByteBufferLength(e)
+	fnOffsets["ts_byte_buffer_get"] = len(e.Code)
+	emitAMD64ByteBufferGet(e)
+	fnOffsets["ts_byte_buffer_set"] = len(e.Code)
+	emitAMD64ByteBufferSet(e)
+	fnOffsets["ts_byte_buffer_copy"] = len(e.Code)
+	emitAMD64ByteBufferCopy(e)
+
+	fnOffsets["ts_byte_buffer_slice"] = len(e.Code)
+	emitAMD64ByteBufferSlice(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"])
+
+	fnOffsets["ts_byte_buffer_from_utf8_string"] = len(e.Code)
+	emitAMD64ByteBufferFromUTF8String(e, fnOffsets["ts_byte_buffer_new"])
+	fnOffsets["ts_byte_buffer_to_utf8_string"] = len(e.Code)
+	emitAMD64ByteBufferToUTF8String(e, fnOffsets["ts_alloc"])
+
 	fnOffsets["ts_array_new"] = len(e.Code)
 	emitAMD64ArrayNew(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_array_get"] = len(e.Code)

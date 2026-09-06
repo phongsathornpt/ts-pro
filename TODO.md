@@ -547,9 +547,9 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Finish passive preventDefault suppression.
   - [x] Finish AbortSignal-backed automatic listener removal.
   - [x] Add dictionary/default/coercion helper shared by later WebIDL APIs.
-- [ ] F3 Byte storage foundation
-  - [ ] Add GC-safe byte buffer allocation, length/capacity, slice/copy helpers.
-  - [ ] Add UTF-8/Web string <-> bytes conversion and bounds tests.
+- [x] F3 Byte storage foundation
+  - [x] Add GC-safe byte buffer allocation, length/capacity, slice/copy helpers.
+  - [x] Add UTF-8/Web string <-> bytes conversion and bounds tests.
 - [ ] F4 Web async jobs
   - [ ] Add Promise-job integration on the microtask queue.
   - [ ] Add unhandledrejection/rejectionhandled lifecycle hooks and ordering tests.
@@ -563,7 +563,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [ ] Callback/closure ABI hardening across arbitrary user callbacks.
 - [x] Shared WebIDL dictionary/default/coercion helpers.
 - [ ] Web async job and rejection-event hooks.
-- [ ] GC-safe byte buffer/string conversion primitive.
+- [x] GC-safe byte buffer/string conversion primitive.
 - [ ] Native network/random/crypto/compression capability layer.
 
 - [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
