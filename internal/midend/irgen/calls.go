@@ -220,6 +220,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		if res, handled := g.lowerAbortSignalStaticCall(e, mem); handled {
 			return res
 		}
+		if res, handled := g.lowerURLStaticCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerEventMethodCall(e, mem); handled {
 			return res
 		}

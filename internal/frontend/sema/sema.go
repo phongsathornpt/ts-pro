@@ -492,6 +492,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$AbortSignalConstructor" {
 			return c.builtinAbortSignalStaticMember(property)
 		}
+		if t.Name == "$URLConstructor" {
+			return c.builtinURLStaticMember(property)
+		}
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
 				return member, true

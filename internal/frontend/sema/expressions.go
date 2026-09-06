@@ -109,6 +109,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e] = ctor
 				return ctor
 			}
+			if e.Name == "URL" {
+				ctor := types.NewObject("$URLConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
 			if e.Name == "Date" {
 				ctor := types.NewObject("$DateConstructor")
 				c.result.Types[e] = ctor

@@ -327,3 +327,21 @@ func (c *Checker) builtinURLMember(property string) (types.Type, bool) {
 	}
 	return nil, false
 }
+
+func (c *Checker) builtinURLStaticMember(property string) (types.Type, bool) {
+	urlType := c.builtinURLType()
+	baseType := types.NewUnion(types.TypeString, urlType)
+	switch property {
+	case "canParse":
+		return types.NewFunction([]types.Param{
+			{Name: "url", Type: types.TypeString},
+			{Name: "base", Type: baseType, Optional: true},
+		}, types.TypeBoolean), true
+	case "parse":
+		return types.NewFunction([]types.Param{
+			{Name: "url", Type: types.TypeString},
+			{Name: "base", Type: baseType, Optional: true},
+		}, types.NewUnion(urlType, types.TypeNull)), true
+	}
+	return nil, false
+}

@@ -20,7 +20,7 @@ Conformance is only claimed for APIs whose behavior is implemented according to 
 
 1. **Global foundation**: `globalThis`, `self`, `atob`, `btoa`, timers, `queueMicrotask`, error/rejection hooks, `structuredClone`, console completeness.
 2. **DOM foundation**: `DOMException`, `Event`, `CustomEvent`, `ErrorEvent`, `MessageEvent`, `EventTarget`, `AbortController`, `AbortSignal`.
-3. **Encoding and URL**: `TextEncoder`, `TextDecoder`, encoder/decoder streams, `URL`, `URLSearchParams`, `URLPattern`.
+3. **Encoding and URL**: `TextEncoder` / `TextDecoder` and the byte-view foundation are implemented; `URL` and `URLSearchParams` are implemented with full static methods (`canParse`, `parse`), component setters, normalization, and live two-way synchronization; encoder/decoder streams wait on Streams; `URLPattern` remains pending.
 4. **Binary/body types**: `Blob`, `File`, `FormData` and Body-compatible byte/string conversion.
 5. **Streams**: readable/writable/transform streams, readers/controllers/writers and queuing strategies required by ECMA-429.
 6. **Fetch**: `Headers`, `Request`, `Response`, `fetch`, cancellation, redirects, streaming bodies and default `User-Agent` behavior.

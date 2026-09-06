@@ -11,19 +11,18 @@ import (
 
 func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 	if e.ClassName == "URL" {
-		input := g.lowerExpr(e.Args[0])
-		if len(e.Args) == 1 {
-			return g.lowerURLNew(input)
+		var baseExpr ast.Expr
+		if len(e.Args) > 1 {
+			baseExpr = e.Args[1]
 		}
-		var base ir.Operand
-		baseType := g.semanticType(e.Args[1])
-		if obj, ok := baseType.(*types.ObjectType); ok && obj.Name == "$URL" {
-			base = g.lowerExpr(e.Args[1])
-		} else {
-			base = g.lowerURLNew(g.lowerExpr(e.Args[1]))
-		}
-		resolved := g.lowerURLResolveInput(input, base)
-		return g.lowerURLNew(resolved)
+		invalidBB := g.currentFn.NewBlock("url_new_invalid")
+		res := g.lowerURLResolveAndParse(e.Args[0], baseExpr, invalidBB)
+		resultBB := g.currentBB
+		g.currentBB = invalidBB
+		err := g.newWebError(ir.ConstString{Value: "Invalid URL"}, ir.ConstString{Value: "TypeError"})
+		g.routeThrownValue(err)
+		g.currentBB = resultBB
+		return res
 	}
 	if e.ClassName == "ArrayBuffer" {
 		length := g.lowerExpr(e.Args[0])

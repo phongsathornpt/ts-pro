@@ -53,15 +53,25 @@ func (g *generator) lowerOptionalMember(e *ast.MemberExpr) ir.Operand {
 	if t := g.semanticType(e); t != nil {
 		resultType = t
 	}
-	loaded := g.currentFn.NewValue("optional_field", resultType)
-	load.Instructions = append(load.Instructions, &ir.GetFieldInst{Res: loaded, Obj: obj, Field: e.Property, Offset: offset})
-	load.Terminator = &ir.JumpTerm{Target: join}
+	var loaded ir.Operand
+	if objType.Name == "$URL" {
+		if res, handled := g.lowerURLMember(obj, e.Property); handled {
+			loaded = res
+		}
+	}
+	if loaded == nil {
+		fieldVal := g.currentFn.NewValue("optional_field", resultType)
+		load.Instructions = append(load.Instructions, &ir.GetFieldInst{Res: fieldVal, Obj: obj, Field: e.Property, Offset: offset})
+		loaded = fieldVal
+	}
+	loadEnd := g.currentBB
+	loadEnd.Terminator = &ir.JumpTerm{Target: join}
 
 	g.currentBB = join
 	res := g.currentFn.NewValue("optional", resultType)
 	join.Phis = append(join.Phis, &ir.PhiInst{Res: res, Incoming: []ir.PhiIncoming{
 		{Block: missing, Value: ir.ConstUndefined{}},
-		{Block: load, Value: loaded},
+		{Block: loadEnd, Value: loaded},
 	}})
 	return res
 }

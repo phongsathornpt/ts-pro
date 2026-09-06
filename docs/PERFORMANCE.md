@@ -12,13 +12,32 @@ go test ./...
 python3 scripts/test-node-differential.py
 ```
 
-The current acceptance gates are 125/125 native fixtures and 52/52 Node differential fixtures. Run the reproducible local benchmark sweep with:
+The current acceptance gates are **146/146 native fixtures** and **52/52 Node differential fixtures**. Run the reproducible local benchmark sweep with:
 
 ```text
 make bench-performance
 ```
 
 Runtime process benchmarks include executable launch overhead, so compare the same benchmark on the same machine and use repeated samples for performance decisions.
+
+
+## Current benchmark snapshot (2026-09-06)
+
+`make bench-performance` on the Ryzen 9 7940HS reference host currently reports:
+
+| benchmark | current result | workload |
+| --- | ---: | ---: |
+| Array growth copies | ~5.87 ms/op | 1,638,400 pushes |
+| Dynamic mixed property reads | ~10.37 ms/op | 800,000 gets |
+| Fused string concat chains | ~1.72 ms/op | 100,000 chains |
+| Proven-owned loop append | ~0.178 ms/op | 20,000 appends |
+| Regalloc, 2,048 values | ~0.617 ms/op | 664,568 B/op, 92 allocs/op |
+| Optimizer, 2,048 instructions | ~0.157 ms/op | 164,718 B/op |
+| GC allocation churn | ~0.920 ms/op | 50,000 allocations |
+| GC fragmented reuse | ~2.80 ms/op | 10,000 target allocations |
+| GC mark locality | ~2.69 ms/op | 20 GC cycles |
+
+The benchmark sweep and native fixture suite pass together at **146/146**. These numbers are a local regression baseline, not portable absolute performance claims; CPU governor, thermal state, kernel, and toolchain can move wall-clock results.
 
 ## 2026-09 optimization sweep
 
@@ -35,6 +54,8 @@ Runtime process benchmarks include executable launch overhead, so compare the sa
 An earlier broad exact-reference classifier was rejected because runtime values may mix allocator-owned references, static strings, boxed JSValues, and dynamic-boundary layouts. The current design instead validates exact heap object starts with allocation metadata and then dispatches tracing from explicit layout descriptors.
 
 Green-Tea-style experiments are benchmark-gated rather than accepted on architecture alone. Moving marked state from object headers into a chunk mark bitmap increased measured GC cost and was reverted. A naive policy that forced every discovered object through a chunk-local pending queue also regressed the dedicated mark-locality benchmark by roughly 11-20% and was reverted.
+
+The Green-Tea-inspired locality roadmap is complete for the current single-threaded marker. It borrows locality/metadata ideas rather than attempting to embed or reuse Go's garbage collector, because ts-pro owns a different native heap, object layout, root ABI, and JSValue semantics.
 
 The accepted hybrid keeps ordinary object work as the first-priority fast path and promotes a chunk only after 64 newly marked objects. In paired baseline/hybrid locality runs, median time improved from roughly 3.82 ms to 3.33 ms per 20 GC cycles (about 12-13%) while sparse heaps retain the original work-stack behavior. Atomic layouts are now completed directly in the marker instead of entering scan work, bringing representative locality runs into roughly the 2.9 ms range. RefData and JSValueData share a four-qword scalar batch scanner, which trims another few percent in stable samples.
 
@@ -118,6 +139,18 @@ Instruction-slice reuse was also benchmarked and rejected because it did not mat
 
 - Each public compilation starts a new `FileSet`, preventing a long-lived `Compiler` from retaining source bytes and line tables from every previous invocation.
 - Relative module resolution is cached within one build, avoiding repeated filesystem candidate probes in diamond/repeated imports while deliberately avoiding stale cross-build filesystem state.
+
+
+### Remaining GC performance scope
+
+The completed locality work is not a commitment to copy Go Green Tea feature-for-feature. The next GC changes are benchmark-triggered only:
+
+- concurrent marking and the stronger barriers it requires;
+- pacing and mutator assist under sustained allocation pressure;
+- a true batch-marker ABI before reconsidering AVX2/AVX-512 scanning;
+- scheduler/GC coordination only where stop-the-world or assist latency becomes measurable.
+
+These are future optimization scope, not blockers for the current runtime or WinterTC work.
 
 ## Representation policy
 

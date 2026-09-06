@@ -6,7 +6,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
 > Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only; the active raw-native status is determined exclusively by this section and its acceptance gates.
-> Current active acceptance: **125 / 125 native fixtures PASS, 0 diagnostics, 0 build/lowering failures, 0 runtime failures, 0 timeouts**. Deterministic differential coverage is **52 / 52 Node-comparable fixtures matching stdout and exit status**; 7 fixtures are explicitly skipped only because Node strip-types cannot execute enum syntax, extensionless TS imports, or parameter-property syntax directly.
+> Current active acceptance: **146 / 146 native fixtures PASS, 0 diagnostics, 0 build/lowering failures, 0 runtime failures, 0 timeouts**. Deterministic differential coverage is **52 / 52 Node-comparable fixtures matching stdout and exit status**; 7 fixtures are explicitly skipped only because Node strip-types cannot execute enum syntax, extensionless TS imports, or parameter-property syntax directly.
 
 ### Completed active milestones
 
@@ -63,7 +63,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 ### Active-backend final acceptance
 
 - [x] Re-run and commit a deterministic native fixture sweep script.
-- [x] Reach **125 / 125** active raw-native fixtures compiling/running with **0 diagnostics, 0 lowering failures, 0 runtime failures, 0 timeouts**.
+- [x] Reach the original **125 / 125** active raw-native fixture milestone compiling/running with **0 diagnostics, 0 lowering failures, 0 runtime failures, 0 timeouts**.
 - [x] Add Node differential execution for deterministic observable semantics and require matching stdout/exit status (**52 / 52 comparable fixtures**).
 - [x] Stress GC during dynamic-object graphs, closures, class dispatch, suspended task stacks, channels, Promise/thenable continuations, and aggregate results.
 - [x] `CGO_ENABLED=0 go test ./...`.
@@ -71,7 +71,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] `CGO_ENABLED=0 go build ./...`.
 - [x] `make test-linux-amd64`.
 - [x] `git diff --check`.
-- [x] Active raw-native fixture roadmap accepted at **125 / 125**, with the async state-machine item explicitly superseded by the documented stackful scheduler model.
+- [x] Active raw-native fixture roadmap accepted at its original **125 / 125** milestone, with the async state-machine item explicitly superseded by the documented stackful scheduler model.
 
 ## 2026-09 God-file / God-method refactor closeout
 
@@ -83,12 +83,12 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] Split `jsops_amd64.go` into cohesive string coercion, numeric coercion, and comparison runtime modules.
 - [x] Split `tests/e2e/linux_amd64_test.go` from 2,285 LOC to 858 LOC with dedicated async, runtime-value, and WinterTC suites.
 - [x] Preserve behavior across every refactor commit with targeted E2E plus full `go test ./...`, native fixture, Node differential, and `git diff --check` gates.
-- [x] Final refactor regression gate: **141 / 141 native fixtures PASS**, **52 / 52 Node-comparable fixtures match**, and `make bench-performance` PASS.
+- [x] Final refactor regression gate was **141 / 141 native fixtures PASS**, **52 / 52 Node-comparable fixtures match**, and `make bench-performance` PASS.
 - [x] Intentionally keep cohesive runtime modules such as GC, task scheduler, Base64, and number formatting together unless a future responsibility split is justified by behavior/change pressure rather than LOC alone.
 
 ## Optional next roadmap (new scope, not active blockers)
 
-The active raw-native fixture roadmap is complete. The items below are optional follow-on work and do not change the **125 / 125** acceptance status above.
+The active raw-native fixture roadmap is complete. Subsequent WinterTC/performance coverage has expanded the current native suite to **146 / 146 PASS**; the original **125 / 125** milestone remains the acceptance point for the completed core roadmap.
 
 - [ ] Performance: reduce GPR/XMM payload shuffling, benchmark allocator/GC/scheduler behavior, improve register allocation/code layout, and evaluate PGO/LTO where useful.
 - [ ] Language/ecosystem expansion: broaden TypeScript/ECMAScript syntax, built-in APIs, package/module resolution, and uncommon dynamic edge cases beyond the current fixture set.
@@ -102,7 +102,7 @@ The active raw-native fixture roadmap is complete. The items below are optional 
   - [x] Add `BenchmarkAMD64GCMarkLocality` and include it in `make bench-performance` so future span/chunk batching changes are measured against randomized multi-chunk live-reference traversal.
   - [x] Green-Tea locality follow-up: retain the object-work fast path and promote only dense chunks after 64 newly marked objects. Paired locality runs improved median mark time by roughly 12-13% versus the allocation-bitmap baseline while sparse work keeps the original stack path.
   - [x] Add layout-specialized scan paths: atomic objects finish at mark time without queueing, and RefData/JSValueData scan four qwords per scalar batch. Wider 8-slot batches regressed in interleaved measurements, and AVX2/AVX-512 vector loads were evaluated but deferred because every candidate still requires scalar exact-object validation/mark dedup; SIMD should wait for a true batch-marker ABI.
-  - [ ] Evaluate concurrent marking, write barriers, pacing, and mutator assist only after the single-threaded locality/metadata path is measurably better; these remain future scope rather than current blockers.
+  - [ ] Evaluate concurrent marking, pacing, and mutator assist only after profiling shows the current single-threaded locality/metadata path is the bottleneck. Write barriers already exist for generational/remembered-set correctness; concurrent-mark barriers are future scope.
 
 > These are intentionally unchecked because they define **future scope**, not unfinished work in the completed active roadmap.
 
@@ -585,7 +585,9 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Add ArrayBuffer/Uint8Array byte-view foundation with GC-safe shared backing.
   - [x] Add TextEncoder/TextDecoder including UTF-8 coercion/error behavior, BOM handling, label validation, and encodeInto semantics.
   - [ ] Add TextEncoderStream/TextDecoderStream after Streams core is available.
-  - [ ] Add URL and URLSearchParams parsing/serialization.
+  - [x] Add URL and URLSearchParams parsing/serialization.
+    - [x] URLSearchParams core, application/x-www-form-urlencoded encoding/decoding, mutation, iteration, and UTF-16 sort order.
+    - [x] URL absolute parsing/serialization, relative-reference resolution, property getters/setters, static helpers (`canParse`, `parse`), live `searchParams` two-way synchronization, and conformance test suite.
   - [ ] Add URLPattern matching.
 - [ ] Phase 4: Blob, File, FormData and body byte/string primitives.
 - [ ] Phase 5: Streams interfaces required by ECMA-429.

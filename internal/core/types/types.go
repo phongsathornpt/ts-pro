@@ -264,9 +264,15 @@ func (o *ObjectType) String() string {
 	return sb.String()
 }
 func (o *ObjectType) Equals(other Type) bool {
+	if o == other {
+		return true
+	}
 	t, ok := other.(*ObjectType)
 	if !ok || len(o.Fields) != len(t.Fields) {
 		return false
+	}
+	if o.Name != "" && t.Name != "" && o.Name == t.Name {
+		return true
 	}
 	for name, f1 := range o.Fields {
 		f2, exists := t.Fields[name]
@@ -284,6 +290,12 @@ func (o *ObjectType) AssignableTo(target Type) bool {
 		return true
 	}
 	if t, ok := target.(*ObjectType); ok {
+		if o == t {
+			return true
+		}
+		if o.Name != "" && t.Name != "" && o.Name == t.Name {
+			return true
+		}
 		// Structural subtyping: target must be subset of source
 		for name, targetField := range t.Fields {
 			sourceField, exists := o.Fields[name]

@@ -6,7 +6,7 @@ The active handwritten TypeScript frontend → SSA → raw-native backend is com
 
 Current acceptance:
 
-- **125 / 125** native fixtures compile and run successfully.
+- **146 / 146** native fixtures compile and run successfully (the original core-roadmap acceptance milestone was 125 / 125; later performance/WinterTC work expanded the suite).
 - **0** diagnostics, lowering/build failures, runtime failures, or timeouts.
 - **52 / 52** Node-comparable deterministic fixtures match stdout and exit status.
 - 7 differential fixtures are explicitly skipped only because Node strip-types cannot directly execute enum syntax, extensionless TypeScript imports, or parameter-property syntax.
@@ -55,3 +55,5 @@ The completed fixture roadmap does not imply the compiler implements all TypeScr
 - allocator, GC, scheduler, register-allocation, and code-size performance work;
 - stronger module/package resolution and ecosystem compatibility;
 - production hardening, security review, benchmark baselines, PGO/LTO, and cross-compilation ergonomics.
+
+The September performance sweep is complete for allocator fast paths, GC locality/metadata, dynamic hash tables, array/container copies, string concat/owned append, register allocation, optimizer memory, and compiler lifetime/module-resolution retention. `make bench-performance` is the regression entry point; concurrent GC marking/pacing/mutator assist remain optional profiling-driven scope.
