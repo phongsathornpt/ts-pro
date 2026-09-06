@@ -3403,7 +3403,64 @@ func (g *generator) lowerEventInitBool(init ast.Expr, initValue ir.Operand, name
 	return ir.ConstBool{Value: false}
 }
 
-func (g *generator) lowerEventConstructor(e *ast.NewExpr) ir.Operand {
+func (g *generator) lowerEventInitValue(init ast.Expr, initValue ir.Operand, name string, targetType types.Type, fallback ir.Operand) ir.Operand {
+	if init == nil {
+		return fallback
+	}
+	if objType, ok := g.semanticType(init).(*types.ObjectType); ok {
+		field, exists := objType.Fields[name]
+		if !exists {
+			return fallback
+		}
+		offsets, _, _ := g.objectLayout(objType)
+		res := g.currentFn.NewValue("event_init_"+name, field.Type)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: initValue, Field: name, Offset: offsets[name]})
+		if targetType == types.TypeAny && !irJSValueType(field.Type) {
+			return g.boxJSValue(res, field.Type)
+		}
+		return g.coerceJSValueBoundary(res, field.Type, targetType)
+	}
+	if irJSValueType(initValue.Type()) {
+		value := g.lowerDynamicGet(initValue, name)
+		if targetType == types.TypeAny {
+			return value
+		}
+		return g.coerceJSValueBoundary(value, types.TypeAny, targetType)
+	}
+	return fallback
+}
+
+func (g *generator) initEventVariantFields(obj ir.Operand, className string, init ast.Expr, initValue ir.Operand) {
+	g.setEventField(obj, "$detail", ir.ConstNull{})
+	g.setEventField(obj, "$data", ir.ConstNull{})
+	g.setEventField(obj, "$origin", ir.ConstString{Value: ""})
+	g.setEventField(obj, "$lastEventId", ir.ConstString{Value: ""})
+	g.setEventField(obj, "$source", ir.ConstNull{})
+	g.setEventField(obj, "$ports", ir.ConstNull{})
+	g.setEventField(obj, "$message", ir.ConstString{Value: ""})
+	g.setEventField(obj, "$filename", ir.ConstString{Value: ""})
+	g.setEventField(obj, "$lineno", ir.ConstNumber{Value: 0})
+	g.setEventField(obj, "$colno", ir.ConstNumber{Value: 0})
+	g.setEventField(obj, "$error", ir.ConstNull{})
+	switch className {
+	case "CustomEvent":
+		g.setEventField(obj, "$detail", g.lowerEventInitValue(init, initValue, "detail", types.TypeAny, ir.ConstNull{}))
+	case "MessageEvent":
+		g.setEventField(obj, "$data", g.lowerEventInitValue(init, initValue, "data", types.TypeAny, ir.ConstNull{}))
+		g.setEventField(obj, "$origin", g.lowerEventInitValue(init, initValue, "origin", types.TypeString, ir.ConstString{Value: ""}))
+		g.setEventField(obj, "$lastEventId", g.lowerEventInitValue(init, initValue, "lastEventId", types.TypeString, ir.ConstString{Value: ""}))
+		g.setEventField(obj, "$source", g.lowerEventInitValue(init, initValue, "source", types.TypeAny, ir.ConstNull{}))
+		g.setEventField(obj, "$ports", g.lowerEventInitValue(init, initValue, "ports", types.TypeAny, ir.ConstNull{}))
+	case "ErrorEvent":
+		g.setEventField(obj, "$message", g.lowerEventInitValue(init, initValue, "message", types.TypeString, ir.ConstString{Value: ""}))
+		g.setEventField(obj, "$filename", g.lowerEventInitValue(init, initValue, "filename", types.TypeString, ir.ConstString{Value: ""}))
+		g.setEventField(obj, "$lineno", g.lowerEventInitValue(init, initValue, "lineno", types.TypeNumber, ir.ConstNumber{Value: 0}))
+		g.setEventField(obj, "$colno", g.lowerEventInitValue(init, initValue, "colno", types.TypeNumber, ir.ConstNumber{Value: 0}))
+		g.setEventField(obj, "$error", g.lowerEventInitValue(init, initValue, "error", types.TypeAny, ir.ConstNull{}))
+	}
+}
+
+func (g *generator) lowerEventConstructor(e *ast.NewExpr, resultType *types.ObjectType) ir.Operand {
 	eventType := g.semaResult.EventType
 	typeValue := g.lowerExpr(e.Args[0])
 	var initExpr ast.Expr
@@ -3416,7 +3473,7 @@ func (g *generator) lowerEventConstructor(e *ast.NewExpr) ir.Operand {
 	cancelable := g.lowerEventInitBool(initExpr, initValue, "cancelable")
 	composed := g.lowerEventInitBool(initExpr, initValue, "composed")
 	offsets, refMask, shape := g.objectLayout(eventType)
-	obj := g.currentFn.NewValue("event", eventType)
+	obj := g.currentFn.NewValue("event", resultType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: obj, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 	g.setEventField(obj, "type", typeValue)
 	g.setEventField(obj, "bubbles", bubbles)
@@ -3433,6 +3490,7 @@ func (g *generator) lowerEventConstructor(e *ast.NewExpr) ir.Operand {
 	g.setEventField(obj, "$dispatching", ir.ConstBool{Value: false})
 	g.setEventField(obj, "$stopImmediate", ir.ConstBool{Value: false})
 	g.setEventField(obj, "$stopPropagation", ir.ConstBool{Value: false})
+	g.initEventVariantFields(obj, e.ClassName, initExpr, initValue)
 	return obj
 }
 
@@ -3442,9 +3500,61 @@ func (g *generator) nullRef(t types.Type) ir.Operand {
 	return res
 }
 
+func eventPhysicalProperty(objType *types.ObjectType, property string) (string, bool) {
+	switch property {
+	case "type", "target", "currentTarget", "bubbles", "cancelable", "defaultPrevented", "composed", "isTrusted", "eventPhase", "timeStamp":
+		return property, true
+	}
+	switch objType.Name {
+	case "$CustomEvent":
+		if property == "detail" {
+			return "$detail", true
+		}
+	case "$MessageEvent":
+		switch property {
+		case "data":
+			return "$data", true
+		case "origin":
+			return "$origin", true
+		case "lastEventId":
+			return "$lastEventId", true
+		case "source":
+			return "$source", true
+		case "ports":
+			return "$ports", true
+		}
+	case "$ErrorEvent":
+		switch property {
+		case "message":
+			return "$message", true
+		case "filename":
+			return "$filename", true
+		case "lineno":
+			return "$lineno", true
+		case "colno":
+			return "$colno", true
+		case "error":
+			return "$error", true
+		}
+	}
+	return "", false
+}
+
+func isEventObjectType(t *types.ObjectType) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Name {
+	case "$Event", "$CustomEvent", "$MessageEvent", "$ErrorEvent":
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
-	if !ok || objType.Name != "$Event" {
+	if !ok || (objType.Name != "$Event" && objType.Name != "$CustomEvent" && objType.Name != "$MessageEvent" && objType.Name != "$ErrorEvent") {
 		return nil, false
 	}
 	event := g.lowerExpr(mem.Object)
@@ -3601,7 +3711,16 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if e.ClassName == "Event" {
-			return g.lowerEventConstructor(e)
+			return g.lowerEventConstructor(e, g.semaResult.EventType)
+		}
+		if e.ClassName == "CustomEvent" {
+			return g.lowerEventConstructor(e, g.semaResult.CustomEventType)
+		}
+		if e.ClassName == "MessageEvent" {
+			return g.lowerEventConstructor(e, g.semaResult.MessageEventType)
+		}
+		if e.ClassName == "ErrorEvent" {
+			return g.lowerEventConstructor(e, g.semaResult.ErrorEventType)
 		}
 		if e.ClassName == "DOMException" {
 			message := ir.Operand(ir.ConstString{Value: ""})
@@ -4067,11 +4186,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
-			if objType.Name == "$Event" {
-				if _, method := g.semaResult.EventType.Fields[e.Property]; method {
+			if isEventObjectType(objType) {
+				if physical, ok := eventPhysicalProperty(objType, e.Property); ok {
 					obj := g.lowerExpr(e.Object)
-					resultType := g.semanticType(e)
-					return g.eventField(obj, e.Property, resultType)
+					return g.eventField(obj, physical, g.semanticType(e))
 				}
 			}
 			if objType.Name == "$DOMException" {

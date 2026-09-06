@@ -100,6 +100,9 @@ type Result struct {
 	RegExpType         *types.ObjectType
 	DOMExceptionType   *types.ObjectType
 	EventType          *types.ObjectType
+	CustomEventType    *types.ObjectType
+	MessageEventType   *types.ObjectType
+	ErrorEventType     *types.ObjectType
 	EventTargetType    *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
 	RootScope          *Scope
@@ -590,9 +593,52 @@ func (c *Checker) builtinEventType() *types.ObjectType {
 		e.AddField("$dispatching", types.TypeBoolean, false)
 		e.AddField("$stopImmediate", types.TypeBoolean, false)
 		e.AddField("$stopPropagation", types.TypeBoolean, false)
+		// Variant payload slots keep one physical Event ABI for all DOM event types.
+		e.AddField("$detail", types.TypeAny, false)
+		e.AddField("$data", types.TypeAny, false)
+		e.AddField("$origin", types.TypeString, false)
+		e.AddField("$lastEventId", types.TypeString, false)
+		e.AddField("$source", types.TypeAny, false)
+		e.AddField("$ports", types.TypeAny, false)
+		e.AddField("$message", types.TypeString, false)
+		e.AddField("$filename", types.TypeString, false)
+		e.AddField("$lineno", types.TypeNumber, false)
+		e.AddField("$colno", types.TypeNumber, false)
+		e.AddField("$error", types.TypeAny, false)
 		c.result.EventType = e
 	}
 	return c.result.EventType
+}
+
+func (c *Checker) copyEventSemanticType(name string) *types.ObjectType {
+	base := c.builtinEventType()
+	t := types.NewObject(name)
+	for _, fieldName := range base.FieldOrder {
+		f := base.Fields[fieldName]
+		t.AddField(fieldName, f.Type, f.Optional)
+	}
+	return t
+}
+
+func (c *Checker) builtinCustomEventType() *types.ObjectType {
+	if c.result.CustomEventType == nil {
+		c.result.CustomEventType = c.copyEventSemanticType("$CustomEvent")
+	}
+	return c.result.CustomEventType
+}
+
+func (c *Checker) builtinMessageEventType() *types.ObjectType {
+	if c.result.MessageEventType == nil {
+		c.result.MessageEventType = c.copyEventSemanticType("$MessageEvent")
+	}
+	return c.result.MessageEventType
+}
+
+func (c *Checker) builtinErrorEventType() *types.ObjectType {
+	if c.result.ErrorEventType == nil {
+		c.result.ErrorEventType = c.copyEventSemanticType("$ErrorEvent")
+	}
+	return c.result.ErrorEventType
 }
 
 func (c *Checker) builtinEventTargetType() *types.ObjectType {
@@ -716,6 +762,32 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		}
 	case *types.ObjectType:
 		if t.Name == "$Event" {
+			return c.builtinEventMember(property)
+		}
+		if t.Name == "$CustomEvent" {
+			if property == "detail" {
+				return types.TypeAny, true
+			}
+			return c.builtinEventMember(property)
+		}
+		if t.Name == "$MessageEvent" {
+			switch property {
+			case "data", "source", "ports":
+				return types.TypeAny, true
+			case "origin", "lastEventId":
+				return types.TypeString, true
+			}
+			return c.builtinEventMember(property)
+		}
+		if t.Name == "$ErrorEvent" {
+			switch property {
+			case "message", "filename":
+				return types.TypeString, true
+			case "lineno", "colno":
+				return types.TypeNumber, true
+			case "error":
+				return types.TypeAny, true
+			}
 			return c.builtinEventMember(property)
 		}
 		if t.Name == "$EventTarget" {
@@ -1116,6 +1188,29 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.error(e.Span(), "TS2554", "EventTarget expects no arguments.")
 			}
 			t := c.builtinEventTargetType()
+			c.result.Types[e] = t
+			return t
+		}
+		if e.ClassName == "CustomEvent" || e.ClassName == "MessageEvent" || e.ClassName == "ErrorEvent" {
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				c.error(e.Span(), "TS2554", e.ClassName+" expects a type and optional init dictionary.")
+			} else {
+				if c.checkExpr(e.Args[0]) != types.TypeString {
+					c.error(e.Args[0].Span(), "TS2345", e.ClassName+" type must be a string.")
+				}
+				if len(e.Args) == 2 {
+					c.checkExpr(e.Args[1])
+				}
+			}
+			var t *types.ObjectType
+			switch e.ClassName {
+			case "CustomEvent":
+				t = c.builtinCustomEventType()
+			case "MessageEvent":
+				t = c.builtinMessageEventType()
+			default:
+				t = c.builtinErrorEventType()
+			}
 			c.result.Types[e] = t
 			return t
 		}
@@ -2200,6 +2295,15 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 	case *ast.TypeRefNode:
 		if t.Name == "Event" {
 			return c.builtinEventType()
+		}
+		if t.Name == "CustomEvent" {
+			return c.builtinCustomEventType()
+		}
+		if t.Name == "MessageEvent" {
+			return c.builtinMessageEventType()
+		}
+		if t.Name == "ErrorEvent" {
+			return c.builtinErrorEventType()
 		}
 		if t.Name == "EventTarget" {
 			return c.builtinEventTargetType()
