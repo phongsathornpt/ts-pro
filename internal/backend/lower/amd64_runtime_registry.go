@@ -146,6 +146,16 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	fnOffsets["ts_byte_buffer_to_utf8_string"] = len(e.Code)
 	emitAMD64ByteBufferToUTF8String(e, fnOffsets["ts_alloc"])
 
+	fnOffsets["ts_utf8_validate"] = len(e.Code)
+	emitAMD64UTF8Validate(e)
+	fnOffsets["ts_utf8_sanitize"] = len(e.Code)
+	emitAMD64UTF8Sanitize(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_text_encode_into"] = len(e.Code)
+	emitAMD64TextEncodeInto(e, fnOffsets["ts_object_new"])
+
+	fnOffsets["ts_encoding_label_eq"] = len(e.Code)
+	emitAMD64EncodingLabelEq(e)
+
 	fnOffsets["ts_array_new"] = len(e.Code)
 	emitAMD64ArrayNew(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_array_get"] = len(e.Code)
