@@ -370,3 +370,36 @@ try {
 		expected: "utf-8\n6\n104\n195\n147\nhé✓\n��\nTypeError\nA\n4\n239\n2\n3\n104\n0\nRangeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLSearchParamsCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_search_params_core",
+		source: `
+const p = new URLSearchParams();
+p.append("a", "1");
+p.append("b", "2");
+p.append("a", "3");
+console.log(p.size);
+console.log(p.get("a"));
+console.log(p.get("missing"));
+console.log(p.has("a"));
+const before = p.getAll("a");
+console.log(before.length);
+console.log(before[0]);
+console.log(before[1]);
+p.set("a", "9");
+console.log(p.size);
+console.log(p.get("a"));
+const after = p.getAll("a");
+console.log(after.length);
+console.log(after[0]);
+p.delete("b");
+console.log(p.size);
+console.log(p.has("b"));
+p.set("c", "4");
+console.log(p.size);
+console.log(p.get("c"));
+`,
+		expected: "3\n1\nnull\ntrue\n2\n1\n3\n2\n9\n1\n9\n1\nfalse\n2\n4\n",
+	})
+}

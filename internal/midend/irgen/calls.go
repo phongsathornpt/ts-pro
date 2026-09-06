@@ -211,6 +211,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		if res, handled := g.lowerTextDecoderMethodCall(e, mem); handled {
 			return res
 		}
+		if res, handled := g.lowerURLSearchParamsMethodCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerAbortSignalStaticCall(e, mem); handled {
 			return res
 		}

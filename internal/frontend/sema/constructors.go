@@ -31,6 +31,14 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		c.result.Types[e] = t
 		return t
 	}
+	if e.ClassName == "URLSearchParams" {
+		if len(e.Args) != 0 {
+			c.error(e.Span(), "TS2554", "URLSearchParams currently expects no constructor arguments.")
+		}
+		t := c.builtinURLSearchParamsType()
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "TextEncoder" {
 		if len(e.Args) != 0 {
 			c.error(e.Span(), "TS2554", "TextEncoder expects no arguments.")

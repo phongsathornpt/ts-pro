@@ -393,6 +393,10 @@ func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 	}
 	printer, _ := consolePrinterForType(concrete)
 	value := g.lowerExpr(expr)
+	if actual := value.Type(); actual != nil && irJSValueType(actual) {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_js_print", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeAny}})
+		return nil
+	}
 	join := g.currentFn.NewBlock("print_join")
 	emitMissing := func(name string, sentinel ir.Operand, callee string) {
 		cond := g.currentFn.NewValue(name+"_match", types.TypeBoolean)

@@ -184,6 +184,35 @@ func (c *Checker) builtinTextDecoderMember(property string) (types.Type, bool) {
 	return nil, false
 }
 
+func (c *Checker) builtinURLSearchParamsType() *types.ObjectType {
+	if c.result.URLSearchParamsType == nil {
+		t := types.NewObject("$URLSearchParams")
+		t.AddField("$entries", types.NewArray(types.TypeString), false)
+		c.result.URLSearchParamsType = t
+	}
+	return c.result.URLSearchParamsType
+}
+
+func (c *Checker) builtinURLSearchParamsMember(property string) (types.Type, bool) {
+	switch property {
+	case "size":
+		return types.TypeNumber, true
+	case "append":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}, {Name: "value", Type: types.TypeString}}, types.TypeVoid), true
+	case "get":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}}, types.NewUnion(types.TypeString, types.TypeNull)), true
+	case "getAll":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}}, types.NewArray(types.TypeString)), true
+	case "has":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}}, types.TypeBoolean), true
+	case "delete":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}}, types.TypeVoid), true
+	case "set":
+		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}, {Name: "value", Type: types.TypeString}}, types.TypeVoid), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinEventMember(property string) (types.Type, bool) {
 	switch property {
 	case "type":
