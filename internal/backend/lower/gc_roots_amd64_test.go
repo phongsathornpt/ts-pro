@@ -91,3 +91,39 @@ func TestAMD64RootLiveOutDropsDeadBlockLocal(t *testing.T) {
 		t.Fatal("dead local must not remain live out of return block")
 	}
 }
+
+func TestAMD64RootSlotsDoNotShareWithinBlock(t *testing.T) {
+	fn := ir.NewFunction("root_same_block", types.TypeVoid)
+	entry := fn.NewBlock("entry")
+	first := fn.NewValue("first", types.TypeString)
+	second := fn.NewValue("second", types.TypeString)
+	entry.Instructions = append(entry.Instructions,
+		&ir.CallInst{Res: first, Callee: "make_first"},
+		&ir.CallInst{Res: second, Callee: "make_second"},
+		&ir.CallInst{Callee: "consume", Args: []ir.Operand{first, second}},
+	)
+	entry.Terminator = &ir.ReturnTerm{}
+	slots := amd64RootSlots(fn)
+	if slots[first.ID] == slots[second.ID] {
+		t.Fatalf("same-block roots shared slot %d", slots[first.ID])
+	}
+}
+
+func TestAMD64RootSlotsReuseAcrossDeadSequentialBlocks(t *testing.T) {
+	fn := ir.NewFunction("root_sequential_blocks", types.TypeVoid)
+	firstBlock := fn.NewBlock("first")
+	secondBlock := fn.NewBlock("second")
+	first := fn.NewValue("first", types.TypeString)
+	second := fn.NewValue("second", types.TypeString)
+	firstBlock.Instructions = append(firstBlock.Instructions, &ir.CallInst{Res: first, Callee: "make_first"})
+	firstBlock.Terminator = &ir.JumpTerm{Target: secondBlock}
+	secondBlock.Instructions = append(secondBlock.Instructions, &ir.CallInst{Res: second, Callee: "make_second"})
+	secondBlock.Terminator = &ir.ReturnTerm{}
+	slots := amd64RootSlots(fn)
+	if got := amd64RootSlotCount(slots); got != 1 {
+		t.Fatalf("root slot count = %d, want 1 for non-overlapping block-local roots", got)
+	}
+	if slots[first.ID] != slots[second.ID] {
+		t.Fatalf("sequential dead roots use slots %d and %d, want reuse", slots[first.ID], slots[second.ID])
+	}
+}

@@ -41,32 +41,106 @@ func amd64ArrayElementClass(t types.Type) int64 {
 
 func amd64RootSlots(fn *ir.Function) map[int]int {
 	ids := make(map[int]struct{})
-	add := func(v *ir.Value) {
+	addID := func(v *ir.Value) {
 		if v != nil && isAMD64HeapRefType(v.Type()) {
 			ids[v.ID] = struct{}{}
 		}
 	}
 	for _, param := range fn.Params {
-		add(param)
+		addID(param)
 	}
 	for _, bb := range fn.Blocks {
 		for _, phi := range bb.Phis {
-			add(phi.Res)
+			addID(phi.Res)
 		}
 		for _, inst := range bb.Instructions {
-			add(inst.Result())
+			addID(inst.Result())
 		}
 	}
+
+	// Build a conservative interference graph from GC liveness. Every reference
+	// touched by, defined in, or live through the same basic block interferes.
+	// This intentionally gives up some intra-block reuse so root-slot coloring
+	// never relies on instruction-level lifetime guesses.
+	liveOut := amd64RootLiveOut(fn)
+	interferes := make(map[int]map[int]struct{}, len(ids))
+	for id := range ids {
+		interferes[id] = map[int]struct{}{}
+	}
+	for blockIndex, bb := range fn.Blocks {
+		blockRefs := map[int]struct{}{}
+		if blockIndex == 0 {
+			for _, param := range fn.Params {
+				if isAMD64HeapRefType(param.Type()) {
+					blockRefs[param.ID] = struct{}{}
+				}
+			}
+		}
+		for _, phi := range bb.Phis {
+			if phi.Res != nil && isAMD64HeapRefType(phi.Res.Type()) {
+				blockRefs[phi.Res.ID] = struct{}{}
+			}
+		}
+		for _, inst := range bb.Instructions {
+			for _, v := range amd64RootInstructionUses(inst) {
+				blockRefs[v.ID] = struct{}{}
+			}
+			if res := inst.Result(); res != nil && isAMD64HeapRefType(res.Type()) {
+				blockRefs[res.ID] = struct{}{}
+			}
+		}
+		for _, v := range amd64RootTerminatorUses(bb.Terminator) {
+			blockRefs[v.ID] = struct{}{}
+		}
+		for id := range liveOut[bb] {
+			blockRefs[id] = struct{}{}
+		}
+		blockIDs := make([]int, 0, len(blockRefs))
+		for id := range blockRefs {
+			blockIDs = append(blockIDs, id)
+		}
+		sort.Ints(blockIDs)
+		for i, a := range blockIDs {
+			for _, b := range blockIDs[i+1:] {
+				interferes[a][b] = struct{}{}
+				interferes[b][a] = struct{}{}
+			}
+		}
+	}
+
 	ordered := make([]int, 0, len(ids))
 	for id := range ids {
 		ordered = append(ordered, id)
 	}
 	sort.Ints(ordered)
 	slots := make(map[int]int, len(ordered))
-	for i, id := range ordered {
-		slots[id] = i
+	for _, id := range ordered {
+		used := map[int]struct{}{}
+		for other := range interferes[id] {
+			if slot, ok := slots[other]; ok {
+				used[slot] = struct{}{}
+			}
+		}
+		slot := 0
+		for {
+			if _, busy := used[slot]; !busy {
+				break
+			}
+			slot++
+		}
+		slots[id] = slot
 	}
 	return slots
+}
+
+func amd64RootSlotCount(slots map[int]int) int {
+	count := 0
+	for _, slot := range slots {
+		if slot+1 > count {
+			count = slot + 1
+		}
+	}
+	return count
 }
 
 func amd64RootOperandValue(op ir.Operand) *ir.Value {
