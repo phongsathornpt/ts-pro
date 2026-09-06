@@ -110,9 +110,30 @@ type Result struct {
 	Uint8ArrayType      *types.ObjectType
 	TextEncoderType     *types.ObjectType
 	TextDecoderType     *types.ObjectType
-	URLSearchParamsType *types.ObjectType
-	URLType             *types.ObjectType
-	VarTypes            map[*ast.VarDeclStmt][]types.Type
+	URLSearchParamsType           *types.ObjectType
+	URLType                       *types.ObjectType
+	URLPatternType                *types.ObjectType
+	URLPatternResultType          *types.ObjectType
+	URLPatternComponentResultType *types.ObjectType
+	URLPatternInitType            *types.ObjectType
+	BlobType                      *types.ObjectType
+	FileType                      *types.ObjectType
+	FormDataType                  *types.ObjectType
+	HeadersType                   *types.ObjectType
+	ReadableStreamType            *types.ObjectType
+	ReadableStreamDefaultReaderType *types.ObjectType
+	ReadableStreamDefaultControllerType *types.ObjectType
+	ReadableStreamReadResultType  *types.ObjectType
+	WritableStreamType            *types.ObjectType
+	WritableStreamDefaultWriterType *types.ObjectType
+	WritableStreamDefaultControllerType *types.ObjectType
+	TransformStreamType           *types.ObjectType
+	TransformStreamDefaultControllerType *types.ObjectType
+	ByteLengthQueuingStrategyType *types.ObjectType
+	CountQueuingStrategyType      *types.ObjectType
+	TextEncoderStreamType         *types.ObjectType
+	TextDecoderStreamType         *types.ObjectType
+	VarTypes                      map[*ast.VarDeclStmt][]types.Type
 	RootScope           *Scope
 	Diagnostics         diag.DiagnosticList
 }
@@ -451,6 +472,21 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$URL" {
 			return c.builtinURLMember(property)
 		}
+		if t.Name == "$URLPattern" {
+			return c.builtinURLPatternMember(property)
+		}
+		if t.Name == "$Blob" {
+			return c.builtinBlobMember(property)
+		}
+		if t.Name == "$File" {
+			return c.builtinFileMember(property)
+		}
+		if t.Name == "$FormData" {
+			return c.builtinFormDataMember(property)
+		}
+		if t.Name == "$Headers" {
+			return c.builtinHeadersMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -494,6 +530,45 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		}
 		if t.Name == "$URLConstructor" {
 			return c.builtinURLStaticMember(property)
+		}
+		if t.Name == "$ReadableStream" {
+			return c.builtinReadableStreamMember(property)
+		}
+		if t.Name == "$ReadableStreamDefaultReader" {
+			return c.builtinReadableStreamDefaultReaderMember(property)
+		}
+		if t.Name == "$ReadableStreamDefaultController" {
+			return c.builtinReadableStreamDefaultControllerMember(property)
+		}
+		if t.Name == "$WritableStream" {
+			return c.builtinWritableStreamMember(property)
+		}
+		if t.Name == "$WritableStreamDefaultWriter" {
+			return c.builtinWritableStreamDefaultWriterMember(property)
+		}
+		if t.Name == "$WritableStreamDefaultController" {
+			return c.builtinWritableStreamDefaultControllerMember(property)
+		}
+		if t.Name == "$TransformStream" {
+			return c.builtinTransformStreamMember(property)
+		}
+		if t.Name == "$TransformStreamDefaultController" {
+			return c.builtinTransformStreamDefaultControllerMember(property)
+		}
+		if t.Name == "$ByteLengthQueuingStrategy" {
+			return c.builtinByteLengthQueuingStrategyMember(property)
+		}
+		if t.Name == "$CountQueuingStrategy" {
+			return c.builtinCountQueuingStrategyMember(property)
+		}
+		if t.Name == "$TextEncoderStream" {
+			return c.builtinTextEncoderStreamMember(property)
+		}
+		if t.Name == "$TextDecoderStream" {
+			return c.builtinTextDecoderStreamMember(property)
+		}
+		if t.Name == "$ReadableStreamConstructor" {
+			return c.builtinReadableStreamStaticMember(property)
 		}
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
@@ -664,6 +739,63 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "URL" {
 			return c.builtinURLType()
+		}
+		if t.Name == "URLPattern" {
+			return c.builtinURLPatternType()
+		}
+		if t.Name == "URLPatternResult" {
+			return c.builtinURLPatternResultType()
+		}
+		if t.Name == "URLPatternComponentResult" {
+			return c.builtinURLPatternComponentResultType()
+		}
+		if t.Name == "URLPatternInit" {
+			return c.builtinURLPatternInitType()
+		}
+		if t.Name == "Blob" {
+			return c.builtinBlobType()
+		}
+		if t.Name == "File" {
+			return c.builtinFileType()
+		}
+		if t.Name == "FormData" {
+			return c.builtinFormDataType()
+		}
+		if t.Name == "ReadableStream" {
+			return c.builtinReadableStreamType()
+		}
+		if t.Name == "ReadableStreamDefaultReader" {
+			return c.builtinReadableStreamDefaultReaderType()
+		}
+		if t.Name == "ReadableStreamDefaultController" {
+			return c.builtinReadableStreamDefaultControllerType()
+		}
+		if t.Name == "WritableStream" {
+			return c.builtinWritableStreamType()
+		}
+		if t.Name == "WritableStreamDefaultWriter" {
+			return c.builtinWritableStreamDefaultWriterType()
+		}
+		if t.Name == "WritableStreamDefaultController" {
+			return c.builtinWritableStreamDefaultControllerType()
+		}
+		if t.Name == "TransformStream" {
+			return c.builtinTransformStreamType()
+		}
+		if t.Name == "TransformStreamDefaultController" {
+			return c.builtinTransformStreamDefaultControllerType()
+		}
+		if t.Name == "ByteLengthQueuingStrategy" {
+			return c.builtinByteLengthQueuingStrategyType()
+		}
+		if t.Name == "CountQueuingStrategy" {
+			return c.builtinCountQueuingStrategyType()
+		}
+		if t.Name == "TextEncoderStream" {
+			return c.builtinTextEncoderStreamType()
+		}
+		if t.Name == "TextDecoderStream" {
+			return c.builtinTextDecoderStreamType()
 		}
 		if t.Name == "DOMException" {
 			return c.builtinDOMExceptionType()

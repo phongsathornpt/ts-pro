@@ -345,3 +345,585 @@ func (c *Checker) builtinURLStaticMember(property string) (types.Type, bool) {
 	}
 	return nil, false
 }
+
+func (c *Checker) builtinURLPatternType() *types.ObjectType {
+	if c.result.URLPatternType == nil {
+		_ = c.builtinURLType()
+		_ = c.builtinDOMExceptionType()
+		t := types.NewObject("$URLPattern")
+		c.result.URLPatternType = t
+		for _, name := range []string{"protocol", "username", "password", "hostname", "port", "pathname", "search", "hash"} {
+			t.AddField(name, types.TypeString, false)
+		}
+		t.AddField("hasRegExpGroups", types.TypeBoolean, false)
+		for _, name := range []string{"$protocolRegex", "$usernameRegex", "$passwordRegex", "$hostnameRegex", "$portRegex", "$pathnameRegex", "$searchRegex", "$hashRegex", "$groupKeys"} {
+			t.AddField(name, types.TypeString, false)
+		}
+	}
+	return c.result.URLPatternType
+}
+
+func (c *Checker) builtinURLPatternComponentResultType() *types.ObjectType {
+	if c.result.URLPatternComponentResultType == nil {
+		t := types.NewObject("$URLPatternComponentResult")
+		c.result.URLPatternComponentResultType = t
+		t.AddField("input", types.TypeString, false)
+		t.AddField("groups", types.TypeAny, false)
+	}
+	return c.result.URLPatternComponentResultType
+}
+
+func (c *Checker) builtinURLPatternResultType() *types.ObjectType {
+	if c.result.URLPatternResultType == nil {
+		t := types.NewObject("$URLPatternResult")
+		c.result.URLPatternResultType = t
+		comp := c.builtinURLPatternComponentResultType()
+		t.AddField("inputs", types.NewArray(types.TypeAny), false)
+		for _, name := range []string{"protocol", "username", "password", "hostname", "port", "pathname", "search", "hash"} {
+			t.AddField(name, comp, false)
+		}
+	}
+	return c.result.URLPatternResultType
+}
+
+func (c *Checker) builtinURLPatternInitType() *types.ObjectType {
+	if c.result.URLPatternInitType == nil {
+		t := types.NewObject("$URLPatternInit")
+		c.result.URLPatternInitType = t
+		for _, name := range []string{"protocol", "username", "password", "hostname", "port", "pathname", "search", "hash", "baseURL"} {
+			t.AddField(name, types.TypeString, false)
+		}
+	}
+	return c.result.URLPatternInitType
+}
+
+func (c *Checker) builtinURLPatternMember(property string) (types.Type, bool) {
+	switch property {
+	case "protocol", "username", "password", "hostname", "port", "pathname", "search", "hash":
+		return types.TypeString, true
+	case "hasRegExpGroups":
+		return types.TypeBoolean, true
+	case "test":
+		return types.NewFunction([]types.Param{
+			{Name: "input", Type: types.TypeAny, Optional: true},
+			{Name: "baseURL", Type: types.TypeString, Optional: true},
+		}, types.TypeBoolean), true
+	case "exec":
+		return types.NewFunction([]types.Param{
+			{Name: "input", Type: types.TypeAny, Optional: true},
+			{Name: "baseURL", Type: types.TypeString, Optional: true},
+		}, c.builtinURLPatternResultType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinBlobType() *types.ObjectType {
+	if c.result.BlobType == nil {
+		t := types.NewObject("$Blob")
+		t.AddField("size", types.TypeNumber, false)
+		t.AddField("type", types.TypeString, false)
+		t.AddField("$data", c.builtinByteBufferType(), false)
+		c.result.BlobType = t
+	}
+	return c.result.BlobType
+}
+
+func (c *Checker) builtinBlobMember(property string) (types.Type, bool) {
+	switch property {
+	case "size":
+		return types.TypeNumber, true
+	case "type":
+		return types.TypeString, true
+	case "slice":
+		return types.NewFunction([]types.Param{
+			{Name: "start", Type: types.TypeNumber, Optional: true},
+			{Name: "end", Type: types.TypeNumber, Optional: true},
+			{Name: "contentType", Type: types.TypeString, Optional: true},
+		}, c.builtinBlobType()), true
+	case "text":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeString)), true
+	case "arrayBuffer":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinArrayBufferType())), true
+	case "bytes":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinUint8ArrayType())), true
+	case "stream":
+		return types.NewFunction(nil, c.builtinReadableStreamType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinFileType() *types.ObjectType {
+	if c.result.FileType == nil {
+		t := types.NewObject("$File")
+		t.AddField("size", types.TypeNumber, false)
+		t.AddField("type", types.TypeString, false)
+		t.AddField("name", types.TypeString, false)
+		t.AddField("lastModified", types.TypeNumber, false)
+		t.AddField("webkitRelativePath", types.TypeString, false)
+		t.AddField("$data", c.builtinByteBufferType(), false)
+		c.result.FileType = t
+	}
+	return c.result.FileType
+}
+
+func (c *Checker) builtinFileMember(property string) (types.Type, bool) {
+	switch property {
+	case "name", "webkitRelativePath":
+		return types.TypeString, true
+	case "lastModified":
+		return types.TypeNumber, true
+	default:
+		return c.builtinBlobMember(property)
+	}
+}
+
+func (c *Checker) builtinFormDataType() *types.ObjectType {
+	if c.result.FormDataType == nil {
+		t := types.NewObject("$FormData")
+		t.AddField("$entries", types.NewArray(types.TypeAny), false)
+		c.result.FormDataType = t
+	}
+	return c.result.FormDataType
+}
+
+func (c *Checker) builtinFormDataMember(property string) (types.Type, bool) {
+	switch property {
+	case "append":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+			{Name: "value", Type: types.TypeAny},
+			{Name: "filename", Type: types.TypeString, Optional: true},
+		}, types.TypeVoid), true
+	case "set":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+			{Name: "value", Type: types.TypeAny},
+			{Name: "filename", Type: types.TypeString, Optional: true},
+		}, types.TypeVoid), true
+	case "delete":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.TypeVoid), true
+	case "get":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.TypeAny), true
+	case "getAll":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.NewArray(types.TypeAny)), true
+	case "has":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.TypeBoolean), true
+	case "keys":
+		return types.NewFunction(nil, types.NewArray(types.TypeString)), true
+	case "values":
+		return types.NewFunction(nil, types.NewArray(types.TypeAny)), true
+	case "entries":
+		return types.NewFunction(nil, types.NewArray(types.TypeAny)), true
+	case "forEach":
+		cbType := types.NewFunction([]types.Param{
+			{Name: "value", Type: types.TypeAny},
+			{Name: "key", Type: types.TypeString},
+			{Name: "parent", Type: types.TypeAny, Optional: true},
+		}, types.TypeVoid)
+		return types.NewFunction([]types.Param{
+			{Name: "callback", Type: cbType},
+		}, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinHeadersType() *types.ObjectType {
+	if c.result.HeadersType == nil {
+		t := types.NewObject("$Headers")
+		c.result.HeadersType = t
+		t.AddField("$entries", types.NewArray(types.TypeString), false)
+	}
+	return c.result.HeadersType
+}
+
+func (c *Checker) builtinHeadersMember(property string) (types.Type, bool) {
+	switch property {
+	case "append":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+			{Name: "value", Type: types.TypeString},
+		}, types.TypeVoid), true
+	case "delete":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.TypeVoid), true
+	case "get":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.NewUnion(types.TypeString, types.TypeNull)), true
+	case "getSetCookie":
+		return types.NewFunction(nil, types.NewArray(types.TypeString)), true
+	case "has":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+		}, types.TypeBoolean), true
+	case "set":
+		return types.NewFunction([]types.Param{
+			{Name: "name", Type: types.TypeString},
+			{Name: "value", Type: types.TypeString},
+		}, types.TypeVoid), true
+	case "forEach":
+		cbType := types.NewFunction([]types.Param{
+			{Name: "value", Type: types.TypeString},
+			{Name: "key", Type: types.TypeString},
+			{Name: "parent", Type: types.TypeAny, Optional: true},
+		}, types.TypeVoid)
+		return types.NewFunction([]types.Param{
+			{Name: "callback", Type: cbType},
+			{Name: "thisArg", Type: types.TypeAny, Optional: true},
+		}, types.TypeVoid), true
+	case "keys":
+		return types.NewFunction(nil, types.NewArray(types.TypeString)), true
+	case "values":
+		return types.NewFunction(nil, types.NewArray(types.TypeString)), true
+	case "entries":
+		return types.NewFunction(nil, types.NewArray(types.NewArray(types.TypeString))), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinReadableStreamReadResultType() *types.ObjectType {
+	if c.result.ReadableStreamReadResultType == nil {
+		t := types.NewObject("$ReadableStreamReadResult")
+		t.AddField("value", types.TypeAny, false)
+		t.AddField("done", types.TypeBoolean, false)
+		c.result.ReadableStreamReadResultType = t
+	}
+	return c.result.ReadableStreamReadResultType
+}
+
+func (c *Checker) builtinReadableStreamDefaultReaderType() *types.ObjectType {
+	if c.result.ReadableStreamDefaultReaderType == nil {
+		t := types.NewObject("$ReadableStreamDefaultReader")
+		t.AddField("$stream", c.builtinReadableStreamType(), false)
+		t.AddField("closed", c.newPromiseType(types.TypeUndefined), false)
+		c.result.ReadableStreamDefaultReaderType = t
+	}
+	return c.result.ReadableStreamDefaultReaderType
+}
+
+func (c *Checker) builtinReadableStreamDefaultReaderMember(property string) (types.Type, bool) {
+	switch property {
+	case "closed":
+		return c.newPromiseType(types.TypeUndefined), true
+	case "read":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinReadableStreamReadResultType())), true
+	case "releaseLock":
+		return types.NewFunction(nil, types.TypeVoid), true
+	case "cancel":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, c.newPromiseType(types.TypeAny)), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinReadableStreamDefaultControllerType() *types.ObjectType {
+	if c.result.ReadableStreamDefaultControllerType == nil {
+		t := types.NewObject("$ReadableStreamDefaultController")
+		t.AddField("$stream", c.builtinReadableStreamType(), false)
+		t.AddField("desiredSize", types.NewUnion(types.TypeNumber, types.TypeNull), false)
+		c.result.ReadableStreamDefaultControllerType = t
+	}
+	return c.result.ReadableStreamDefaultControllerType
+}
+
+func (c *Checker) builtinReadableStreamDefaultControllerMember(property string) (types.Type, bool) {
+	switch property {
+	case "desiredSize":
+		return types.NewUnion(types.TypeNumber, types.TypeNull), true
+	case "close":
+		return types.NewFunction(nil, types.TypeVoid), true
+	case "enqueue":
+		return types.NewFunction([]types.Param{{Name: "chunk", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	case "error":
+		return types.NewFunction([]types.Param{{Name: "e", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinReadableStreamType() *types.ObjectType {
+	if c.result.ReadableStreamType == nil {
+		t := types.NewObject("$ReadableStream")
+		t.AddField("locked", types.TypeBoolean, false)
+		t.AddField("$state", types.TypeString, false)
+		t.AddField("$queue", types.NewArray(types.TypeAny), false)
+		t.AddField("$queueIndex", types.TypeNumber, false)
+		t.AddField("$reader", types.TypeAny, false)
+		t.AddField("$controller", types.TypeAny, false)
+		t.AddField("$source", types.TypeAny, false)
+		t.AddField("$pullFn", types.TypeAny, false)
+		t.AddField("$cancelFn", types.TypeAny, false)
+		t.AddField("$highWaterMark", types.TypeNumber, false)
+		t.AddField("$storedError", types.TypeAny, false)
+		c.result.ReadableStreamType = t
+
+		_ = c.builtinReadableStreamDefaultControllerType()
+		_ = c.builtinReadableStreamDefaultReaderType()
+		_ = c.builtinReadableStreamReadResultType()
+	}
+	return c.result.ReadableStreamType
+}
+
+func (c *Checker) builtinReadableStreamMember(property string) (types.Type, bool) {
+	switch property {
+	case "locked":
+		return types.TypeBoolean, true
+	case "cancel":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, c.newPromiseType(types.TypeAny)), true
+	case "getReader":
+		return types.NewFunction([]types.Param{{Name: "options", Type: types.TypeAny, Optional: true}}, c.builtinReadableStreamDefaultReaderType()), true
+	case "pipeThrough":
+		return types.NewFunction([]types.Param{
+			{Name: "transform", Type: types.TypeAny},
+			{Name: "options", Type: types.TypeAny, Optional: true},
+		}, c.builtinReadableStreamType()), true
+	case "pipeTo":
+		return types.NewFunction([]types.Param{
+			{Name: "destination", Type: types.TypeAny},
+			{Name: "options", Type: types.TypeAny, Optional: true},
+		}, c.newPromiseType(types.TypeVoid)), true
+	case "tee":
+		return types.NewFunction(nil, types.NewArray(c.builtinReadableStreamType())), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinReadableStreamStaticMember(property string) (types.Type, bool) {
+	switch property {
+	case "from":
+		return types.NewFunction([]types.Param{{Name: "asyncIterableOrIterable", Type: types.TypeAny}}, c.builtinReadableStreamType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinWritableStreamDefaultWriterType() *types.ObjectType {
+	if c.result.WritableStreamDefaultWriterType == nil {
+		t := types.NewObject("$WritableStreamDefaultWriter")
+		t.AddField("$stream", c.builtinWritableStreamType(), false)
+		t.AddField("closed", c.newPromiseType(types.TypeUndefined), false)
+		t.AddField("ready", c.newPromiseType(types.TypeUndefined), false)
+		t.AddField("desiredSize", types.NewUnion(types.TypeNumber, types.TypeNull), false)
+		c.result.WritableStreamDefaultWriterType = t
+	}
+	return c.result.WritableStreamDefaultWriterType
+}
+
+func (c *Checker) builtinWritableStreamDefaultWriterMember(property string) (types.Type, bool) {
+	switch property {
+	case "closed", "ready":
+		return c.newPromiseType(types.TypeUndefined), true
+	case "desiredSize":
+		return types.NewUnion(types.TypeNumber, types.TypeNull), true
+	case "write":
+		return types.NewFunction([]types.Param{{Name: "chunk", Type: types.TypeAny, Optional: true}}, c.newPromiseType(types.TypeVoid)), true
+	case "close":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeVoid)), true
+	case "abort":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, c.newPromiseType(types.TypeAny)), true
+	case "releaseLock":
+		return types.NewFunction(nil, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinWritableStreamDefaultControllerType() *types.ObjectType {
+	if c.result.WritableStreamDefaultControllerType == nil {
+		t := types.NewObject("$WritableStreamDefaultController")
+		t.AddField("$stream", c.builtinWritableStreamType(), false)
+		t.AddField("signal", c.builtinAbortSignalType(), false)
+		c.result.WritableStreamDefaultControllerType = t
+	}
+	return c.result.WritableStreamDefaultControllerType
+}
+
+func (c *Checker) builtinWritableStreamDefaultControllerMember(property string) (types.Type, bool) {
+	switch property {
+	case "signal":
+		return c.builtinAbortSignalType(), true
+	case "error":
+		return types.NewFunction([]types.Param{{Name: "e", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinWritableStreamType() *types.ObjectType {
+	if c.result.WritableStreamType == nil {
+		t := types.NewObject("$WritableStream")
+		t.AddField("locked", types.TypeBoolean, false)
+		t.AddField("$state", types.TypeString, false)
+		t.AddField("$writer", types.TypeAny, false)
+		t.AddField("$controller", types.TypeAny, false)
+		t.AddField("$sink", types.TypeAny, false)
+		t.AddField("$writeFn", types.TypeAny, false)
+		t.AddField("$closeFn", types.TypeAny, false)
+		t.AddField("$abortFn", types.TypeAny, false)
+		t.AddField("$highWaterMark", types.TypeNumber, false)
+		t.AddField("$storedError", types.TypeAny, false)
+		c.result.WritableStreamType = t
+
+		_ = c.builtinWritableStreamDefaultWriterType()
+		_ = c.builtinWritableStreamDefaultControllerType()
+	}
+	return c.result.WritableStreamType
+}
+
+func (c *Checker) builtinWritableStreamMember(property string) (types.Type, bool) {
+	switch property {
+	case "locked":
+		return types.TypeBoolean, true
+	case "abort":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, c.newPromiseType(types.TypeAny)), true
+	case "close":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeVoid)), true
+	case "getWriter":
+		return types.NewFunction(nil, c.builtinWritableStreamDefaultWriterType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinTransformStreamDefaultControllerType() *types.ObjectType {
+	if c.result.TransformStreamDefaultControllerType == nil {
+		t := types.NewObject("$TransformStreamDefaultController")
+		t.AddField("$transformStream", c.builtinTransformStreamType(), false)
+		t.AddField("desiredSize", types.NewUnion(types.TypeNumber, types.TypeNull), false)
+		c.result.TransformStreamDefaultControllerType = t
+	}
+	return c.result.TransformStreamDefaultControllerType
+}
+
+func (c *Checker) builtinTransformStreamDefaultControllerMember(property string) (types.Type, bool) {
+	switch property {
+	case "desiredSize":
+		return types.NewUnion(types.TypeNumber, types.TypeNull), true
+	case "enqueue":
+		return types.NewFunction([]types.Param{{Name: "chunk", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	case "error":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	case "terminate":
+		return types.NewFunction(nil, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinTransformStreamType() *types.ObjectType {
+	if c.result.TransformStreamType == nil {
+		t := types.NewObject("$TransformStream")
+		t.AddField("readable", c.builtinReadableStreamType(), false)
+		t.AddField("writable", c.builtinWritableStreamType(), false)
+		t.AddField("$controller", types.TypeAny, false)
+		t.AddField("$transformer", types.TypeAny, false)
+		t.AddField("$transformFn", types.TypeAny, false)
+		t.AddField("$flushFn", types.TypeAny, false)
+		c.result.TransformStreamType = t
+
+		_ = c.builtinTransformStreamDefaultControllerType()
+	}
+	return c.result.TransformStreamType
+}
+
+func (c *Checker) builtinTransformStreamMember(property string) (types.Type, bool) {
+	switch property {
+	case "readable":
+		return c.builtinReadableStreamType(), true
+	case "writable":
+		return c.builtinWritableStreamType(), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinByteLengthQueuingStrategyType() *types.ObjectType {
+	if c.result.ByteLengthQueuingStrategyType == nil {
+		t := types.NewObject("$ByteLengthQueuingStrategy")
+		t.AddField("highWaterMark", types.TypeNumber, false)
+		c.result.ByteLengthQueuingStrategyType = t
+	}
+	return c.result.ByteLengthQueuingStrategyType
+}
+
+func (c *Checker) builtinByteLengthQueuingStrategyMember(property string) (types.Type, bool) {
+	switch property {
+	case "highWaterMark":
+		return types.TypeNumber, true
+	case "size":
+		return types.NewFunction([]types.Param{{Name: "chunk", Type: types.TypeAny, Optional: true}}, types.TypeNumber), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinCountQueuingStrategyType() *types.ObjectType {
+	if c.result.CountQueuingStrategyType == nil {
+		t := types.NewObject("$CountQueuingStrategy")
+		t.AddField("highWaterMark", types.TypeNumber, false)
+		c.result.CountQueuingStrategyType = t
+	}
+	return c.result.CountQueuingStrategyType
+}
+
+func (c *Checker) builtinCountQueuingStrategyMember(property string) (types.Type, bool) {
+	switch property {
+	case "highWaterMark":
+		return types.TypeNumber, true
+	case "size":
+		return types.NewFunction([]types.Param{{Name: "chunk", Type: types.TypeAny, Optional: true}}, types.TypeNumber), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinTextEncoderStreamType() *types.ObjectType {
+	if c.result.TextEncoderStreamType == nil {
+		t := types.NewObject("$TextEncoderStream")
+		t.AddField("readable", c.builtinReadableStreamType(), false)
+		t.AddField("writable", c.builtinWritableStreamType(), false)
+		t.AddField("encoding", types.TypeString, false)
+		t.AddField("$transform", c.builtinTransformStreamType(), false)
+		c.result.TextEncoderStreamType = t
+	}
+	return c.result.TextEncoderStreamType
+}
+
+func (c *Checker) builtinTextEncoderStreamMember(property string) (types.Type, bool) {
+	switch property {
+	case "readable":
+		return c.builtinReadableStreamType(), true
+	case "writable":
+		return c.builtinWritableStreamType(), true
+	case "encoding":
+		return types.TypeString, true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinTextDecoderStreamType() *types.ObjectType {
+	if c.result.TextDecoderStreamType == nil {
+		t := types.NewObject("$TextDecoderStream")
+		t.AddField("readable", c.builtinReadableStreamType(), false)
+		t.AddField("writable", c.builtinWritableStreamType(), false)
+		t.AddField("encoding", types.TypeString, false)
+		t.AddField("fatal", types.TypeBoolean, false)
+		t.AddField("ignoreBOM", types.TypeBoolean, false)
+		t.AddField("$transform", c.builtinTransformStreamType(), false)
+		c.result.TextDecoderStreamType = t
+	}
+	return c.result.TextDecoderStreamType
+}
+
+func (c *Checker) builtinTextDecoderStreamMember(property string) (types.Type, bool) {
+	switch property {
+	case "readable":
+		return c.builtinReadableStreamType(), true
+	case "writable":
+		return c.builtinWritableStreamType(), true
+	case "encoding":
+		return types.TypeString, true
+	case "fatal", "ignoreBOM":
+		return types.TypeBoolean, true
+	}
+	return nil, false
+}

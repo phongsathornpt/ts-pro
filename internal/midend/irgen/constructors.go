@@ -10,6 +10,48 @@ import (
 )
 
 func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
+	if e.ClassName == "Blob" {
+		return g.lowerBlobNew(e)
+	}
+	if e.ClassName == "File" {
+		return g.lowerFileNew(e)
+	}
+	if e.ClassName == "FormData" {
+		return g.lowerFormDataNew(e)
+	}
+	if e.ClassName == "Headers" {
+		return g.lowerHeadersNew(e)
+	}
+	if e.ClassName == "ReadableStream" {
+		return g.lowerReadableStreamNew(e)
+	}
+	if e.ClassName == "ReadableStreamDefaultReader" {
+		return g.lowerReadableStreamDefaultReaderNew(e)
+	}
+	if e.ClassName == "WritableStream" {
+		return g.lowerWritableStreamNew(e)
+	}
+	if e.ClassName == "WritableStreamDefaultWriter" {
+		return g.lowerWritableStreamDefaultWriterNew(e)
+	}
+	if e.ClassName == "TransformStream" {
+		return g.lowerTransformStreamNew(e)
+	}
+	if e.ClassName == "ByteLengthQueuingStrategy" {
+		return g.lowerByteLengthQueuingStrategyNew(e)
+	}
+	if e.ClassName == "CountQueuingStrategy" {
+		return g.lowerCountQueuingStrategyNew(e)
+	}
+	if e.ClassName == "TextEncoderStream" {
+		return g.lowerTextEncoderStreamNew(e)
+	}
+	if e.ClassName == "TextDecoderStream" {
+		return g.lowerTextDecoderStreamNew(e)
+	}
+	if e.ClassName == "URLPattern" {
+		return g.lowerURLPatternNew(e)
+	}
 	if e.ClassName == "URL" {
 		var baseExpr ast.Expr
 		if len(e.Args) > 1 {

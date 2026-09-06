@@ -688,3 +688,218 @@ func TestLinuxAMD64WinterTCURLConformance(t *testing.T) {
 		expected: "true\ntrue\nfalse\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\nhttps://example.com/foo?bar=1#baz\nhttps://example.com/root/sub/page\nhttps://example.com/base/other\nnull\nnull\nnull\nhttp://example.org:8080/new/path?new=2#newfrag\nhttp://example.org:8080/new/path?new=2#newfrag\nhttp:\nexample.org:8080\nexample.org\n8080\n/new/path\n?new=2\n#newfrag\n2\n2\nhttps:\nhttps://example.org:8080/new/path?new=2#newfrag\nhttps://example.org:8080/new/path?new=2#newfrag\ntest.net:3000\ntest.net\n3000\nhttps://test.net:3000/new/path?new=2#newfrag\nhttps://test.net:3000/new/path?new=2#newfrag\nsub.test.net\nsub.test.net:3000\nhttps://sub.test.net:3000/new/path?new=2#newfrag\nhttps://sub.test.net:3000/new/path?new=2#newfrag\n9090\nsub.test.net:9090\nhttps://sub.test.net:9090/new/path?new=2#newfrag\nhttps://sub.test.net:9090/new/path?new=2#newfrag\n/final/route\nhttps://sub.test.net:9090/final/route?new=2#newfrag\nhttps://sub.test.net:9090/final/route?new=2#newfrag\n#done\nhttps://sub.test.net:9090/final/route?new=2#done\nhttps://sub.test.net:9090/final/route?new=2#done\n?alpha=1&beta=2\nhttps://sub.test.net:9090/final/route?alpha=1&beta=2#done\nhttps://sub.test.net:9090/final/route?alpha=1&beta=2#done\n1\n2\n?alpha=1&beta=2&gamma=3\nhttps://sub.test.net:9090/final/route?alpha=1&beta=2&gamma=3#done\nhttps://sub.test.net:9090/final/route?alpha=1&beta=2&gamma=3#done\n8080\ndefault\nexample.com\nhttp://example.com/a\n8443\ndefault\nexample.com\nhttps://example.com/b\n/no-leading-slash\nhttp://example.com/no-leading-slash\n/x/z\nhttp://example.com/x/z\n/sub/file.txt\nhttp://example.com/sub/file.txt\n#heading\nhttp://example.com/a#heading\n#subheading\nhttp://example.com/a#subheading\nempty\nhttp://example.com/a\nhttps:\nhttps://example.com/a\nhttp:\nhttp://example.com/a\n9000\n9000\n9000\nhttp://example.com:9000/a\nhttp:\nhttp:\nhttp://example.com/a\nvalid.test\nvalid.test\nhttp://valid.test/a\nTypeError\nhttps://sub.test.net:9090/final/route?alpha=1&beta=2&gamma=3#done\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLPattern(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_pattern_basic",
+		source: `
+const p = new URLPattern("https://example.com/books/:id");
+const r = p.exec("https://example.com/books/42");
+console.log(r.pathname.input);
+const g: any = r.pathname.groups;
+console.log(g.id);
+`,
+		expected: "/books/42\n42\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCURLPatternFullConformance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_url_pattern_conformance",
+		source:   mustReadExample(t, "../../examples/wintertc/url_pattern_conformance.ts"),
+		expected: "https\nexample.com\n8080\n/books/:id\nsort=:sort\nsection\nfalse\nhttps\nexample.org\n/api/:version/*\n*\n*\n/users/:id\nhttps\nexample.net\n3000\n/articles/:slug\nTypeError\nTypeError\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\ntrue\nfalse\n/books/42\n42\nasc\n1\nhttps://example.com:8080/books/42?sort=asc#section\nv1\nposts/100\ntrue\ntrue\ntrue\nfalse\n777\ntrue\ntrue\ntrue\nfalse\napi\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCBlobCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_blob_core",
+		source: `
+async function test(): Promise<void> {
+  const b1 = new Blob();
+  console.log(b1.size);
+  console.log(b1.type);
+
+  const b2 = new Blob(["hello ", "world"], { type: "TEXT/PLAIN; charset=utf-8" });
+  console.log(b2.size);
+  console.log(b2.type);
+  const text2 = await b2.text();
+  console.log(text2);
+
+  const s1 = b2.slice(0, 5);
+  console.log(s1.size);
+  const textS1 = await s1.text();
+  console.log(textS1);
+
+  const s2 = b2.slice(-5);
+  console.log(s2.size);
+  const textS2 = await s2.text();
+  console.log(textS2);
+
+  const s3 = b2.slice(0, 5, "IMAGE/PNG");
+  console.log(s3.type);
+
+  const ab = await b2.arrayBuffer();
+  console.log(ab.byteLength);
+
+  const bytes = await b2.bytes();
+  console.log(bytes.length);
+  console.log(bytes[0]);
+  console.log(bytes[10]);
+}
+test();
+`,
+		expected: "0\n\n11\ntext/plain; charset=utf-8\nhello world\n5\nhello\n5\nworld\nimage/png\n11\n11\n104\n100\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFileCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_file_core",
+		source: `
+async function test(): Promise<void> {
+  const f1 = new File(["file-data"], "test.txt");
+  console.log(f1.name);
+  console.log(f1.size);
+  console.log(f1.webkitRelativePath);
+  console.log(f1.lastModified > 0);
+
+  const f2 = new File(["content"], "custom.bin", { type: "APPLICATION/OCTET-STREAM", lastModified: 999999 });
+  console.log(f2.name);
+  console.log(f2.type);
+  console.log(f2.lastModified);
+  const textF2 = await f2.text();
+  console.log(textF2);
+}
+test();
+`,
+		expected: "test.txt\n9\n\ntrue\ncustom.bin\napplication/octet-stream\n999999\ncontent\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCBlobFileFormDataConformance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:   "wintertc_blob_file_formdata_conformance",
+		source: mustReadExample(t, "../../examples/wintertc/blob_file_formdata_conformance.ts"),
+		expected: "0\nempty-type\n11\ntext/plain; charset=utf-8\nhello world\n5\nhello\n5\nworld\nimage/png\n11\n11\n104\n100\ntest.txt\n9\ntrue\ncustom.bin\napplication/octet-stream\n999999\ncontent\n1\nnull-val\ntrue\nfalse\n2\n1\n3\n1\n100\nfalse\nblob\nblobby\ncustom.dat\ncustom.bin\nrenamed.bin\nx:10\ny:20\nx:30\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCQueuingStrategies(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_queuing_strategies",
+		source: `
+const bl = new ByteLengthQueuingStrategy({ highWaterMark: 512 });
+console.log(bl.highWaterMark);
+const u8 = new Uint8Array(8);
+console.log(bl.size(u8));
+
+const cs = new CountQueuingStrategy({ highWaterMark: 3 });
+console.log(cs.highWaterMark);
+console.log(cs.size("test"));
+`,
+		expected: "512\n8\n3\n1\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCReadableStreamCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_readable_stream_core",
+		source: `
+async function test(): Promise<void> {
+  const rs = new ReadableStream({
+    start: (controller: ReadableStreamDefaultController): void => {
+      console.log(controller.desiredSize);
+      controller.enqueue("a");
+      controller.enqueue("b");
+      controller.close();
+    }
+  });
+  console.log(rs.locked);
+  const reader = rs.getReader();
+  console.log(rs.locked);
+
+  const r1 = await reader.read();
+  console.log(r1.value);
+  console.log(r1.done);
+
+  const r2 = await reader.read();
+  console.log(r2.value);
+  console.log(r2.done);
+
+  const r3 = await reader.read();
+  console.log(r3.done);
+
+  reader.releaseLock();
+  console.log(rs.locked);
+}
+test();
+`,
+		expected: "1\nfalse\ntrue\na\nfalse\nb\nfalse\ntrue\nfalse\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCWritableStreamCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_writable_stream_core",
+		source: `
+async function test(): Promise<void> {
+  const items: string[] = [];
+  const ws = new WritableStream({
+    write: (chunk: any): void => {
+      items.push(chunk);
+    }
+  });
+  console.log(ws.locked);
+  const writer = ws.getWriter();
+  console.log(ws.locked);
+  await writer.write("msg1");
+  await writer.write("msg2");
+  await writer.close();
+  console.log(items.length);
+  console.log(items[0]);
+  console.log(items[1]);
+}
+test();
+`,
+		expected: "false\ntrue\n2\nmsg1\nmsg2\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCTransformStreamPipe(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_transform_stream_pipe",
+		source: `
+async function test(): Promise<void> {
+  const ts = new TransformStream({
+    transform: (chunk: any, controller: any): void => {
+      controller.enqueue("got:" + chunk);
+    }
+  });
+  const rs = ReadableStream.from(["one", "two"]);
+  const piped = rs.pipeThrough(ts);
+  const reader = piped.getReader();
+  const c1 = await reader.read();
+  console.log(c1.value);
+  const c2 = await reader.read();
+  console.log(c2.value);
+  const c3 = await reader.read();
+  console.log(c3.done);
+}
+test();
+`,
+		expected: "got:one\ngot:two\ntrue\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCStreamsConformance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:   "wintertc_streams_conformance",
+		source: mustReadExample(t, "../../examples/wintertc/streams_conformance.ts"),
+		expected: "1024\n16\n10\n1\n1\nfalse\ntrue\nchunk1\nfalse\nchunk2\nfalse\ntrue\nfalse\nalpha\nbeta\ntrue\ntrue\nbranch-data\nbranch-data\nfalse\ntrue\n1\n2\nwrite-1\nwrite-2\ntransformed:in1\ntransformed:in2\ntrue\nutf-8\nutf-8\nfalse\nfalse\nblob-stream-content\ntrue\n",
+	})
+}
+
+
+
+

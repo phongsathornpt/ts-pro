@@ -385,6 +385,8 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		g.locals[captureName] = cell
 		g.bindCaptureCell(lifted, captureName, cell, captureTypes[i])
 	}
+	savedStreamKind := g.activeStreamControllerKind
+	g.activeStreamControllerKind = ""
 	for i, p := range e.Params {
 		pt := types.TypeAny
 		if i < len(fnType.Params) {
@@ -393,6 +395,22 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		v := lifted.NewValue(p.Name, pt)
 		lifted.Params = append(lifted.Params, v)
 		g.locals[p.Name] = v
+		if savedStreamKind != "" && g.semaResult != nil {
+			switch savedStreamKind {
+			case "readable":
+				if i == 0 && g.semaResult.ReadableStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.ReadableStreamDefaultControllerType
+				}
+			case "transform":
+				if (i == 1 || (i == 0 && len(e.Params) == 1)) && g.semaResult.TransformStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.TransformStreamDefaultControllerType
+				}
+			case "writable":
+				if (i == 1 || (i == 0 && len(e.Params) == 1)) && g.semaResult.WritableStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.WritableStreamDefaultControllerType
+				}
+			}
+		}
 	}
 	if e.IsExprBody {
 		body := e.Body.(ast.Expr)
@@ -419,6 +437,7 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	g.prog.Functions = append(g.prog.Functions, lifted)
 
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees
+	g.activeStreamControllerKind = savedStreamKind
 	res := g.currentFn.NewValue("closure", fnType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
 		Res: res, Function: name, Captures: captureOps, RefMask: refMask,
@@ -468,6 +487,8 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 		lifted.Params = append(lifted.Params, thisVal)
 		g.locals["$this"] = thisVal
 	}
+	savedStreamKind := g.activeStreamControllerKind
+	g.activeStreamControllerKind = ""
 	runtimeIndex := 0
 	for _, p := range e.Params {
 		if p.IsThis {
@@ -480,6 +501,22 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 		v := lifted.NewValue(p.Name, pt)
 		lifted.Params = append(lifted.Params, v)
 		g.locals[p.Name] = v
+		if savedStreamKind != "" && g.semaResult != nil {
+			switch savedStreamKind {
+			case "readable":
+				if runtimeIndex == 0 && g.semaResult.ReadableStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.ReadableStreamDefaultControllerType
+				}
+			case "transform":
+				if (runtimeIndex == 1 || (runtimeIndex == 0 && len(e.Params) == 1)) && g.semaResult.TransformStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.TransformStreamDefaultControllerType
+				}
+			case "writable":
+				if (runtimeIndex == 1 || (runtimeIndex == 0 && len(e.Params) == 1)) && g.semaResult.WritableStreamDefaultControllerType != nil {
+					g.localProvenance[p.Name] = g.semaResult.WritableStreamDefaultControllerType
+				}
+			}
+		}
 		runtimeIndex++
 	}
 	for _, stmt := range e.Body.Statements {
@@ -490,6 +527,7 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	}
 	g.prog.Functions = append(g.prog.Functions, lifted)
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees
+	g.activeStreamControllerKind = savedStreamKind
 	res := g.currentFn.NewValue("closure", fnType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: name, Captures: captureOps, RefMask: refMask})
 	return res

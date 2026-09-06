@@ -123,6 +123,11 @@ func (g *generator) lowerMemberExpr(e *ast.MemberExpr) ir.Operand {
 		}
 	}
 	obj := g.lowerExpr(e.Object)
+	if _, ok := obj.Type().(*types.ArrayType); ok && e.Property == "length" {
+		res := g.currentFn.NewValue("len", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: res, Array: obj})
+		return res
+	}
 	if concrete, ok := obj.Type().(*types.ObjectType); ok {
 		offsets, _, _ := g.objectLayout(concrete)
 		field := concrete.Fields[e.Property]

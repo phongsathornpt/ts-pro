@@ -350,12 +350,15 @@ func (c *Checker) checkSwitch(s *ast.SwitchStmt) {
 
 func (c *Checker) checkForOf(s *ast.ForOfStmt) {
 	iterableType := c.checkExpr(s.Iterable)
-	arr, ok := iterableType.(*types.ArrayType)
-	if !ok {
+	var elemType types.Type
+	if arr, ok := iterableType.(*types.ArrayType); ok {
+		elemType = arr.Elem
+	} else if obj, ok := iterableType.(*types.ObjectType); ok && obj.Name == "$Headers" {
+		elemType = types.NewArray(types.TypeString)
+	} else {
 		c.error(s.Iterable.Span(), "TS2488", fmt.Sprintf("Type '%s' is not iterable by the native array for-of lowering.", iterableType))
 		return
 	}
-	elemType := arr.Elem
 	if s.Type != nil {
 		declared := c.resolveTypeNode(s.Type)
 		if !elemType.AssignableTo(declared) {

@@ -581,16 +581,28 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 
 - [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
 - [x] Phase 2: DOM events and abort primitives.
-- [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
+- [x] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
   - [x] Add ArrayBuffer/Uint8Array byte-view foundation with GC-safe shared backing.
   - [x] Add TextEncoder/TextDecoder including UTF-8 coercion/error behavior, BOM handling, label validation, and encodeInto semantics.
-  - [ ] Add TextEncoderStream/TextDecoderStream after Streams core is available.
+  - [x] Add TextEncoderStream/TextDecoderStream after Streams core is available.
   - [x] Add URL and URLSearchParams parsing/serialization.
     - [x] URLSearchParams core, application/x-www-form-urlencoded encoding/decoding, mutation, iteration, and UTF-16 sort order.
     - [x] URL absolute parsing/serialization, relative-reference resolution, property getters/setters, static helpers (`canParse`, `parse`), live `searchParams` two-way synchronization, and conformance test suite.
-  - [ ] Add URLPattern matching.
-- [ ] Phase 4: Blob, File, FormData and body byte/string primitives.
-- [ ] Phase 5: Streams interfaces required by ECMA-429.
+  - [x] Add URLPattern matching.
+    - [x] Component extraction, pattern parsing (literals, wildcards `*`, named parameters `:name`, regex groups `:name(\d+)`, regex alternations `(alt1|alt2)`), `.test()`, `.exec()`, and differential conformance.
+- [x] Phase 4: Blob, File, FormData and body byte/string primitives.
+  - [x] `Blob` constructor, parts concatenation (string, ArrayBuffer, Uint8Array, nested Blob), `size`, normalized `type`, `slice(start, end, contentType)`, `text()`, `arrayBuffer()`, and `bytes()`.
+  - [x] `File` constructor extending `Blob`, `name`, `lastModified`, and `webkitRelativePath`.
+  - [x] `FormData` entry storage, `append`, `set`, `get`, `getAll`, `has`, `delete`, automatic Blob-to-File wrapping, and `forEach` iteration.
+  - [x] Conformance suite and differential Node.js verification.
+- [x] Phase 5: Streams interfaces required by ECMA-429.
+  - [x] Queuing Strategies (`ByteLengthQueuingStrategy`, `CountQueuingStrategy`) with `highWaterMark` and `size(chunk)` calculation.
+  - [x] `ReadableStream` core lifecycle (`start`, `pull`, `cancel`, `enqueue`, `close`, `read()`, `releaseLock()`, `cancel()`, `tee()`, and `ReadableStream.from()`).
+  - [x] `WritableStream` core lifecycle (`start`, `write`, `close`, `abort`, `getWriter()`, `releaseLock()`).
+  - [x] `TransformStream` & stream piping (`readable`, `writable`, `transform`, `flush`, `pipeThrough`, `pipeTo`).
+  - [x] `TextEncoderStream` and `TextDecoderStream` integration.
+  - [x] `Blob.prototype.stream()` readable stream backing.
+  - [x] Streams conformance suite and differential testing matching Node.js v26.8.1.
 - [ ] Phase 6: Headers, Request, Response and fetch with cancellation/streaming semantics.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
 - [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.

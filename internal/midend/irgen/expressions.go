@@ -148,7 +148,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
 
-		if e.Op == token.Plus && (irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+		if e.Op == token.Plus && (irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
+			irJSValueType(lhs.Type()) || irJSValueType(rhs.Type())) {
 			if !irJSValueType(lhs.Type()) {
 				lhs = g.boxJSValue(lhs, lhs.Type())
 			}
@@ -163,7 +164,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 
 		if (e.Op == token.Minus || e.Op == token.Star || e.Op == token.Slash || e.Op == token.Percent) &&
-			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
+				irJSValueType(lhs.Type()) || irJSValueType(rhs.Type())) {
 			if !irJSValueType(lhs.Type()) {
 				lhs = g.boxJSValue(lhs, lhs.Type())
 			}
@@ -187,7 +189,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 
 		if (e.Op == token.EqEq || e.Op == token.EqEqEq || e.Op == token.BangEq || e.Op == token.BangEqEq) &&
-			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right))) {
+			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
+				irJSValueType(lhs.Type()) || irJSValueType(rhs.Type())) {
 			if !irJSValueType(lhs.Type()) {
 				lhs = g.boxJSValue(lhs, lhs.Type())
 			}
@@ -212,7 +215,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 		if (e.Op == token.Lt || e.Op == token.LtEq || e.Op == token.Gt || e.Op == token.GtEq) &&
 			(irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
-				g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString) {
+				irJSValueType(lhs.Type()) || irJSValueType(rhs.Type()) ||
+				g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString ||
+				lhs.Type() == types.TypeString || rhs.Type() == types.TypeString) {
 			if !irJSValueType(lhs.Type()) {
 				lhs = g.boxJSValue(lhs, lhs.Type())
 			}
@@ -237,7 +242,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 		if e.Op == token.Plus {
 			isString := false
-			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString {
+			if g.semanticType(e) == types.TypeString || g.semanticType(e.Left) == types.TypeString || g.semanticType(e.Right) == types.TypeString ||
+				lhs.Type() == types.TypeString || rhs.Type() == types.TypeString {
 				isString = true
 			}
 			if isString {

@@ -8,6 +8,144 @@ import (
 )
 
 func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
+	if e.ClassName == "Blob" {
+		t := c.builtinBlobType()
+		if len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "Blob constructor expects at most 2 arguments.")
+		}
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "File" {
+		t := c.builtinFileType()
+		if len(e.Args) < 2 || len(e.Args) > 3 {
+			c.error(e.Span(), "TS2554", "File constructor expects 2 or 3 arguments.")
+		} else {
+			c.checkExpr(e.Args[0])
+			nameType := c.checkExpr(e.Args[1])
+			if nameType != types.TypeString && nameType != types.TypeAny {
+				c.error(e.Args[1].Span(), "TS2345", "File name must be a string.")
+			}
+			if len(e.Args) == 3 {
+				c.checkExpr(e.Args[2])
+			}
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "FormData" {
+		t := c.builtinFormDataType()
+		if len(e.Args) > 1 {
+			c.error(e.Span(), "TS2554", "FormData constructor expects at most 1 argument.")
+		}
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "Headers" {
+		t := c.builtinHeadersType()
+		if len(e.Args) > 1 {
+			c.error(e.Span(), "TS2554", "Headers constructor expects at most 1 argument.")
+		}
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "ReadableStream" {
+		t := c.builtinReadableStreamType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "ReadableStreamDefaultReader" {
+		t := c.builtinReadableStreamDefaultReaderType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "WritableStream" {
+		t := c.builtinWritableStreamType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "WritableStreamDefaultWriter" {
+		t := c.builtinWritableStreamDefaultWriterType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "TransformStream" {
+		t := c.builtinTransformStreamType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "ByteLengthQueuingStrategy" {
+		t := c.builtinByteLengthQueuingStrategyType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "CountQueuingStrategy" {
+		t := c.builtinCountQueuingStrategyType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "TextEncoderStream" {
+		t := c.builtinTextEncoderStreamType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "TextDecoderStream" {
+		t := c.builtinTextDecoderStreamType()
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "URLPattern" {
+		t := c.builtinURLPatternType()
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "URLPattern expects an input and optional baseURL.")
+		} else {
+			c.checkExpr(e.Args[0])
+			if len(e.Args) == 2 {
+				baseType := c.checkExpr(e.Args[1])
+				if baseType != types.TypeString && baseType != types.TypeAny {
+					c.error(e.Args[1].Span(), "TS2345", "URLPattern baseURL must be a string.")
+				}
+			}
+		}
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "URL" {
 		t := c.builtinURLType()
 		if len(e.Args) < 1 || len(e.Args) > 2 {

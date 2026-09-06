@@ -404,3 +404,29 @@ func TestIRGenVoidExpressionArrow(t *testing.T) {
 		t.Fatalf("missing lifted arrow:\n%s", irProg.Dump())
 	}
 }
+
+func TestIRGenURLPattern(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("url_pattern.ts", []byte(`
+const p = new URLPattern("https://example.com/books/:id");
+const r = p.exec("https://example.com/books/42");
+console.log(r.pathname.input);
+const g: any = r.pathname.groups;
+console.log(g);
+console.log(g.id);
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	t.Logf("IR Dump:\n%s", irProg.Dump())
+}

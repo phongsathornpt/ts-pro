@@ -84,6 +84,9 @@ func (g *generator) newUint8ArrayView(data, buffer, offset, length ir.Operand) i
 }
 
 func (g *generator) uint8ArrayField(obj ir.Operand, name string, typ types.Type) ir.Operand {
+	if irJSValueType(obj.Type()) {
+		obj = g.coerceJSValueBoundary(obj, obj.Type(), g.semaResult.Uint8ArrayType)
+	}
 	offsets, _, _ := g.objectLayout(g.semaResult.Uint8ArrayType)
 	res := g.currentFn.NewValue("uint8_"+strings.TrimPrefix(name, "$"), typ)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: name, Offset: offsets[name]})

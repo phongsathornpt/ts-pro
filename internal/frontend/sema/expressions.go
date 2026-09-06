@@ -114,6 +114,36 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e] = ctor
 				return ctor
 			}
+			if e.Name == "URLPattern" {
+				ctor := types.NewObject("$URLPatternConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
+			if e.Name == "Blob" {
+				ctor := types.NewObject("$BlobConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
+			if e.Name == "File" {
+				ctor := types.NewObject("$FileConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
+			if e.Name == "FormData" {
+				ctor := types.NewObject("$FormDataConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
+			if e.Name == "Headers" {
+				ctor := types.NewObject("$HeadersConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
+			if e.Name == "ReadableStream" {
+				ctor := types.NewObject("$ReadableStreamConstructor")
+				c.result.Types[e] = ctor
+				return ctor
+			}
 			if e.Name == "Date" {
 				ctor := types.NewObject("$DateConstructor")
 				c.result.Types[e] = ctor

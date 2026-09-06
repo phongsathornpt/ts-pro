@@ -7,6 +7,9 @@ import (
 )
 
 func irJSValueType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
 	if t.Kind() == types.KindAny || t.Kind() == types.KindUnknown {
 		return true
 	}
@@ -33,6 +36,9 @@ func irJSValueType(t types.Type) bool {
 }
 
 func irHeapRefType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
 	if irJSValueType(t) {
 		return true
 	}
@@ -113,6 +119,9 @@ func (g *generator) coerceNullableUnionString(t *types.UnionType, op ir.Operand)
 
 func (g *generator) coerceStringOperand(expr ast.Expr, op ir.Operand) ir.Operand {
 	t := g.semanticType(expr)
+	if t == nil {
+		t = op.Type()
+	}
 	if union, ok := t.(*types.UnionType); ok {
 		return g.coerceNullableUnionString(union, op)
 	}
@@ -189,7 +198,12 @@ func (g *generator) coerceCallOperands(args []ir.Operand, sourceTypes []types.Ty
 }
 
 func (g *generator) boxJSValue(value ir.Operand, sourceType types.Type) ir.Operand {
-	if irJSValueType(sourceType) {
+	if sourceType == nil {
+		if value != nil {
+			sourceType = value.Type()
+		}
+	}
+	if sourceType == nil || irJSValueType(sourceType) {
 		return value
 	}
 	switch sourceType.Kind() {

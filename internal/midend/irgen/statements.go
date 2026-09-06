@@ -2,6 +2,7 @@ package irgen
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
@@ -34,6 +35,8 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 					if objectType, ok := targetType.(*types.ObjectType); ok && irJSValueType(sourceType) {
 						if provenance, known := g.provenObjectType(d.Init); known {
 							initOp = g.unboxKnownObject(initOp, provenance)
+						} else if strings.HasPrefix(objectType.Name, "$") {
+							initOp = g.unboxKnownObject(initOp, objectType)
 						} else {
 							initOp = g.materializeDynamicObject(initOp, objectType)
 						}
@@ -150,7 +153,13 @@ func findModifiedVars(stmt ast.Stmt) map[string]bool {
 
 func (g *generator) lowerForOf(s *ast.ForOfStmt) {
 	iterable := g.lowerExpr(s.Iterable)
-	arrType := g.semaResult.Types[s.Iterable].(*types.ArrayType)
+	var elemType types.Type
+	if arrType, ok := g.semaResult.Types[s.Iterable].(*types.ArrayType); ok {
+		elemType = arrType.Elem
+	} else if objType, ok := g.semaResult.Types[s.Iterable].(*types.ObjectType); ok && objType.Name == "$Headers" {
+		iterable = g.lowerHeadersEntries(iterable)
+		elemType = types.NewArray(types.TypeString)
+	}
 
 	preBB := g.currentBB
 	condBB := g.currentFn.NewBlock("forof_cond")
@@ -186,7 +195,7 @@ func (g *generator) lowerForOf(s *ast.ForOfStmt) {
 
 	previousLoopVar, hadPrevious := g.locals[s.Name]
 	g.currentBB = bodyBB
-	elem := g.currentFn.NewValue(s.Name, arrType.Elem)
+	elem := g.currentFn.NewValue(s.Name, elemType)
 	bodyBB.Instructions = append(bodyBB.Instructions, &ir.GetElementInst{Res: elem, Array: iterable, Index: index})
 	g.locals[s.Name] = elem
 	g.lowerStatement(s.Body)

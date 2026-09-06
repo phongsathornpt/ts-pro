@@ -199,6 +199,51 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		return nil
 	}
 	if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+		if res, handled := g.lowerByteLengthQueuingStrategyMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerCountQueuingStrategyMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerReadableStreamStaticCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerReadableStreamMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerReadableStreamDefaultReaderMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerReadableStreamDefaultControllerMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerWritableStreamMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerWritableStreamDefaultWriterMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerWritableStreamDefaultControllerMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerTransformStreamMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerTransformStreamDefaultControllerMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerBlobMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerFormDataMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerHeadersMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerURLPatternMethodCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerURLMethodCall(e, mem); handled {
 			return res
 		}
@@ -306,9 +351,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			switch mem.Property {
 			case "push":
 				val := g.lowerExpr(e.Args[0])
-				if irJSValueType(arrType.Elem) {
-					val = g.boxJSValue(val, g.semanticType(e.Args[0]))
-				}
+				val = g.coerceJSValueBoundary(val, g.semanticType(e.Args[0]), arrType.Elem)
 				res := g.currentFn.NewValue("len", types.TypeNumber)
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: res, Array: array, Val: val})
 				return res

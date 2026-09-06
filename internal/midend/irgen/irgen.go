@@ -44,8 +44,9 @@ type generator struct {
 	currentClass      *sema.ClassInfo
 	classTags         map[string]int
 	emittedClassSpecs map[string]bool
-	catchStack        []*catchContext
-	finallyStack      []*finallyContext
+	catchStack                 []*catchContext
+	finallyStack               []*finallyContext
+	activeStreamControllerKind string
 }
 
 func typeNodeIsAny(node ast.TypeNode) bool {
