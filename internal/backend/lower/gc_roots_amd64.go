@@ -346,6 +346,7 @@ const (
 	amd64RTSchedRoot   int32 = 136
 	amd64RTTimerHead   int32 = 144
 	amd64RTMarkChunk   int32 = 152
+	amd64RTMarkStack   int32 = 160
 
 	amd64ChunkNext int32 = 0
 	amd64ChunkEnd  int32 = 8

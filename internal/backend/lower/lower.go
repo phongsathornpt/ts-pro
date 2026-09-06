@@ -760,7 +760,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 160)
+	e.SubRegImm32(amd64.RSP, 176)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1855,7 +1855,7 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
-	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk} {
+	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack} {
 		e.MovDerefReg(amd64.R15, off, amd64.R11)
 	}
 	e.Ret()

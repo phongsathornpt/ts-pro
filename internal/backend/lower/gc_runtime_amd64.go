@@ -108,11 +108,11 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegImm64(amd64.RAX, 1)
 	e.MovDerefReg(amd64.R10, amd64ObjectFlags, amd64.RAX)
-	// During marking, amd64RTFreeList is repurposed as an intrusive mark stack.
-	// Sweep rebuilds the actual free list after all reachable objects are traced.
-	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTFreeList)
+	// Marked objects form an intrusive worklist using a dedicated runtime head.
+	// Keeping this separate from allocator free lists allows future segregated bins.
+	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTMarkStack)
 	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R11)
-	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R10)
+	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.R10)
 	e.Pop(amd64.R8)
 	e.Ret()
 	next := len(e.Code)
@@ -154,10 +154,10 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.AddRegImm32(amd64.RAX, 1)
 	e.MovDerefReg(amd64.R15, amd64RTCollections, amd64.RAX)
 
-	// The reclaimed-block list is rebuilt by sweep. Reuse its head as the mark
-	// worklist so tracing needs no allocation and each live object is visited once.
+	// Reset the dedicated intrusive mark worklist. Sweep rebuilds allocator free
+	// structures independently after all reachable objects are traced.
 	e.MovRegImm64(amd64.RAX, 0)
-	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.RAX)
+	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.RAX)
 	// Start pointer validation from the current chunk, then retain locality hints
 	// as marking walks into older chunks.
 	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTChunkHead)
@@ -211,12 +211,12 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	// Drain the intrusive mark worklist. Newly discovered children are pushed by
 	// ts_gc_mark_payload, so every reachable object is traced exactly once.
 	traceWorkLoop := len(e.Code)
-	e.MovRegDeref(amd64.R12, amd64.R15, amd64RTFreeList)
+	e.MovRegDeref(amd64.R12, amd64.R15, amd64RTMarkStack)
 	e.TestRegReg(amd64.R12, amd64.R12)
 	traceDoneJump := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R13, amd64.R12, amd64ObjectNextFree)
-	e.MovDerefReg(amd64.R15, amd64RTFreeList, amd64.R13)
+	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.R13)
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.RAX)
 	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectType)
