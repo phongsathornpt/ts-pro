@@ -3989,6 +3989,59 @@ func (g *generator) makeAbortTimeoutCallback(signal ir.Operand) ir.Operand {
 	return closure
 }
 
+func (g *generator) lowerArrayBufferMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$ArrayBuffer" || mem.Property != "slice" {
+		return nil, false
+	}
+	obj := g.lowerExpr(mem.Object)
+	data := g.arrayBufferData(obj)
+	begin := g.lowerExpr(e.Args[0])
+	end := ir.Operand(nil)
+	if len(e.Args) > 1 {
+		end = g.lowerExpr(e.Args[1])
+	} else {
+		length := g.currentFn.NewValue("array_buffer_len", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+		end = length
+	}
+	sliced := g.currentFn.NewValue("array_buffer_slice_data", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: sliced, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{data, begin, end}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	return g.newArrayBufferFromData(sliced), true
+}
+
+func (g *generator) lowerUint8ArrayMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$Uint8Array" || (mem.Property != "slice" && mem.Property != "subarray") {
+		return nil, false
+	}
+	obj := g.lowerExpr(mem.Object)
+	data := g.uint8ArrayField(obj, "$data", g.semaResult.ByteBufferType)
+	buffer := g.uint8ArrayField(obj, "buffer", g.semaResult.ArrayBufferType)
+	base := g.uint8ArrayField(obj, "byteOffset", types.TypeNumber)
+	length := g.uint8ArrayField(obj, "length", types.TypeNumber)
+	begin := g.lowerExpr(e.Args[0])
+	end := ir.Operand(length)
+	if len(e.Args) > 1 {
+		end = g.lowerExpr(e.Args[1])
+	}
+	startAbs := g.currentFn.NewValue("uint8_slice_start", types.TypeNumber)
+	endAbs := g.currentFn.NewValue("uint8_slice_end", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: startAbs, Op: ir.OpAdd, LHS: base, RHS: begin},
+		&ir.BinaryInst{Res: endAbs, Op: ir.OpAdd, LHS: base, RHS: end},
+	)
+	newLen := g.currentFn.NewValue("uint8_slice_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: newLen, Op: ir.OpSub, LHS: end, RHS: begin})
+	if mem.Property == "subarray" {
+		return g.newUint8ArrayView(data, buffer, startAbs, newLen), true
+	}
+	sliced := g.currentFn.NewValue("uint8_slice_data", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: sliced, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{data, startAbs, endAbs}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	newBuffer := g.newArrayBufferFromData(sliced)
+	return g.newUint8ArrayView(sliced, newBuffer, ir.ConstNumber{Value: 0}, newLen), true
+}
+
 func (g *generator) lowerAbortSignalStaticCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	ident, ok := mem.Object.(*ast.IdentExpr)
 	if !ok || ident.Name != "AbortSignal" {
@@ -4211,6 +4264,35 @@ func (g *generator) nullRefAt(bb *ir.BasicBlock, t types.Type) ir.Operand {
 	return res
 }
 
+func (g *generator) newArrayBufferFromData(data ir.Operand) ir.Operand {
+	t := g.semaResult.ArrayBufferType
+	obj := g.currentFn.NewValue("array_buffer", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: obj, Callee: "ts_array_buffer_wrap", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	return obj
+}
+
+func (g *generator) arrayBufferData(obj ir.Operand) ir.Operand {
+	t := g.semaResult.ArrayBufferType
+	offsets, _, _ := g.objectLayout(t)
+	data := g.currentFn.NewValue("array_buffer_data", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: data, Obj: obj, Field: "$data", Offset: offsets["$data"]})
+	return data
+}
+
+func (g *generator) newUint8ArrayView(data, buffer, offset, length ir.Operand) ir.Operand {
+	t := g.semaResult.Uint8ArrayType
+	obj := g.currentFn.NewValue("uint8_array", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: obj, Callee: "ts_uint8_array_wrap", Args: []ir.Operand{data, buffer, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ArrayBufferType, types.TypeNumber, types.TypeNumber}})
+	return obj
+}
+
+func (g *generator) uint8ArrayField(obj ir.Operand, name string, typ types.Type) ir.Operand {
+	offsets, _, _ := g.objectLayout(g.semaResult.Uint8ArrayType)
+	res := g.currentFn.NewValue("uint8_"+strings.TrimPrefix(name, "$"), typ)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: obj, Field: name, Offset: offsets[name]})
+	return res
+}
+
 func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 	switch e := expr.(type) {
@@ -4230,6 +4312,27 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.locals["$this"]
 
 	case *ast.NewExpr:
+		if e.ClassName == "ArrayBuffer" {
+			length := g.lowerExpr(e.Args[0])
+			data := g.currentFn.NewValue("array_buffer_data", g.semaResult.ByteBufferType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: data, Callee: "ts_byte_buffer_new", Args: []ir.Operand{length}, ParamTypes: []types.Type{types.TypeNumber}})
+			return g.newArrayBufferFromData(data)
+		}
+		if e.ClassName == "Uint8Array" {
+			argType := g.semanticType(e.Args[0])
+			if obj, ok := argType.(*types.ObjectType); ok && obj.Name == "$ArrayBuffer" {
+				buffer := g.lowerExpr(e.Args[0])
+				data := g.arrayBufferData(buffer)
+				length := g.currentFn.NewValue("uint8_len", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+				return g.newUint8ArrayView(data, buffer, ir.ConstNumber{Value: 0}, length)
+			}
+			length := g.lowerExpr(e.Args[0])
+			data := g.currentFn.NewValue("uint8_data", g.semaResult.ByteBufferType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: data, Callee: "ts_byte_buffer_new", Args: []ir.Operand{length}, ParamTypes: []types.Type{types.TypeNumber}})
+			buffer := g.newArrayBufferFromData(data)
+			return g.newUint8ArrayView(data, buffer, ir.ConstNumber{Value: 0}, length)
+		}
 		if e.ClassName == "AbortController" {
 			return g.lowerAbortControllerNew()
 		}
@@ -4639,6 +4742,17 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return g.lowerExpr(e.Target)
 	case *ast.IndexExpr:
+		if obj, ok := g.semanticType(e.Target).(*types.ObjectType); ok && obj.Name == "$Uint8Array" {
+			target := g.lowerExpr(e.Target)
+			index := g.lowerExpr(e.Index)
+			data := g.uint8ArrayField(target, "$data", g.semaResult.ByteBufferType)
+			offset := g.uint8ArrayField(target, "byteOffset", types.TypeNumber)
+			actual := g.currentFn.NewValue("uint8_index", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: actual, Op: ir.OpAdd, LHS: offset, RHS: index})
+			res := g.currentFn.NewValue("uint8_value", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_byte_buffer_get", Args: []ir.Operand{data, actual}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber}})
+			return res
+		}
 		if key, ok := g.staticStringKey(e.Index); ok {
 			target := g.lowerExpr(e.Target)
 			if object, ok := target.Type().(*types.ObjectType); ok {
@@ -4717,6 +4831,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if objType.Name == "$ArrayBuffer" && e.Property == "byteLength" {
+				obj := g.lowerExpr(e.Object)
+				data := g.arrayBufferData(obj)
+				res := g.currentFn.NewValue("array_buffer_len", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_byte_buffer_len", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+				return res
+			}
 			if objType.Name == "$AbortSignal" {
 				signal := g.lowerExpr(e.Object)
 				switch e.Property {
@@ -4998,6 +5119,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return nil
 		}
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if res, handled := g.lowerArrayBufferMethodCall(e, mem); handled {
+				return res
+			}
+			if res, handled := g.lowerUint8ArrayMethodCall(e, mem); handled {
+				return res
+			}
 			if res, handled := g.lowerAbortSignalStaticCall(e, mem); handled {
 				return res
 			}
@@ -5286,6 +5413,17 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 
 		if idx, ok := e.Left.(*ast.IndexExpr); ok {
+			if obj, ok := g.semanticType(idx.Target).(*types.ObjectType); ok && obj.Name == "$Uint8Array" {
+				target := g.lowerExpr(idx.Target)
+				index := g.lowerExpr(idx.Index)
+				value := g.lowerExpr(e.Right)
+				data := g.uint8ArrayField(target, "$data", g.semaResult.ByteBufferType)
+				offset := g.uint8ArrayField(target, "byteOffset", types.TypeNumber)
+				actual := g.currentFn.NewValue("uint8_index", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: actual, Op: ir.OpAdd, LHS: offset, RHS: index})
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_byte_buffer_set", Args: []ir.Operand{data, actual, value}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+				return value
+			}
 			if key, ok := g.staticStringKey(idx.Index); ok {
 				target := g.lowerExpr(idx.Target)
 				if object, ok := target.Type().(*types.ObjectType); ok {

@@ -106,6 +106,9 @@ type Result struct {
 	EventTargetType     *types.ObjectType
 	AbortSignalType     *types.ObjectType
 	AbortControllerType *types.ObjectType
+	ByteBufferType      *types.ObjectType
+	ArrayBufferType     *types.ObjectType
+	Uint8ArrayType      *types.ObjectType
 	VarTypes            map[*ast.VarDeclStmt][]types.Type
 	RootScope           *Scope
 	Diagnostics         diag.DiagnosticList
@@ -651,6 +654,57 @@ func (c *Checker) builtinEventTargetType() *types.ObjectType {
 	return c.result.EventTargetType
 }
 
+func (c *Checker) builtinByteBufferType() *types.ObjectType {
+	if c.result.ByteBufferType == nil {
+		c.result.ByteBufferType = types.NewObject("$ByteBuffer")
+	}
+	return c.result.ByteBufferType
+}
+
+func (c *Checker) builtinArrayBufferType() *types.ObjectType {
+	if c.result.ArrayBufferType == nil {
+		t := types.NewObject("$ArrayBuffer")
+		t.AddField("$data", c.builtinByteBufferType(), false)
+		c.result.ArrayBufferType = t
+	}
+	return c.result.ArrayBufferType
+}
+
+func (c *Checker) builtinUint8ArrayType() *types.ObjectType {
+	if c.result.Uint8ArrayType == nil {
+		t := types.NewObject("$Uint8Array")
+		t.AddField("$data", c.builtinByteBufferType(), false)
+		t.AddField("buffer", c.builtinArrayBufferType(), false)
+		t.AddField("byteOffset", types.TypeNumber, false)
+		t.AddField("byteLength", types.TypeNumber, false)
+		t.AddField("length", types.TypeNumber, false)
+		c.result.Uint8ArrayType = t
+	}
+	return c.result.Uint8ArrayType
+}
+
+func (c *Checker) builtinArrayBufferMember(property string) (types.Type, bool) {
+	switch property {
+	case "byteLength":
+		return types.TypeNumber, true
+	case "slice":
+		return types.NewFunction([]types.Param{{Name: "begin", Type: types.TypeNumber}, {Name: "end", Type: types.TypeNumber, Optional: true}}, c.builtinArrayBufferType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinUint8ArrayMember(property string) (types.Type, bool) {
+	switch property {
+	case "length", "byteLength", "byteOffset":
+		return types.TypeNumber, true
+	case "buffer":
+		return c.builtinArrayBufferType(), true
+	case "slice", "subarray":
+		return types.NewFunction([]types.Param{{Name: "begin", Type: types.TypeNumber}, {Name: "end", Type: types.TypeNumber, Optional: true}}, c.builtinUint8ArrayType()), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinEventMember(property string) (types.Type, bool) {
 	switch property {
 	case "type":
@@ -818,6 +872,12 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 			return types.NewFunction(nil, t.Elem), true
 		}
 	case *types.ObjectType:
+		if t.Name == "$ArrayBuffer" {
+			return c.builtinArrayBufferMember(property)
+		}
+		if t.Name == "$Uint8Array" {
+			return c.builtinUint8ArrayMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -1249,6 +1309,29 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = base.Constructor
 		return base.Constructor
 	case *ast.NewExpr:
+		if e.ClassName == "ArrayBuffer" {
+			if len(e.Args) != 1 {
+				c.error(e.Span(), "TS2554", "ArrayBuffer expects exactly one byteLength argument.")
+			} else if c.checkExpr(e.Args[0]) != types.TypeNumber {
+				c.error(e.Args[0].Span(), "TS2345", "ArrayBuffer byteLength must be a number.")
+			}
+			t := c.builtinArrayBufferType()
+			c.result.Types[e] = t
+			return t
+		}
+		if e.ClassName == "Uint8Array" {
+			if len(e.Args) != 1 {
+				c.error(e.Span(), "TS2554", "Uint8Array currently expects one length or ArrayBuffer argument.")
+			} else {
+				at := c.checkExpr(e.Args[0])
+				if at != types.TypeNumber && at != c.builtinArrayBufferType() {
+					c.error(e.Args[0].Span(), "TS2345", "Uint8Array argument must be a number or ArrayBuffer.")
+				}
+			}
+			t := c.builtinUint8ArrayType()
+			c.result.Types[e] = t
+			return t
+		}
 		if e.ClassName == "AbortController" {
 			if len(e.Args) != 0 {
 				c.error(e.Span(), "TS2554", "AbortController expects no arguments.")
@@ -2067,6 +2150,13 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				return types.TypeAny
 			}
 		}
+		if object, ok := targetType.(*types.ObjectType); ok && object.Name == "$Uint8Array" {
+			if indexType != types.TypeNumber && indexType != types.TypeAny {
+				c.error(e.Index.Span(), "TS7015", "Uint8Array index expression must be a number.")
+			}
+			c.result.Types[e] = types.TypeNumber
+			return types.TypeNumber
+		}
 		if targetType != types.TypeAny && indexType != types.TypeNumber && indexType != types.TypeAny {
 			c.error(e.Index.Span(), "TS7015", "Array index expression must be a number.")
 		}
@@ -2372,6 +2462,12 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return types.TypeNull
 		}
 	case *ast.TypeRefNode:
+		if t.Name == "ArrayBuffer" {
+			return c.builtinArrayBufferType()
+		}
+		if t.Name == "Uint8Array" {
+			return c.builtinUint8ArrayType()
+		}
 		if t.Name == "Event" {
 			return c.builtinEventType()
 		}

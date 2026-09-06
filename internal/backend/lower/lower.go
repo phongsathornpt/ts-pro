@@ -1617,6 +1617,11 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_object_new"] = len(e.Code)
 	emitAMD64ObjectNew(e, fnOffsets["ts_alloc"])
 
+	fnOffsets["ts_array_buffer_wrap"] = len(e.Code)
+	emitAMD64ArrayBufferWrap(e, fnOffsets["ts_object_new"])
+	fnOffsets["ts_uint8_array_wrap"] = len(e.Code)
+	emitAMD64Uint8ArrayWrap(e, fnOffsets["ts_object_new"])
+
 	fnOffsets["ts_byte_buffer_new"] = len(e.Code)
 	emitAMD64ByteBufferNew(e, fnOffsets["ts_object_new"], fnOffsets["ts_alloc"])
 	fnOffsets["ts_byte_buffer_len"] = len(e.Code)

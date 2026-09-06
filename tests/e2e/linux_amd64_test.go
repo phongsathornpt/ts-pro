@@ -2255,3 +2255,31 @@ console.log(passive.defaultPrevented);
 		expected: "true\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCTypedArrays(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_typed_arrays",
+		source: `
+const buffer = new ArrayBuffer(4);
+console.log(buffer.byteLength);
+const bytes = new Uint8Array(buffer);
+bytes[0] = 65;
+bytes[1] = 511;
+bytes[2] = 66;
+bytes[3] = 67;
+console.log(bytes.length);
+console.log(bytes[0]);
+console.log(bytes[1]);
+const copy = bytes.slice(1, 3);
+console.log(copy.length);
+console.log(copy[0]);
+const view = bytes.subarray(1, 3);
+console.log(view.byteOffset);
+console.log(view.length);
+view[0] = 42;
+console.log(bytes[1]);
+console.log(copy[0]);
+`,
+		expected: "4\n4\n65\n255\n2\n255\n1\n2\n42\n255\n",
+	})
+}

@@ -569,6 +569,11 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
 - [x] Phase 2: DOM events and abort primitives.
 - [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
+  - [x] Add ArrayBuffer/Uint8Array byte-view foundation with GC-safe shared backing.
+  - [ ] Add TextEncoder/TextDecoder including UTF-8 coercion/error behavior.
+  - [ ] Add TextEncoderStream/TextDecoderStream after Streams core is available.
+  - [ ] Add URL and URLSearchParams parsing/serialization.
+  - [ ] Add URLPattern matching.
 - [ ] Phase 4: Blob, File, FormData and body byte/string primitives.
 - [ ] Phase 5: Streams interfaces required by ECMA-429.
 - [ ] Phase 6: Headers, Request, Response and fetch with cancellation/streaming semantics.
