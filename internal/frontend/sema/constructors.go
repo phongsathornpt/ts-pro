@@ -31,6 +31,28 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		c.result.Types[e] = t
 		return t
 	}
+	if e.ClassName == "TextEncoder" {
+		if len(e.Args) != 0 {
+			c.error(e.Span(), "TS2554", "TextEncoder expects no arguments.")
+		}
+		t := c.builtinTextEncoderType()
+		c.result.Types[e] = t
+		return t
+	}
+	if e.ClassName == "TextDecoder" {
+		if len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "TextDecoder expects optional label and options arguments.")
+		}
+		if len(e.Args) > 0 && c.checkExpr(e.Args[0]) != types.TypeString {
+			c.error(e.Args[0].Span(), "TS2345", "TextDecoder label must be a string.")
+		}
+		if len(e.Args) > 1 {
+			c.checkExpr(e.Args[1])
+		}
+		t := c.builtinTextDecoderType()
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "AbortController" {
 		if len(e.Args) != 0 {
 			c.error(e.Span(), "TS2554", "AbortController expects no arguments.")

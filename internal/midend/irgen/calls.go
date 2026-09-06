@@ -205,6 +205,12 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		if res, handled := g.lowerUint8ArrayMethodCall(e, mem); handled {
 			return res
 		}
+		if res, handled := g.lowerTextEncoderMethodCall(e, mem); handled {
+			return res
+		}
+		if res, handled := g.lowerTextDecoderMethodCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerAbortSignalStaticCall(e, mem); handled {
 			return res
 		}

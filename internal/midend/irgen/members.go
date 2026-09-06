@@ -33,6 +33,9 @@ func (g *generator) lowerMemberExpr(e *ast.MemberExpr) ir.Operand {
 		return res
 	}
 	if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+		if (objType.Name == "$TextEncoder" || objType.Name == "$TextDecoder") && e.Property == "encoding" {
+			return ir.ConstString{Value: "utf-8"}
+		}
 		if objType.Name == "$ArrayBuffer" && e.Property == "byteLength" {
 			obj := g.lowerExpr(e.Object)
 			data := g.arrayBufferData(obj)

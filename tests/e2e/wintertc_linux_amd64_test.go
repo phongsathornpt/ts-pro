@@ -324,3 +324,49 @@ console.log(copy[0]);
 		expected: "4\n4\n65\n255\n2\n255\n1\n2\n42\n255\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCTextEncoding(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_text_encoding",
+		source: `
+const encoder = new TextEncoder();
+console.log(encoder.encoding);
+const encoded = encoder.encode("hé✓");
+console.log(encoded.length);
+console.log(encoded[0]);
+console.log(encoded[1]);
+console.log(encoded[5]);
+const decoder = new TextDecoder("  UTF8\t");
+console.log(decoder.decode(encoded));
+const malformed = new Uint8Array(2);
+malformed[0] = 0xc0;
+malformed[1] = 0xaf;
+console.log(new TextDecoder().decode(malformed));
+try {
+  new TextDecoder("utf-8", { fatal: true }).decode(malformed);
+  console.log("bad-fatal");
+} catch (err) {
+  console.log(err.name);
+}
+const bom = new Uint8Array(4);
+bom[0] = 0xef; bom[1] = 0xbb; bom[2] = 0xbf; bom[3] = 65;
+console.log(new TextDecoder().decode(bom));
+const preserved = encoder.encode(new TextDecoder("unicode-1-1-utf-8", { ignoreBOM: true }).decode(bom));
+console.log(preserved.length);
+console.log(preserved[0]);
+const destination = new Uint8Array(4);
+const metrics = encoder.encodeInto("hé✓", destination);
+console.log(metrics.read);
+console.log(metrics.written);
+console.log(destination[0]);
+console.log(destination[3]);
+try {
+  new TextDecoder("windows-1252");
+  console.log("bad-label");
+} catch (err) {
+  console.log(err.name);
+}
+`,
+		expected: "utf-8\n6\n104\n195\n147\nhé✓\n��\nTypeError\nA\n4\n239\n2\n3\n104\n0\nRangeError\n",
+	})
+}

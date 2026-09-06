@@ -108,6 +108,8 @@ type Result struct {
 	ByteBufferType      *types.ObjectType
 	ArrayBufferType     *types.ObjectType
 	Uint8ArrayType      *types.ObjectType
+	TextEncoderType     *types.ObjectType
+	TextDecoderType     *types.ObjectType
 	VarTypes            map[*ast.VarDeclStmt][]types.Type
 	RootScope           *Scope
 	Diagnostics         diag.DiagnosticList
@@ -435,6 +437,12 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$Uint8Array" {
 			return c.builtinUint8ArrayMember(property)
 		}
+		if t.Name == "$TextEncoder" {
+			return c.builtinTextEncoderMember(property)
+		}
+		if t.Name == "$TextDecoder" {
+			return c.builtinTextDecoderMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -633,6 +641,12 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "AbortController" {
 			return c.builtinAbortControllerType()
+		}
+		if t.Name == "TextEncoder" {
+			return c.builtinTextEncoderType()
+		}
+		if t.Name == "TextDecoder" {
+			return c.builtinTextDecoderType()
 		}
 		if t.Name == "DOMException" {
 			return c.builtinDOMExceptionType()

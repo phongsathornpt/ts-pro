@@ -583,7 +583,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [x] Phase 2: DOM events and abort primitives.
 - [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
   - [x] Add ArrayBuffer/Uint8Array byte-view foundation with GC-safe shared backing.
-  - [ ] Add TextEncoder/TextDecoder including UTF-8 coercion/error behavior.
+  - [x] Add TextEncoder/TextDecoder including UTF-8 coercion/error behavior, BOM handling, label validation, and encodeInto semantics.
   - [ ] Add TextEncoderStream/TextDecoderStream after Streams core is available.
   - [ ] Add URL and URLSearchParams parsing/serialization.
   - [ ] Add URLPattern matching.

@@ -140,6 +140,50 @@ func (c *Checker) builtinUint8ArrayMember(property string) (types.Type, bool) {
 	return nil, false
 }
 
+func (c *Checker) builtinTextEncoderType() *types.ObjectType {
+	if c.result.TextEncoderType == nil {
+		c.result.TextEncoderType = types.NewObject("$TextEncoder")
+	}
+	return c.result.TextEncoderType
+}
+
+func (c *Checker) builtinTextDecoderType() *types.ObjectType {
+	if c.result.TextDecoderType == nil {
+		t := types.NewObject("$TextDecoder")
+		t.AddField("fatal", types.TypeBoolean, false)
+		t.AddField("ignoreBOM", types.TypeBoolean, false)
+		c.result.TextDecoderType = t
+	}
+	return c.result.TextDecoderType
+}
+
+func (c *Checker) builtinTextEncoderMember(property string) (types.Type, bool) {
+	switch property {
+	case "encoding":
+		return types.TypeString, true
+	case "encode":
+		return types.NewFunction([]types.Param{{Name: "input", Type: types.TypeString, Optional: true}}, c.builtinUint8ArrayType()), true
+	case "encodeInto":
+		result := types.NewObject("$TextEncoderEncodeIntoResult")
+		result.AddField("read", types.TypeNumber, false)
+		result.AddField("written", types.TypeNumber, false)
+		return types.NewFunction([]types.Param{{Name: "source", Type: types.TypeString}, {Name: "destination", Type: c.builtinUint8ArrayType()}}, result), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinTextDecoderMember(property string) (types.Type, bool) {
+	switch property {
+	case "encoding":
+		return types.TypeString, true
+	case "fatal", "ignoreBOM":
+		return types.TypeBoolean, true
+	case "decode":
+		return types.NewFunction([]types.Param{{Name: "input", Type: c.builtinUint8ArrayType(), Optional: true}, {Name: "options", Type: types.TypeAny, Optional: true}}, types.TypeString), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinEventMember(property string) (types.Type, bool) {
 	switch property {
 	case "type":

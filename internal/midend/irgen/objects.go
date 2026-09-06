@@ -87,6 +87,20 @@ func (g *generator) materializeDynamicObject(value ir.Operand, objectType *types
 	return res
 }
 
+func (g *generator) newWebError(message, name ir.Operand) ir.Operand {
+	dyn := g.currentFn.NewValue("web_error_dynamic", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: dyn, Callee: "ts_dynamic_object_new"})
+	for key, value := range map[string]ir.Operand{"message": message, "name": name} {
+		boxed := value
+		if !irJSValueType(value.Type()) {
+			boxed = g.boxJSValue(value, value.Type())
+		}
+		set := g.currentFn.NewValue("web_error_set", types.TypeAny)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: set, Callee: "ts_dynamic_set", Args: []ir.Operand{dyn, ir.ConstString{Value: key}, boxed}, ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny}})
+	}
+	return dyn
+}
+
 func (g *generator) newDOMException(message, name ir.Operand) ir.Operand {
 	t := g.semaResult.DOMExceptionType
 	dyn := g.currentFn.NewValue("dom_exception_dynamic", types.TypeAny)
