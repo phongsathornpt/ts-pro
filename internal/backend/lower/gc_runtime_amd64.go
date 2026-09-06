@@ -162,6 +162,43 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.Ret()
 }
 
+func emitAMD64GCTraceQwordSlots(e *amd64.Emitter, markOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	batchLoop := len(e.Code)
+	e.CmpRegImm32(amd64.R9, 4)
+	tailJump := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	for off := int32(0); off < 32; off += 8 {
+		e.MovRegDeref(amd64.RDI, amd64.R8, off)
+		callAt := len(e.Code)
+		e.CallRel32(int32(markOffset - (callAt + 5)))
+		e.OrRegReg(amd64.R14, amd64.RAX)
+	}
+	e.AddRegImm32(amd64.R8, 32)
+	e.SubRegImm32(amd64.R9, 4)
+	batchBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(batchBack, batchLoop)
+
+	tailLoop := len(e.Code)
+	patchJcc(tailJump, tailLoop)
+	e.TestRegReg(amd64.R9, amd64.R9)
+	doneJump := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RDI, amd64.R8, 0)
+	callAt := len(e.Code)
+	e.CallRel32(int32(markOffset - (callAt + 5)))
+	e.OrRegReg(amd64.R14, amd64.RAX)
+	e.AddRegImm32(amd64.R8, 8)
+	e.SubRegImm32(amd64.R9, 1)
+	tailBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(tailBack, tailLoop)
+	patchJcc(doneJump, len(e.Code))
+}
+
 func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	patchJcc := func(at, target int) {
 		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
@@ -328,21 +365,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectSize)
 	e.SubRegImm32(amd64.R9, amd64ObjectHeaderSize)
 	e.ShrRegImm8(amd64.R9, 3)
-	refSlotLoop := len(e.Code)
-	e.TestRegReg(amd64.R9, amd64.R9)
-	refSlotsDone := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.MovRegDeref(amd64.RDI, amd64.R8, 0)
-	markRefCall := len(e.Code)
-	e.CallRel32(int32(markOffset - (markRefCall + 5)))
-	e.OrRegReg(amd64.R14, amd64.RAX)
-	e.AddRegImm32(amd64.R8, 8)
-	e.SubRegImm32(amd64.R9, 1)
-	refSlotBack := len(e.Code)
-	e.JmpRel32(0)
-	patchJmp(refSlotBack, refSlotLoop)
-	refSlotsDoneLabel := len(e.Code)
-	patchJcc(refSlotsDone, refSlotsDoneLabel)
+	emitAMD64GCTraceQwordSlots(e, markOffset)
 	traceRefDataDone := len(e.Code)
 	e.JmpRel32(0)
 
@@ -385,21 +408,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectSize)
 	e.SubRegImm32(amd64.R9, amd64ObjectHeaderSize)
 	e.ShrRegImm8(amd64.R9, 3)
-	jsSlotLoop := len(e.Code)
-	e.TestRegReg(amd64.R9, amd64.R9)
-	jsSlotsDone := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.MovRegDeref(amd64.RDI, amd64.R8, 0)
-	markJSCall := len(e.Code)
-	e.CallRel32(int32(markOffset - (markJSCall + 5)))
-	e.OrRegReg(amd64.R14, amd64.RAX)
-	e.AddRegImm32(amd64.R8, 8)
-	e.SubRegImm32(amd64.R9, 1)
-	jsSlotBack := len(e.Code)
-	e.JmpRel32(0)
-	patchJmp(jsSlotBack, jsSlotLoop)
-	jsSlotsDoneLabel := len(e.Code)
-	patchJcc(jsSlotsDone, jsSlotsDoneLabel)
+	emitAMD64GCTraceQwordSlots(e, markOffset)
 	traceJSValueDataDone := len(e.Code)
 	e.JmpRel32(0)
 
