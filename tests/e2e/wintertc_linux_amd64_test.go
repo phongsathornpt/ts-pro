@@ -424,3 +424,21 @@ console.log(params.toString());
 		expected: "5\nhello world\n2\n✓\n\na=1&b=hello+world&a=%E2%9C%93&plus=%2B&empty=\na=x+y&plus=%2B&empty=&c=a%2Bb\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLSearchParamsSort(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_search_params_sort",
+		source: `
+const params = new URLSearchParams();
+params.append("", "late");
+params.append("😀", "first");
+params.append("a", "ascii");
+params.append("😀", "second");
+params.sort();
+console.log(params.toString());
+console.log("😀" < "");
+console.log("" > "😀");
+`,
+		expected: "a=ascii&%F0%9F%98%80=first&%F0%9F%98%80=second&%EE%80%80=late\ntrue\ntrue\n",
+	})
+}

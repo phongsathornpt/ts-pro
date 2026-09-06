@@ -465,6 +465,92 @@ func (g *generator) lowerURLSearchParamsMethodCall(e *ast.CallExpr, mem *ast.Mem
 		return nil, true
 	case "toString":
 		return g.lowerURLSearchParamsSerialize(params), true
+	case "sort":
+		g.lowerURLSearchParamsSort(params)
+		return nil, true
 	}
 	return nil, false
+}
+
+func (g *generator) lowerURLSearchParamsSort(params ir.Operand) {
+	entries := g.urlSearchParamsEntries(params)
+	entry := g.currentBB
+	outerCond := g.currentFn.NewBlock("url_search_sort_outer_cond")
+	outerBody := g.currentFn.NewBlock("url_search_sort_outer_body")
+	innerCond := g.currentFn.NewBlock("url_search_sort_inner_cond")
+	innerBody := g.currentFn.NewBlock("url_search_sort_inner_body")
+	shiftBB := g.currentFn.NewBlock("url_search_sort_shift")
+	insertBB := g.currentFn.NewBlock("url_search_sort_insert")
+	outerNext := g.currentFn.NewBlock("url_search_sort_outer_next")
+	doneBB := g.currentFn.NewBlock("url_search_sort_done")
+	entry.Terminator = &ir.JumpTerm{Target: outerCond}
+
+	i := g.currentFn.NewValue("url_search_sort_i", types.TypeNumber)
+	nextI := g.currentFn.NewValue("url_search_sort_next_i", types.TypeNumber)
+	outerCond.Phis = append(outerCond.Phis, &ir.PhiInst{Res: i, Incoming: []ir.PhiIncoming{
+		{Block: entry, Value: ir.ConstNumber{Value: 2}},
+		{Block: outerNext, Value: nextI},
+	}})
+	length := g.currentFn.NewValue("url_search_sort_len", types.TypeNumber)
+	outerCond.Instructions = append(outerCond.Instructions, &ir.ArrayLengthInst{Res: length, Array: entries})
+	more := g.currentFn.NewValue("url_search_sort_more", types.TypeBoolean)
+	outerCond.Instructions = append(outerCond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: i, RHS: length})
+	outerCond.Terminator = &ir.BranchTerm{Cond: more, Then: outerBody, Else: doneBB}
+
+	keyName := g.currentFn.NewValue("url_search_sort_key_name", types.TypeString)
+	outerBody.Instructions = append(outerBody.Instructions, &ir.GetElementInst{Res: keyName, Array: entries, Index: i})
+	keyValueIndex := g.currentFn.NewValue("url_search_sort_key_value_index", types.TypeNumber)
+	outerBody.Instructions = append(outerBody.Instructions, &ir.BinaryInst{Res: keyValueIndex, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+	keyValue := g.currentFn.NewValue("url_search_sort_key_value", types.TypeString)
+	outerBody.Instructions = append(outerBody.Instructions, &ir.GetElementInst{Res: keyValue, Array: entries, Index: keyValueIndex})
+	outerBody.Terminator = &ir.JumpTerm{Target: innerCond}
+
+	j := g.currentFn.NewValue("url_search_sort_j", types.TypeNumber)
+	prevJ := g.currentFn.NewValue("url_search_sort_prev_j", types.TypeNumber)
+	innerCond.Phis = append(innerCond.Phis, &ir.PhiInst{Res: j, Incoming: []ir.PhiIncoming{
+		{Block: outerBody, Value: i},
+		{Block: shiftBB, Value: prevJ},
+	}})
+	hasPrev := g.currentFn.NewValue("url_search_sort_has_prev", types.TypeBoolean)
+	innerCond.Instructions = append(innerCond.Instructions, &ir.BinaryInst{Res: hasPrev, Op: ir.OpGt, LHS: j, RHS: ir.ConstNumber{Value: 0}})
+	innerCond.Terminator = &ir.BranchTerm{Cond: hasPrev, Then: innerBody, Else: insertBB}
+
+	prevIndex := g.currentFn.NewValue("url_search_sort_prev_index", types.TypeNumber)
+	innerBody.Instructions = append(innerBody.Instructions, &ir.BinaryInst{Res: prevIndex, Op: ir.OpSub, LHS: j, RHS: ir.ConstNumber{Value: 2}})
+	prevName := g.currentFn.NewValue("url_search_sort_prev_name", types.TypeString)
+	innerBody.Instructions = append(innerBody.Instructions, &ir.GetElementInst{Res: prevName, Array: entries, Index: prevIndex})
+
+	g.currentBB = innerBody
+	prevBox := g.boxJSValue(prevName, types.TypeString)
+	keyBox := g.boxJSValue(keyName, types.TypeString)
+	greater := g.currentFn.NewValue("url_search_sort_greater", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: greater, Callee: "ts_js_gt", Args: []ir.Operand{prevBox, keyBox}, ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
+	})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: greater, Then: shiftBB, Else: insertBB}
+
+	prevValueIndex := g.currentFn.NewValue("url_search_sort_prev_value_index", types.TypeNumber)
+	shiftBB.Instructions = append(shiftBB.Instructions, &ir.BinaryInst{Res: prevValueIndex, Op: ir.OpAdd, LHS: prevIndex, RHS: ir.ConstNumber{Value: 1}})
+	prevValue := g.currentFn.NewValue("url_search_sort_prev_value", types.TypeString)
+	shiftBB.Instructions = append(shiftBB.Instructions, &ir.GetElementInst{Res: prevValue, Array: entries, Index: prevValueIndex})
+	shiftValueIndex := g.currentFn.NewValue("url_search_sort_shift_value_index", types.TypeNumber)
+	shiftBB.Instructions = append(shiftBB.Instructions,
+		&ir.SetElementInst{Array: entries, Index: j, Val: prevName},
+		&ir.BinaryInst{Res: shiftValueIndex, Op: ir.OpAdd, LHS: j, RHS: ir.ConstNumber{Value: 1}},
+		&ir.SetElementInst{Array: entries, Index: shiftValueIndex, Val: prevValue},
+		&ir.BinaryInst{Res: prevJ, Op: ir.OpSub, LHS: j, RHS: ir.ConstNumber{Value: 2}},
+	)
+	shiftBB.Terminator = &ir.JumpTerm{Target: innerCond}
+
+	insertValueIndex := g.currentFn.NewValue("url_search_sort_insert_value_index", types.TypeNumber)
+	insertBB.Instructions = append(insertBB.Instructions,
+		&ir.SetElementInst{Array: entries, Index: j, Val: keyName},
+		&ir.BinaryInst{Res: insertValueIndex, Op: ir.OpAdd, LHS: j, RHS: ir.ConstNumber{Value: 1}},
+		&ir.SetElementInst{Array: entries, Index: insertValueIndex, Val: keyValue},
+	)
+	insertBB.Terminator = &ir.JumpTerm{Target: outerNext}
+
+	outerNext.Instructions = append(outerNext.Instructions, &ir.BinaryInst{Res: nextI, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 2}})
+	outerNext.Terminator = &ir.JumpTerm{Target: outerCond}
+	g.currentBB = doneBB
 }
