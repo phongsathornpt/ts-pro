@@ -59,28 +59,35 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 		return intervals[i].Start < intervals[j].Start
 	})
 
-	assignment := make(map[int]Location)
+	assignment := make(map[int]Location, len(intervals))
 	type activeItem struct {
 		interval Interval
 		reg      PhysReg
 	}
-	var active []activeItem
+	active := make([]activeItem, 0, a.numPhysRegs)
+	insertActive := func(item activeItem) {
+		active = append(active, item)
+		for i := len(active) - 1; i > 0 && active[i].interval.End < active[i-1].interval.End; i-- {
+			active[i], active[i-1] = active[i-1], active[i]
+		}
+	}
 	freeRegs := make([]bool, a.numPhysRegs)
 	for i := range freeRegs {
 		freeRegs[i] = true
 	}
 
 	for _, curr := range intervals {
-		// Expire old intervals
-		var stillActive []activeItem
+		// Expire old intervals while compacting the active set in place.
+		kept := 0
 		for _, act := range active {
 			if act.interval.End < curr.Start || (act.interval.End == curr.Start && act.interval.Start < curr.Start) {
 				freeRegs[act.reg] = true
-			} else {
-				stillActive = append(stillActive, act)
+				continue
 			}
+			active[kept] = act
+			kept++
 		}
-		active = stillActive
+		active = active[:kept]
 
 		// Find free register
 		allocatedReg := NoReg
@@ -94,11 +101,7 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 
 		if allocatedReg != NoReg {
 			assignment[curr.ValID] = InReg(allocatedReg)
-			active = append(active, activeItem{interval: curr, reg: allocatedReg})
-			// Sort active by end position
-			sort.Slice(active, func(i, j int) bool {
-				return active[i].interval.End < active[j].interval.End
-			})
+			insertActive(activeItem{interval: curr, reg: allocatedReg})
 		} else {
 			// Spill: spill the one with the furthest end
 			last := len(active) - 1
@@ -108,10 +111,8 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 				a.stackSlots++
 
 				assignment[curr.ValID] = InReg(spilled.reg)
-				active[last] = activeItem{interval: curr, reg: spilled.reg}
-				sort.Slice(active, func(i, j int) bool {
-					return active[i].interval.End < active[j].interval.End
-				})
+				active = active[:last]
+				insertActive(activeItem{interval: curr, reg: spilled.reg})
 			} else {
 				assignment[curr.ValID] = InStack(a.stackSlots)
 				a.stackSlots++
