@@ -1972,3 +1972,21 @@ console.log(end >= start);
 		expected: "true\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCDOMException(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_dom_exception",
+		source: `
+const defaultError = new DOMException();
+console.log(defaultError.name);
+console.log(defaultError.message);
+try {
+  throw new DOMException("bad byte", "InvalidCharacterError");
+} catch (err: any) {
+  console.log(err.name);
+  console.log(err.message);
+}
+`,
+		expected: "Error\n\nInvalidCharacterError\nbad byte\n",
+	})
+}

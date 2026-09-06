@@ -98,6 +98,7 @@ type Result struct {
 	AsyncResults       map[*ast.FunctionDecl]types.Type
 	DateType           *types.ObjectType
 	RegExpType         *types.ObjectType
+	DOMExceptionType   *types.ObjectType
 	VarTypes           map[*ast.VarDeclStmt][]types.Type
 	RootScope          *Scope
 	Diagnostics        diag.DiagnosticList
@@ -556,6 +557,17 @@ func (c *Checker) builtinRegExpType() *types.ObjectType {
 		c.result.RegExpType = types.NewObject("$RegExp")
 	}
 	return c.result.RegExpType
+}
+
+func (c *Checker) builtinDOMExceptionType() *types.ObjectType {
+	if c.result.DOMExceptionType == nil {
+		t := types.NewObject("$DOMException")
+		t.AddField("code", types.TypeNumber, false)
+		t.AddField("message", types.TypeString, false)
+		t.AddField("name", types.TypeString, false)
+		c.result.DOMExceptionType = t
+	}
+	return c.result.DOMExceptionType
 }
 
 func (c *Checker) builtinDateType() *types.ObjectType {
@@ -1029,6 +1041,19 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = base.Constructor
 		return base.Constructor
 	case *ast.NewExpr:
+		if e.ClassName == "DOMException" {
+			if len(e.Args) > 2 {
+				c.error(e.Span(), "TS2554", "DOMException expects optional message and name arguments.")
+			}
+			for _, arg := range e.Args {
+				if c.checkExpr(arg) != types.TypeString {
+					c.error(arg.Span(), "TS2345", "DOMException message and name must be strings.")
+				}
+			}
+			t := c.builtinDOMExceptionType()
+			c.result.Types[e] = t
+			return t
+		}
 		if e.ClassName == "RegExp" {
 			if len(e.Args) < 1 || len(e.Args) > 2 {
 				c.error(e.Span(), "TS2554", "RegExp expects a pattern and optional flags.")

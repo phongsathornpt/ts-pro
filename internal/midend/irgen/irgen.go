@@ -3348,6 +3348,35 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.locals["$this"]
 
 	case *ast.NewExpr:
+		if e.ClassName == "DOMException" {
+			t := g.semanticType(e).(*types.ObjectType)
+			dyn := g.currentFn.NewValue("dom_exception_dynamic", types.TypeAny)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: dyn, Callee: "ts_dynamic_object_new"})
+			message := ir.Operand(ir.ConstString{Value: ""})
+			name := ir.Operand(ir.ConstString{Value: "Error"})
+			if len(e.Args) > 0 {
+				message = g.lowerExpr(e.Args[0])
+			}
+			if len(e.Args) > 1 {
+				name = g.lowerExpr(e.Args[1])
+			}
+			for key, value := range map[string]ir.Operand{
+				"code": ir.ConstNumber{Value: 0}, "message": message, "name": name,
+			} {
+				boxed := value
+				valueType := value.Type()
+				if !irJSValueType(valueType) {
+					boxed = g.boxJSValue(value, valueType)
+				}
+				set := g.currentFn.NewValue("dom_exception_set", types.TypeAny)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+					Res: set, Callee: "ts_dynamic_set",
+					Args:       []ir.Operand{dyn, ir.ConstString{Value: key}, boxed},
+					ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
+				})
+			}
+			return g.coerceJSValueBoundary(dyn, types.TypeAny, t)
+		}
 		if e.ClassName == "RegExp" {
 			pattern := e.Args[0].(*ast.StringLit)
 			flags := ""
@@ -3787,6 +3816,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if objType.Name == "$DOMException" {
+				raw := g.lowerExpr(e.Object)
+				boxed := g.boxJSValue(raw, objType)
+				value := g.lowerDynamicGet(boxed, e.Property)
+				if field, ok := objType.Fields[e.Property]; ok {
+					return g.coerceJSValueBoundary(value, types.TypeAny, field.Type)
+				}
+				return value
+			}
 			if objType.Name == "$RegExp" && e.Property == "source" {
 				obj := g.lowerExpr(e.Object)
 				res := g.currentFn.NewValue("regexp_source", types.TypeString)
