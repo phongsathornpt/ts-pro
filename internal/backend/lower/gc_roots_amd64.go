@@ -326,31 +326,32 @@ func amd64RootLiveOut(fn *ir.Function) map[*ir.BasicBlock]map[int]struct{} {
 }
 
 const (
-	amd64RTCursor      int32 = 0
-	amd64RTEnd         int32 = 8
-	amd64RTRootHead    int32 = 16
-	amd64RTChunkHead   int32 = 24
-	amd64RTFreeList    int32 = 32
-	amd64RTCollections int32 = 40
-	amd64RTReclaimed   int32 = 48
-	amd64RTMappedBytes int32 = 56
-	amd64RTTaskHead    int32 = 64
-	amd64RTTaskTail    int32 = 72
-	amd64RTCurrentTask int32 = 80
-	amd64RTSchedRsp    int32 = 88
-	amd64RTSchedRbp    int32 = 96
-	amd64RTSchedRbx    int32 = 104
-	amd64RTSchedR12    int32 = 112
-	amd64RTSchedR13    int32 = 120
-	amd64RTSchedR14    int32 = 128
-	amd64RTSchedRoot   int32 = 136
-	amd64RTTimerHead   int32 = 144
-	amd64RTMarkChunk   int32 = 152
-	amd64RTMarkStack   int32 = 160
-	amd64RTFree128     int32 = 168
-	amd64RTFree512     int32 = 176
-	amd64RTFree2048    int32 = 184
-	amd64RTFree8192    int32 = 192
+	amd64RTCursor          int32 = 0
+	amd64RTEnd             int32 = 8
+	amd64RTRootHead        int32 = 16
+	amd64RTChunkHead       int32 = 24
+	amd64RTFreeList        int32 = 32
+	amd64RTCollections     int32 = 40
+	amd64RTReclaimed       int32 = 48
+	amd64RTMappedBytes     int32 = 56
+	amd64RTTaskHead        int32 = 64
+	amd64RTTaskTail        int32 = 72
+	amd64RTCurrentTask     int32 = 80
+	amd64RTSchedRsp        int32 = 88
+	amd64RTSchedRbp        int32 = 96
+	amd64RTSchedRbx        int32 = 104
+	amd64RTSchedR12        int32 = 112
+	amd64RTSchedR13        int32 = 120
+	amd64RTSchedR14        int32 = 128
+	amd64RTSchedRoot       int32 = 136
+	amd64RTTimerHead       int32 = 144
+	amd64RTMarkChunk       int32 = 152
+	amd64RTMarkStack       int32 = 160
+	amd64RTFree128         int32 = 168
+	amd64RTFree512         int32 = 176
+	amd64RTFree2048        int32 = 184
+	amd64RTFree8192        int32 = 192
+	amd64RTDenseChunkStack int32 = 200
 
 	amd64ChunkNext        int32 = 0
 	amd64ChunkEnd         int32 = 8
@@ -358,7 +359,11 @@ const (
 	amd64ChunkAllocBitmap int32 = 32
 	amd64ChunkBitmapBytes int32 = 8192
 	amd64ChunkMarkBitmap  int32 = amd64ChunkAllocBitmap + amd64ChunkBitmapBytes
-	amd64ChunkSize        int32 = amd64ChunkMarkBitmap + amd64ChunkBitmapBytes
+	amd64ChunkDenseHead   int32 = amd64ChunkMarkBitmap + amd64ChunkBitmapBytes
+	amd64ChunkDenseNext   int32 = amd64ChunkDenseHead + 8
+	amd64ChunkDenseCount  int32 = amd64ChunkDenseNext + 8
+	amd64ChunkDenseQueued int32 = amd64ChunkDenseCount + 8
+	amd64ChunkSize        int32 = amd64ChunkDenseQueued + 8
 
 	amd64ObjectSize       int32 = 0
 	amd64ObjectFlags      int32 = 8
@@ -379,4 +384,6 @@ const (
 	amd64ObjectTypeChannel        int64 = 10
 	amd64ObjectTypeTaskGroup      int64 = 11
 	amd64ObjectTypeCollection     int64 = 12
+
+	amd64GCDensePromotionThreshold int32 = 64
 )

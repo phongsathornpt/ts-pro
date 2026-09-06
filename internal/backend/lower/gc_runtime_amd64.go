@@ -94,11 +94,41 @@ func emitAMD64GCMarkPayload(e *amd64.Emitter) {
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegImm64(amd64.RAX, 1)
 	e.MovDerefReg(amd64.R10, amd64ObjectFlags, amd64.RAX)
-	// Marked objects form an intrusive worklist using a dedicated runtime head.
-	// Keeping this separate from allocator free lists allows future segregated bins.
-	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTMarkStack)
-	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R11)
+
+	// Keep sparse discovery on the existing object-work fast path. Only after a
+	// chunk has accumulated enough newly marked objects do later discoveries go
+	// to its local pending list, amortizing queue metadata over dense work.
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64ChunkDenseCount)
+	e.CmpRegImm32(amd64.RAX, amd64GCDensePromotionThreshold)
+	denseWork := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.AddRegImm32(amd64.RAX, 1)
+	e.MovDerefReg(amd64.R11, amd64ChunkDenseCount, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTMarkStack)
+	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.RAX)
 	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.R10)
+	markQueued := len(e.Code)
+	e.JmpRel32(0)
+
+	denseWorkLabel := len(e.Code)
+	patchJcc(denseWork, denseWorkLabel)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64ChunkDenseHead)
+	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.RAX)
+	e.MovDerefReg(amd64.R11, amd64ChunkDenseHead, amd64.R10)
+	e.MovRegDeref(amd64.RAX, amd64.R11, amd64ChunkDenseQueued)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	alreadyDenseQueued := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegImm64(amd64.RAX, 1)
+	e.MovDerefReg(amd64.R11, amd64ChunkDenseQueued, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTDenseChunkStack)
+	e.MovDerefReg(amd64.R11, amd64ChunkDenseNext, amd64.RAX)
+	e.MovDerefReg(amd64.R15, amd64RTDenseChunkStack, amd64.R11)
+	alreadyDenseQueuedLabel := len(e.Code)
+	patchJcc(alreadyDenseQueued, alreadyDenseQueuedLabel)
+
+	markQueuedLabel := len(e.Code)
+	patchJmp(markQueued, markQueuedLabel)
 	e.Pop(amd64.R9)
 	e.Pop(amd64.R8)
 	e.Ret()
@@ -141,10 +171,24 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.AddRegImm32(amd64.RAX, 1)
 	e.MovDerefReg(amd64.R15, amd64RTCollections, amd64.RAX)
 
-	// Reset the dedicated intrusive mark worklist. Sweep rebuilds allocator free
-	// structures independently after all reachable objects are traced.
+	// Reset object work plus dense-chunk scheduling metadata for this cycle.
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.RAX)
+	e.MovDerefReg(amd64.R15, amd64RTDenseChunkStack, amd64.RAX)
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTChunkHead)
+	resetDenseLoop := len(e.Code)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	resetDenseDone := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	for _, off := range []int32{amd64ChunkDenseHead, amd64ChunkDenseNext, amd64ChunkDenseCount, amd64ChunkDenseQueued} {
+		e.MovDerefReg(amd64.R10, off, amd64.RAX)
+	}
+	e.MovRegDeref(amd64.R10, amd64.R10, amd64ChunkNext)
+	resetDenseBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(resetDenseBack, resetDenseLoop)
+	resetDenseDoneLabel := len(e.Code)
+	patchJcc(resetDenseDone, resetDenseDoneLabel)
 	// Start pointer validation from the current chunk, then retain locality hints
 	// as marking walks into older chunks.
 	e.MovRegDeref(amd64.RAX, amd64.R15, amd64RTChunkHead)
@@ -195,15 +239,48 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	markCurrentTaskCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markCurrentTaskCall + 5)))
 
-	// Drain the intrusive mark worklist. Newly discovered children are pushed by
-	// ts_gc_mark_payload, so every reachable object is traced exactly once.
+	// Drain ordinary object work first. If it empties, take one pending object
+	// from the current dense chunk; the chunk remains queued until its local list
+	// is exhausted so nearby objects retain physical locality.
 	traceWorkLoop := len(e.Code)
 	e.MovRegDeref(amd64.R12, amd64.R15, amd64RTMarkStack)
 	e.TestRegReg(amd64.R12, amd64.R12)
-	traceDoneJump := len(e.Code)
+	tryDenseWork := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R13, amd64.R12, amd64ObjectNextFree)
 	e.MovDerefReg(amd64.R15, amd64RTMarkStack, amd64.R13)
+	workReady := len(e.Code)
+	e.JmpRel32(0)
+
+	tryDenseWorkLabel := len(e.Code)
+	patchJcc(tryDenseWork, tryDenseWorkLabel)
+	e.MovRegDeref(amd64.R13, amd64.R15, amd64RTDenseChunkStack)
+	e.TestRegReg(amd64.R13, amd64.R13)
+	traceDoneJump := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R12, amd64.R13, amd64ChunkDenseHead)
+	e.TestRegReg(amd64.R12, amd64.R12)
+	denseChunkEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectNextFree)
+	e.MovDerefReg(amd64.R13, amd64ChunkDenseHead, amd64.RAX)
+	denseWorkReady := len(e.Code)
+	e.JmpRel32(0)
+
+	denseChunkEmptyLabel := len(e.Code)
+	patchJcc(denseChunkEmpty, denseChunkEmptyLabel)
+	e.MovRegDeref(amd64.RAX, amd64.R13, amd64ChunkDenseNext)
+	e.MovDerefReg(amd64.R15, amd64RTDenseChunkStack, amd64.RAX)
+	e.MovRegImm64(amd64.RAX, 0)
+	e.MovDerefReg(amd64.R13, amd64ChunkDenseNext, amd64.RAX)
+	e.MovDerefReg(amd64.R13, amd64ChunkDenseQueued, amd64.RAX)
+	denseRetry := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(denseRetry, traceWorkLoop)
+
+	workReadyLabel := len(e.Code)
+	patchJmp(workReady, workReadyLabel)
+	patchJmp(denseWorkReady, workReadyLabel)
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.RAX)
 	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectType)
