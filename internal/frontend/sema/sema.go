@@ -1360,6 +1360,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "queueMicrotask":
+				if len(e.Args) != 1 {
+					c.error(e.Span(), "TS2554", "queueMicrotask expects exactly one callback.")
+				} else if fn, ok := c.checkExpr(e.Args[0]).(*types.FunctionType); !ok || len(fn.Params) != 0 {
+					c.error(e.Args[0].Span(), "TS2345", "queueMicrotask expects a zero-argument function.")
+				}
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeVoid
+				return types.TypeVoid
 			case "atob", "btoa":
 				if len(e.Args) != 1 {
 					c.error(e.Span(), "TS2554", ident.Name+" expects exactly one string argument.")

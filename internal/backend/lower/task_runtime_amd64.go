@@ -42,6 +42,14 @@ const (
 )
 
 func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
+	emitAMD64TaskSpawnQueued(e, allocOffset, amd64RTTaskHead, amd64RTTaskTail)
+}
+
+func emitAMD64MicrotaskSpawn(e *amd64.Emitter, allocOffset int) {
+	emitAMD64TaskSpawnQueued(e, allocOffset, amd64RTMicrotaskHead, amd64RTMicrotaskTail)
+}
+
+func emitAMD64TaskSpawnQueued(e *amd64.Emitter, allocOffset int, queueHead, queueTail int32) {
 	// RDI=closure payload, XMM0=result-kind number. Allocate a GC task object
 	// plus a private native stack and enqueue it without running user code.
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
@@ -97,7 +105,7 @@ func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
 	e.MovDerefReg(amd64.RBX, amd64TaskStackTop, amd64.RAX)
 
 	// FIFO enqueue.
-	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTTaskTail)
+	e.MovRegDeref(amd64.R10, amd64.R15, queueTail)
 	e.TestRegReg(amd64.R10, amd64.R10)
 	emptyQueue := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
@@ -106,10 +114,10 @@ func emitAMD64TaskSpawn(e *amd64.Emitter, allocOffset int) {
 	e.JmpRel32(0)
 	emptyQueueLabel := len(e.Code)
 	patchJcc(emptyQueue, emptyQueueLabel)
-	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.RBX)
+	e.MovDerefReg(amd64.R15, queueHead, amd64.RBX)
 	linked := len(e.Code)
 	binary.LittleEndian.PutUint32(e.Code[linkedJump+1:], uint32(int32(linked-(linkedJump+5))))
-	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.RBX)
+	e.MovDerefReg(amd64.R15, queueTail, amd64.RBX)
 
 	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
@@ -343,7 +351,28 @@ func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset, nowOffset, sleepNSOffse
 	e.Push(amd64.RBX)
 	e.SubRegImm32(amd64.RSP, 8)
 
-	// Due timers outrank runnable work so a cooperatively requeued waiter cannot
+	// Microtasks always run before timers and ordinary runnable tasks.
+	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTMicrotaskHead)
+	e.TestRegReg(amd64.RBX, amd64.RBX)
+	noMicrotask := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64TaskNext)
+	e.MovDerefReg(amd64.R15, amd64RTMicrotaskHead, amd64.R10)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	microHasNext := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.R15, amd64RTMicrotaskTail, amd64.R11)
+	patchJcc(microHasNext, len(e.Code))
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovDerefReg(amd64.RBX, amd64TaskNext, amd64.R11)
+	microHaveTaskJump := len(e.Code)
+	e.JmpRel32(0)
+
+	microtasksEmpty := len(e.Code)
+	patchJcc(noMicrotask, microtasksEmpty)
+
+	// Due timers outrank ordinary runnable work so a cooperatively requeued waiter cannot
 	// starve a sleeping task that will satisfy it.
 	e.MovRegDeref(amd64.RBX, amd64.R15, amd64RTTimerHead)
 	e.TestRegReg(amd64.RBX, amd64.RBX)
@@ -403,6 +432,7 @@ func emitAMD64TaskRunOne(e *amd64.Emitter, resumeOffset, nowOffset, sleepNSOffse
 
 	haveTask := len(e.Code)
 	patchJmp(haveRunnableJump, haveTask)
+	patchJmp(microHaveTaskJump, haveTask)
 	e.MovRegReg(amd64.RDI, amd64.RBX)
 	callResume := len(e.Code)
 	e.CallRel32(int32(resumeOffset - (callResume + 5)))

@@ -355,6 +355,8 @@ const (
 	amd64RTTimeOriginMono  int32 = 208
 	amd64RTTimeOriginEpoch int32 = 216
 	amd64RTGlobalObject    int32 = 224
+	amd64RTMicrotaskHead   int32 = 232
+	amd64RTMicrotaskTail   int32 = 240
 
 	amd64ChunkNext        int32 = 0
 	amd64ChunkEnd         int32 = 8

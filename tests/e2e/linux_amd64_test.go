@@ -2059,3 +2059,16 @@ func TestLinuxAMD64TopLevelThrowExitsCleanly(t *testing.T) {
 		t.Fatalf("top-level throw exit = %v, want exit code 1", err)
 	}
 }
+
+func TestLinuxAMD64WinterTCQueueMicrotaskOrdering(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_queue_microtask",
+		source: `
+console.log("sync");
+queueMicrotask((): void => { console.log("micro-1"); });
+queueMicrotask((): void => { console.log("micro-2"); });
+spawn((): void => { console.log("task"); });
+`,
+		expected: "sync\nmicro-1\nmicro-2\ntask\n",
+	})
+}

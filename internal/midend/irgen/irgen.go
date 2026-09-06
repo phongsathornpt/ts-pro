@@ -3936,6 +3936,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 			switch ident.Name {
+			case "queueMicrotask":
+				closure := g.lowerExpr(e.Args[0])
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+					Callee: "ts_microtask_spawn",
+					Args:   []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(types.TypeVoid)}},
+				})
+				return nil
 			case "atob":
 				input := g.lowerExpr(e.Args[0])
 				valid := g.currentFn.NewValue("atob_valid", types.TypeBoolean)

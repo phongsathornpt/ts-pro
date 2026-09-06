@@ -760,7 +760,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 240)
+	e.SubRegImm32(amd64.RSP, 256)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1529,6 +1529,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64TaskSuspend(e)
 	fnOffsets["ts_task_spawn"] = len(e.Code)
 	emitAMD64TaskSpawn(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_microtask_spawn"] = len(e.Code)
+	emitAMD64MicrotaskSpawn(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_clock_now_ns"] = len(e.Code)
 	emitAMD64ClockNowNS(e)
 	fnOffsets["ts_performance_now"] = len(e.Code)
@@ -1888,7 +1890,7 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.R11, 0)
 	e.MovDerefReg(amd64.R15, amd64RTTaskHead, amd64.R11)
 	e.MovDerefReg(amd64.R15, amd64RTTaskTail, amd64.R11)
-	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack, amd64RTFree128, amd64RTFree512, amd64RTFree2048, amd64RTFree8192, amd64RTDenseChunkStack, amd64RTGlobalObject} {
+	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack, amd64RTFree128, amd64RTFree512, amd64RTFree2048, amd64RTFree8192, amd64RTDenseChunkStack, amd64RTGlobalObject, amd64RTMicrotaskHead, amd64RTMicrotaskTail} {
 		e.MovDerefReg(amd64.R15, off, amd64.R11)
 	}
 	emitAMD64ClockSampleToContext(e, 1, amd64RTTimeOriginMono)
