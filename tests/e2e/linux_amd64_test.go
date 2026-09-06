@@ -1964,12 +1964,17 @@ func TestLinuxAMD64WinterTCPerformanceNow(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "wintertc_performance_now",
 		source: `
+const origin = performance.timeOrigin;
 const start = performance.now();
 const end = performance.now();
+const json = performance.toJSON();
+console.log(origin > 1600000000000);
 console.log(start >= 0);
+console.log(start < 60000);
 console.log(end >= start);
+console.log(json.timeOrigin === origin);
 `,
-		expected: "true\ntrue\n",
+		expected: "true\ntrue\ntrue\ntrue\ntrue\n",
 	})
 }
 

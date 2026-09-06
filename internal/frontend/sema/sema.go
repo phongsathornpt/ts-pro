@@ -1153,7 +1153,11 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			}
 			if e.Name == "performance" {
 				obj := types.NewObject("$Performance")
+				json := types.NewObject("$PerformanceJSON")
+				json.AddField("timeOrigin", types.TypeNumber, false)
 				obj.AddField("now", types.NewFunction(nil, types.TypeNumber), false)
+				obj.AddField("timeOrigin", types.TypeNumber, false)
+				obj.AddField("toJSON", types.NewFunction(nil, json), false)
 				c.result.Types[e] = obj
 				return obj
 			}

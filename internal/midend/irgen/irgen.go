@@ -3802,6 +3802,11 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.lowerOptionalMember(e)
 		}
 		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			if ident.Name == "performance" && e.Property == "timeOrigin" {
+				res := g.currentFn.NewValue("performance_time_origin", types.TypeNumber)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_performance_time_origin"})
+				return res
+			}
 			if ident.Name == "navigator" && e.Property == "userAgent" {
 				return ir.ConstString{Value: "ts-pro"}
 			}
@@ -3888,10 +3893,22 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.lowerDynamicGet(obj, e.Property)
 	case *ast.CallExpr:
 		if member, ok := e.Callee.(*ast.MemberExpr); ok {
-			if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" && member.Property == "now" {
-				res := g.currentFn.NewValue("performance_now", types.TypeNumber)
-				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_performance_now"})
-				return res
+			if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" {
+				switch member.Property {
+				case "now":
+					res := g.currentFn.NewValue("performance_now", types.TypeNumber)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_performance_now"})
+					return res
+				case "toJSON":
+					t := g.semanticType(e).(*types.ObjectType)
+					offsets, refMask, shape := g.objectLayout(t)
+					obj := g.currentFn.NewValue("performance_json", t)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: obj, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+					origin := g.currentFn.NewValue("performance_json_origin", types.TypeNumber)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: origin, Callee: "ts_performance_time_origin"})
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: "timeOrigin", Offset: offsets["timeOrigin"], Val: origin})
+					return obj
+				}
 			}
 			if promise, handled := g.lowerPromiseStaticCall(e, member); handled {
 				return promise

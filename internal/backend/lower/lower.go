@@ -760,7 +760,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["_start"] = len(e.Code)
 	// Reserve a small runtime context on the process stack. R15 is callee-saved
 	// by SysV and deliberately excluded from the program register allocator.
-	e.SubRegImm32(amd64.RSP, 208)
+	e.SubRegImm32(amd64.RSP, 224)
 	e.MovRegReg(amd64.R15, amd64.RSP)
 	initOffset := len(e.Code)
 	e.CallRel32(0)
@@ -1533,6 +1533,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64ClockNowNS(e)
 	fnOffsets["ts_performance_now"] = len(e.Code)
 	emitAMD64PerformanceNow(e, fnOffsets["ts_clock_now_ns"])
+	fnOffsets["ts_performance_time_origin"] = len(e.Code)
+	emitAMD64PerformanceTimeOrigin(e)
 	fnOffsets["ts_nanosleep_ns"] = len(e.Code)
 	emitAMD64NanosleepNS(e)
 	fnOffsets["ts_task_run_one"] = len(e.Code)
@@ -1867,6 +1869,8 @@ func emitAMD64RuntimeInit(e *amd64.Emitter) {
 	for _, off := range []int32{amd64RTCurrentTask, amd64RTSchedRsp, amd64RTSchedRbp, amd64RTSchedRbx, amd64RTSchedR12, amd64RTSchedR13, amd64RTSchedR14, amd64RTSchedRoot, amd64RTTimerHead, amd64RTMarkChunk, amd64RTMarkStack, amd64RTFree128, amd64RTFree512, amd64RTFree2048, amd64RTFree8192, amd64RTDenseChunkStack} {
 		e.MovDerefReg(amd64.R15, off, amd64.R11)
 	}
+	emitAMD64ClockSampleToContext(e, 1, amd64RTTimeOriginMono)
+	emitAMD64ClockSampleToContext(e, 0, amd64RTTimeOriginEpoch)
 	e.Ret()
 }
 
