@@ -211,3 +211,86 @@ func emitAMD64JSUnboxRef(e *amd64.Emitter) {
 	e.AndRegReg(amd64.RAX, amd64.R10)
 	e.Ret()
 }
+
+func emitAMD64JSToBool(e *amd64.Emitter) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	e.MovRegImm64(amd64.RAX, 0)
+	e.MovRegImm64(amd64.R10, amd64UndefinedBits)
+	e.CmpRegReg(amd64.RDI, amd64.R10)
+	isFalseUndefined := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R10, amd64NullBits)
+	e.CmpRegReg(amd64.RDI, amd64.R10)
+	isFalseNull := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.MovRegImm64(amd64.R11, amd64JSTagMask)
+	e.AndRegReg(amd64.R10, amd64.R11)
+	e.MovRegImm64(amd64.R11, amd64JSBoolTag)
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	isBool := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R11, amd64JSStringTag)
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	isString := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R11, amd64JSRefTag)
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	isRef := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+
+	// Remaining values are raw IEEE-754 numbers. ±0 and canonical NaN are false.
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.MovRegImm64(amd64.R11, 0x7fffffffffffffff)
+	e.AndRegReg(amd64.R10, amd64.R11)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	isZero := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R11, amd64JSNumberNaN)
+	e.CmpRegReg(amd64.RDI, amd64.R11)
+	isNaN := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.RAX, 1)
+	numberDone := len(e.Code)
+	e.JmpRel32(0)
+
+	boolLabel := len(e.Code)
+	patchJcc(isBool, boolLabel)
+	e.MovRegReg(amd64.RAX, amd64.RDI)
+	e.MovRegImm64(amd64.R10, 1)
+	e.AndRegReg(amd64.RAX, amd64.R10)
+	boolDone := len(e.Code)
+	e.JmpRel32(0)
+
+	stringLabel := len(e.Code)
+	patchJcc(isString, stringLabel)
+	e.MovRegReg(amd64.R10, amd64.RDI)
+	e.MovRegImm64(amd64.R11, amd64JSPayloadMask)
+	e.AndRegReg(amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.R10, amd64.R10, 0)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	stringEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.RAX, 1)
+	stringDone := len(e.Code)
+	e.JmpRel32(0)
+
+	refLabel := len(e.Code)
+	patchJcc(isRef, refLabel)
+	e.MovRegImm64(amd64.RAX, 1)
+	refDone := len(e.Code)
+	e.JmpRel32(0)
+
+	falseLabel := len(e.Code)
+	for _, at := range []int{isFalseUndefined, isFalseNull, isZero, isNaN, stringEmpty} {
+		patchJcc(at, falseLabel)
+	}
+	done := len(e.Code)
+	for _, at := range []int{numberDone, boolDone, stringDone, refDone} {
+		patchJmp(at, done)
+	}
+	e.Ret()
+}

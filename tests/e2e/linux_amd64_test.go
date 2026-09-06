@@ -2236,3 +2236,22 @@ console.log("done");
 		expected: "signal-listener\n1\ndone\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCWebIDLBooleanCoercion(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_webidl_boolean_coercion",
+		source: `
+console.log(new Event("one", { cancelable: 1 }).cancelable);
+console.log(new Event("zero", { cancelable: 0 }).cancelable);
+console.log(new Event("text", { cancelable: "yes" }).cancelable);
+console.log(new Event("empty", { cancelable: "" }).cancelable);
+console.log(new Event("object", { cancelable: { value: 1 } }).cancelable);
+const target = new EventTarget();
+const passive = new Event("passive", { cancelable: 1 });
+target.addEventListener("passive", (event: Event): void => { event.preventDefault(); }, { passive: "yes" });
+console.log(target.dispatchEvent(passive));
+console.log(passive.defaultPrevented);
+`,
+		expected: "true\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n",
+	})
+}

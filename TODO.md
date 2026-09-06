@@ -542,11 +542,11 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Share the same cell across nested arrows/function expressions and outer scope.
   - [ ] Preserve immutable/by-value captures where mutation is impossible.
   - [x] Add native regression for outer/inner mutation, nested closures, timers, and EventTarget callbacks.
-- [ ] F2 EventTarget/WebIDL listener options
+- [x] F2 EventTarget/WebIDL listener options
   - [x] Finish capture identity and remove matching semantics.
   - [x] Finish passive preventDefault suppression.
   - [x] Finish AbortSignal-backed automatic listener removal.
-  - [ ] Add dictionary/default/coercion helper shared by later WebIDL APIs.
+  - [x] Add dictionary/default/coercion helper shared by later WebIDL APIs.
 - [ ] F3 Byte storage foundation
   - [ ] Add GC-safe byte buffer allocation, length/capacity, slice/copy helpers.
   - [ ] Add UTF-8/Web string <-> bytes conversion and bounds tests.
@@ -561,13 +561,13 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 
 - [x] GC-safe `any`/JSValue cell storage shared by Web runtime state.
 - [ ] Callback/closure ABI hardening across arbitrary user callbacks.
-- [ ] Shared WebIDL dictionary/default/coercion helpers.
+- [x] Shared WebIDL dictionary/default/coercion helpers.
 - [ ] Web async job and rejection-event hooks.
 - [ ] GC-safe byte buffer/string conversion primitive.
 - [ ] Native network/random/crypto/compression capability layer.
 
 - [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
-- [ ] Phase 2: DOM events and abort primitives.
+- [x] Phase 2: DOM events and abort primitives.
 - [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
 - [ ] Phase 4: Blob, File, FormData and body byte/string primitives.
 - [ ] Phase 5: Streams interfaces required by ECMA-429.

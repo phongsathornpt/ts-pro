@@ -3534,55 +3534,67 @@ func (g *generator) setEventField(obj ir.Operand, name string, value ir.Operand)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: obj, Field: name, Offset: offsets[name], Val: value})
 }
 
-func (g *generator) lowerEventInitBool(init ast.Expr, initValue ir.Operand, name string) ir.Operand {
-	if init == nil {
-		return ir.ConstBool{Value: false}
+func (g *generator) lowerWebIDLBoolean(value ir.Operand, sourceType types.Type) ir.Operand {
+	if sourceType == types.TypeBoolean && value.Type() == types.TypeBoolean {
+		return value
 	}
-	if objType, ok := g.semanticType(init).(*types.ObjectType); ok {
+	boxed := value
+	if !irJSValueType(value.Type()) {
+		boxed = g.boxJSValue(value, sourceType)
+	}
+	res := g.currentFn.NewValue("webidl_bool", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_js_to_bool", Args: []ir.Operand{boxed}, ParamTypes: []types.Type{types.TypeAny},
+	})
+	return res
+}
+
+func (g *generator) lowerWebIDLDictionaryMember(expr ast.Expr, value ir.Operand, name string, targetType types.Type, fallback ir.Operand) (ir.Operand, bool) {
+	if expr == nil || value == nil {
+		return fallback, false
+	}
+	convert := func(raw ir.Operand, sourceType types.Type) ir.Operand {
+		if targetType == types.TypeBoolean {
+			return g.lowerWebIDLBoolean(raw, sourceType)
+		}
+		if targetType == types.TypeAny {
+			if irJSValueType(raw.Type()) {
+				return raw
+			}
+			return g.boxJSValue(raw, sourceType)
+		}
+		return g.coerceJSValueBoundary(raw, sourceType, targetType)
+	}
+	if objType, ok := g.semanticType(expr).(*types.ObjectType); ok {
 		field, exists := objType.Fields[name]
 		if !exists {
-			return ir.ConstBool{Value: false}
+			return fallback, false
 		}
 		offsets, _, _ := g.objectLayout(objType)
-		res := g.currentFn.NewValue("event_init_"+name, field.Type)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: initValue, Field: name, Offset: offsets[name]})
-		if field.Type != types.TypeBoolean {
-			return g.coerceJSValueBoundary(res, field.Type, types.TypeBoolean)
-		}
-		return res
+		raw := g.currentFn.NewValue("webidl_dict_"+name, field.Type)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: value, Field: name, Offset: offsets[name]})
+		return convert(raw, field.Type), true
 	}
-	if irJSValueType(initValue.Type()) {
-		boxed := g.lowerDynamicGet(initValue, name)
-		return g.coerceJSValueBoundary(boxed, types.TypeAny, types.TypeBoolean)
+	if irJSValueType(value.Type()) {
+		raw := g.lowerDynamicGet(value, name)
+		return convert(raw, types.TypeAny), true
 	}
-	return ir.ConstBool{Value: false}
+	return fallback, false
+}
+
+func (g *generator) lowerWebIDLDictionaryBool(expr ast.Expr, value ir.Operand, name string, fallback bool) ir.Operand {
+	fallbackValue := ir.Operand(ir.ConstBool{Value: fallback})
+	result, _ := g.lowerWebIDLDictionaryMember(expr, value, name, types.TypeBoolean, fallbackValue)
+	return result
+}
+
+func (g *generator) lowerEventInitBool(init ast.Expr, initValue ir.Operand, name string) ir.Operand {
+	return g.lowerWebIDLDictionaryBool(init, initValue, name, false)
 }
 
 func (g *generator) lowerEventInitValue(init ast.Expr, initValue ir.Operand, name string, targetType types.Type, fallback ir.Operand) ir.Operand {
-	if init == nil {
-		return fallback
-	}
-	if objType, ok := g.semanticType(init).(*types.ObjectType); ok {
-		field, exists := objType.Fields[name]
-		if !exists {
-			return fallback
-		}
-		offsets, _, _ := g.objectLayout(objType)
-		res := g.currentFn.NewValue("event_init_"+name, field.Type)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: res, Obj: initValue, Field: name, Offset: offsets[name]})
-		if targetType == types.TypeAny && !irJSValueType(field.Type) {
-			return g.boxJSValue(res, field.Type)
-		}
-		return g.coerceJSValueBoundary(res, field.Type, targetType)
-	}
-	if irJSValueType(initValue.Type()) {
-		value := g.lowerDynamicGet(initValue, name)
-		if targetType == types.TypeAny {
-			return value
-		}
-		return g.coerceJSValueBoundary(value, types.TypeAny, targetType)
-	}
-	return fallback
+	result, _ := g.lowerWebIDLDictionaryMember(init, initValue, name, targetType, fallback)
+	return result
 }
 
 func (g *generator) initEventVariantFields(obj ir.Operand, className string, init ast.Expr, initValue ir.Operand) {
@@ -3759,25 +3771,21 @@ func (g *generator) lowerEventListenerOptionBool(expr ast.Expr, value ir.Operand
 		}
 		return ir.ConstBool{Value: false}
 	}
-	return g.lowerEventInitBool(expr, value, name)
+	return g.lowerWebIDLDictionaryBool(expr, value, name, false)
 }
 
 func (g *generator) lowerEventListenerSignal(expr ast.Expr, value ir.Operand) (ir.Operand, bool) {
+	if expr == nil {
+		return nil, false
+	}
 	objType, ok := g.semanticType(expr).(*types.ObjectType)
 	if !ok {
 		return nil, false
 	}
-	field, exists := objType.Fields["signal"]
-	if !exists {
+	if _, exists := objType.Fields["signal"]; !exists {
 		return nil, false
 	}
-	offsets, _, _ := g.objectLayout(objType)
-	raw := g.currentFn.NewValue("event_listener_signal", field.Type)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: value, Field: "signal", Offset: offsets["signal"]})
-	if field.Type != g.semaResult.AbortSignalType {
-		raw = g.coerceJSValueBoundary(raw, field.Type, g.semaResult.AbortSignalType).(*ir.Value)
-	}
-	return raw, true
+	return g.lowerWebIDLDictionaryMember(expr, value, "signal", g.semaResult.AbortSignalType, ir.ConstNull{})
 }
 
 func (g *generator) makeEventListenerAbortRemovalCallback(target, eventType, callback, capture ir.Operand) ir.Operand {
