@@ -440,33 +440,9 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		}
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
+	case *ast.MemberExpr:
+		return c.checkMemberExpr(e)
 	default:
-		mem := expr.(*ast.MemberExpr)
-		if ident, ok := mem.Object.(*ast.IdentExpr); ok {
-			if members := c.result.Enums[ident.Name]; members != nil {
-				if _, exists := members[mem.Property]; !exists {
-					c.error(e.Span(), "TS2339", fmt.Sprintf("Enum '%s' has no member '%s'.", ident.Name, mem.Property))
-				}
-				c.result.Types[ident] = types.TypeNumber
-				c.result.Types[mem] = types.TypeNumber
-				return types.TypeNumber
-			}
-		}
-		objType := c.checkExpr(mem.Object)
-		lookupType := objType
-		if mem.Optional {
-			lookupType = removeNullishType(objType)
-		}
-		memberType, ok := c.lookupMemberType(lookupType, mem.Property)
-		if !ok {
-			c.error(e.Span(), "TS2339", fmt.Sprintf("Property '%s' does not exist on type '%s'.", mem.Property, objType))
-			c.result.Types[mem] = types.TypeAny
-			return types.TypeAny
-		}
-		if mem.Optional {
-			memberType = types.NewUnion(memberType, types.TypeUndefined)
-		}
-		c.result.Types[mem] = memberType
-		return memberType
+		panic(fmt.Sprintf("unsupported expression %T", expr))
 	}
 }
