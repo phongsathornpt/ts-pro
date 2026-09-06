@@ -599,6 +599,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.MovRegReg(amd64.R10, amd64.R13)
 	e.AddRegImm32(amd64.R10, amd64ChunkSize)
 	e.MovRegDeref(amd64.R11, amd64.R13, amd64ChunkUsed)
+	e.MovRegImm64(amd64.R8, 0) // previous free header in this chunk
 
 	sweepObjectLoop := len(e.Code)
 	e.CmpRegReg(amd64.R10, amd64.R11)
@@ -616,17 +617,37 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	// Newly unreachable object.
 	e.MovRegImm64(amd64.RAX, 2)
 	e.MovDerefReg(amd64.R10, amd64ObjectFlags, amd64.RAX)
-	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R12)
-	e.MovRegReg(amd64.R12, amd64.R10)
 	e.AddRegReg(amd64.R14, amd64.RBX)
-	objectNextJump := len(e.Code)
+	newlyFreeJump := len(e.Code)
 	e.JmpRel32(0)
 
 	alreadyFree := len(e.Code)
 	patchJcc(alreadyFreeJump, alreadyFree)
+
+	freeObject := len(e.Code)
+	patchJmp(newlyFreeJump, freeObject)
+	// Coalesce with the immediately preceding free object in this chunk.
+	e.TestRegReg(amd64.R8, amd64.R8)
+	linkFree := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64ObjectSize)
+	e.MovRegReg(amd64.RDX, amd64.R8)
+	e.AddRegReg(amd64.RDX, amd64.RAX)
+	e.CmpRegReg(amd64.RDX, amd64.R10)
+	notAdjacent := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.AddRegReg(amd64.RAX, amd64.RBX)
+	e.MovDerefReg(amd64.R8, amd64ObjectSize, amd64.RAX)
+	mergedJump := len(e.Code)
+	e.JmpRel32(0)
+
+	linkFreeLabel := len(e.Code)
+	patchJcc(linkFree, linkFreeLabel)
+	patchJcc(notAdjacent, linkFreeLabel)
 	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.R12)
 	e.MovRegReg(amd64.R12, amd64.R10)
-	freeNextJump := len(e.Code)
+	e.MovRegReg(amd64.R8, amd64.R10)
+	linkedJump := len(e.Code)
 	e.JmpRel32(0)
 
 	live := len(e.Code)
@@ -634,10 +655,11 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R10, amd64ObjectFlags, amd64.RAX)
 	e.MovDerefReg(amd64.R10, amd64ObjectNextFree, amd64.RAX)
+	e.MovRegImm64(amd64.R8, 0)
 
 	objectNext := len(e.Code)
-	patchJmp(objectNextJump, objectNext)
-	patchJmp(freeNextJump, objectNext)
+	patchJmp(mergedJump, objectNext)
+	patchJmp(linkedJump, objectNext)
 	e.AddRegReg(amd64.R10, amd64.RBX)
 	objectBack := len(e.Code)
 	e.JmpRel32(0)

@@ -229,3 +229,56 @@ func TestAMD64GCClearsDeadRootsAcrossBlocks(t *testing.T) {
 		t.Fatalf("mapped bytes: got %d, want %d; dead roots crossed block boundaries", mappedBytes, 1<<20)
 	}
 }
+
+func TestAMD64GCCoalescesAdjacentFreeBlocksForLargeReuse(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("native Linux AMD64 execution required")
+	}
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	blocks := make([]*ir.BasicBlock, 1200)
+	for i := range blocks {
+		blocks[i] = fn.NewBlock("small_dead")
+	}
+	small := strings.Repeat("s", 512)
+	for i, bb := range blocks {
+		value := fn.NewValue("small", types.TypeString)
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: value, Callee: "ts_string_concat", Args: []ir.Operand{ir.ConstString{Value: small}, ir.ConstString{Value: small}}})
+		if i+1 < len(blocks) {
+			bb.Terminator = &ir.JumpTerm{Target: blocks[i+1]}
+		}
+	}
+	exit := blocks[len(blocks)-1]
+	large := strings.Repeat("L", 32768)
+	largeValue := fn.NewValue("large_reuse", types.TypeString)
+	exit.Instructions = append(exit.Instructions, &ir.CallInst{Res: largeValue, Callee: "ts_string_concat", Args: []ir.Operand{ir.ConstString{Value: large}, ir.ConstString{Value: large}}})
+	mapped := fn.NewValue("mapped_coalesce", types.TypeNumber)
+	exit.Instructions = append(exit.Instructions, &ir.CallInst{Res: mapped, Callee: "ts_gc_mapped_bytes"})
+	exit.Instructions = append(exit.Instructions, &ir.CallInst{Callee: "ts_print_val", Args: []ir.Operand{mapped}})
+	exit.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+
+	code, err := lowerAMD64(prog)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	bin, err := elf.CreateExecutable(code, false)
+	if err != nil {
+		t.Fatalf("elf: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "gc-coalesce")
+	if err := os.WriteFile(path, bin, 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	out, err := exec.Command(path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("execute: %v\n%s", err, out)
+	}
+	mappedBytes, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		t.Fatalf("mapped bytes %q: %v", out, err)
+	}
+	if mappedBytes != 1<<20 {
+		t.Fatalf("mapped bytes: got %d, want %d; adjacent free blocks were not coalesced", mappedBytes, 1<<20)
+	}
+}
