@@ -1,0 +1,11 @@
+const params = new URLSearchParams("a=1&b=hello+world&a=%E2%9C%93&plus=%2B&empty");
+console.log(params.size);
+console.log(params.get("b"));
+const all = params.getAll("a");
+console.log(all.length);
+console.log(all[1]);
+console.log(params.get("empty"));
+params.set("a", "x y");
+params.delete("b");
+params.append("c", "a+b");
+console.log(params.toString());

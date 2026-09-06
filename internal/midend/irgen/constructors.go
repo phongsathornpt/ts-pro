@@ -32,7 +32,11 @@ func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 		return g.newUint8ArrayView(data, buffer, ir.ConstNumber{Value: 0}, length)
 	}
 	if e.ClassName == "URLSearchParams" {
-		return g.lowerURLSearchParamsNew()
+		var init ir.Operand
+		if len(e.Args) == 1 {
+			init = g.lowerExpr(e.Args[0])
+		}
+		return g.lowerURLSearchParamsNew(init)
 	}
 	if e.ClassName == "TextEncoder" {
 		t := g.semaResult.TextEncoderType

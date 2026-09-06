@@ -6,7 +6,110 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
 )
 
-func (g *generator) lowerURLSearchParamsNew() ir.Operand {
+func (g *generator) urlStringLen(value ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_string_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_len", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeString}})
+	return res
+}
+
+func (g *generator) urlStringFindByte(value ir.Operand, ch, start, end ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_string_find", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_find_byte", Args: []ir.Operand{value, ch, start, end}, ParamTypes: []types.Type{types.TypeString, types.TypeNumber, types.TypeNumber, types.TypeNumber}})
+	return res
+}
+
+func (g *generator) urlStringSlice(value, start, end ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_string_slice", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_slice_bytes", Args: []ir.Operand{value, start, end}, ParamTypes: []types.Type{types.TypeString, types.TypeNumber, types.TypeNumber}})
+	return res
+}
+
+func (g *generator) lowerFormURLDecode(value ir.Operand) ir.Operand {
+	bytes := g.currentFn.NewValue("form_decoded_bytes", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: bytes, Callee: "ts_form_url_decode_bytes", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeString}})
+	length := g.currentFn.NewValue("form_decoded_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{bytes}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	res := g.currentFn.NewValue("form_decoded", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_utf8_sanitize", Args: []ir.Operand{bytes, ir.ConstNumber{Value: 0}, length, ir.ConstBool{Value: false}}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeBoolean}})
+	return res
+}
+
+func (g *generator) lowerFormURLEncode(value ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("form_encoded", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_form_url_encode", Args: []ir.Operand{value}, ParamTypes: []types.Type{types.TypeString}})
+	return res
+}
+
+func (g *generator) lowerURLSearchParamsParse(entries, input ir.Operand) {
+	total := g.urlStringLen(input)
+	pre := g.currentBB
+	condBB := g.currentFn.NewBlock("url_params_parse_cond")
+	scanBB := g.currentFn.NewBlock("url_params_parse_scan")
+	ampBB := g.currentFn.NewBlock("url_params_parse_amp")
+	lastBB := g.currentFn.NewBlock("url_params_parse_last")
+	pairBB := g.currentFn.NewBlock("url_params_parse_pair")
+	parseBB := g.currentFn.NewBlock("url_params_parse_component")
+	eqBB := g.currentFn.NewBlock("url_params_parse_eq")
+	noEqBB := g.currentFn.NewBlock("url_params_parse_no_eq")
+	decodeBB := g.currentFn.NewBlock("url_params_parse_decode")
+	advanceBB := g.currentFn.NewBlock("url_params_parse_advance")
+	doneBB := g.currentFn.NewBlock("url_params_parse_done")
+	pre.Terminator = &ir.JumpTerm{Target: condBB}
+
+	offset := g.currentFn.NewValue("url_params_offset", types.TypeNumber)
+	nextOffset := g.currentFn.NewValue("url_params_next_offset", types.TypeNumber)
+	condBB.Phis = append(condBB.Phis, &ir.PhiInst{Res: offset, Incoming: []ir.PhiIncoming{{Block: pre, Value: ir.ConstNumber{Value: 0}}, {Block: advanceBB, Value: nextOffset}}})
+	more := g.currentFn.NewValue("url_params_more", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: offset, RHS: total})
+	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: scanBB, Else: doneBB}
+
+	g.currentBB = scanBB
+	amp := g.urlStringFindByte(input, ir.ConstNumber{Value: '&'}, offset, total)
+	hasAmp := g.currentFn.NewValue("url_params_has_amp", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasAmp, Op: ir.OpGe, LHS: amp, RHS: ir.ConstNumber{Value: 0}})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasAmp, Then: ampBB, Else: lastBB}
+	ampBB.Terminator = &ir.JumpTerm{Target: pairBB}
+	lastBB.Terminator = &ir.JumpTerm{Target: pairBB}
+
+	pairEnd := g.currentFn.NewValue("url_params_pair_end", types.TypeNumber)
+	pairBB.Phis = append(pairBB.Phis, &ir.PhiInst{Res: pairEnd, Incoming: []ir.PhiIncoming{{Block: ampBB, Value: amp}, {Block: lastBB, Value: total}}})
+	nonEmpty := g.currentFn.NewValue("url_params_pair_nonempty", types.TypeBoolean)
+	pairBB.Instructions = append(pairBB.Instructions, &ir.BinaryInst{Res: nonEmpty, Op: ir.OpGt, LHS: pairEnd, RHS: offset})
+	pairBB.Terminator = &ir.BranchTerm{Cond: nonEmpty, Then: parseBB, Else: advanceBB}
+
+	g.currentBB = parseBB
+	equalAt := g.urlStringFindByte(input, ir.ConstNumber{Value: '='}, offset, pairEnd)
+	hasEq := g.currentFn.NewValue("url_params_has_eq", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasEq, Op: ir.OpGe, LHS: equalAt, RHS: ir.ConstNumber{Value: 0}})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasEq, Then: eqBB, Else: noEqBB}
+
+	eqValueStart := g.currentFn.NewValue("url_params_eq_value_start", types.TypeNumber)
+	eqBB.Instructions = append(eqBB.Instructions, &ir.BinaryInst{Res: eqValueStart, Op: ir.OpAdd, LHS: equalAt, RHS: ir.ConstNumber{Value: 1}})
+	eqBB.Terminator = &ir.JumpTerm{Target: decodeBB}
+	noEqBB.Terminator = &ir.JumpTerm{Target: decodeBB}
+	nameEnd := g.currentFn.NewValue("url_params_name_end", types.TypeNumber)
+	valueStart := g.currentFn.NewValue("url_params_value_start", types.TypeNumber)
+	decodeBB.Phis = append(decodeBB.Phis,
+		&ir.PhiInst{Res: nameEnd, Incoming: []ir.PhiIncoming{{Block: eqBB, Value: equalAt}, {Block: noEqBB, Value: pairEnd}}},
+		&ir.PhiInst{Res: valueStart, Incoming: []ir.PhiIncoming{{Block: eqBB, Value: eqValueStart}, {Block: noEqBB, Value: pairEnd}}},
+	)
+	g.currentBB = decodeBB
+	rawName := g.urlStringSlice(input, offset, nameEnd)
+	rawValue := g.urlStringSlice(input, valueStart, pairEnd)
+	name := g.lowerFormURLDecode(rawName)
+	value := g.lowerFormURLDecode(rawValue)
+	g.pushArrayOperand(entries, name)
+	g.pushArrayOperand(entries, value)
+	decodeEnd := g.currentBB
+	decodeEnd.Terminator = &ir.JumpTerm{Target: advanceBB}
+
+	g.currentBB = advanceBB
+	advanceBB.Instructions = append(advanceBB.Instructions, &ir.BinaryInst{Res: nextOffset, Op: ir.OpAdd, LHS: pairEnd, RHS: ir.ConstNumber{Value: 1}})
+	advanceBB.Terminator = &ir.JumpTerm{Target: condBB}
+	g.currentBB = doneBB
+}
+
+func (g *generator) lowerURLSearchParamsNew(init ir.Operand) ir.Operand {
 	t := g.semaResult.URLSearchParamsType
 	offsets, refMask, shape := g.objectLayout(t)
 	params := g.currentFn.NewValue("url_search_params", t)
@@ -21,6 +124,9 @@ func (g *generator) lowerURLSearchParamsNew() ir.Operand {
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
 		Obj: params, Field: "$entries", Offset: offsets["$entries"], Val: entries,
 	})
+	if init != nil {
+		g.lowerURLSearchParamsParse(entries, init)
+	}
 	return params
 }
 
@@ -262,6 +368,75 @@ func (g *generator) lowerURLSearchParamsRebuild(params, name, replacement ir.Ope
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: params, Field: "$entries", Offset: offsets["$entries"], Val: nextEntries})
 }
 
+func (g *generator) lowerURLSearchParamsSerialize(params ir.Operand) ir.Operand {
+	entries := g.urlSearchParamsEntries(params)
+	start := g.currentBB
+	length := g.currentFn.NewValue("url_params_serialize_len", types.TypeNumber)
+	start.Instructions = append(start.Instructions, &ir.ArrayLengthInst{Res: length, Array: entries})
+	hasAny := g.currentFn.NewValue("url_params_serialize_has", types.TypeBoolean)
+	start.Instructions = append(start.Instructions, &ir.BinaryInst{Res: hasAny, Op: ir.OpGt, LHS: length, RHS: ir.ConstNumber{Value: 0}})
+	nonEmpty := g.currentFn.NewBlock("url_params_serialize_nonempty")
+	empty := g.currentFn.NewBlock("url_params_serialize_empty")
+	cond := g.currentFn.NewBlock("url_params_serialize_cond")
+	body := g.currentFn.NewBlock("url_params_serialize_body")
+	done := g.currentFn.NewBlock("url_params_serialize_done")
+	join := g.currentFn.NewBlock("url_params_serialize_join")
+	start.Terminator = &ir.BranchTerm{Cond: hasAny, Then: nonEmpty, Else: empty}
+	empty.Terminator = &ir.JumpTerm{Target: join}
+
+	g.currentBB = nonEmpty
+	key0 := g.currentFn.NewValue("url_params_key0", types.TypeString)
+	val0 := g.currentFn.NewValue("url_params_val0", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetElementInst{Res: key0, Array: entries, Index: ir.ConstNumber{Value: 0}},
+		&ir.GetElementInst{Res: val0, Array: entries, Index: ir.ConstNumber{Value: 1}},
+	)
+	encKey0 := g.lowerFormURLEncode(key0)
+	encVal0 := g.lowerFormURLEncode(val0)
+	pair0 := g.concatNativeStrings(g.concatNativeStrings(encKey0, ir.ConstString{Value: "="}), encVal0)
+	nonEmptyEnd := g.currentBB
+	nonEmptyEnd.Terminator = &ir.JumpTerm{Target: cond}
+
+	index := g.currentFn.NewValue("url_params_serialize_i", types.TypeNumber)
+	acc := g.currentFn.NewValue("url_params_serialize_acc", types.TypeString)
+	cond.Phis = append(cond.Phis,
+		&ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: nonEmptyEnd, Value: ir.ConstNumber{Value: 2}}}},
+		&ir.PhiInst{Res: acc, Incoming: []ir.PhiIncoming{{Block: nonEmptyEnd, Value: pair0}}},
+	)
+	more := g.currentFn.NewValue("url_params_serialize_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: length})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: done}
+
+	g.currentBB = body
+	key := g.currentFn.NewValue("url_params_key", types.TypeString)
+	valIndex := g.currentFn.NewValue("url_params_val_i", types.TypeNumber)
+	val := g.currentFn.NewValue("url_params_val", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetElementInst{Res: key, Array: entries, Index: index},
+		&ir.BinaryInst{Res: valIndex, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}},
+		&ir.GetElementInst{Res: val, Array: entries, Index: valIndex},
+	)
+	encKey := g.lowerFormURLEncode(key)
+	encVal := g.lowerFormURLEncode(val)
+	pair := g.concatNativeStrings(g.concatNativeStrings(encKey, ir.ConstString{Value: "="}), encVal)
+	withAmp := g.concatNativeStrings(ir.ConstString{Value: "&"}, pair)
+	nextAcc := g.concatNativeStrings(acc, withAmp)
+	next := g.currentFn.NewValue("url_params_serialize_next", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 2}})
+	bodyEnd := g.currentBB
+	bodyEnd.Terminator = &ir.JumpTerm{Target: cond}
+	cond.Phis[0].Incoming = append(cond.Phis[0].Incoming, ir.PhiIncoming{Block: bodyEnd, Value: next})
+	cond.Phis[1].Incoming = append(cond.Phis[1].Incoming, ir.PhiIncoming{Block: bodyEnd, Value: nextAcc})
+
+	g.currentBB = done
+	doneEnd := g.currentBB
+	doneEnd.Terminator = &ir.JumpTerm{Target: join}
+	g.currentBB = join
+	result := g.currentFn.NewValue("url_params_serialized", types.TypeString)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{{Block: empty, Value: ir.ConstString{Value: ""}}, {Block: doneEnd, Value: acc}}})
+	return result
+}
+
 func (g *generator) lowerURLSearchParamsMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
 	if !ok || objType.Name != "$URLSearchParams" {
@@ -288,6 +463,8 @@ func (g *generator) lowerURLSearchParamsMethodCall(e *ast.CallExpr, mem *ast.Mem
 	case "set":
 		g.lowerURLSearchParamsRebuild(params, g.lowerExpr(e.Args[0]), g.lowerExpr(e.Args[1]), true)
 		return nil, true
+	case "toString":
+		return g.lowerURLSearchParamsSerialize(params), true
 	}
 	return nil, false
 }

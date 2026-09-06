@@ -403,3 +403,24 @@ console.log(p.get("c"));
 		expected: "3\n1\nnull\ntrue\n2\n1\n3\n2\n9\n1\n9\n1\nfalse\n2\n4\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLSearchParamsFormEncoding(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_search_params_form_encoding",
+		source: `
+const params = new URLSearchParams("a=1&b=hello+world&a=%E2%9C%93&plus=%2B&empty");
+console.log(params.size);
+console.log(params.get("b"));
+const all = params.getAll("a");
+console.log(all.length);
+console.log(all[1]);
+console.log(params.get("empty"));
+console.log(params.toString());
+params.set("a", "x y");
+params.delete("b");
+params.append("c", "a+b");
+console.log(params.toString());
+`,
+		expected: "5\nhello world\n2\n✓\n\na=1&b=hello+world&a=%E2%9C%93&plus=%2B&empty=\na=x+y&plus=%2B&empty=&c=a%2Bb\n",
+	})
+}

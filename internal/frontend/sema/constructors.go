@@ -32,8 +32,10 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		return t
 	}
 	if e.ClassName == "URLSearchParams" {
-		if len(e.Args) != 0 {
-			c.error(e.Span(), "TS2554", "URLSearchParams currently expects no constructor arguments.")
+		if len(e.Args) > 1 {
+			c.error(e.Span(), "TS2554", "URLSearchParams expects at most one string argument.")
+		} else if len(e.Args) == 1 && c.checkExpr(e.Args[0]) != types.TypeString {
+			c.error(e.Args[0].Span(), "TS2345", "URLSearchParams init must be a string.")
 		}
 		t := c.builtinURLSearchParamsType()
 		c.result.Types[e] = t

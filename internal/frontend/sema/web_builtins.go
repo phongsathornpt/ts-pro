@@ -209,6 +209,8 @@ func (c *Checker) builtinURLSearchParamsMember(property string) (types.Type, boo
 		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}}, types.TypeVoid), true
 	case "set":
 		return types.NewFunction([]types.Param{{Name: "name", Type: types.TypeString}, {Name: "value", Type: types.TypeString}}, types.TypeVoid), true
+	case "toString":
+		return types.NewFunction(nil, types.TypeString), true
 	}
 	return nil, false
 }
