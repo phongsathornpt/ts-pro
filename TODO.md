@@ -534,6 +534,31 @@ Target: ECMA-429 / WinterTC Minimum Common Web API draft 31 July 2026. This is a
 
 Foundation blockers before broad API expansion:
 
+Execution TODO (finish in order; every checked item requires targeted native/e2e coverage and a separate commit):
+
+- [ ] F1 Callback/closure semantics
+  - [x] Box mutable captured lexical bindings into shared GC-safe JSValue cells.
+  - [x] Route captured identifier reads, writes, compound assignments, and ++/-- through the shared cell.
+  - [x] Share the same cell across nested arrows/function expressions and outer scope.
+  - [ ] Preserve immutable/by-value captures where mutation is impossible.
+  - [x] Add native regression for outer/inner mutation, nested closures, timers, and EventTarget callbacks.
+- [ ] F2 EventTarget/WebIDL listener options
+  - [x] Finish capture identity and remove matching semantics.
+  - [x] Finish passive preventDefault suppression.
+  - [x] Finish AbortSignal-backed automatic listener removal.
+  - [ ] Add dictionary/default/coercion helper shared by later WebIDL APIs.
+- [ ] F3 Byte storage foundation
+  - [ ] Add GC-safe byte buffer allocation, length/capacity, slice/copy helpers.
+  - [ ] Add UTF-8/Web string <-> bytes conversion and bounds tests.
+- [ ] F4 Web async jobs
+  - [ ] Add Promise-job integration on the microtask queue.
+  - [ ] Add unhandledrejection/rejectionhandled lifecycle hooks and ordering tests.
+- [ ] F5 Native capabilities
+  - [ ] Network transport abstraction and deterministic local HTTP integration harness.
+  - [ ] OS randomness + crypto/hash primitive layer.
+  - [ ] Compression/decompression primitive layer.
+- [ ] F6 Finish WinterTC Phase 1-9 using the foundations above, one API cluster per tested commit.
+
 - [x] GC-safe `any`/JSValue cell storage shared by Web runtime state.
 - [ ] Callback/closure ABI hardening across arbitrary user callbacks.
 - [ ] Shared WebIDL dictionary/default/coercion helpers.

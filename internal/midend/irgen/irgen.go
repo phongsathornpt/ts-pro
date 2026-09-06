@@ -35,6 +35,8 @@ type generator struct {
 	locals            map[string]ir.Operand
 	localProvenance   map[string]types.Type
 	localDirectCallee map[string]string
+	captureCells      map[*ir.Function]map[string]ir.Operand
+	captureCellTypes  map[*ir.Function]map[string]types.Type
 	err               error
 	arrowCounter      int
 	genericDecls      map[string]*ast.FunctionDecl
@@ -90,6 +92,76 @@ func irHeapRefType(t types.Type) bool {
 	default:
 		return true
 	}
+}
+
+func captureCellRuntimeType() *types.ObjectType {
+	return types.NewObject("$JSValueCell")
+}
+
+func (g *generator) captureCell(name string) (ir.Operand, types.Type, bool) {
+	if g.currentFn == nil {
+		return nil, nil, false
+	}
+	cells := g.captureCells[g.currentFn]
+	if cells == nil {
+		return nil, nil, false
+	}
+	cell, ok := cells[name]
+	if !ok {
+		return nil, nil, false
+	}
+	return cell, g.captureCellTypes[g.currentFn][name], true
+}
+
+func (g *generator) bindCaptureCell(fn *ir.Function, name string, cell ir.Operand, valueType types.Type) {
+	if g.captureCells[fn] == nil {
+		g.captureCells[fn] = make(map[string]ir.Operand)
+		g.captureCellTypes[fn] = make(map[string]types.Type)
+	}
+	g.captureCells[fn][name] = cell
+	g.captureCellTypes[fn][name] = valueType
+}
+
+func (g *generator) ensureCaptureCell(name string) (ir.Operand, types.Type) {
+	if cell, valueType, ok := g.captureCell(name); ok {
+		return cell, valueType
+	}
+	value := g.locals[name]
+	valueType := value.Type()
+	cellType := captureCellRuntimeType()
+	cell := g.currentFn.NewValue(name+"_cell", cellType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: cell, Callee: "ts_jsvalue_cell_new"})
+	boxed := value
+	if !irJSValueType(valueType) {
+		boxed = g.boxJSValue(value, valueType)
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_jsvalue_cell_set", Args: []ir.Operand{cell, boxed}, ParamTypes: []types.Type{cellType, types.TypeAny}})
+	g.bindCaptureCell(g.currentFn, name, cell, valueType)
+	return cell, valueType
+}
+
+func (g *generator) readLocal(name string) ir.Operand {
+	cell, valueType, ok := g.captureCell(name)
+	if !ok {
+		return g.locals[name]
+	}
+	boxed := g.currentFn.NewValue(name+"_cell_value", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: boxed, Callee: "ts_jsvalue_cell_get", Args: []ir.Operand{cell}})
+	return g.coerceJSValueBoundary(boxed, types.TypeAny, valueType)
+}
+
+func (g *generator) writeCapturedLocal(name string, value ir.Operand) bool {
+	cell, _, ok := g.captureCell(name)
+	if !ok {
+		return false
+	}
+	boxed := value
+	if !irJSValueType(value.Type()) {
+		boxed = g.boxJSValue(value, value.Type())
+	}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_jsvalue_cell_set", Args: []ir.Operand{cell, boxed}, ParamTypes: []types.Type{cell.Type(), types.TypeAny}})
+	g.locals[name] = value
+	return true
 }
 
 func cloneOperandMap(src map[string]ir.Operand) map[string]ir.Operand {
@@ -859,6 +931,34 @@ func (g *generator) collectArrowCaptures(expr ast.Expr, params map[string]struct
 			walk(n.Cond)
 			walk(n.Then)
 			walk(n.Else)
+		case *ast.ArrowFuncExpr:
+			nestedParams := make(map[string]struct{}, len(n.Params))
+			for _, p := range n.Params {
+				nestedParams[p.Name] = struct{}{}
+			}
+			var nested []string
+			if n.IsExprBody {
+				nested = g.collectArrowCaptures(n.Body.(ast.Expr), nestedParams)
+			} else {
+				nested = g.collectBlockClosureCaptures(n.Body.(*ast.BlockStmt), nestedParams)
+			}
+			for _, name := range nested {
+				if _, isParam := params[name]; !isParam {
+					found[name] = struct{}{}
+				}
+			}
+		case *ast.FunctionExpr:
+			nestedParams := make(map[string]struct{}, len(n.Params))
+			for _, p := range n.Params {
+				if !p.IsThis {
+					nestedParams[p.Name] = struct{}{}
+				}
+			}
+			for _, name := range g.collectBlockClosureCaptures(n.Body, nestedParams) {
+				if _, isParam := params[name]; !isParam {
+					found[name] = struct{}{}
+				}
+			}
 		}
 	}
 	walk(expr)
@@ -961,8 +1061,34 @@ func (g *generator) collectBlockClosureCaptures(block *ast.BlockStmt, params map
 			walkExpr(n.Cond)
 			walkExpr(n.Then)
 			walkExpr(n.Else)
-		case *ast.ArrowFuncExpr, *ast.FunctionExpr:
-			// Nested functions own their capture analysis.
+		case *ast.ArrowFuncExpr:
+			nestedParams := make(map[string]struct{}, len(n.Params))
+			for _, p := range n.Params {
+				nestedParams[p.Name] = struct{}{}
+			}
+			var nested []string
+			if n.IsExprBody {
+				nested = g.collectArrowCaptures(n.Body.(ast.Expr), nestedParams)
+			} else {
+				nested = g.collectBlockClosureCaptures(n.Body.(*ast.BlockStmt), nestedParams)
+			}
+			for _, name := range nested {
+				if _, shadowed := locals[name]; !shadowed {
+					found[name] = struct{}{}
+				}
+			}
+		case *ast.FunctionExpr:
+			nestedParams := make(map[string]struct{}, len(n.Params))
+			for _, p := range n.Params {
+				if !p.IsThis {
+					nestedParams[p.Name] = struct{}{}
+				}
+			}
+			for _, name := range g.collectBlockClosureCaptures(n.Body, nestedParams) {
+				if _, shadowed := locals[name]; !shadowed {
+					found[name] = struct{}{}
+				}
+			}
 		}
 	}
 	walkStmt = func(stmt ast.Stmt) {
@@ -1036,13 +1162,14 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 		captureNames = g.collectBlockClosureCaptures(body, paramSet)
 	}
 	captureOps := make([]ir.Operand, 0, len(captureNames))
+	captureTypes := make([]types.Type, 0, len(captureNames))
 	var refMask uint64
 	for i, name := range captureNames {
-		op := g.locals[name]
-		captureOps = append(captureOps, op)
-		if irHeapRefType(op.Type()) {
-			refMask |= uint64(1) << i
-		}
+		cell, valueType := g.ensureCaptureCell(name)
+		captureOps = append(captureOps, cell)
+		captureTypes = append(captureTypes, valueType)
+		// Capture cells are always GC-managed references.
+		refMask |= uint64(1) << i
 	}
 
 	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
@@ -1058,10 +1185,13 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
 	for i, captureName := range captureNames {
-		captureType := captureOps[i].Type()
-		v := lifted.NewValue(captureName+"_capture", captureType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: v, Closure: env, Index: i})
-		g.locals[captureName] = v
+		cellType := captureOps[i].Type()
+		cell := lifted.NewValue(captureName+"_cell_capture", cellType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: cell, Closure: env, Index: i})
+		// Keep the name visible to nested capture analysis while all reads/writes
+		// route through the shared cell.
+		g.locals[captureName] = cell
+		g.bindCaptureCell(lifted, captureName, cell, captureTypes[i])
 	}
 	for i, p := range e.Params {
 		pt := types.TypeAny
@@ -1712,6 +1842,22 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 
 func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	fnType := g.semanticType(e).(*types.FunctionType)
+	paramSet := make(map[string]struct{}, len(e.Params))
+	for _, p := range e.Params {
+		if !p.IsThis {
+			paramSet[p.Name] = struct{}{}
+		}
+	}
+	captureNames := g.collectBlockClosureCaptures(e.Body, paramSet)
+	captureOps := make([]ir.Operand, 0, len(captureNames))
+	captureTypes := make([]types.Type, 0, len(captureNames))
+	var refMask uint64
+	for i, captureName := range captureNames {
+		cell, valueType := g.ensureCaptureCell(captureName)
+		captureOps = append(captureOps, cell)
+		captureTypes = append(captureTypes, valueType)
+		refMask |= uint64(1) << i
+	}
 	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
 	name := fmt.Sprintf("$function%d", g.arrowCounter)
 	g.arrowCounter++
@@ -1724,6 +1870,13 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
+	for i, captureName := range captureNames {
+		cellType := captureOps[i].Type()
+		cell := lifted.NewValue(captureName+"_cell_capture", cellType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: cell, Closure: env, Index: i})
+		g.locals[captureName] = cell
+		g.bindCaptureCell(lifted, captureName, cell, captureTypes[i])
+	}
 	if fnType.This != nil {
 		thisVal := lifted.NewValue("$this", fnType.This)
 		lifted.Params = append(lifted.Params, thisVal)
@@ -1752,7 +1905,7 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	g.prog.Functions = append(g.prog.Functions, lifted)
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees
 	res := g.currentFn.NewValue("closure", fnType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: name})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: name, Captures: captureOps, RefMask: refMask})
 	return res
 }
 
@@ -2349,6 +2502,8 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		genericSpecs:      make(map[string]string),
 		classTags:         make(map[string]int),
 		emittedClassSpecs: make(map[string]bool),
+		captureCells:      make(map[*ir.Function]map[string]ir.Operand),
+		captureCellTypes:  make(map[*ir.Function]map[string]types.Type),
 	}
 	classNames := make([]string, 0, len(semaResult.Classes))
 	for name := range semaResult.Classes {
@@ -3488,6 +3643,7 @@ func (g *generator) lowerEventConstructor(e *ast.NewExpr, resultType *types.Obje
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: timestamp, Callee: "ts_performance_now"})
 	g.setEventField(obj, "timeStamp", timestamp)
 	g.setEventField(obj, "$dispatching", ir.ConstBool{Value: false})
+	g.setEventField(obj, "$inPassiveListener", ir.ConstBool{Value: false})
 	g.setEventField(obj, "$stopImmediate", ir.ConstBool{Value: false})
 	g.setEventField(obj, "$stopPropagation", ir.ConstBool{Value: false})
 	g.initEventVariantFields(obj, e.ClassName, initExpr, initValue)
@@ -3561,9 +3717,14 @@ func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (
 	switch mem.Property {
 	case "preventDefault":
 		cancelable := g.eventField(event, "cancelable", types.TypeBoolean)
+		passive := g.eventField(event, "$inPassiveListener", types.TypeBoolean)
+		notPassive := g.currentFn.NewValue("event_not_passive", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: notPassive, Op: ir.OpEq, LHS: passive, RHS: ir.ConstBool{Value: false}})
+		canPrevent := g.currentFn.NewValue("event_can_prevent", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: canPrevent, Op: ir.OpAnd, LHS: cancelable, RHS: notPassive})
 		setBB := g.currentFn.NewBlock("event_prevent_default")
 		doneBB := g.currentFn.NewBlock("event_prevent_default_done")
-		g.currentBB.Terminator = &ir.BranchTerm{Cond: cancelable, Then: setBB, Else: doneBB}
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: canPrevent, Then: setBB, Else: doneBB}
 		g.currentBB = setBB
 		g.setEventField(event, "defaultPrevented", ir.ConstBool{Value: true})
 		setBB.Terminator = &ir.JumpTerm{Target: doneBB}
@@ -3588,6 +3749,70 @@ func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (
 	return nil, false
 }
 
+func (g *generator) lowerEventListenerOptionBool(expr ast.Expr, value ir.Operand, name string) ir.Operand {
+	if expr == nil {
+		return ir.ConstBool{Value: false}
+	}
+	if g.semanticType(expr) == types.TypeBoolean {
+		if name == "capture" {
+			return value
+		}
+		return ir.ConstBool{Value: false}
+	}
+	return g.lowerEventInitBool(expr, value, name)
+}
+
+func (g *generator) lowerEventListenerSignal(expr ast.Expr, value ir.Operand) (ir.Operand, bool) {
+	objType, ok := g.semanticType(expr).(*types.ObjectType)
+	if !ok {
+		return nil, false
+	}
+	field, exists := objType.Fields["signal"]
+	if !exists {
+		return nil, false
+	}
+	offsets, _, _ := g.objectLayout(objType)
+	raw := g.currentFn.NewValue("event_listener_signal", field.Type)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: value, Field: "signal", Offset: offsets["signal"]})
+	if field.Type != g.semaResult.AbortSignalType {
+		raw = g.coerceJSValueBoundary(raw, field.Type, g.semaResult.AbortSignalType).(*ir.Value)
+	}
+	return raw, true
+}
+
+func (g *generator) makeEventListenerAbortRemovalCallback(target, eventType, callback, capture ir.Operand) ir.Operand {
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	fnType := types.NewFunction([]types.Param{{Name: "event", Type: g.semaResult.EventType}}, types.TypeVoid)
+	name := fmt.Sprintf("$event_listener_abort%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, types.TypeVoid)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	capturedTarget := lifted.NewValue("target", target.Type())
+	capturedType := lifted.NewValue("type", types.TypeString)
+	capturedCallback := lifted.NewValue("callback", callback.Type())
+	capturedCapture := lifted.NewValue("capture", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.ClosureGetInst{Res: capturedTarget, Closure: env, Index: 0},
+		&ir.ClosureGetInst{Res: capturedType, Closure: env, Index: 1},
+		&ir.ClosureGetInst{Res: capturedCallback, Closure: env, Index: 2},
+		&ir.ClosureGetInst{Res: capturedCapture, Closure: env, Index: 3})
+	ignoredEvent := lifted.NewValue("event", g.semaResult.EventType)
+	lifted.Params = append(lifted.Params, ignoredEvent)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_remove", Args: []ir.Operand{capturedTarget, capturedType, capturedCallback, capturedCapture}})
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("event_listener_abort_callback", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: name, Captures: []ir.Operand{target, eventType, callback, capture}, RefMask: 0b111})
+	return closure
+}
+
 func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
 	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal") {
@@ -3598,20 +3823,50 @@ func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberE
 	case "addEventListener":
 		typeArg := g.lowerExpr(e.Args[0])
 		callback := g.lowerExpr(e.Args[1])
+		capture := ir.Operand(ir.ConstBool{Value: false})
 		once := ir.Operand(ir.ConstBool{Value: false})
+		passive := ir.Operand(ir.ConstBool{Value: false})
+		var signal ir.Operand
+		hasSignal := false
 		if len(e.Args) > 2 {
 			options := g.lowerExpr(e.Args[2])
-			once = g.lowerEventInitBool(e.Args[2], options, "once")
+			capture = g.lowerEventListenerOptionBool(e.Args[2], options, "capture")
+			once = g.lowerEventListenerOptionBool(e.Args[2], options, "once")
+			passive = g.lowerEventListenerOptionBool(e.Args[2], options, "passive")
+			signal, hasSignal = g.lowerEventListenerSignal(e.Args[2], options)
 		}
+		if !hasSignal {
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Callee: "ts_event_target_add", Args: []ir.Operand{target, typeArg, callback, once, capture, passive},
+			})
+			return nil, true
+		}
+		aborted := g.currentFn.NewValue("event_listener_signal_aborted", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+		addBB := g.currentFn.NewBlock("event_listener_signal_add")
+		doneBB := g.currentFn.NewBlock("event_listener_signal_done")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: doneBB, Else: addBB}
+		g.currentBB = addBB
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Callee: "ts_event_target_add", Args: []ir.Operand{target, typeArg, callback, once},
+			Callee: "ts_event_target_add", Args: []ir.Operand{target, typeArg, callback, once, capture, passive},
 		})
+		removal := g.makeEventListenerAbortRemovalCallback(target, typeArg, callback, capture)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Callee: "ts_event_target_add", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, removal, ir.ConstBool{Value: true}, ir.ConstBool{Value: false}, ir.ConstBool{Value: false}},
+		})
+		g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+		g.currentBB = doneBB
 		return nil, true
 	case "removeEventListener":
 		typeArg := g.lowerExpr(e.Args[0])
 		callback := g.lowerExpr(e.Args[1])
+		capture := ir.Operand(ir.ConstBool{Value: false})
+		if len(e.Args) > 2 {
+			options := g.lowerExpr(e.Args[2])
+			capture = g.lowerEventListenerOptionBool(e.Args[2], options, "capture")
+		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Callee: "ts_event_target_remove", Args: []ir.Operand{target, typeArg, callback},
+			Callee: "ts_event_target_remove", Args: []ir.Operand{target, typeArg, callback, capture},
 		})
 		return nil, true
 	case "dispatchEvent":
@@ -3651,14 +3906,19 @@ func (g *generator) lowerEventDispatch(target, event ir.Operand) ir.Operand {
 	loopBB.Terminator = &ir.BranchTerm{Cond: next, Then: bodyBB, Else: doneBB}
 
 	once := g.currentFn.NewValue("event_listener_once", types.TypeBoolean)
-	bodyBB.Instructions = append(bodyBB.Instructions, &ir.CallInst{Res: once, Callee: "ts_event_listener_once", Args: []ir.Operand{next}})
+	passive := g.currentFn.NewValue("event_listener_passive", types.TypeBoolean)
+	bodyBB.Instructions = append(bodyBB.Instructions,
+		&ir.CallInst{Res: once, Callee: "ts_event_listener_once", Args: []ir.Operand{next}},
+		&ir.CallInst{Res: passive, Callee: "ts_event_listener_passive", Args: []ir.Operand{next}})
 	bodyBB.Terminator = &ir.BranchTerm{Cond: once, Then: onceBB, Else: invokeBB}
 	onceBB.Instructions = append(onceBB.Instructions, &ir.CallInst{Callee: "ts_event_listener_remove", Args: []ir.Operand{next}})
 	onceBB.Terminator = &ir.JumpTerm{Target: invokeBB}
 
 	callback := g.currentFn.NewValue("event_callback", listenerFn)
 	invokeBB.Instructions = append(invokeBB.Instructions, &ir.CallInst{Res: callback, Callee: "ts_event_listener_callback", Args: []ir.Operand{next}})
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.SetFieldInst{Obj: event, Field: "$inPassiveListener", Offset: eventOffsets["$inPassiveListener"], Val: passive})
 	invokeBB.Instructions = append(invokeBB.Instructions, &ir.IndirectCallInst{Closure: callback, Args: []ir.Operand{event}, ParamTypes: []types.Type{eventType}})
+	invokeBB.Instructions = append(invokeBB.Instructions, &ir.SetFieldInst{Obj: event, Field: "$inPassiveListener", Offset: eventOffsets["$inPassiveListener"], Val: ir.ConstBool{Value: false}})
 	stop := g.currentFn.NewValue("event_stop_immediate", types.TypeBoolean)
 	offsets, _, _ := g.objectLayout(eventType)
 	invokeBB.Instructions = append(invokeBB.Instructions, &ir.GetFieldInst{Res: stop, Obj: event, Field: "$stopImmediate", Offset: offsets["$stopImmediate"]})
@@ -3673,6 +3933,7 @@ func (g *generator) lowerEventDispatch(target, event ir.Operand) ir.Operand {
 	g.setEventField(event, "currentTarget", ir.ConstNull{})
 	g.setEventField(event, "eventPhase", ir.ConstNumber{Value: 0})
 	g.setEventField(event, "$dispatching", ir.ConstBool{Value: false})
+	g.setEventField(event, "$inPassiveListener", ir.ConstBool{Value: false})
 	defaultPrevented := g.eventField(event, "defaultPrevented", types.TypeBoolean)
 	result := g.currentFn.NewValue("event_dispatch_result", types.TypeBoolean)
 	doneBB.Instructions = append(doneBB.Instructions, &ir.BinaryInst{Res: result, Op: ir.OpEq, LHS: defaultPrevented, RHS: ir.ConstBool{Value: false}})
@@ -3838,7 +4099,7 @@ func (g *generator) lowerAbortSignalAny(e *ast.CallExpr, result ir.Operand) ir.O
 
 	g.currentBB = listenBB
 	callback := g.makeAbortDependencyCallback(source, result)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_add", Args: []ir.Operand{source, ir.ConstString{Value: "abort"}, callback, ir.ConstBool{Value: false}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_add", Args: []ir.Operand{source, ir.ConstString{Value: "abort"}, callback, ir.ConstBool{Value: false}, ir.ConstBool{Value: false}, ir.ConstBool{Value: false}}})
 	listenBB.Terminator = &ir.JumpTerm{Target: postBB}
 
 	postBB.Instructions = append(postBB.Instructions, &ir.BinaryInst{Res: nextIndex, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
@@ -4133,8 +4394,8 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_global_object"})
 			return res
 		}
-		if op, exists := g.locals[e.Name]; exists {
-			return op
+		if _, exists := g.locals[e.Name]; exists {
+			return g.readLocal(e.Name)
 		}
 		sym := g.semaResult.Symbols[e]
 		fnType := sym.Type.(*types.FunctionType)
@@ -4329,7 +4590,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 	case *ast.UnaryExpr:
 		if e.Op == token.PlusPlus || e.Op == token.MinusMinus {
 			if ident, ok := e.Target.(*ast.IdentExpr); ok {
-				currVal := g.locals[ident.Name]
+				currVal := g.readLocal(ident.Name)
 				op := ir.OpAdd
 				if e.Op == token.MinusMinus {
 					op = ir.OpSub
@@ -4341,7 +4602,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 					LHS: currVal,
 					RHS: ir.ConstNumber{Value: 1},
 				})
-				g.locals[ident.Name] = nextVal
+				if !g.writeCapturedLocal(ident.Name, nextVal) {
+					g.locals[ident.Name] = nextVal
+				}
 				if e.Prefix {
 					return nextVal
 				}
@@ -4956,7 +5219,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				removeBB := g.currentFn.NewBlock("abort_onabort_remove")
 				setBB := g.currentFn.NewBlock("abort_onabort_set")
 				g.currentBB.Terminator = &ir.BranchTerm{Cond: oldHandler, Then: removeBB, Else: setBB}
-				removeBB.Instructions = append(removeBB.Instructions, &ir.CallInst{Callee: "ts_event_target_remove", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, oldHandler}})
+				removeBB.Instructions = append(removeBB.Instructions, &ir.CallInst{Callee: "ts_event_target_remove", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, oldHandler, ir.ConstBool{Value: false}}})
 				removeBB.Terminator = &ir.JumpTerm{Target: setBB}
 				g.currentBB = setBB
 				handler := rhs
@@ -4969,7 +5232,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				}
 				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_abort_signal_set_onabort", Args: []ir.Operand{signal, handler}})
 				if !isNull {
-					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_add", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, handler, ir.ConstBool{Value: false}}})
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_add", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, handler, ir.ConstBool{Value: false}, ir.ConstBool{Value: false}, ir.ConstBool{Value: false}}})
 				}
 				return rhs
 			}
@@ -5092,13 +5355,15 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return value
 		}
 		ident := e.Left.(*ast.IdentExpr)
-		current := g.locals[ident.Name]
+		current := g.readLocal(ident.Name)
 		rhs := g.lowerExpr(e.Right)
 		if e.Op == token.Eq {
 			targetType := g.semanticType(e.Left)
 			sourceType := g.semanticType(e.Right)
 			rhs = g.coerceJSValueBoundary(rhs, sourceType, targetType)
-			g.locals[ident.Name] = rhs
+			if !g.writeCapturedLocal(ident.Name, rhs) {
+				g.locals[ident.Name] = rhs
+			}
 			delete(g.localProvenance, ident.Name)
 			delete(g.localDirectCallee, ident.Name)
 			if irJSValueType(targetType) {
@@ -5115,7 +5380,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return rhs
 		}
 		value := g.lowerAssignmentValue(e, current, rhs)
-		g.locals[ident.Name] = value
+		if !g.writeCapturedLocal(ident.Name, value) {
+			g.locals[ident.Name] = value
+		}
 		return value
 
 	default:

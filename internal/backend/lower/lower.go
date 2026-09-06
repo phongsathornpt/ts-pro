@@ -1666,6 +1666,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64EventListenerCallback(e)
 	fnOffsets["ts_event_listener_once"] = len(e.Code)
 	emitAMD64EventListenerOnce(e)
+	fnOffsets["ts_event_listener_passive"] = len(e.Code)
+	emitAMD64EventListenerPassive(e)
 	fnOffsets["ts_event_listener_remove"] = len(e.Code)
 	emitAMD64EventListenerRemove(e)
 	fnOffsets["ts_event_target_tail"] = len(e.Code)

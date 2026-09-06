@@ -15,6 +15,8 @@ const (
 	amd64EventListenerCallback int32 = amd64ObjectFields + 16
 	amd64EventListenerOnce     int32 = amd64ObjectFields + 24
 	amd64EventListenerRemoved  int32 = amd64ObjectFields + 32
+	amd64EventListenerCapture  int32 = amd64ObjectFields + 40
+	amd64EventListenerPassive  int32 = amd64ObjectFields + 48
 )
 
 func emitAMD64EventTargetNew(e *amd64.Emitter, objectNewOffset int) {
@@ -38,11 +40,13 @@ func emitAMD64EventTargetAdd(e *amd64.Emitter, objectNewOffset, stringEqOffset i
 	e.Push(amd64.R12)
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
-	e.SubRegImm32(amd64.RSP, 40)
-	e.MovRegReg(amd64.RBX, amd64.RDI) // target
-	e.MovRegReg(amd64.R12, amd64.RSI) // type
-	e.MovRegReg(amd64.R13, amd64.RDX) // callback
-	e.MovRegReg(amd64.R14, amd64.RCX) // once
+	e.SubRegImm32(amd64.RSP, 56)
+	e.MovRegReg(amd64.RBX, amd64.RDI)      // target
+	e.MovRegReg(amd64.R12, amd64.RSI)      // type
+	e.MovRegReg(amd64.R13, amd64.RDX)      // callback
+	e.MovRegReg(amd64.R14, amd64.RCX)      // once
+	e.MovDerefReg(amd64.RSP, 40, amd64.R8) // capture
+	e.MovDerefReg(amd64.RSP, 48, amd64.R9) // passive
 
 	// Duplicate registrations with the same type and callback are ignored.
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64EventTargetHead)
@@ -65,11 +69,17 @@ func emitAMD64EventTargetAdd(e *amd64.Emitter, objectNewOffset, stringEqOffset i
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R11, amd64.R10, amd64EventListenerCallback)
 	e.CmpRegReg(amd64.R11, amd64.R13)
+	scanNextCallback := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64EventListenerCapture)
+	e.MovRegDeref(amd64.RDX, amd64.RSP, 40)
+	e.CmpRegReg(amd64.R11, amd64.RDX)
 	duplicate := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	scanNextLabel := len(e.Code)
 	patchJcc(scanNextRemoved, scanNextLabel)
 	patchJcc(scanNextType, scanNextLabel)
+	patchJcc(scanNextCallback, scanNextLabel)
 	e.MovRegDeref(amd64.R10, amd64.R10, amd64EventListenerNext)
 	scanBack := len(e.Code)
 	e.JmpRel32(0)
@@ -86,7 +96,7 @@ func emitAMD64EventTargetAdd(e *amd64.Emitter, objectNewOffset, stringEqOffset i
 	e.MovDerefReg(amd64.RSP, 24, amd64.R12)
 	e.MovDerefReg(amd64.RSP, 32, amd64.R13)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
-	e.MovRegImm64(amd64.RDI, 5)
+	e.MovRegImm64(amd64.RDI, 7)
 	e.MovRegImm64(amd64.RSI, 0b111)
 	callNew := len(e.Code)
 	e.CallRel32(int32(objectNewOffset - (callNew + 5)))
@@ -97,6 +107,10 @@ func emitAMD64EventTargetAdd(e *amd64.Emitter, objectNewOffset, stringEqOffset i
 	e.MovDerefReg(amd64.R10, amd64EventListenerCallback, amd64.R13)
 	e.MovDerefReg(amd64.R10, amd64EventListenerOnce, amd64.R14)
 	e.MovDerefReg(amd64.R10, amd64EventListenerRemoved, amd64.R11)
+	e.MovRegDeref(amd64.RDX, amd64.RSP, 40)
+	e.MovDerefReg(amd64.R10, amd64EventListenerCapture, amd64.RDX)
+	e.MovRegDeref(amd64.RDX, amd64.RSP, 48)
+	e.MovDerefReg(amd64.R10, amd64EventListenerPassive, amd64.RDX)
 
 	e.MovRegDeref(amd64.R11, amd64.RBX, amd64EventTargetTail)
 	e.TestRegReg(amd64.R11, amd64.R11)
@@ -120,7 +134,7 @@ func emitAMD64EventTargetAdd(e *amd64.Emitter, objectNewOffset, stringEqOffset i
 	patchJcc(duplicate, duplicateLabel)
 	done := len(e.Code)
 	patchJmp(doneJump, done)
-	e.AddRegImm32(amd64.RSP, 40)
+	e.AddRegImm32(amd64.RSP, 56)
 	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)
 	e.Pop(amd64.R12)
@@ -141,9 +155,11 @@ func emitAMD64EventTargetRemove(e *amd64.Emitter, stringEqOffset int) {
 	e.Push(amd64.RBX)
 	e.Push(amd64.R12)
 	e.Push(amd64.R13)
+	e.Push(amd64.R14)
 	e.MovRegReg(amd64.RBX, amd64.RDI)
 	e.MovRegReg(amd64.R12, amd64.RSI)
 	e.MovRegReg(amd64.R13, amd64.RDX)
+	e.MovRegReg(amd64.R14, amd64.RCX)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64EventTargetHead)
 	loop := len(e.Code)
 	e.TestRegReg(amd64.R10, amd64.R10)
@@ -166,6 +182,10 @@ func emitAMD64EventTargetRemove(e *amd64.Emitter, stringEqOffset int) {
 	e.CmpRegReg(amd64.R11, amd64.R13)
 	nextCallback := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64EventListenerCapture)
+	e.CmpRegReg(amd64.R11, amd64.R14)
+	nextCapture := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
 	e.MovRegImm64(amd64.R11, 1)
 	e.MovDerefReg(amd64.R10, amd64EventListenerRemoved, amd64.R11)
 	found := len(e.Code)
@@ -174,6 +194,7 @@ func emitAMD64EventTargetRemove(e *amd64.Emitter, stringEqOffset int) {
 	patchJcc(nextRemoved, next)
 	patchJcc(nextType, next)
 	patchJcc(nextCallback, next)
+	patchJcc(nextCapture, next)
 	e.MovRegDeref(amd64.R10, amd64.R10, amd64EventListenerNext)
 	back := len(e.Code)
 	e.JmpRel32(0)
@@ -181,6 +202,7 @@ func emitAMD64EventTargetRemove(e *amd64.Emitter, stringEqOffset int) {
 	end := len(e.Code)
 	patchJcc(done, end)
 	patchJmp(found, end)
+	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)
 	e.Pop(amd64.R12)
 	e.Pop(amd64.RBX)
@@ -270,5 +292,10 @@ func emitAMD64EventTargetTail(e *amd64.Emitter) {
 
 func emitAMD64NullRef(e *amd64.Emitter) {
 	e.MovRegImm64(amd64.RAX, 0)
+	e.Ret()
+}
+
+func emitAMD64EventListenerPassive(e *amd64.Emitter) {
+	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64EventListenerPassive)
 	e.Ret()
 }

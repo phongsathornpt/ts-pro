@@ -593,6 +593,7 @@ func (c *Checker) builtinEventType() *types.ObjectType {
 		// Internal dispatch state lives in the physical object but is deliberately
 		// hidden by lookupMemberType for the public Event surface.
 		e.AddField("$dispatching", types.TypeBoolean, false)
+		e.AddField("$inPassiveListener", types.TypeBoolean, false)
 		e.AddField("$stopImmediate", types.TypeBoolean, false)
 		e.AddField("$stopPropagation", types.TypeBoolean, false)
 		// Variant payload slots keep one physical Event ABI for all DOM event types.
@@ -675,7 +676,7 @@ func (c *Checker) builtinEventTargetMember(property string) (types.Type, bool) {
 	case "addEventListener":
 		return types.NewFunction([]types.Param{{Name: "type", Type: types.TypeString}, {Name: "callback", Type: listener}, {Name: "options", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
 	case "removeEventListener":
-		return types.NewFunction([]types.Param{{Name: "type", Type: types.TypeString}, {Name: "callback", Type: listener}}, types.TypeVoid), true
+		return types.NewFunction([]types.Param{{Name: "type", Type: types.TypeString}, {Name: "callback", Type: listener}, {Name: "options", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
 	case "dispatchEvent":
 		return types.NewFunction([]types.Param{{Name: "event", Type: event}}, types.TypeBoolean), true
 	}

@@ -2158,3 +2158,81 @@ func TestLinuxAMD64WinterTCAbortSignalStatics(t *testing.T) {
 		expected: "true\nstatic\nAbortError\nsecond\nsecond\nfirst\nTimeoutError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCMutableCaptureCells(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_mutable_capture_cells",
+		source: `
+let value = 1;
+const arrow = (): void => { value = value + 1; };
+arrow();
+console.log(value);
+const fn = function (): void { value = value + 3; };
+fn();
+console.log(value);
+const nested = (): void => {
+  const inner = (): void => { value++; };
+  inner();
+};
+nested();
+console.log(value);
+for (let i = 0; i < 50000; i = i + 1) {
+  const dead = "capture-pressure-" + i;
+}
+setTimeout((): void => { value = value + 4; console.log(value); }, 0);
+`,
+		expected: "2\n5\n6\n10\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCEventListenerOptions(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_event_listener_options",
+		source: `
+const target = new EventTarget();
+const callback = (event: Event): void => { console.log("callback"); };
+target.addEventListener("tick", callback, { capture: false });
+target.addEventListener("tick", callback, { capture: false });
+target.addEventListener("tick", callback, { capture: true });
+target.dispatchEvent(new Event("tick"));
+target.removeEventListener("tick", callback, { capture: false });
+target.dispatchEvent(new Event("tick"));
+target.removeEventListener("tick", callback, { capture: true });
+const passive = new Event("passive", { cancelable: true });
+target.addEventListener("passive", (event: Event): void => { event.preventDefault(); }, { passive: true });
+console.log(target.dispatchEvent(passive));
+console.log(passive.defaultPrevented);
+const active = new Event("active", { cancelable: true });
+target.addEventListener("active", (event: Event): void => { event.preventDefault(); });
+console.log(target.dispatchEvent(active));
+console.log(active.defaultPrevented);
+`,
+		expected: "callback\ncallback\ncallback\ntrue\nfalse\nfalse\ntrue\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCEventSignalOption(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_event_signal_option",
+		source: `
+const target = new EventTarget();
+const controller = new AbortController();
+let calls = 0;
+const callback = (event: Event): void => {
+  calls = calls + 1;
+  console.log("signal-listener");
+};
+target.addEventListener("tick", callback, { signal: controller.signal });
+target.dispatchEvent(new Event("tick"));
+controller.abort();
+target.dispatchEvent(new Event("tick"));
+console.log(calls);
+const already = new AbortController();
+already.abort();
+target.addEventListener("late", (event: Event): void => { console.log("should-not-run"); }, { signal: already.signal });
+target.dispatchEvent(new Event("late"));
+console.log("done");
+`,
+		expected: "signal-listener\n1\ndone\n",
+	})
+}
