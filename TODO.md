@@ -73,6 +73,19 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 - [x] `git diff --check`.
 - [x] Active raw-native fixture roadmap accepted at **125 / 125**, with the async state-machine item explicitly superseded by the documented stackful scheduler model.
 
+## 2026-09 God-file / God-method refactor closeout
+
+- [x] Split `internal/midend/irgen/irgen.go` from 5,693 LOC to 482 LOC and isolate closures, exceptions, promises, classes/generics, coercion, objects, strings, statements, Web APIs, constructors, members, and calls by responsibility.
+- [x] Split `internal/frontend/sema/sema.go` from 2,630 LOC to 695 LOC and isolate Web builtins, core builtins, Promise typing, statements/narrowing, constructors, calls, members, and expression checking.
+- [x] Split `internal/frontend/parser/parser.go` from 1,435 LOC to 173 LOC and isolate declarations, statements, expressions, and type syntax.
+- [x] Split `internal/backend/lower/lower.go` from 2,588 LOC to 295 LOC; isolate ARM64/AMD64 lowering, allocator/string runtime, runtime symbol emission, finalization/fixups, and per-function AMD64 lowering.
+- [x] Reduce `lowerAMD64` from a ~1,100-line God method to ~100 lines of orchestration (`entry -> functions -> runtime -> finalize`).
+- [x] Split `jsops_amd64.go` into cohesive string coercion, numeric coercion, and comparison runtime modules.
+- [x] Split `tests/e2e/linux_amd64_test.go` from 2,285 LOC to 858 LOC with dedicated async, runtime-value, and WinterTC suites.
+- [x] Preserve behavior across every refactor commit with targeted E2E plus full `go test ./...`, native fixture, Node differential, and `git diff --check` gates.
+- [x] Final refactor regression gate: **141 / 141 native fixtures PASS**, **52 / 52 Node-comparable fixtures match**, and `make bench-performance` PASS.
+- [x] Intentionally keep cohesive runtime modules such as GC, task scheduler, Base64, and number formatting together unless a future responsibility split is justified by behavior/change pressure rather than LOC alone.
+
 ## Optional next roadmap (new scope, not active blockers)
 
 The active raw-native fixture roadmap is complete. The items below are optional follow-on work and do not change the **125 / 125** acceptance status above.
