@@ -130,16 +130,25 @@ func (c *Compiler) compileProgram(prog *ast.Program, diags diag.DiagnosticList) 
 	return bin, allDiags, nil
 }
 
+type moduleResolution struct {
+	path string
+	err  error
+}
+
 type moduleLoadState struct {
 	loaded   map[string]bool
 	visiting map[string]bool
+	resolved map[string]moduleResolution
 }
 
-func resolveModulePath(importer, spec string) (string, error) {
+func resolveModulePath(importer, spec string, state *moduleLoadState) (string, error) {
 	if !strings.HasPrefix(spec, ".") {
 		return "", fmt.Errorf("only relative TypeScript imports are supported, got %q", spec)
 	}
 	base := filepath.Clean(filepath.Join(filepath.Dir(importer), spec))
+	if cached, ok := state.resolved[base]; ok {
+		return cached.path, cached.err
+	}
 	candidates := []string{base}
 	if filepath.Ext(base) == "" {
 		candidates = append(candidates, base+".ts", filepath.Join(base, "index.ts"))
@@ -147,10 +156,15 @@ func resolveModulePath(importer, spec string) (string, error) {
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
 		if err == nil && !info.IsDir() {
-			return filepath.Abs(candidate)
+			abs, absErr := filepath.Abs(candidate)
+			result := moduleResolution{path: abs, err: absErr}
+			state.resolved[base] = result
+			return result.path, result.err
 		}
 	}
-	return "", fmt.Errorf("cannot resolve module %q from %q", spec, importer)
+	err := fmt.Errorf("cannot resolve module %q from %q", spec, importer)
+	state.resolved[base] = moduleResolution{err: err}
+	return "", err
 }
 
 func (c *Compiler) loadModule(path string, state *moduleLoadState) ([]ast.Stmt, diag.DiagnosticList, error) {
@@ -183,7 +197,7 @@ func (c *Compiler) loadModule(path string, state *moduleLoadState) ([]ast.Stmt, 
 			flattened = append(flattened, stmt)
 			continue
 		}
-		resolved, err := resolveModulePath(abs, imp.Module)
+		resolved, err := resolveModulePath(abs, imp.Module, state)
 		if err != nil {
 			return nil, allDiags, err
 		}
@@ -201,7 +215,7 @@ func (c *Compiler) loadModule(path string, state *moduleLoadState) ([]ast.Stmt, 
 
 func (c *Compiler) loadModuleProgram(inputPath string) (*ast.Program, diag.DiagnosticList, error) {
 	stmts, diags, err := c.loadModule(inputPath, &moduleLoadState{
-		loaded: make(map[string]bool), visiting: make(map[string]bool),
+		loaded: make(map[string]bool), visiting: make(map[string]bool), resolved: make(map[string]moduleResolution),
 	})
 	if err != nil {
 		return nil, diags, err
