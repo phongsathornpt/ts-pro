@@ -19,6 +19,15 @@ type linuxAMD64Case struct {
 	expected string
 }
 
+func mustReadExample(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example %s: %v", path, err)
+	}
+	return string(data)
+}
+
 func runLinuxAMD64(t *testing.T, tc linuxAMD64Case) {
 	t.Helper()
 	dir := t.TempDir()
@@ -2131,5 +2140,13 @@ console.log(error.colno);
 console.log(error.error);
 `,
 		expected: "custom\npayload\nhello\nhttps://example.test\n42\nboom\napp.ts\n12\n7\nreason\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCAbortController(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_abort_controller",
+		source:   mustReadExample(t, "../../examples/wintertc/abort.ts"),
+		expected: "false\nabort\ntrue\nstop\nstop\nstop\nAbortError\nonabort\n",
 	})
 }

@@ -532,6 +532,15 @@ All roadmap and critical path items are 100% complete.
 
 Target: ECMA-429 / WinterTC Minimum Common Web API draft 31 July 2026. This is a Web-interoperability target, not Cloudflare Workers compatibility.
 
+Foundation blockers before broad API expansion:
+
+- [x] GC-safe `any`/JSValue cell storage shared by Web runtime state.
+- [ ] Callback/closure ABI hardening across arbitrary user callbacks.
+- [ ] Shared WebIDL dictionary/default/coercion helpers.
+- [ ] Web async job and rejection-event hooks.
+- [ ] GC-safe byte buffer/string conversion primitive.
+- [ ] Native network/random/crypto/compression capability layer.
+
 - [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
 - [ ] Phase 2: DOM events and abort primitives.
 - [ ] Phase 3: Encoding, URL, URLSearchParams, URLPattern.

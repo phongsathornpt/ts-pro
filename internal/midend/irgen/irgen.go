@@ -3590,7 +3590,7 @@ func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (
 
 func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
-	if !ok || objType.Name != "$EventTarget" {
+	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal") {
 		return nil, false
 	}
 	target := g.lowerExpr(mem.Object)
@@ -3679,6 +3679,95 @@ func (g *generator) lowerEventDispatch(target, event ir.Operand) ir.Operand {
 	return result
 }
 
+func (g *generator) lowerAbortControllerNew() ir.Operand {
+	signalType := g.semaResult.AbortSignalType
+	signal := g.currentFn.NewValue("abort_signal", signalType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: signal, Callee: "ts_abort_signal_new"})
+	controllerType := g.semaResult.AbortControllerType
+	offsets, refMask, shape := g.objectLayout(controllerType)
+	controller := g.currentFn.NewValue("abort_controller", controllerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: controller, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: controller, Field: "signal", Offset: offsets["signal"], Val: signal})
+	return controller
+}
+
+func (g *generator) lowerSimpleEvent(typeName string) ir.Operand {
+	eventType := g.semaResult.EventType
+	offsets, refMask, shape := g.objectLayout(eventType)
+	event := g.currentFn.NewValue("event", eventType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: event, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+	g.setEventField(event, "type", ir.ConstString{Value: typeName})
+	g.setEventField(event, "bubbles", ir.ConstBool{Value: false})
+	g.setEventField(event, "cancelable", ir.ConstBool{Value: false})
+	g.setEventField(event, "composed", ir.ConstBool{Value: false})
+	g.setEventField(event, "currentTarget", ir.ConstNull{})
+	g.setEventField(event, "target", ir.ConstNull{})
+	g.setEventField(event, "defaultPrevented", ir.ConstBool{Value: false})
+	g.setEventField(event, "eventPhase", ir.ConstNumber{Value: 0})
+	g.setEventField(event, "isTrusted", ir.ConstBool{Value: false})
+	timestamp := g.currentFn.NewValue("event_timestamp", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: timestamp, Callee: "ts_performance_now"})
+	g.setEventField(event, "timeStamp", timestamp)
+	g.setEventField(event, "$dispatching", ir.ConstBool{Value: false})
+	g.setEventField(event, "$stopImmediate", ir.ConstBool{Value: false})
+	g.setEventField(event, "$stopPropagation", ir.ConstBool{Value: false})
+	g.initEventVariantFields(event, "Event", nil, nil)
+	return event
+}
+
+func (g *generator) lowerAbortControllerMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$AbortController" || mem.Property != "abort" {
+		return nil, false
+	}
+	controller := g.lowerExpr(mem.Object)
+	offsets, _, _ := g.objectLayout(g.semaResult.AbortControllerType)
+	signal := g.currentFn.NewValue("abort_signal", g.semaResult.AbortSignalType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: signal, Obj: controller, Field: "signal", Offset: offsets["signal"]})
+	var reason ir.Operand
+	if len(e.Args) > 0 {
+		reason = g.lowerExpr(e.Args[0])
+		if !irJSValueType(reason.Type()) {
+			reason = g.boxJSValue(reason, g.semanticType(e.Args[0]))
+		}
+	} else {
+		err := g.newDOMException(ir.ConstString{Value: "This operation was aborted"}, ir.ConstString{Value: "AbortError"})
+		reason = g.boxJSValue(err, g.semaResult.DOMExceptionType)
+	}
+	first := g.currentFn.NewValue("abort_first", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: first, Callee: "ts_abort_signal_set_reason", Args: []ir.Operand{signal, reason}, ParamTypes: []types.Type{g.semaResult.AbortSignalType, types.TypeAny}})
+	fireBB := g.currentFn.NewBlock("abort_fire")
+	doneBB := g.currentFn.NewBlock("abort_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: first, Then: fireBB, Else: doneBB}
+	g.currentBB = fireBB
+	event := g.lowerSimpleEvent("abort")
+	g.lowerEventDispatch(signal, event)
+	if g.currentBB.Terminator == nil {
+		g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	}
+	g.currentBB = doneBB
+	return nil, true
+}
+
+func (g *generator) lowerAbortSignalMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
+	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
+	if !ok || objType.Name != "$AbortSignal" || mem.Property != "throwIfAborted" {
+		return nil, false
+	}
+	signal := g.lowerExpr(mem.Object)
+	aborted := g.currentFn.NewValue("abort_signal_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	throwBB := g.currentFn.NewBlock("abort_throw")
+	doneBB := g.currentFn.NewBlock("abort_throw_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: throwBB, Else: doneBB}
+	g.currentBB = throwBB
+	reason := g.currentFn.NewValue("abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: reason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(reason)
+	g.currentBB = doneBB
+	return nil, true
+}
+
 func (g *generator) nullRefAt(bb *ir.BasicBlock, t types.Type) ir.Operand {
 	res := g.currentFn.NewValue("null_ref", t)
 	bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: res, Callee: "ts_null_ref"})
@@ -3704,6 +3793,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return g.locals["$this"]
 
 	case *ast.NewExpr:
+		if e.ClassName == "AbortController" {
+			return g.lowerAbortControllerNew()
+		}
 		if e.ClassName == "EventTarget" {
 			t := g.semaResult.EventTargetType
 			res := g.currentFn.NewValue("event_target", t)
@@ -4186,6 +4278,24 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return res
 		}
 		if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+			if objType.Name == "$AbortSignal" {
+				signal := g.lowerExpr(e.Object)
+				switch e.Property {
+				case "aborted":
+					res := g.currentFn.NewValue("abort_signal_aborted", types.TypeBoolean)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+					return res
+				case "reason":
+					res := g.currentFn.NewValue("abort_signal_reason", types.TypeAny)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+					return res
+				case "onabort":
+					fnType := types.NewFunction([]types.Param{{Name: "event", Type: g.semaResult.EventType}}, types.TypeVoid)
+					raw := g.currentFn.NewValue("abort_signal_onabort", fnType)
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_abort_signal_onabort", Args: []ir.Operand{signal}})
+					return g.boxJSValue(raw, fnType)
+				}
+			}
 			if isEventObjectType(objType) {
 				if physical, ok := eventPhysicalProperty(objType, e.Property); ok {
 					obj := g.lowerExpr(e.Object)
@@ -4455,6 +4565,12 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			if res, handled := g.lowerEventTargetMethodCall(e, mem); handled {
 				return res
 			}
+			if res, handled := g.lowerAbortControllerMethodCall(e, mem); handled {
+				return res
+			}
+			if res, handled := g.lowerAbortSignalMethodCall(e, mem); handled {
+				return res
+			}
 			if proven, ok := g.provenObjectType(mem.Object); ok {
 				if field, exists := proven.Fields[mem.Property]; exists {
 					if fnType, ok := field.Type.(*types.FunctionType); ok {
@@ -4657,6 +4773,36 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		return resVal
 	case *ast.AssignExpr:
 		if mem, ok := e.Left.(*ast.MemberExpr); ok {
+			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok && objType.Name == "$AbortSignal" && mem.Property == "onabort" {
+				if e.Op != token.Eq {
+					return g.failExpr("compound assignment to AbortSignal.onabort is not supported")
+				}
+				signal := g.lowerExpr(mem.Object)
+				rhs := g.lowerExpr(e.Right)
+				fnType := types.NewFunction([]types.Param{{Name: "event", Type: g.semaResult.EventType}}, types.TypeVoid)
+				oldHandler := g.currentFn.NewValue("abort_old_handler", fnType)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: oldHandler, Callee: "ts_abort_signal_onabort", Args: []ir.Operand{signal}})
+				removeBB := g.currentFn.NewBlock("abort_onabort_remove")
+				setBB := g.currentFn.NewBlock("abort_onabort_set")
+				g.currentBB.Terminator = &ir.BranchTerm{Cond: oldHandler, Then: removeBB, Else: setBB}
+				removeBB.Instructions = append(removeBB.Instructions, &ir.CallInst{Callee: "ts_event_target_remove", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, oldHandler}})
+				removeBB.Terminator = &ir.JumpTerm{Target: setBB}
+				g.currentBB = setBB
+				handler := rhs
+				isNull := false
+				if _, ok := e.Right.(*ast.NullLit); ok {
+					isNull = true
+					handler = g.nullRef(fnType)
+				} else if irJSValueType(rhs.Type()) {
+					handler = g.coerceJSValueBoundary(rhs, rhs.Type(), fnType)
+				}
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_abort_signal_set_onabort", Args: []ir.Operand{signal, handler}})
+				if !isNull {
+					g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_event_target_add", Args: []ir.Operand{signal, ir.ConstString{Value: "abort"}, handler, ir.ConstBool{Value: false}}})
+				}
+				return rhs
+			}
+
 			if objType, ok := g.semanticType(mem.Object).(*types.ObjectType); ok {
 				offsets, _, _ := g.objectLayout(objType)
 				offset := offsets[mem.Property]

@@ -29,3 +29,18 @@ Conformance is only claimed for APIs whose behavior is implemented according to 
 9. **Conformance closeout**: WinterTC matrix at 100%, full native suite, differential tests and documented server-runtime deviations.
 
 Web Workers themselves are not required by ECMA-429; worker-global additions apply only if ts-pro later exposes a WorkerGlobalScope-equivalent environment.
+
+## Foundation blocker matrix
+
+WinterTC completion is gated by shared runtime/compiler foundations rather than by API count alone. These are completed before broad surface expansion so later phases reuse one correct ABI instead of duplicating fragile representations.
+
+| Foundation | Why it blocks | Completion gate |
+| --- | --- | --- |
+| GC-safe `any` / JSValue cells | WebIDL `any`, reasons, chunks and bodies cannot live in raw reference slots | one shared JSValue cell/storage ABI, GC stress coverage |
+| Callback / closure ABI | Event, Streams and Fetch invoke arbitrary user callbacks that clobber caller registers | callback values reloaded/materialized across calls; mutation/order e2e |
+| WebIDL dictionaries/coercion | Constructors repeatedly need optional members/defaults/string/boolean conversion | shared dictionary read/default helpers and error coercion tests |
+| Web async jobs | rejection hooks, streams and fetch depend on deterministic microtask semantics | promise-job + rejection event ordering e2e |
+| Byte buffer primitive | Encoding, Blob, Streams, Fetch, Crypto and Compression all exchange bytes | GC-safe byte storage plus slice/copy/string conversion tests |
+| Native capability layer | Fetch, Crypto and Compression require OS/runtime services | explicit network/random/hash/compression modules with local integration tests |
+
+The active implementation order is: JSValue storage -> callback/dictionary foundations -> byte buffers -> async hooks -> native capabilities -> Phase 2 through Phase 9 conformance closeout.

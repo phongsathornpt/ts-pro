@@ -84,29 +84,31 @@ func (s *Scope) Resolve(name string) *Symbol {
 
 // Result holds the analyzed types and symbols for an AST.
 type Result struct {
-	Types              map[ast.Node]types.Type
-	Symbols            map[ast.Node]*Symbol
-	GenericCalls       map[*ast.CallExpr]*types.FunctionType
-	GenericClasses     map[*ast.NewExpr]*ClassInfo
-	Classes            map[string]*ClassInfo
-	Enums              map[string]map[string]float64
-	ImportAliases      map[string]string
-	BuiltinCollections map[string]*BuiltinCollectionInfo
-	TaskResults        map[string]types.Type
-	ChannelElements    map[string]types.Type
-	TaskGroupType      *types.ObjectType
-	AsyncResults       map[*ast.FunctionDecl]types.Type
-	DateType           *types.ObjectType
-	RegExpType         *types.ObjectType
-	DOMExceptionType   *types.ObjectType
-	EventType          *types.ObjectType
-	CustomEventType    *types.ObjectType
-	MessageEventType   *types.ObjectType
-	ErrorEventType     *types.ObjectType
-	EventTargetType    *types.ObjectType
-	VarTypes           map[*ast.VarDeclStmt][]types.Type
-	RootScope          *Scope
-	Diagnostics        diag.DiagnosticList
+	Types               map[ast.Node]types.Type
+	Symbols             map[ast.Node]*Symbol
+	GenericCalls        map[*ast.CallExpr]*types.FunctionType
+	GenericClasses      map[*ast.NewExpr]*ClassInfo
+	Classes             map[string]*ClassInfo
+	Enums               map[string]map[string]float64
+	ImportAliases       map[string]string
+	BuiltinCollections  map[string]*BuiltinCollectionInfo
+	TaskResults         map[string]types.Type
+	ChannelElements     map[string]types.Type
+	TaskGroupType       *types.ObjectType
+	AsyncResults        map[*ast.FunctionDecl]types.Type
+	DateType            *types.ObjectType
+	RegExpType          *types.ObjectType
+	DOMExceptionType    *types.ObjectType
+	EventType           *types.ObjectType
+	CustomEventType     *types.ObjectType
+	MessageEventType    *types.ObjectType
+	ErrorEventType      *types.ObjectType
+	EventTargetType     *types.ObjectType
+	AbortSignalType     *types.ObjectType
+	AbortControllerType *types.ObjectType
+	VarTypes            map[*ast.VarDeclStmt][]types.Type
+	RootScope           *Scope
+	Diagnostics         diag.DiagnosticList
 }
 
 type Checker struct {
@@ -680,6 +682,47 @@ func (c *Checker) builtinEventTargetMember(property string) (types.Type, bool) {
 	return nil, false
 }
 
+func (c *Checker) builtinAbortSignalType() *types.ObjectType {
+	if c.result.AbortSignalType == nil {
+		c.result.AbortSignalType = types.NewObject("$AbortSignal")
+	}
+	return c.result.AbortSignalType
+}
+
+func (c *Checker) builtinAbortControllerType() *types.ObjectType {
+	if c.result.AbortControllerType == nil {
+		t := types.NewObject("$AbortController")
+		t.AddField("signal", c.builtinAbortSignalType(), false)
+		c.result.AbortControllerType = t
+	}
+	return c.result.AbortControllerType
+}
+
+func (c *Checker) builtinAbortSignalMember(property string) (types.Type, bool) {
+	if member, ok := c.builtinEventTargetMember(property); ok {
+		return member, true
+	}
+	switch property {
+	case "aborted":
+		return types.TypeBoolean, true
+	case "reason", "onabort":
+		return types.TypeAny, true
+	case "throwIfAborted":
+		return types.NewFunction(nil, types.TypeVoid), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinAbortControllerMember(property string) (types.Type, bool) {
+	switch property {
+	case "signal":
+		return c.builtinAbortSignalType(), true
+	case "abort":
+		return types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny, Optional: true}}, types.TypeVoid), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinDateType() *types.ObjectType {
 	if c.result.DateType == nil {
 		c.result.DateType = types.NewObject("$Date")
@@ -792,6 +835,12 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		}
 		if t.Name == "$EventTarget" {
 			return c.builtinEventTargetMember(property)
+		}
+		if t.Name == "$AbortSignal" {
+			return c.builtinAbortSignalMember(property)
+		}
+		if t.Name == "$AbortController" {
+			return c.builtinAbortControllerMember(property)
 		}
 		if t.Name == "$Date" {
 			if member, ok := c.builtinDateMember(property); ok {
@@ -1183,6 +1232,14 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 		c.result.Types[e] = base.Constructor
 		return base.Constructor
 	case *ast.NewExpr:
+		if e.ClassName == "AbortController" {
+			if len(e.Args) != 0 {
+				c.error(e.Span(), "TS2554", "AbortController expects no arguments.")
+			}
+			t := c.builtinAbortControllerType()
+			c.result.Types[e] = t
+			return t
+		}
 		if e.ClassName == "EventTarget" {
 			if len(e.Args) != 0 {
 				c.error(e.Span(), "TS2554", "EventTarget expects no arguments.")
@@ -2307,6 +2364,12 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "EventTarget" {
 			return c.builtinEventTargetType()
+		}
+		if t.Name == "AbortSignal" {
+			return c.builtinAbortSignalType()
+		}
+		if t.Name == "AbortController" {
+			return c.builtinAbortControllerType()
 		}
 		if t.Name == "DOMException" {
 			return c.builtinDOMExceptionType()
