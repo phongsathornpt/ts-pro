@@ -220,44 +220,25 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovDerefReg(amd64.R12, amd64ObjectNextFree, amd64.RAX)
 	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectType)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeArray))
-	isArray := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeRefData))
-	isRefData := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeObject))
-	isObject := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeClosure))
-	isClosure := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeJSValueData))
-	isJSValueData := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeDynamicObject))
-	isDynamicObject := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeDynamicEntries))
-	isDynamicEntries := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeTask))
-	isTask := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeChannel))
-	isChannel := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeTaskGroup))
-	isTaskGroup := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
-	e.CmpRegImm32(amd64.RAX, int32(amd64ObjectTypeCollection))
-	isCollection := len(e.Code)
-	e.JccRel32(amd64.CondE, 0)
+	traceJumps := make(map[amd64GCTraceKind]int, len(amd64GCLayouts))
+	for _, desc := range amd64GCLayouts {
+		if desc.TraceKind == amd64GCTraceAtomic {
+			continue
+		}
+		e.CmpRegImm32(amd64.RAX, int32(desc.ObjectType))
+		traceJumps[desc.TraceKind] = len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+	}
+	patchTrace := func(kind amd64GCTraceKind, target int) {
+		if at, ok := traceJumps[kind]; ok {
+			patchJcc(at, target)
+		}
+	}
 	traceAfterChildrenJump := len(e.Code)
 	e.JmpRel32(0)
 
 	traceArray := len(e.Code)
-	patchJcc(isArray, traceArray)
+	patchTrace(amd64GCTraceArray, traceArray)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64ArrayData)
 	markArrayChildCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markArrayChildCall + 5)))
@@ -266,7 +247,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceRefData := len(e.Code)
-	patchJcc(isRefData, traceRefData)
+	patchTrace(amd64GCTraceRefData, traceRefData)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize)
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectSize)
@@ -291,7 +272,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceObjectFields := len(e.Code)
-	patchJcc(isObject, traceObjectFields)
+	patchTrace(amd64GCTraceObject, traceObjectFields)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize+amd64ObjectFields)
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectHeaderSize+amd64ObjectRefMask)
@@ -323,7 +304,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 
 	// JSValue backing stores trace only tagged heap references.
 	traceJSValueData := len(e.Code)
-	patchJcc(isJSValueData, traceJSValueData)
+	patchTrace(amd64GCTraceJSValueData, traceJSValueData)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize)
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectSize)
@@ -349,7 +330,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 
 	// Dynamic object identity owns one raw pointer to its growable entry table.
 	traceDynamicObject := len(e.Code)
-	patchJcc(isDynamicObject, traceDynamicObject)
+	patchTrace(amd64GCTraceDynamicObject, traceDynamicObject)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64DynamicEntries)
 	markDynamicEntriesCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markDynamicEntriesCall + 5)))
@@ -360,7 +341,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	// Dynamic hash entries are {hash, raw string key, boxed JSValue}. Hash words
 	// are scalars and must never be interpreted as heap references.
 	traceDynamicEntries := len(e.Code)
-	patchJcc(isDynamicEntries, traceDynamicEntries)
+	patchTrace(amd64GCTraceDynamicEntries, traceDynamicEntries)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize)
 	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectSize)
@@ -395,7 +376,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	// Closure payload: code pointer, capture count, reference mask, captures.
 	// Only bits set in the capture reference mask are traced.
 	traceClosure := len(e.Code)
-	patchJcc(isClosure, traceClosure)
+	patchTrace(amd64GCTraceClosure, traceClosure)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize+24)
 	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectHeaderSize+16)
@@ -426,7 +407,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceTask := len(e.Code)
-	patchJcc(isTask, traceTask)
+	patchTrace(amd64GCTraceTask, traceTask)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskClosure)
 	markTaskClosureCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markTaskClosureCall + 5)))
@@ -536,7 +517,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceCollection := len(e.Code)
-	patchJcc(isCollection, traceCollection)
+	patchTrace(amd64GCTraceCollection, traceCollection)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64CollectionEntries)
 	markCollectionEntriesCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markCollectionEntriesCall + 5)))
@@ -545,7 +526,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceTaskGroup := len(e.Code)
-	patchJcc(isTaskGroup, traceTaskGroup)
+	patchTrace(amd64GCTraceTaskGroup, traceTaskGroup)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64TaskGroupHead)
 	markTaskGroupHeadCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markTaskGroupHeadCall + 5)))
@@ -554,7 +535,7 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset, freeInsertOffset int) {
 	e.JmpRel32(0)
 
 	traceChannel := len(e.Code)
-	patchJcc(isChannel, traceChannel)
+	patchTrace(amd64GCTraceChannel, traceChannel)
 	e.MovRegDeref(amd64.RDI, amd64.R12, amd64ObjectHeaderSize+amd64ChannelData)
 	markChannelDataCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markChannelDataCall + 5)))

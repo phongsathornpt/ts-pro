@@ -127,3 +127,24 @@ func TestAMD64RootSlotsReuseAcrossDeadSequentialBlocks(t *testing.T) {
 		t.Fatalf("sequential dead roots use slots %d and %d, want reuse", slots[first.ID], slots[second.ID])
 	}
 }
+
+func TestAMD64GCLayoutDescriptorsCoverEveryObjectType(t *testing.T) {
+	for typ := int64(0); typ <= amd64ObjectTypeCollection; typ++ {
+		desc, ok := amd64GCLayoutForType(typ)
+		if !ok {
+			t.Fatalf("missing GC layout descriptor for object type %d", typ)
+		}
+		if desc.ObjectType != typ {
+			t.Fatalf("descriptor type = %d, want %d", desc.ObjectType, typ)
+		}
+	}
+	if desc, ok := amd64GCLayoutForType(amd64ObjectTypeAtomic); !ok || desc.TraceKind != amd64GCTraceAtomic {
+		t.Fatalf("atomic descriptor = %#v, ok=%v", desc, ok)
+	}
+	if desc, ok := amd64GCLayoutForType(amd64ObjectTypeArrayData); !ok || desc.TraceKind != amd64GCTraceAtomic {
+		t.Fatalf("number array data must be atomic: %#v, ok=%v", desc, ok)
+	}
+	if _, ok := amd64GCLayoutForType(amd64ObjectTypeCollection + 1); ok {
+		t.Fatal("unknown object type must not resolve to a GC layout")
+	}
+}
