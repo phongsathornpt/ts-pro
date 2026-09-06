@@ -12,11 +12,29 @@ const (
 	amd64DynamicEntries   int32 = 16
 	amd64DynamicLastIndex int32 = 24
 	amd64DynamicPayload   int32 = 32
-	amd64DynamicEntrySize       = 16
+
+	amd64DynamicEntryHash  int32 = 0
+	amd64DynamicEntryKey   int32 = 8
+	amd64DynamicEntryValue int32 = 16
+	amd64DynamicEntrySize        = 24
 )
 
+func emitAMD64DynamicEntryAddress(e *amd64.Emitter, dst, base, index, scratch amd64.Register) {
+	// offset = index * 24 = index * 3 * 8. Compute it in scratch so dst may
+	// safely alias base, which is common in the generated lookup paths.
+	e.MovRegReg(scratch, index)
+	e.AddRegReg(scratch, scratch)
+	e.AddRegReg(scratch, index)
+	e.AddRegReg(scratch, scratch)
+	e.AddRegReg(scratch, scratch)
+	e.AddRegReg(scratch, scratch)
+	if dst != base {
+		e.MovRegReg(dst, base)
+	}
+	e.AddRegReg(dst, scratch)
+}
+
 func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
-	// Returns a boxed JSValue object reference in RAX.
 	e.Push(amd64.RBP)
 	e.MovRegReg(amd64.RBP, amd64.RSP)
 	e.Push(amd64.RBX)
@@ -29,7 +47,6 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.MovRegReg(amd64.RBX, amd64.RAX)
 	emitAMD64SetObjectType(e, amd64.RBX, amd64ObjectTypeDynamicObject)
 
-	// Root the object while allocating its first entry table.
 	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
 	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
 	e.MovRegImm64(amd64.R10, 1)
@@ -43,13 +60,12 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.CallRel32(int32(allocOffset - (callEntries + 5)))
 	emitAMD64SetObjectType(e, amd64.RAX, amd64ObjectTypeDynamicEntries)
 
-	// Fresh bump/mmap memory is already zero; reclaimed entry tables are not.
+	// Fresh pages are already zero; reclaimed hash tables must be scrubbed.
 	e.TestRegReg(amd64.RDX, amd64.RDX)
-	zeroFreshDone := len(e.Code)
+	zeroDone := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	// Clear 4 {key,value} pairs.
 	e.MovRegReg(amd64.R10, amd64.RAX)
-	e.MovRegImm64(amd64.R11, 8)
+	e.MovRegImm64(amd64.R11, 12) // 4 entries * 3 qwords
 	e.MovRegImm64(amd64.RDX, 0)
 	zeroLoop := len(e.Code)
 	e.MovDerefReg(amd64.R10, 0, amd64.RDX)
@@ -58,8 +74,8 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	binary.LittleEndian.PutUint32(e.Code[zeroBack+2:], uint32(int32(zeroLoop-(zeroBack+6))))
-	zeroFreshDoneLabel := len(e.Code)
-	binary.LittleEndian.PutUint32(e.Code[zeroFreshDone+2:], uint32(int32(zeroFreshDoneLabel-(zeroFreshDone+6))))
+	zeroDoneLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[zeroDone+2:], uint32(int32(zeroDoneLabel-(zeroDone+6))))
 
 	e.MovRegImm64(amd64.R10, 0)
 	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R10)
@@ -68,7 +84,6 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.MovRegImm64(amd64.R10, -1)
 	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R10)
 
-	// Unlink temporary root frame and box the stable object payload.
 	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 	e.MovRegReg(amd64.RAX, amd64.RBX)
@@ -84,8 +99,7 @@ func emitAMD64DynamicObjectNew(e *amd64.Emitter, allocOffset int) {
 	e.Ret()
 }
 
-func emitAMD64DynamicGet(e *amd64.Emitter, stringEqOffset int) {
-	// RDI=boxed object, RSI=raw native string key. Returns boxed JSValue.
+func emitAMD64DynamicGet(e *amd64.Emitter, stringEqOffset, stringHashOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	emitReturn := func() {
@@ -108,88 +122,102 @@ func emitAMD64DynamicGet(e *amd64.Emitter, stringEqOffset int) {
 	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
 	e.AndRegReg(amd64.RBX, amd64.R10)
 	e.MovRegReg(amd64.R12, amd64.RSI)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	hashCall := len(e.Code)
+	e.CallRel32(int32(stringHashOffset - (hashCall + 5)))
+	e.MovRegReg(amd64.R14, amd64.RAX)
 
-	// Repeated property access is common in loops. Probe the last successful
-	// slot first, then fall back to the linear table scan on a cache miss.
+	// L1 cache: probe the last successful hash-table slot first.
 	e.MovRegDeref(amd64.R13, amd64.RBX, amd64DynamicLastIndex)
-	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
 	e.CmpRegReg(amd64.R13, amd64.R10)
-	cacheInvalid := len(e.Code)
+	cacheMiss := len(e.Code)
 	e.JccRel32(amd64.CondAE, 0)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R13)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R13, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64DynamicEntryHash)
+	e.CmpRegReg(amd64.R11, amd64.R14)
+	cacheHashMiss := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegDeref(amd64.RDI, amd64.R10, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	cacheEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.MovRegReg(amd64.RSI, amd64.R12)
 	cacheEqCall := len(e.Code)
 	e.CallRel32(int32(stringEqOffset - (cacheEqCall + 5)))
 	e.TestRegReg(amd64.RAX, amd64.RAX)
-	cacheMiss := len(e.Code)
+	cacheEqMiss := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R13)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RAX, amd64.R10, 8)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R13, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R10, amd64DynamicEntryValue)
 	emitReturn()
 
-	linearScan := len(e.Code)
-	patchJcc(cacheInvalid, linearScan)
-	patchJcc(cacheMiss, linearScan)
-	e.MovRegImm64(amd64.R13, 0)
+	probeStart := len(e.Code)
+	patchJcc(cacheMiss, probeStart)
+	patchJcc(cacheHashMiss, probeStart)
+	patchJcc(cacheEmpty, probeStart)
+	patchJcc(cacheEqMiss, probeStart)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.SubRegImm32(amd64.R10, 1)
+	e.MovRegReg(amd64.R13, amd64.R14)
+	e.AndRegReg(amd64.R13, amd64.R10)
+	e.MovRegImm64(amd64.RDX, 0)
 
-	loop := len(e.Code)
-	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
-	e.CmpRegReg(amd64.R13, amd64.R10)
-	missing := len(e.Code)
-	e.JccRel32(amd64.CondAE, 0)
+	probeLoop := len(e.Code)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R13)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R13, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R10, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	empty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64DynamicEntryHash)
+	e.CmpRegReg(amd64.R11, amd64.R14)
+	nextHash := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
 	e.MovRegReg(amd64.RSI, amd64.R12)
 	callEq := len(e.Code)
 	e.CallRel32(int32(stringEqOffset - (callEq + 5)))
 	e.TestRegReg(amd64.RAX, amd64.RAX)
 	found := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
-	e.AddRegImm32(amd64.R13, 1)
-	back := len(e.Code)
+	nextEq := len(e.Code)
 	e.JmpRel32(0)
-	patchJmp(back, loop)
+
+	nextProbe := len(e.Code)
+	patchJcc(nextHash, nextProbe)
+	patchJmp(nextEq, nextProbe)
+	e.AddRegImm32(amd64.R13, 1)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.MovRegReg(amd64.R11, amd64.R10)
+	e.SubRegImm32(amd64.R11, 1)
+	e.AndRegReg(amd64.R13, amd64.R11)
+	e.AddRegImm32(amd64.RDX, 1)
+	e.CmpRegReg(amd64.RDX, amd64.R10)
+	probeBack := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	patchJcc(probeBack, probeLoop)
+
+	missing := len(e.Code)
+	patchJcc(empty, missing)
+	e.MovRegImm64(amd64.RAX, amd64UndefinedBits)
+	emitReturn()
 
 	foundLabel := len(e.Code)
 	patchJcc(found, foundLabel)
 	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R13)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R13)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RAX, amd64.R10, 8)
-	emitReturn()
-
-	missingLabel := len(e.Code)
-	patchJcc(missing, missingLabel)
-	e.MovRegImm64(amd64.RAX, amd64UndefinedBits)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R13, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R10, amd64DynamicEntryValue)
 	emitReturn()
 }
 
-func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
-	// RDI=boxed object, RSI=raw key, RDX=boxed value. Returns value in RAX.
+func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset, stringHashOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 	emitReturn := func() {
-		e.AddRegImm32(amd64.RSP, 48)
+		e.AddRegImm32(amd64.RSP, 64)
 		e.Pop(amd64.R14)
 		e.Pop(amd64.R13)
 		e.Pop(amd64.R12)
@@ -204,93 +232,126 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	e.Push(amd64.R12)
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
-	e.SubRegImm32(amd64.RSP, 48)
+	e.SubRegImm32(amd64.RSP, 64)
 
 	e.MovRegReg(amd64.RBX, amd64.RDI)
 	e.MovRegImm64(amd64.R10, amd64JSPayloadMask)
 	e.AndRegReg(amd64.RBX, amd64.R10)
 	e.MovRegReg(amd64.R12, amd64.RSI)
 	e.MovRegReg(amd64.R13, amd64.RDX)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	hashCall := len(e.Code)
+	e.CallRel32(int32(stringHashOffset - (hashCall + 5)))
+	e.MovDerefReg(amd64.RSP, 40, amd64.RAX)
 
+	// L1 last-slot cache.
 	e.MovRegDeref(amd64.R14, amd64.RBX, amd64DynamicLastIndex)
-	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
 	e.CmpRegReg(amd64.R14, amd64.R10)
-	cacheInvalid := len(e.Code)
+	cacheMiss := len(e.Code)
 	e.JccRel32(amd64.CondAE, 0)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64DynamicEntryHash)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 40)
+	e.CmpRegReg(amd64.R11, amd64.RAX)
+	cacheHashMiss := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegDeref(amd64.RDI, amd64.R10, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	cacheEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.MovRegReg(amd64.RSI, amd64.R12)
 	cacheEqCall := len(e.Code)
 	e.CallRel32(int32(stringEqOffset - (cacheEqCall + 5)))
 	e.TestRegReg(amd64.RAX, amd64.RAX)
-	cacheMiss := len(e.Code)
+	cacheEqMiss := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovDerefReg(amd64.R10, 8, amd64.R13)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovDerefReg(amd64.R10, amd64DynamicEntryValue, amd64.R13)
 	e.MovRegReg(amd64.RAX, amd64.R13)
 	emitReturn()
 
-	linearSearch := len(e.Code)
-	patchJcc(cacheInvalid, linearSearch)
-	patchJcc(cacheMiss, linearSearch)
-	e.MovRegImm64(amd64.R14, 0)
+	probeStart := len(e.Code)
+	patchJcc(cacheMiss, probeStart)
+	patchJcc(cacheHashMiss, probeStart)
+	patchJcc(cacheEmpty, probeStart)
+	patchJcc(cacheEqMiss, probeStart)
+	e.MovRegDeref(amd64.R14, amd64.RSP, 40)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.SubRegImm32(amd64.R10, 1)
+	e.AndRegReg(amd64.R14, amd64.R10)
+	e.MovRegImm64(amd64.RDX, 0)
 
-	search := len(e.Code)
-	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
-	e.CmpRegReg(amd64.R14, amd64.R10)
-	notFound := len(e.Code)
-	e.JccRel32(amd64.CondAE, 0)
+	probeLoop := len(e.Code)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovRegDeref(amd64.RDI, amd64.R10, 0)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RDI, amd64.R10, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	emptySlot := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64DynamicEntryHash)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 40)
+	e.CmpRegReg(amd64.R11, amd64.RAX)
+	nextHash := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
 	e.MovRegReg(amd64.RSI, amd64.R12)
 	callEq := len(e.Code)
 	e.CallRel32(int32(stringEqOffset - (callEq + 5)))
 	e.TestRegReg(amd64.RAX, amd64.RAX)
 	found := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
-	e.AddRegImm32(amd64.R14, 1)
-	searchBack := len(e.Code)
+	nextEq := len(e.Code)
 	e.JmpRel32(0)
-	patchJmp(searchBack, search)
+
+	nextProbe := len(e.Code)
+	patchJcc(nextHash, nextProbe)
+	patchJmp(nextEq, nextProbe)
+	e.AddRegImm32(amd64.R14, 1)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.MovRegReg(amd64.R11, amd64.R10)
+	e.SubRegImm32(amd64.R11, 1)
+	e.AndRegReg(amd64.R14, amd64.R11)
+	e.AddRegImm32(amd64.RDX, 1)
+	e.CmpRegReg(amd64.RDX, amd64.R10)
+	probeBack := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	patchJcc(probeBack, probeLoop)
+	growFromFull := len(e.Code)
+	e.JmpRel32(0)
 
 	foundLabel := len(e.Code)
 	patchJcc(found, foundLabel)
 	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R14)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovDerefReg(amd64.R10, 8, amd64.R13)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovDerefReg(amd64.R10, amd64DynamicEntryValue, amd64.R13)
 	e.MovRegReg(amd64.RAX, amd64.R13)
 	emitReturn()
 
-	notFoundLabel := len(e.Code)
-	patchJcc(notFound, notFoundLabel)
-	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
-	e.CmpRegReg(amd64.R14, amd64.R10)
-	hasCapacity := len(e.Code)
-	e.JccRel32(amd64.CondB, 0)
-
-	// Grow table x2. Root object, key, and boxed value while allocating.
+	// We found an empty slot. Grow first if inserting would exceed 75% load.
+	insertCandidate := len(e.Code)
+	patchJcc(emptySlot, insertCandidate)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCount)
+	e.AddRegImm32(amd64.R10, 1)
 	e.AddRegReg(amd64.R10, amd64.R10)
-	e.MovDerefReg(amd64.RSP, 40, amd64.R10)
+	e.AddRegReg(amd64.R10, amd64.R10) // (count+1)*4
+	e.MovRegDeref(amd64.R11, amd64.RBX, amd64DynamicCapacity)
+	e.MovRegReg(amd64.RAX, amd64.R11)
+	e.AddRegReg(amd64.RAX, amd64.RAX)
+	e.AddRegReg(amd64.R11, amd64.RAX) // capacity*3
+	e.CmpRegReg(amd64.R10, amd64.R11)
+	insertWithoutGrow := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+
+	grow := len(e.Code)
+	patchJmp(growFromFull, grow)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.AddRegReg(amd64.R10, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 48, amd64.R10)
+
+	// Root object, incoming key, and incoming value across allocation/GC.
 	e.MovRegDeref(amd64.R11, amd64.R15, amd64RTRootHead)
 	e.MovDerefReg(amd64.RSP, 0, amd64.R11)
 	e.MovRegImm64(amd64.R11, 3)
@@ -300,23 +361,22 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	e.MovDerefReg(amd64.RSP, 32, amd64.R13)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
 
-	e.MovRegDeref(amd64.RDI, amd64.RSP, 40)
-	for range 4 {
-		e.AddRegReg(amd64.RDI, amd64.RDI)
-	}
+	e.MovRegDeref(amd64.RDI, amd64.RSP, 48)
+	e.MovRegImm64(amd64.R11, amd64DynamicEntrySize)
+	e.ImulRegReg(amd64.RDI, amd64.R11)
 	callAlloc := len(e.Code)
 	e.CallRel32(int32(allocOffset - (callAlloc + 5)))
 	e.MovRegReg(amd64.R9, amd64.RAX)
 	emitAMD64SetObjectType(e, amd64.R9, amd64ObjectTypeDynamicEntries)
 
-	// Fresh backing tables are zero from mmap/bump allocation.
+	// Fresh tables are already zero. Reclaimed tables need all slots cleared.
 	e.TestRegReg(amd64.RDX, amd64.RDX)
-	growZeroFreshDone := len(e.Code)
+	zeroDone := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	// Reclaimed tables may contain stale keys/JSValues and must be cleared.
 	e.MovRegReg(amd64.R10, amd64.R9)
-	e.MovRegDeref(amd64.R11, amd64.RSP, 40)
-	e.AddRegReg(amd64.R11, amd64.R11) // two qwords per entry
+	e.MovRegDeref(amd64.R11, amd64.RSP, 48)
+	e.MovRegImm64(amd64.RAX, 3)
+	e.ImulRegReg(amd64.R11, amd64.RAX)
 	e.MovRegImm64(amd64.RAX, 0)
 	zeroLoop := len(e.Code)
 	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
@@ -325,47 +385,95 @@ func emitAMD64DynamicSet(e *amd64.Emitter, allocOffset, stringEqOffset int) {
 	zeroBack := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 	patchJcc(zeroBack, zeroLoop)
-	growZeroFreshDoneLabel := len(e.Code)
-	patchJcc(growZeroFreshDone, growZeroFreshDoneLabel)
+	zeroDoneLabel := len(e.Code)
+	patchJcc(zeroDone, zeroDoneLabel)
 
-	// Copy the live old prefix.
+	// Rehash occupied slots into the doubled table.
 	e.MovRegDeref(amd64.R8, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R10, amd64.R9)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	e.AddRegReg(amd64.R11, amd64.R11)
-	e.TestRegReg(amd64.R11, amd64.R11)
-	copyDone := len(e.Code)
+	e.MovRegDeref(amd64.RDX, amd64.RBX, amd64DynamicCapacity)
+	rehashLoop := len(e.Code)
+	e.TestRegReg(amd64.RDX, amd64.RDX)
+	rehashDone := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	copyLoop := len(e.Code)
-	e.MovRegDeref(amd64.RAX, amd64.R8, 0)
-	e.MovDerefReg(amd64.R10, 0, amd64.RAX)
-	e.AddRegImm32(amd64.R8, 8)
-	e.AddRegImm32(amd64.R10, 8)
+	e.MovRegDeref(amd64.RDI, amd64.R8, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.RDI, amd64.RDI)
+	rehashNextEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64DynamicEntryHash)
+	e.MovRegReg(amd64.R10, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 48)
 	e.SubRegImm32(amd64.R11, 1)
-	copyBack := len(e.Code)
-	e.JccRel32(amd64.CondNE, 0)
-	patchJcc(copyBack, copyLoop)
-	patchJcc(copyDone, len(e.Code))
+	e.AndRegReg(amd64.R10, amd64.R11)
+	rehashProbe := len(e.Code)
+	emitAMD64DynamicEntryAddress(e, amd64.RSI, amd64.R9, amd64.R10, amd64.R11)
+	e.MovRegDeref(amd64.R11, amd64.RSI, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	rehashPlace := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.AddRegImm32(amd64.R10, 1)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 48)
+	e.SubRegImm32(amd64.R11, 1)
+	e.AndRegReg(amd64.R10, amd64.R11)
+	rehashProbeBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(rehashProbeBack, rehashProbe)
+	rehashPlaceLabel := len(e.Code)
+	patchJcc(rehashPlace, rehashPlaceLabel)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64DynamicEntryHash)
+	e.MovDerefReg(amd64.RSI, amd64DynamicEntryHash, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64DynamicEntryKey)
+	e.MovDerefReg(amd64.RSI, amd64DynamicEntryKey, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.R8, amd64DynamicEntryValue)
+	e.MovDerefReg(amd64.RSI, amd64DynamicEntryValue, amd64.RAX)
+	rehashNext := len(e.Code)
+	patchJcc(rehashNextEmpty, rehashNext)
+	e.AddRegImm32(amd64.R8, amd64DynamicEntrySize)
+	e.SubRegImm32(amd64.RDX, 1)
+	rehashBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(rehashBack, rehashLoop)
+	rehashDoneLabel := len(e.Code)
+	patchJcc(rehashDone, rehashDoneLabel)
 
 	e.MovDerefReg(amd64.RBX, amd64DynamicEntries, amd64.R9)
-	e.MovRegDeref(amd64.R10, amd64.RSP, 40)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 48)
 	e.MovDerefReg(amd64.RBX, amd64DynamicCapacity, amd64.R10)
 	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 
-	hasCapacityLabel := len(e.Code)
-	patchJcc(hasCapacity, hasCapacityLabel)
+	// Locate the first empty slot for the new key in the rehashed table.
+	e.MovRegDeref(amd64.R14, amd64.RSP, 40)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicCapacity)
+	e.SubRegImm32(amd64.R10, 1)
+	e.AndRegReg(amd64.R14, amd64.R10)
+	insertProbe := len(e.Code)
 	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
-	e.MovRegReg(amd64.R11, amd64.R14)
-	for range 4 {
-		e.AddRegReg(amd64.R11, amd64.R11)
-	}
-	e.AddRegReg(amd64.R10, amd64.R11)
-	e.MovDerefReg(amd64.R10, 0, amd64.R12)
-	e.MovDerefReg(amd64.R10, 8, amd64.R13)
-	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R14)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64DynamicEntryKey)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	insertAfterGrow := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.AddRegImm32(amd64.R14, 1)
-	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R14)
+	e.MovRegDeref(amd64.R11, amd64.RBX, amd64DynamicCapacity)
+	e.SubRegImm32(amd64.R11, 1)
+	e.AndRegReg(amd64.R14, amd64.R11)
+	insertProbeBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(insertProbeBack, insertProbe)
+
+	insert := len(e.Code)
+	patchJcc(insertWithoutGrow, insert)
+	patchJcc(insertAfterGrow, insert)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64DynamicEntries)
+	emitAMD64DynamicEntryAddress(e, amd64.R10, amd64.R10, amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.RAX, amd64.RSP, 40)
+	e.MovDerefReg(amd64.R10, amd64DynamicEntryHash, amd64.RAX)
+	e.MovDerefReg(amd64.R10, amd64DynamicEntryKey, amd64.R12)
+	e.MovDerefReg(amd64.R10, amd64DynamicEntryValue, amd64.R13)
+	e.MovDerefReg(amd64.RBX, amd64DynamicLastIndex, amd64.R14)
+	e.MovRegDeref(amd64.R11, amd64.RBX, amd64DynamicCount)
+	e.AddRegImm32(amd64.R11, 1)
+	e.MovDerefReg(amd64.RBX, amd64DynamicCount, amd64.R11)
 	e.MovRegReg(amd64.RAX, amd64.R13)
 	emitReturn()
 }

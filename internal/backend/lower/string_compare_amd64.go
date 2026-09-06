@@ -62,3 +62,31 @@ func emitAMD64StringEq(e *amd64.Emitter) {
 	patchJmp(doneJump, done)
 	e.Ret()
 }
+
+// emitAMD64StringHash computes a stable FNV-1a hash for a runtime string.
+// RDI=raw runtime string, RAX=64-bit hash.
+func emitAMD64StringHash(e *amd64.Emitter) {
+	patchJcc := func(at, target int) {
+		binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
+	}
+
+	e.MovRegDeref(amd64.R10, amd64.RDI, 0)
+	e.AddRegImm32(amd64.RDI, 8)
+	e.MovRegImm64(amd64.RAX, int64(-3750763034362895579)) // FNV offset basis as signed uint64
+	e.TestRegReg(amd64.R10, amd64.R10)
+	done := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegImm64(amd64.R11, 1099511628211)
+	loop := len(e.Code)
+	e.MovzxRegDeref8(amd64.R9, amd64.RDI, 0)
+	e.XorRegReg(amd64.RAX, amd64.R9)
+	e.ImulRegReg(amd64.RAX, amd64.R11)
+	e.AddRegImm32(amd64.RDI, 1)
+	e.SubRegImm32(amd64.R10, 1)
+	back := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	patchJcc(back, loop)
+	doneLabel := len(e.Code)
+	patchJcc(done, doneLabel)
+	e.Ret()
+}

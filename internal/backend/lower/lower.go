@@ -1572,6 +1572,8 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	fnOffsets["ts_string_eq"] = len(e.Code)
 	emitAMD64StringEq(e)
+	fnOffsets["ts_string_hash"] = len(e.Code)
+	emitAMD64StringHash(e)
 	fnOffsets["ts_regexp_test"] = len(e.Code)
 	emitAMD64RegExpTest(e)
 
@@ -1597,9 +1599,9 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_dynamic_object_new"] = len(e.Code)
 	emitAMD64DynamicObjectNew(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_dynamic_get"] = len(e.Code)
-	emitAMD64DynamicGet(e, fnOffsets["ts_string_eq"])
+	emitAMD64DynamicGet(e, fnOffsets["ts_string_eq"], fnOffsets["ts_string_hash"])
 	fnOffsets["ts_dynamic_set"] = len(e.Code)
-	emitAMD64DynamicSet(e, fnOffsets["ts_alloc"], fnOffsets["ts_string_eq"])
+	emitAMD64DynamicSet(e, fnOffsets["ts_alloc"], fnOffsets["ts_string_eq"], fnOffsets["ts_string_hash"])
 
 	fnOffsets["ts_string_concat"] = len(e.Code)
 	emitAMD64StringConcat(e, fnOffsets["ts_alloc"])

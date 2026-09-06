@@ -323,24 +323,28 @@ func emitAMD64GCCollect(e *amd64.Emitter, markOffset int) {
 	traceDynamicObjectDone := len(e.Code)
 	e.JmpRel32(0)
 
-	// Entry tables contain {raw string key, boxed JSValue} pairs. The mark
-	// helper accepts both raw string pointers and tagged references.
+	// Dynamic hash entries are {hash, raw string key, boxed JSValue}. Hash words
+	// are scalars and must never be interpreted as heap references.
 	traceDynamicEntries := len(e.Code)
 	patchJcc(isDynamicEntries, traceDynamicEntries)
 	e.MovRegReg(amd64.R8, amd64.R12)
 	e.AddRegImm32(amd64.R8, amd64ObjectHeaderSize)
-	e.MovRegDeref(amd64.R9, amd64.R12, amd64ObjectSize)
-	e.SubRegImm32(amd64.R9, amd64ObjectHeaderSize)
-	e.ShrRegImm8(amd64.R9, 4)
+	e.MovRegDeref(amd64.RAX, amd64.R12, amd64ObjectSize)
+	e.SubRegImm32(amd64.RAX, amd64ObjectHeaderSize)
+	e.ShrRegImm8(amd64.RAX, 3) // payload qwords
+	e.MovRegImm64(amd64.R11, 3)
+	e.Cqo()
+	e.IdivReg(amd64.R11)
+	e.MovRegReg(amd64.R9, amd64.RAX) // entry count = qwords / 3
 	dynamicEntryLoop := len(e.Code)
 	e.TestRegReg(amd64.R9, amd64.R9)
 	dynamicEntriesDone := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	e.MovRegDeref(amd64.RDI, amd64.R8, 0)
+	e.MovRegDeref(amd64.RDI, amd64.R8, amd64DynamicEntryKey)
 	markDynamicKeyCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markDynamicKeyCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
-	e.MovRegDeref(amd64.RDI, amd64.R8, 8)
+	e.MovRegDeref(amd64.RDI, amd64.R8, amd64DynamicEntryValue)
 	markDynamicValueCall := len(e.Code)
 	e.CallRel32(int32(markOffset - (markDynamicValueCall + 5)))
 	e.OrRegReg(amd64.R14, amd64.RAX)
