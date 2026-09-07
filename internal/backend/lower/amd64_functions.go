@@ -1,6 +1,7 @@
 package lower
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
@@ -127,6 +128,34 @@ func lowerAMD64Functions(e *amd64.Emitter, prog *ir.Program, fnOffsets map[strin
 			}
 		}
 		loadRawValue := loadOperand
+		emitPhiMoves := func(target, from *ir.BasicBlock) {
+			type move struct {
+				res *ir.Value
+				val ir.Operand
+			}
+			moves := make([]move, 0, len(target.Phis))
+			for _, phi := range target.Phis {
+				for _, inc := range phi.Incoming {
+					if inc.Block == from {
+						moves = append(moves, move{res: phi.Res, val: inc.Value})
+						break
+					}
+				}
+			}
+			// Snapshot all sources before writing any destinations so phi copies
+			// retain parallel-copy semantics even when locations overlap.
+			for _, m := range moves {
+				src := loadOperand(m.val, amd64.R10)
+				if src != amd64.R10 {
+					e.MovRegReg(amd64.R10, src)
+				}
+				e.Push(amd64.R10)
+			}
+			for i := len(moves) - 1; i >= 0; i-- {
+				e.Pop(amd64.R10)
+				storeSSAValue(moves[i].res, amd64.R10)
+			}
+		}
 		loadArrayIndex := func(op ir.Operand, dst amd64.Register) {
 			src := loadOperand(op, amd64.R10)
 			e.MovQXMMReg(amd64.XMM0, src)
@@ -595,14 +624,18 @@ func lowerAMD64Functions(e *amd64.Emitter, prog *ir.Program, fnOffsets map[strin
 					e.Ret()
 
 				case *ir.BranchTerm:
+					emitEdgeJump := func(target *ir.BasicBlock) {
+						emitPhiMoves(target, bb)
+						jumpOffset := len(e.Code)
+						e.JmpRel32(0)
+						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: target})
+					}
 					if c, ok := term.Cond.(ir.ConstBool); ok {
 						target := term.Else
 						if c.Value {
 							target = term.Then
 						}
-						jumpOffset := len(e.Code)
-						e.JmpRel32(0)
-						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: target})
+						emitEdgeJump(target)
 						break
 					}
 					if c, ok := term.Cond.(ir.ConstNumber); ok {
@@ -610,12 +643,11 @@ func lowerAMD64Functions(e *amd64.Emitter, prog *ir.Program, fnOffsets map[strin
 						if c.Value != 0 {
 							target = term.Then
 						}
-						jumpOffset := len(e.Code)
-						e.JmpRel32(0)
-						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: target})
+						emitEdgeJump(target)
 						break
 					}
 
+					var trueBranches []int
 					if vCond, ok := term.Cond.(*ir.Value); ok && isNumberType(vCond.Type()) {
 						condReg := loadValue(vCond, amd64.R10)
 						e.MovQXMMReg(amd64.XMM0, condReg)
@@ -624,59 +656,29 @@ func lowerAMD64Functions(e *amd64.Emitter, prog *ir.Program, fnOffsets map[strin
 						for _, cond := range []amd64.Cond{amd64.CondNE, amd64.CondP} {
 							at := len(e.Code)
 							e.JccRel32(cond, 0)
-							branchFixups = append(branchFixups, branchFixupAMD64{offset: at, targetBB: term.Then, isCond: true})
+							trueBranches = append(trueBranches, at)
 						}
-						jumpOffset := len(e.Code)
-						e.JmpRel32(0)
-						branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: term.Else})
-						break
+					} else {
+						condReg := amd64.RAX
+						if vCond, ok := term.Cond.(*ir.Value); ok {
+							condReg = loadValue(vCond, amd64.R10)
+						}
+						e.TestRegReg(condReg, condReg)
+						at := len(e.Code)
+						e.JccRel32(amd64.CondNE, 0)
+						trueBranches = append(trueBranches, at)
 					}
 
-					condReg := amd64.RAX
-					if vCond, ok := term.Cond.(*ir.Value); ok {
-						condReg = loadValue(vCond, amd64.R10)
+					// False edge falls through to its phi copies, then jumps to the block.
+					emitEdgeJump(term.Else)
+					trueEdge := len(e.Code)
+					for _, at := range trueBranches {
+						binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(trueEdge-(at+6))))
 					}
-					e.TestRegReg(condReg, condReg)
-					branchOffset := len(e.Code)
-					e.JccRel32(amd64.CondNE, 0)
-					branchFixups = append(branchFixups, branchFixupAMD64{offset: branchOffset, targetBB: term.Then, isCond: true})
-					jumpOffset := len(e.Code)
-					e.JmpRel32(0)
-					branchFixups = append(branchFixups, branchFixupAMD64{offset: jumpOffset, targetBB: term.Else})
+					emitEdgeJump(term.Then)
 
 				case *ir.JumpTerm:
-					for _, phi := range term.Target.Phis {
-						for _, inc := range phi.Incoming {
-							if inc.Block == bb {
-								if v, ok := inc.Value.(*ir.Value); ok {
-									srcReg := loadValue(v, amd64.R10)
-									storeSSAValue(phi.Res, srcReg)
-								} else if c, ok := inc.Value.(ir.ConstNumber); ok {
-									e.MovRegImm64(amd64.R10, numberBits(c.Value))
-									storeSSAValue(phi.Res, amd64.R10)
-								} else if c, ok := inc.Value.(ir.ConstBool); ok {
-									if c.Value {
-										e.MovRegImm64(amd64.R10, 1)
-									} else {
-										e.MovRegImm64(amd64.R10, 0)
-									}
-									storeSSAValue(phi.Res, amd64.R10)
-								} else if _, ok := inc.Value.(ir.ConstUndefined); ok {
-									e.MovRegImm64(amd64.R10, amd64UndefinedBits)
-									storeSSAValue(phi.Res, amd64.R10)
-								} else if _, ok := inc.Value.(ir.ConstNull); ok {
-									e.MovRegImm64(amd64.R10, amd64NullBits)
-									storeSSAValue(phi.Res, amd64.R10)
-								} else if c, ok := inc.Value.(ir.ConstString); ok {
-									strOffset := len(e.Code)
-									e.LeaRipRel32(amd64.R10, 0)
-									strFixups = append(strFixups, stringFixupAMD64{offset: strOffset + 3, targetReg: amd64.R10, str: c.Value})
-									storeSSAValue(phi.Res, amd64.R10)
-								}
-							}
-						}
-					}
-
+					emitPhiMoves(term.Target, bb)
 					jumpOffset := len(e.Code)
 					e.JmpRel32(0)
 					branchFixups = append(branchFixups, branchFixupAMD64{
