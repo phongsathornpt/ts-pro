@@ -244,3 +244,34 @@ func TestCFGNonLinearBlockOrderKeepsLiveThroughValue(t *testing.T) {
 		t.Fatalf("live-through key and bridge temporary share stack slot %d", keyLoc.StackSlot)
 	}
 }
+
+func TestPhiResultsAtSameBlockEntryDoNotShareLocation(t *testing.T) {
+	fn := ir.NewFunction("parallelPhiResults", types.TypeNumber)
+	entry := fn.NewBlock("entry")
+	left := fn.NewBlock("left")
+	right := fn.NewBlock("right")
+	join := fn.NewBlock("join")
+	entry.Terminator = &ir.BranchTerm{Cond: ir.ConstBool{Value: true}, Then: left, Else: right}
+	left.Terminator = &ir.JumpTerm{Target: join}
+	right.Terminator = &ir.JumpTerm{Target: join}
+
+	strPhi := fn.NewValue("strPhi", types.TypeString)
+	lenPhi := fn.NewValue("lenPhi", types.TypeNumber)
+	join.Phis = append(join.Phis,
+		&ir.PhiInst{Res: strPhi, Incoming: []ir.PhiIncoming{{Block: left, Value: ir.ConstString{Value: "a"}}, {Block: right, Value: ir.ConstString{Value: "b"}}}},
+		&ir.PhiInst{Res: lenPhi, Incoming: []ir.PhiIncoming{{Block: left, Value: ir.ConstNumber{Value: 1}}, {Block: right, Value: ir.ConstNumber{Value: 2}}}},
+	)
+	result := fn.NewValue("result", types.TypeNumber)
+	join.Instructions = append(join.Instructions, &ir.BinaryInst{Res: result, Op: ir.OpAdd, LHS: lenPhi, RHS: ir.ConstNumber{Value: 1}})
+	join.Terminator = &ir.ReturnTerm{Val: result}
+
+	ra := New(2)
+	locs := ra.Allocate(fn)
+	a, b := locs[strPhi.ID], locs[lenPhi.ID]
+	if a.IsReg && b.IsReg && a.Reg == b.Reg {
+		t.Fatalf("simultaneous phi results share register %d", a.Reg)
+	}
+	if !a.IsReg && !b.IsReg && a.StackSlot == b.StackSlot {
+		t.Fatalf("simultaneous phi results share stack slot %d", a.StackSlot)
+	}
+}

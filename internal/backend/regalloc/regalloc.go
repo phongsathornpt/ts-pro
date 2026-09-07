@@ -248,11 +248,16 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 			}
 		}
 
+		phiEntryStep := step + 1
 		for _, phi := range bb.Phis {
 			step++
 			if phi.Res != nil {
+				// Phi results are defined simultaneously at block entry. Giving
+				// sequential phi nodes distinct starts lets two results share one
+				// location, after which parallel phi copies overwrite each other.
+				// Use the common entry position for every result so they interfere.
 				if _, exists := startMap[phi.Res.ID]; !exists {
-					startMap[phi.Res.ID] = step
+					startMap[phi.Res.ID] = phiEntryStep
 				}
 				if endMap[phi.Res.ID] < step {
 					endMap[phi.Res.ID] = step
@@ -353,23 +358,17 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 		}
 	}
 
-	// Linear scan still needs one contiguous interval. Conservatively span every
-	// block where a value is live, even when physical block order differs from
-	// CFG execution order. This may increase pressure slightly, but cannot
-	// miscompile a live-through value by reusing its register early.
+	// Linear scan still needs one contiguous interval. Extend the end through every
+	// block where a value remains live, but never move its start before the actual
+	// SSA definition. Moving starts backwards creates artificial interference and
+	// can turn modest functions into hundreds of needless spills.
 	for _, bb := range fn.Blocks {
 		for id := range liveIn[bb] {
-			if start, ok := startMap[id]; ok && blockStart[bb] < start {
-				startMap[id] = blockStart[bb]
-			}
 			if endMap[id] < blockEnd[bb] {
 				endMap[id] = blockEnd[bb]
 			}
 		}
 		for id := range liveOut[bb] {
-			if start, ok := startMap[id]; ok && blockStart[bb] < start {
-				startMap[id] = blockStart[bb]
-			}
 			if endMap[id] < blockEnd[bb] {
 				endMap[id] = blockEnd[bb]
 			}
