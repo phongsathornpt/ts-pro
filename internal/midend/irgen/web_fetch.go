@@ -381,10 +381,16 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network connection failed"}, ir.ConstString{Value: "TypeError"}))
 
 	g.currentBB = readResponseBB
-	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
+	headerRaw := g.currentFn.NewValue("fetch_raw_headers", g.semaResult.ByteBufferType)
+	bodyRaw := g.currentFn.NewValue("fetch_raw_body_remainder", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.CallInst{Res: raw, Callee: "ts_net_http_read_all", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
+		&ir.CallInst{Res: headerRaw, Callee: "ts_net_http_read_headers", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
+		&ir.CallInst{Res: bodyRaw, Callee: "ts_net_http_read_all", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
 		&ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}},
+	)
+	headerRawLen := g.currentFn.NewValue("fetch_raw_headers_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: headerRawLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{headerRaw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}},
 	)
 	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
@@ -396,24 +402,18 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
 	g.routeThrownValue(postReason)
 	g.currentBB = parseResponseBB
-	rawLen := g.currentFn.NewValue("fetch_raw_transport_len", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rawLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
 	networkFailed := g.currentFn.NewValue("fetch_network_failed", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: networkFailed, Op: ir.OpEq, LHS: rawLen, RHS: ir.ConstNumber{Value: 0}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: networkFailed, Op: ir.OpEq, LHS: headerRawLen, RHS: ir.ConstNumber{Value: 0}})
 	networkErrBB := g.currentFn.NewBlock("fetch_network_error")
 	httpParseBB := g.currentFn.NewBlock("fetch_http_parse")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: networkFailed, Then: networkErrBB, Else: httpParseBB}
 	g.currentBB = networkErrBB
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network request failed"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = httpParseBB
-	status := g.lowerHTTPStatus(raw)
-	offset := g.lowerHTTPBodyOffset(raw)
-	statusText := g.lowerHTTPStatusText(raw, offset)
-	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	rawBody := g.currentFn.NewValue("fetch_response_body_raw", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rawBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
-	responseHeaders := g.lowerHTTPResponseHeaders(raw, offset)
+	status := g.lowerHTTPStatus(headerRaw)
+	statusText := g.lowerHTTPStatusText(headerRaw, headerRawLen)
+	rawBody := bodyRaw
+	responseHeaders := g.lowerHTTPResponseHeaders(headerRaw, headerRawLen)
 	hasTransferEncoding := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "transfer-encoding"})
 	checkEncodingBB := g.currentFn.NewBlock("fetch_transfer_encoding_check")
 	plainBodyBB := g.currentFn.NewBlock("fetch_transfer_encoding_plain")
@@ -431,7 +431,7 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 
 	g.currentBB = dechunkBB
 	decodedBody := g.currentFn.NewValue("fetch_response_body_dechunked", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: decodedBody, Callee: "ts_http_dechunk", Args: []ir.Operand{raw, offset}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: decodedBody, Callee: "ts_http_dechunk", Args: []ir.Operand{bodyRaw, ir.ConstNumber{Value: 0}}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber}})
 	dechunkEnd := g.currentBB
 	dechunkEnd.Terminator = &ir.JumpTerm{Target: bodyJoinBB}
 

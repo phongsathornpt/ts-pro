@@ -563,6 +563,155 @@ func emitAMD64NetHTTPReadAll(e *amd64.Emitter, byteBufferNewOffset, byteBufferCo
 	e.Ret()
 }
 
+func emitAMD64NetHTTPReadHeaders(e *amd64.Emitter, byteBufferNewOffset, byteBufferCopyOffset, taskYieldOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 64)
+	e.Cvttsd2si(amd64.R14, amd64.XMM0)      // fd
+	e.MovDerefReg(amd64.RSP, 24, amd64.RDI) // AbortSignal
+
+	e.MovRegImm64(amd64.R10, 8*1024)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callNew := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callNew + 5)))
+	e.MovRegReg(amd64.RBX, amd64.RAX)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R10)
+
+	// Root the header buffer across cooperative yields and growth allocations.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 32, amd64.R10)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RSP, 40, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 48, amd64.RBX)
+	e.MovRegReg(amd64.R10, amd64.RSP)
+	e.AddRegImm32(amd64.R10, 32)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+
+	e.MovRegImm64(amd64.R13, 0) // bytes used
+	readLoop := len(e.Code)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 24)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64AbortSignalAborted)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	abortedRead := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferCapacity)
+	e.CmpRegReg(amd64.R13, amd64.R10)
+	haveCapacity := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	e.MovRegReg(amd64.R12, amd64.RBX)
+	e.AddRegReg(amd64.R10, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callGrow := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callGrow + 5)))
+	e.MovRegReg(amd64.RBX, amd64.RAX)
+	e.MovDerefReg(amd64.RSP, 48, amd64.RBX)
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	e.MovRegReg(amd64.RSI, amd64.R12)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM1, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM2, amd64.R13)
+	callCopy := len(e.Code)
+	e.CallRel32(int32(byteBufferCopyOffset - (callCopy + 5)))
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
+	patchJcc(haveCapacity, len(e.Code))
+
+	// Read exactly one byte so the first body byte remains on the socket.
+	e.MovRegImm64(amd64.RAX, 0)
+	e.MovRegReg(amd64.RDI, amd64.R14)
+	e.MovRegDeref(amd64.RSI, amd64.RBX, amd64ByteBufferData)
+	e.AddRegReg(amd64.RSI, amd64.R13)
+	e.MovRegImm64(amd64.RDX, 1)
+	e.Syscall()
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	readProgress := len(e.Code)
+	e.JccRel32(amd64.CondG, 0)
+	readEOF := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, -11)
+	wouldBlock := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, -4)
+	interrupted := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	readFailure := len(e.Code)
+	e.JmpRel32(0)
+
+	yieldLabel := len(e.Code)
+	patchJcc(wouldBlock, yieldLabel)
+	patchJcc(interrupted, yieldLabel)
+	callYield := len(e.Code)
+	e.CallRel32(int32(taskYieldOffset - (callYield + 5)))
+	retry := len(e.Code)
+	e.JmpRel32(int32(readLoop - (retry + 5)))
+
+	progressLabel := len(e.Code)
+	patchJcc(readProgress, progressLabel)
+	e.AddRegReg(amd64.R13, amd64.RAX)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
+	// Stop exactly after CRLFCRLF. Before four bytes exist, keep reading.
+	e.CmpRegImm32(amd64.R13, 4)
+	needMoreShort := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferData)
+	e.MovRegReg(amd64.R11, amd64.R13)
+	e.SubRegImm32(amd64.R11, 4)
+	e.AddRegReg(amd64.R10, amd64.R11)
+	var markerMiss []int
+	for i, want := range []byte{'\r', '\n', '\r', '\n'} {
+		e.MovzxRegDeref8(amd64.R11, amd64.R10, int32(i))
+		e.CmpRegImm32(amd64.R11, int32(want))
+		at := len(e.Code)
+		e.JccRel32(amd64.CondNE, 0)
+		markerMiss = append(markerMiss, at)
+	}
+	headerDoneJump := len(e.Code)
+	e.JmpRel32(0)
+
+	needMore := len(e.Code)
+	patchJcc(needMoreShort, needMore)
+	for _, at := range markerMiss {
+		patchJcc(at, needMore)
+	}
+	readMore := len(e.Code)
+	e.JmpRel32(int32(readLoop - (readMore + 5)))
+
+	readDone := len(e.Code)
+	patchJmp(headerDoneJump, readDone)
+	patchJcc(readEOF, readDone)
+	patchJmp(readFailure, readDone)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+
+	aborted := len(e.Code)
+	patchJcc(abortedRead, aborted)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R10)
+
+	done := len(e.Code)
+	patchJmp(doneJump, done)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 32)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovRegReg(amd64.RAX, amd64.RBX)
+	e.AddRegImm32(amd64.RSP, 64)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64NetHTTPClose(e *amd64.Emitter) {
 	e.Cvttsd2si(amd64.RDI, amd64.XMM0)
 	e.TestRegReg(amd64.RDI, amd64.RDI)

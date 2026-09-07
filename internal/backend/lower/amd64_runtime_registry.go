@@ -166,6 +166,8 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64NetHTTPOpenIPv6(e, fnOffsets["ts_task_yield"])
 	fnOffsets["ts_net_http_read_all"] = len(e.Code)
 	emitAMD64NetHTTPReadAll(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
+	fnOffsets["ts_net_http_read_headers"] = len(e.Code)
+	emitAMD64NetHTTPReadHeaders(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
 	fnOffsets["ts_net_http_close"] = len(e.Code)
 	emitAMD64NetHTTPClose(e)
 
