@@ -407,6 +407,16 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 				return g.lowerDynamicGet(target, key)
 			}
 		}
+		if g.semanticType(e.Target) == types.TypeAny {
+			target := g.lowerExpr(e.Target)
+			index := g.lowerExpr(e.Index)
+			res := g.currentFn.NewValue("dynamic_index", types.TypeAny)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Res: res, Callee: "ts_js_index_get", Args: []ir.Operand{target, index},
+				ParamTypes: []types.Type{types.TypeAny, types.TypeNumber},
+			})
+			return res
+		}
 		if tuple, ok := g.semanticType(e.Target).(*types.TupleType); ok {
 			lit := e.Index.(*ast.NumberLit)
 			idx := int(lit.Value)

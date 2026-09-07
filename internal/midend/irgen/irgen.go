@@ -47,6 +47,8 @@ type generator struct {
 	catchStack                 []*catchContext
 	finallyStack               []*finallyContext
 	activeStreamControllerKind string
+	jsonParserStateType        *types.ObjectType
+	jsonParserEmitted          bool
 }
 
 func typeNodeIsAny(node ast.TypeNode) bool {

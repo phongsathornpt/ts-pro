@@ -207,7 +207,10 @@ func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Op
 	case "parse":
 		if lit, ok := call.Args[0].(*ast.StringLit); ok {
 			var decoded any
-			_ = json.Unmarshal([]byte(lit.Value), &decoded)
+			if err := json.Unmarshal([]byte(lit.Value), &decoded); err != nil {
+				g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Unexpected token in JSON"}, ir.ConstString{Value: "SyntaxError"}))
+				return ir.ConstUndefined{}
+			}
 			value := g.lowerJSONConstant(decoded)
 			switch decoded.(type) {
 			case []any, map[string]any:
@@ -217,9 +220,7 @@ func (g *generator) lowerJSONCall(call *ast.CallExpr, mem *ast.MemberExpr) ir.Op
 			}
 		}
 		text := g.lowerExpr(call.Args[0])
-		res := g.currentFn.NewValue("json_parsed", types.TypeAny)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_json_parse_scalar", Args: []ir.Operand{text}})
-		return res
+		return g.lowerRuntimeJSONParse(text)
 	default:
 		value := g.lowerExpr(call.Args[0])
 		return g.lowerJSONStringifyValue(value, value.Type())

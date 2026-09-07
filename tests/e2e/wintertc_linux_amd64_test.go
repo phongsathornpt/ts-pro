@@ -1858,3 +1858,64 @@ test();
 		expected: "true\nfalse\n\ntrue\ntrue\nfalse\n\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64RuntimeJSONStructuredConformance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "runtime_json_structured_conformance",
+		source: `
+function parseRuntime(text: string): any { return JSON.parse(text); }
+function bad(text: string): void {
+  try {
+    JSON.parse(text);
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+const obj: any = parseRuntime('{"a":1,"nested":{"x":2},"items":[10,20,30],"emoji":"\\uD83D\\uDE00","escaped":"a\\nb","e":1.5e2}');
+console.log(obj.a);
+console.log(obj.nested.x);
+console.log(obj.items[1]);
+console.log(obj.emoji);
+console.log(obj.escaped);
+console.log(obj.e);
+const top: any = parseRuntime('[1,{"x":9}]');
+console.log(top[1].x);
+console.log(parseRuntime('1e-2'));
+bad('[1,]');
+bad('{"a":1,}');
+bad('01');
+bad('1e');
+bad('true false');
+bad('"\\x"');
+bad('"unterminated');
+`,
+		expected: "1\n2\n20\n😀\na\nb\n150\n9\n0.01\nSyntaxError\nSyntaxError\nSyntaxError\nSyntaxError\nSyntaxError\nSyntaxError\nSyntaxError\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCBodyJSONStructured(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_json_structured",
+		source: `
+async function test(): Promise<void> {
+  const response = new Response('{"name":"ts-pro","items":[1,{"x":7},3],"emoji":"\\uD83D\\uDE00","e":2.5e2}');
+  const value: any = await response.json();
+  console.log(value.name);
+  console.log(value.items[1].x);
+  console.log(value.emoji);
+  console.log(value.e);
+  console.log(response.bodyUsed);
+  try {
+    const bad = new Response('[1,]');
+    await bad.json();
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`,
+		expected: "ts-pro\n7\n😀\n250\ntrue\nSyntaxError\n",
+	})
+}

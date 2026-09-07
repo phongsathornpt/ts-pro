@@ -313,8 +313,7 @@ func (g *generator) ensureRequestBodyUnused(req ir.Operand) {
 func (g *generator) lowerBodyJSON(data ir.Operand) ir.Operand {
 	text := g.currentFn.NewValue("body_json_text", types.TypeString)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: text, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	value := g.currentFn.NewValue("body_json_value", types.TypeAny)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_json_parse_scalar", Args: []ir.Operand{text}, ParamTypes: []types.Type{types.TypeString}})
+	value := g.lowerRuntimeJSONParse(text)
 	return g.makeImmediatePromiseTask(value, types.TypeAny, types.TypeAny)
 }
 

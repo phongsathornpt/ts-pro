@@ -6,7 +6,7 @@ Legend: `[ ]` planned, `[~]` in progress, `[x]` complete, `[S]` superseded.
 
 > This section tracks the currently active handwritten frontend → SSA → raw native backend.
 > Historical Pure-Go / LLVM / TypeScript-7 migration sections below are retained for context only; the active raw-native status is determined exclusively by this section and its acceptance gates.
-> Current active acceptance: **146 / 146 native fixtures PASS, 0 diagnostics, 0 build/lowering failures, 0 runtime failures, 0 timeouts**. Deterministic differential coverage is **52 / 52 Node-comparable fixtures matching stdout and exit status**; 7 fixtures are explicitly skipped only because Node strip-types cannot execute enum syntax, extensionless TS imports, or parameter-property syntax directly.
+> Current active acceptance: **152 / 152 native fixtures PASS, 0 diagnostics, 0 build/lowering failures, 0 runtime failures, 0 timeouts**. Deterministic differential coverage is **52 / 52 Node-comparable fixtures matching stdout and exit status**; 7 fixtures are explicitly skipped only because Node strip-types cannot execute enum syntax, extensionless TS imports, or parameter-property syntax directly.
 
 ### Completed active milestones
 
@@ -607,10 +607,13 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Finish `Headers` conformance with dedicated WinterTC fixture covering normalization, duplicate combination, `set-cookie`, mutation, iteration, constructors, and validation errors.
   - [x] Add `Request` constructor, method/url/headers/body state, cloning, body-use semantics, and AbortSignal integration.
   - [x] Add `Response` constructor, status/statusText/headers/body state, cloning, redirect/error/json helpers, and body-use semantics.
+  - [x] Implement structured runtime `Body.json()` parsing for objects, arrays, escaped strings/Unicode, strict JSON numbers, nested dynamic access, and `SyntaxError` coverage.
+  - [x] Implement `Body.formData()` for `application/x-www-form-urlencoded`, including percent decoding, duplicate names, UTF-8, MIME validation, and disturbed/locked body semantics.
+  - [ ] Add `multipart/form-data` Body parsing with boundary/file-part handling.
   - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
     - [x] Add Linux/AMD64 raw HTTP transport primitive and standalone-ELF integration harness.
-    - [x] Generalize transport to numeric IPv4, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
-    - [ ] Add UDP DNS fallback, IPv6, and TLS/HTTPS transport.
+    - [x] Generalize transport to numeric IPv4, numeric IPv6, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
+    - [ ] Add UDP DNS fallback and TLS/HTTPS transport.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
     - [x] Normalize string/Request input plus RequestInit method/headers/body/signal overrides and emit `User-Agent: ts-pro`.
     - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
@@ -642,4 +645,4 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Mark WinterTC target complete only when the matrix has no unchecked required rows.
 
 Current WinterTC execution order (2026-09-07): **Phase 6 Request -> Response -> fetch -> Phase 7 -> Phase 8 -> Phase 9**.
-Current acceptance baseline: **156 / 156 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.
+Current acceptance baseline: **152 / 152 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.
