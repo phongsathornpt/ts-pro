@@ -149,4 +149,3 @@ func TestSemaDiagnostics(t *testing.T) {
 	expectDiagnostic(t, `Promise.all(123);`, "TS2345")
 	expectDiagnostic(t, `Promise.resolve();`, "TS2554")
 }
-

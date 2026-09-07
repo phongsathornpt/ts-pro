@@ -244,6 +244,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		if res, handled := g.lowerRequestMethodCall(e, mem); handled {
 			return res
 		}
+		if res, handled := g.lowerResponseCall(e, mem); handled {
+			return res
+		}
 		if res, handled := g.lowerURLPatternMethodCall(e, mem); handled {
 			return res
 		}

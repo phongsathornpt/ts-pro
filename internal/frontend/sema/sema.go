@@ -121,6 +121,7 @@ type Result struct {
 	FormDataType                         *types.ObjectType
 	HeadersType                          *types.ObjectType
 	RequestType                          *types.ObjectType
+	ResponseType                         *types.ObjectType
 	ReadableStreamType                   *types.ObjectType
 	ReadableStreamDefaultReaderType      *types.ObjectType
 	ReadableStreamDefaultControllerType  *types.ObjectType
@@ -491,6 +492,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$Request" {
 			return c.builtinRequestMember(property)
 		}
+		if t.Name == "$Response" {
+			return c.builtinResponseMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -534,6 +538,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		}
 		if t.Name == "$URLConstructor" {
 			return c.builtinURLStaticMember(property)
+		}
+		if t.Name == "$ResponseConstructor" {
+			return c.builtinResponseStaticMember(property)
 		}
 		if t.Name == "$ReadableStream" {
 			return c.builtinReadableStreamMember(property)
@@ -767,6 +774,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "Request" {
 			return c.builtinRequestType()
+		}
+		if t.Name == "Response" {
+			return c.builtinResponseType()
 		}
 		if t.Name == "ReadableStream" {
 			return c.builtinReadableStreamType()

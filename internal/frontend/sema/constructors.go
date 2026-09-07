@@ -47,6 +47,17 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		c.result.Types[e] = t
 		return t
 	}
+	if e.ClassName == "Response" {
+		t := c.builtinResponseType()
+		if len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "Response expects optional body and init.")
+		}
+		for _, arg := range e.Args {
+			c.checkExpr(arg)
+		}
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "Request" {
 		t := c.builtinRequestType()
 		if len(e.Args) < 1 || len(e.Args) > 2 {

@@ -640,6 +640,62 @@ func (c *Checker) builtinRequestMember(property string) (types.Type, bool) {
 	return nil, false
 }
 
+func (c *Checker) builtinResponseType() *types.ObjectType {
+	if c.result.ResponseType == nil {
+		t := types.NewObject("$Response")
+		c.result.ResponseType = t
+		t.AddField("$bodyData", c.builtinByteBufferType(), false)
+		t.AddField("$hasBody", types.TypeBoolean, false)
+		t.AddField("bodyUsed", types.TypeBoolean, false)
+		t.AddField("headers", c.builtinHeadersType(), false)
+		t.AddField("ok", types.TypeBoolean, false)
+		t.AddField("redirected", types.TypeBoolean, false)
+		t.AddField("status", types.TypeNumber, false)
+		t.AddField("statusText", types.TypeString, false)
+		t.AddField("type", types.TypeString, false)
+		t.AddField("url", types.TypeString, false)
+	}
+	return c.result.ResponseType
+}
+
+func (c *Checker) builtinResponseStaticMember(property string) (types.Type, bool) {
+	switch property {
+	case "error":
+		return types.NewFunction(nil, c.builtinResponseType()), true
+	case "redirect":
+		return types.NewFunction([]types.Param{{Name: "url", Type: types.TypeString}, {Name: "status", Type: types.TypeNumber, Optional: true}}, c.builtinResponseType()), true
+	case "json":
+		return types.NewFunction([]types.Param{{Name: "data", Type: types.TypeAny}, {Name: "init", Type: types.TypeAny, Optional: true}}, c.builtinResponseType()), true
+	}
+	return nil, false
+}
+
+func (c *Checker) builtinResponseMember(property string) (types.Type, bool) {
+	switch property {
+	case "status":
+		return types.TypeNumber, true
+	case "statusText", "type", "url":
+		return types.TypeString, true
+	case "headers":
+		return c.builtinHeadersType(), true
+	case "bodyUsed", "ok", "redirected":
+		return types.TypeBoolean, true
+	case "clone":
+		return types.NewFunction(nil, c.builtinResponseType()), true
+	case "text":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeString)), true
+	case "arrayBuffer":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinArrayBufferType())), true
+	case "bytes":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinUint8ArrayType())), true
+	case "blob":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinBlobType())), true
+	case "json":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeAny)), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinReadableStreamReadResultType() *types.ObjectType {
 	if c.result.ReadableStreamReadResultType == nil {
 		t := types.NewObject("$ReadableStreamReadResult")

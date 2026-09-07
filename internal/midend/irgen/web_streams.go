@@ -1422,4 +1422,3 @@ func (g *generator) coerceNumberOperand(val ir.Operand, src types.Type) ir.Opera
 	}
 	return g.coerceJSValueBoundary(val, src, types.TypeNumber)
 }
-

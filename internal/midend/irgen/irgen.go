@@ -25,25 +25,25 @@ type finallyContext struct {
 }
 
 type generator struct {
-	semaResult        *sema.Result
-	prog              *ir.Program
-	currentFn         *ir.Function
-	currentBB         *ir.BasicBlock
-	locals            map[string]ir.Operand
-	localProvenance   map[string]types.Type
-	localDirectCallee map[string]string
-	captureCells      map[*ir.Function]map[string]ir.Operand
-	captureCellTypes  map[*ir.Function]map[string]types.Type
-	err               error
-	arrowCounter      int
-	genericDecls      map[string]*ast.FunctionDecl
-	functionDecls     map[string]*ast.FunctionDecl
-	genericSpecs      map[string]string
-	genericSpecCount  int
-	typeBindings      map[*types.TypeVar]types.Type
-	currentClass      *sema.ClassInfo
-	classTags         map[string]int
-	emittedClassSpecs map[string]bool
+	semaResult                 *sema.Result
+	prog                       *ir.Program
+	currentFn                  *ir.Function
+	currentBB                  *ir.BasicBlock
+	locals                     map[string]ir.Operand
+	localProvenance            map[string]types.Type
+	localDirectCallee          map[string]string
+	captureCells               map[*ir.Function]map[string]ir.Operand
+	captureCellTypes           map[*ir.Function]map[string]types.Type
+	err                        error
+	arrowCounter               int
+	genericDecls               map[string]*ast.FunctionDecl
+	functionDecls              map[string]*ast.FunctionDecl
+	genericSpecs               map[string]string
+	genericSpecCount           int
+	typeBindings               map[*types.TypeVar]types.Type
+	currentClass               *sema.ClassInfo
+	classTags                  map[string]int
+	emittedClassSpecs          map[string]bool
 	catchStack                 []*catchContext
 	finallyStack               []*finallyContext
 	activeStreamControllerKind string

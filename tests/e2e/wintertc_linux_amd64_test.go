@@ -950,3 +950,53 @@ test();
 		expected: "POST\nhttps://example.com/a?x=1\none\ntext/plain\nfalse\none\ntwo\nPOST\nhttps://example.com/a?x=1\nhello request\ntrue\n13\n104\ntrue\nPUT\nhttps://example.com/a?x=1\ntwo\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCResponseCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_response_core",
+		source: `
+async function test(): Promise<void> {
+  const res = new Response("hello response", {
+    status: 201,
+    statusText: "Created",
+    headers: { "X-Test": " one " }
+  });
+  console.log(res.status);
+  console.log(res.statusText);
+  console.log(res.ok);
+  console.log(res.type);
+  console.log(res.url);
+  console.log(res.redirected);
+  console.log(res.headers.get("x-test"));
+  console.log(res.bodyUsed);
+
+  const clone = res.clone();
+  clone.headers.set("x-test", "two");
+  console.log(res.headers.get("x-test"));
+  console.log(clone.headers.get("x-test"));
+  console.log(await res.text());
+  console.log(res.bodyUsed);
+  const bytes = await clone.bytes();
+  console.log(bytes.length);
+  console.log(bytes[0]);
+
+  const redir = Response.redirect("https://example.com/next", 307);
+  console.log(redir.status);
+  console.log(redir.headers.get("location"));
+  console.log(redir.ok);
+
+  const err = Response.error();
+  console.log(err.status);
+  console.log(err.type);
+  console.log(err.ok);
+
+  const json = Response.json({ answer: 42 }, { status: 202 });
+  console.log(json.status);
+  console.log(json.headers.get("content-type"));
+  console.log(await json.text());
+}
+test();
+`,
+		expected: "201\nCreated\ntrue\ndefault\n\nfalse\none\nfalse\none\ntwo\nhello response\ntrue\n14\n104\n307\nhttps://example.com/next\nfalse\n0\nerror\nfalse\n202\napplication/json\n{\"answer\":42}\n",
+	})
+}
