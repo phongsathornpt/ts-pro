@@ -1006,6 +1006,10 @@ test();
 
 func TestLinuxAMD64WinterTCFetchLoopbackTransport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("X-Test", " one ")
+		w.Header().Add("X-Test", "two")
+		w.Header().Add("Set-Cookie", "a=1")
+		w.Header().Add("Set-Cookie", "b=2")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, "%s|%s", r.Method, r.UserAgent())
 	}))
@@ -1017,6 +1021,11 @@ async function test(): Promise<void> {
   console.log(res.status);
   console.log(res.ok);
   console.log(res.url);
+  console.log(res.headers.get("x-test"));
+  const cookies = res.headers.getSetCookie();
+  console.log(cookies.length);
+  console.log(cookies[0]);
+  console.log(cookies[1]);
   console.log(await res.text());
 }
 test();
@@ -1024,7 +1033,7 @@ test();
 	runLinuxAMD64(t, linuxAMD64Case{
 		name:     "wintertc_fetch_loopback_transport",
 		source:   source,
-		expected: "201\ntrue\n" + server.URL + "/hello?x=1\nGET|ts-pro\n",
+		expected: "201\ntrue\n" + server.URL + "/hello?x=1\none, two\n2\na=1\nb=2\nGET|ts-pro\n",
 	})
 }
 

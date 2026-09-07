@@ -103,6 +103,65 @@ func (g *generator) lowerHTTPBodyOffset(raw ir.Operand) ir.Operand {
 	return res
 }
 
+func (g *generator) lowerHTTPResponseHeaders(raw, bodyOffset ir.Operand) ir.Operand {
+	headers := g.newEmptyHeaders()
+	headerBytes := g.currentFn.NewValue("http_header_bytes", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: headerBytes, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, ir.ConstNumber{Value: 0}, bodyOffset},
+		ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber},
+	})
+	headerText := g.currentFn.NewValue("http_header_text", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: headerText, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{headerBytes}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
+	})
+	total := g.urlStringLen(headerText)
+	firstLF := g.urlStringFindByte(headerText, ir.ConstNumber{Value: 10}, ir.ConstNumber{Value: 0}, total)
+	start := g.currentFn.NewValue("http_header_start", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: start, Op: ir.OpAdd, LHS: firstLF, RHS: ir.ConstNumber{Value: 1}})
+
+	pre := g.currentBB
+	cond := g.currentFn.NewBlock("http_headers_parse_cond")
+	body := g.currentFn.NewBlock("http_headers_parse_body")
+	appendBB := g.currentFn.NewBlock("http_headers_parse_append")
+	done := g.currentFn.NewBlock("http_headers_parse_done")
+	pre.Terminator = &ir.JumpTerm{Target: cond}
+	pos := g.currentFn.NewValue("http_headers_pos", types.TypeNumber)
+	nextPos := g.currentFn.NewValue("http_headers_next_pos", types.TypeNumber)
+	cond.Phis = append(cond.Phis, &ir.PhiInst{Res: pos, Incoming: []ir.PhiIncoming{{Block: pre, Value: start}, {Block: appendBB, Value: nextPos}}})
+	more := g.currentFn.NewValue("http_headers_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: pos, RHS: total})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: done}
+
+	g.currentBB = body
+	lineLF := g.urlStringFindByte(headerText, ir.ConstNumber{Value: 10}, pos, total)
+	lineEnd := g.currentFn.NewValue("http_header_line_end", types.TypeNumber)
+	body.Instructions = append(body.Instructions, &ir.BinaryInst{Res: lineEnd, Op: ir.OpSub, LHS: lineLF, RHS: ir.ConstNumber{Value: 1}})
+	colon := g.urlStringFindByte(headerText, ir.ConstNumber{Value: 58}, pos, lineEnd)
+	colonFound := g.currentFn.NewValue("http_header_colon_found", types.TypeBoolean)
+	colonBeforeEnd := g.currentFn.NewValue("http_header_colon_before_end", types.TypeBoolean)
+	hasColon := g.currentFn.NewValue("http_header_has_colon", types.TypeBoolean)
+	body = g.currentBB
+	body.Instructions = append(body.Instructions,
+		&ir.BinaryInst{Res: colonFound, Op: ir.OpGe, LHS: colon, RHS: pos},
+		&ir.BinaryInst{Res: colonBeforeEnd, Op: ir.OpLt, LHS: colon, RHS: lineEnd},
+		&ir.BinaryInst{Res: hasColon, Op: ir.OpAnd, LHS: colonFound, RHS: colonBeforeEnd},
+	)
+	body.Terminator = &ir.BranchTerm{Cond: hasColon, Then: appendBB, Else: done}
+
+	g.currentBB = appendBB
+	name := g.urlStringSlice(headerText, pos, colon)
+	valueStart := g.currentFn.NewValue("http_header_value_start", types.TypeNumber)
+	appendBB.Instructions = append(appendBB.Instructions, &ir.BinaryInst{Res: valueStart, Op: ir.OpAdd, LHS: colon, RHS: ir.ConstNumber{Value: 1}})
+	value := g.urlStringSlice(headerText, valueStart, lineEnd)
+	g.lowerHeadersAppendDirect(headers, name, value)
+	appendBB = g.currentBB
+	appendBB.Instructions = append(appendBB.Instructions, &ir.BinaryInst{Res: nextPos, Op: ir.OpAdd, LHS: lineLF, RHS: ir.ConstNumber{Value: 1}})
+	appendBB.Terminator = &ir.JumpTerm{Target: cond}
+	cond.Phis[0].Incoming[1].Block = appendBB
+	g.currentBB = done
+	return headers
+}
+
 func (g *generator) serializeFetchHeaders(headers ir.Operand) ir.Operand {
 	entries := g.headersEntries(headers)
 	length := g.currentFn.NewValue("fetch_headers_len", types.TypeNumber)
@@ -260,6 +319,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
 	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: responseBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
-	res := g.newResponseObject(responseBody, ir.ConstBool{Value: true}, g.newEmptyHeaders(), status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, href, ir.ConstBool{Value: false})
+	responseHeaders := g.lowerHTTPResponseHeaders(raw, offset)
+	res := g.newResponseObject(responseBody, ir.ConstBool{Value: true}, responseHeaders, status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, href, ir.ConstBool{Value: false})
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }
