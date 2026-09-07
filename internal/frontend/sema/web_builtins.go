@@ -776,6 +776,7 @@ func (c *Checker) builtinReadableStreamType() *types.ObjectType {
 		t.AddField("$cancelFn", types.TypeAny, false)
 		t.AddField("$highWaterMark", types.TypeNumber, false)
 		t.AddField("$storedError", types.TypeAny, false)
+		t.AddField("$disturbFn", types.NewFunction(nil, types.TypeVoid), false)
 		c.result.ReadableStreamType = t
 
 		_ = c.builtinReadableStreamDefaultControllerType()

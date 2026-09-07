@@ -194,7 +194,7 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		}
 	}
 
-	bodyStream := g.newBodyStream(data, hasBody)
+	bodyStream := g.newBodyStream(data, hasBody, req, g.semaResult.RequestType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.SetFieldInst{Obj: req, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 		&ir.SetFieldInst{Obj: req, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},
@@ -238,7 +238,7 @@ func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 		data := g.copyByteBuffer(g.requestField(req, "$bodyData", g.semaResult.ByteBufferType))
 		hasBody := g.requestField(req, "$hasBody", types.TypeBoolean)
 		signal := g.requestField(req, "signal", g.semaResult.AbortSignalType)
-		bodyStream := g.newBodyStream(data, hasBody)
+		bodyStream := g.newBodyStream(data, hasBody, clone, g.semaResult.RequestType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
 			&ir.SetFieldInst{Obj: clone, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 			&ir.SetFieldInst{Obj: clone, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},

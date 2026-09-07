@@ -93,25 +93,29 @@ func (g *generator) lowerNullishExpr(e *ast.BinaryExpr) ir.Operand {
 	checkNullBB.Instructions = append(checkNullBB.Instructions, &ir.BinaryInst{Res: isNull, Op: ir.OpEq, LHS: lhs, RHS: ir.ConstNull{}})
 	checkNullBB.Terminator = &ir.BranchTerm{Cond: isNull, Then: rhsBB, Else: shortBB}
 
+	resultType := g.semanticType(e)
+	if resultType == nil {
+		resultType = removeNullishIRType(g.semanticType(e.Left))
+	}
+
 	g.currentBB = shortBB
-	shortBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	shortValue := g.coerceJSValueBoundary(lhs, lhs.Type(), resultType)
+	shortEnd := g.currentBB
+	shortEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
 	g.currentBB = rhsBB
 	rhs := g.lowerExpr(e.Right)
+	rhsValue := g.coerceJSValueBoundary(rhs, rhs.Type(), resultType)
 	rhsEnd := g.currentBB
 	if rhsEnd.Terminator == nil {
 		rhsEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 	}
 
 	g.currentBB = joinBB
-	resultType := rhs.Type()
-	if t := g.semanticType(e); t != nil {
-		resultType = t
-	}
 	res := g.currentFn.NewValue("nullish", resultType)
 	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: res, Incoming: []ir.PhiIncoming{
-		{Block: shortBB, Value: lhs},
-		{Block: rhsEnd, Value: rhs},
+		{Block: shortEnd, Value: shortValue},
+		{Block: rhsEnd, Value: rhsValue},
 	}})
 	return res
 }

@@ -16,10 +16,10 @@ func (g *generator) responseField(res ir.Operand, name string, typ types.Type) i
 func (g *generator) newResponseObject(data, hasBody, headers, status, statusText, typ, url, redirected ir.Operand) ir.Operand {
 	t := g.semaResult.ResponseType
 	offsets, refMask, shape := g.objectLayout(t)
-	bodyStream := g.newBodyStream(data, hasBody)
 	res := g.currentFn.NewValue("response", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+	bodyStream := g.newBodyStream(data, hasBody, res, g.semaResult.ResponseType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask},
 		&ir.SetFieldInst{Obj: res, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 		&ir.SetFieldInst{Obj: res, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},
 		&ir.SetFieldInst{Obj: res, Field: "$bodyStream", Offset: offsets["$bodyStream"], Val: bodyStream},

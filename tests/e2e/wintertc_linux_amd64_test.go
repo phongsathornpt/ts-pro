@@ -1348,3 +1348,31 @@ test();
 		expected: "true\nfalse\ntrue\ntrue\nfalse\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCBodyStreamDisturbance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_stream_disturbance",
+		source: `
+async function test(): Promise<void> {
+  const response = new Response("abc");
+  console.log(response.bodyUsed);
+  const responseStream = response.body ?? new ReadableStream();
+  const responseReader = responseStream.getReader();
+  const responseChunk: any = await responseReader.read();
+  console.log(response.bodyUsed);
+  const responseBytes: Uint8Array = responseChunk.value;
+  console.log(responseBytes.length);
+  console.log(responseBytes[0]);
+
+  const request = new Request("https://example.com/", { method: "POST", body: "xyz" });
+  console.log(request.bodyUsed);
+  const requestStream = request.body ?? new ReadableStream();
+  const requestReader = requestStream.getReader();
+  await requestReader.cancel();
+  console.log(request.bodyUsed);
+}
+test();
+`,
+		expected: "false\ntrue\n3\n97\nfalse\ntrue\n",
+	})
+}

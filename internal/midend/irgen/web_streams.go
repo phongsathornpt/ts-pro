@@ -1,6 +1,7 @@
 package irgen
 
 import (
+	"fmt"
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
@@ -154,6 +155,7 @@ func (g *generator) newReadableStreamCore(hwm ir.Operand) (ir.Operand, ir.Operan
 		&ir.SetFieldInst{Obj: stream, Field: "$cancelFn", Offset: offsets["$cancelFn"], Val: ir.ConstUndefined{}},
 		&ir.SetFieldInst{Obj: stream, Field: "$highWaterMark", Offset: offsets["$highWaterMark"], Val: hwm},
 		&ir.SetFieldInst{Obj: stream, Field: "$storedError", Offset: offsets["$storedError"], Val: ir.ConstUndefined{}},
+		&ir.SetFieldInst{Obj: stream, Field: "$disturbFn", Offset: offsets["$disturbFn"], Val: g.nullRef(types.NewFunction(nil, types.TypeVoid))},
 	)
 
 	ctrlType := g.semaResult.ReadableStreamDefaultControllerType
@@ -196,7 +198,49 @@ func (g *generator) newReadableStreamFromByteBuffer(data ir.Operand) ir.Operand 
 	return stream
 }
 
-func (g *generator) newBodyStream(data, hasBody ir.Operand) ir.Operand {
+func (g *generator) makeBodyDisturbCallback(owner ir.Operand, ownerType *types.ObjectType) ir.Operand {
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	fnType := types.NewFunction(nil, types.TypeVoid)
+	name := fmt.Sprintf("$body_disturb%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, types.TypeVoid)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	captured := lifted.NewValue("body_owner", ownerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: captured, Closure: env, Index: 0})
+	offsets, _, _ := g.objectLayout(ownerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: captured, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: true}})
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("body_disturb_closure", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: name, Captures: []ir.Operand{owner}, RefMask: 1})
+	return closure
+}
+
+func (g *generator) lowerReadableStreamDisturb(stream ir.Operand) {
+	offsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	fnType := types.NewFunction(nil, types.TypeVoid)
+	disturbFn := g.currentFn.NewValue("stream_disturb_fn", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: disturbFn, Obj: stream, Field: "$disturbFn", Offset: offsets["$disturbFn"]})
+	nullFn := g.nullRef(fnType)
+	hasDisturb := g.currentFn.NewValue("stream_has_disturb", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasDisturb, Op: ir.OpNe, LHS: disturbFn, RHS: nullFn})
+	callBB := g.currentFn.NewBlock("stream_disturb_call")
+	doneBB := g.currentFn.NewBlock("stream_disturb_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasDisturb, Then: callBB, Else: doneBB}
+	g.currentBB = callBB
+	callBB.Instructions = append(callBB.Instructions, &ir.IndirectCallInst{Res: g.currentFn.NewValue("stream_disturb_result", types.TypeVoid), Closure: disturbFn})
+	callBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	g.currentBB = doneBB
+}
+
+func (g *generator) newBodyStream(data, hasBody, owner ir.Operand, ownerType *types.ObjectType) ir.Operand {
 	pre := g.currentBB
 	withBody := g.currentFn.NewBlock("body_stream_present")
 	withoutBody := g.currentFn.NewBlock("body_stream_absent")
@@ -204,6 +248,9 @@ func (g *generator) newBodyStream(data, hasBody ir.Operand) ir.Operand {
 	pre.Terminator = &ir.BranchTerm{Cond: hasBody, Then: withBody, Else: withoutBody}
 	g.currentBB = withBody
 	stream := g.newReadableStreamFromByteBuffer(data)
+	disturbFn := g.makeBodyDisturbCallback(owner, ownerType)
+	streamOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: stream, Field: "$disturbFn", Offset: streamOffsets["$disturbFn"], Val: disturbFn})
 	boxedStream := g.boxJSValue(stream, g.semaResult.ReadableStreamType)
 	withBodyEnd := g.currentBB
 	withBodyEnd.Terminator = &ir.JumpTerm{Target: join}
@@ -380,6 +427,7 @@ func (g *generator) lowerReadableStreamMethodCall(e *ast.CallExpr, mem *ast.Memb
 		return reader, true
 
 	case "cancel":
+		g.lowerReadableStreamDisturb(stream)
 		reason := ir.Operand(ir.ConstUndefined{})
 		if len(e.Args) > 0 {
 			reason = g.lowerExpr(e.Args[0])
@@ -758,8 +806,9 @@ func (g *generator) lowerReadableStreamDefaultReaderMethodCall(e *ast.CallExpr, 
 
 	case "cancel":
 		stream := g.currentFn.NewValue("reader_stream", streamType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: stream, Obj: reader, Field: "$stream", Offset: rOffsets["$stream"]})
+		g.lowerReadableStreamDisturb(stream)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.GetFieldInst{Res: stream, Obj: reader, Field: "$stream", Offset: rOffsets["$stream"]},
 			&ir.SetFieldInst{Obj: stream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
 		)
 		task := g.makeImmediatePromiseTask(ir.ConstUndefined{}, types.TypeUndefined, types.TypeUndefined)
@@ -773,8 +822,9 @@ func (g *generator) lowerReadableStreamDefaultReaderMethodCall(e *ast.CallExpr, 
 		pullFn := g.currentFn.NewValue("r_pull_fn", types.TypeAny)
 		ctrl := g.currentFn.NewValue("r_ctrl", types.TypeAny)
 
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: stream, Obj: reader, Field: "$stream", Offset: rOffsets["$stream"]})
+		g.lowerReadableStreamDisturb(stream)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.GetFieldInst{Res: stream, Obj: reader, Field: "$stream", Offset: rOffsets["$stream"]},
 			&ir.GetFieldInst{Res: queue, Obj: stream, Field: "$queue", Offset: sOffsets["$queue"]},
 			&ir.GetFieldInst{Res: qIdx, Obj: stream, Field: "$queueIndex", Offset: sOffsets["$queueIndex"]},
 			&ir.GetFieldInst{Res: pullFn, Obj: stream, Field: "$pullFn", Offset: sOffsets["$pullFn"]},
