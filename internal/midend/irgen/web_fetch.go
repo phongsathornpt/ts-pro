@@ -273,9 +273,22 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.routeThrownValue(reason)
 	g.currentBB = fetchDispatch
 
+	address := g.currentFn.NewValue("fetch_ipv4_address", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address, Callee: "ts_net_resolve_ipv4", Args: []ir.Operand{host}, ParamTypes: []types.Type{types.TypeString}})
+	addressLen := g.currentFn.NewValue("fetch_ipv4_address_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: addressLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{address}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	resolved := g.currentFn.NewValue("fetch_ipv4_resolved", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: resolved, Op: ir.OpEq, LHS: addressLen, RHS: ir.ConstNumber{Value: 4}})
+	resolveOK := g.currentFn.NewBlock("fetch_resolve_ok")
+	resolveErr := g.currentFn.NewBlock("fetch_resolve_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: resolved, Then: resolveOK, Else: resolveErr}
+	g.currentBB = resolveErr
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch host resolution failed"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = resolveOK
+
 	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{host, port, requestBuf, signal}, ParamTypes: []types.Type{types.TypeString, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
 	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")

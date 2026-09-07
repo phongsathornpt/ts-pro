@@ -1463,3 +1463,30 @@ test();
 		expected: "TypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchLocalhostResolver(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Resolver", "localhost")
+		_, _ = fmt.Fprint(w, "resolved")
+	}))
+	defer server.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("split httptest address: %v", err)
+	}
+	url := "http://localhost:" + port + "/resolver"
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.headers.get("x-resolver"));
+  console.log(await response.text());
+}
+test();
+`, url)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_localhost_resolver",
+		source:   source,
+		expected: "200\nlocalhost\nresolved\n",
+	})
+}

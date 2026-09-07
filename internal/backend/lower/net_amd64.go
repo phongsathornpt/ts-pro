@@ -11,7 +11,7 @@ import (
 // connect/write/read. DNS and TLS remain separate transport layers.
 //
 // ABI: RDI=host string, RSI=port string, RDX=request ByteBuffer, RCX=AbortSignal -> RAX=response ByteBuffer.
-func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBufferCopyOffset, taskYieldOffset int) {
+func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 
@@ -21,26 +21,16 @@ func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBuff
 	e.Push(amd64.R12)
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
-	e.SubRegImm32(amd64.RSP, 64)
-	e.MovRegReg(amd64.RBX, amd64.RDI)       // numeric IPv4 host string
-	e.MovDerefReg(amd64.RSP, 16, amd64.RSI) // port string
-	e.MovRegReg(amd64.R12, amd64.RDX)       // request buffer
-	e.MovDerefReg(amd64.RSP, 24, amd64.RCX) // AbortSignal, survives cooperative yields
+	e.SubRegImm32(amd64.RSP, 32)
+	e.MovRegReg(amd64.RBX, amd64.RDI) // host string
 
-	// sockaddr_in family and zero padding. Host bytes are parsed directly into
-	// sin_addr so the transport is not tied to 127.0.0.1.
-	for off, value := range []byte{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
-		e.MovRegImm64(amd64.R11, int64(value))
-		e.MovDerefReg8(amd64.RSP, int32(off), amd64.R11)
-	}
-
-	// Parse dotted-decimal IPv4: exactly four non-empty octets, each <= 255.
-	e.MovRegDeref(amd64.R8, amd64.RBX, 0) // host length
-	e.MovRegImm64(amd64.R9, 0)            // byte index
-	e.MovRegImm64(amd64.R10, 0)           // octet index
-	e.MovRegImm64(amd64.R13, 0)           // current octet value
-	e.MovRegImm64(amd64.R14, 0)           // digits in current octet
-	var invalidHost []int
+	// First try dotted-decimal IPv4 into four scratch bytes at rsp[0:4].
+	e.MovRegDeref(amd64.R8, amd64.RBX, 0)
+	e.MovRegImm64(amd64.R9, 0)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovRegImm64(amd64.R13, 0)
+	e.MovRegImm64(amd64.R14, 0)
+	var numericInvalid []int
 	hostLoop := len(e.Code)
 	e.CmpRegReg(amd64.R9, amd64.R8)
 	hostEnd := len(e.Code)
@@ -55,11 +45,11 @@ func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBuff
 	e.CmpRegImm32(amd64.RAX, '0')
 	belowDigit := len(e.Code)
 	e.JccRel32(amd64.CondB, 0)
-	invalidHost = append(invalidHost, belowDigit)
+	numericInvalid = append(numericInvalid, belowDigit)
 	e.CmpRegImm32(amd64.RAX, '9')
 	aboveDigit := len(e.Code)
 	e.JccRel32(amd64.CondA, 0)
-	invalidHost = append(invalidHost, aboveDigit)
+	numericInvalid = append(numericInvalid, aboveDigit)
 	e.SubRegImm32(amd64.RAX, '0')
 	e.MovRegImm64(amd64.R11, 10)
 	e.ImulRegReg(amd64.R13, amd64.R11)
@@ -67,48 +57,142 @@ func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBuff
 	e.CmpRegImm32(amd64.R13, 255)
 	octetTooLarge := len(e.Code)
 	e.JccRel32(amd64.CondA, 0)
-	invalidHost = append(invalidHost, octetTooLarge)
+	numericInvalid = append(numericInvalid, octetTooLarge)
 	e.AddRegImm32(amd64.R14, 1)
 	e.AddRegImm32(amd64.R9, 1)
-	hostDigitBack := len(e.Code)
+	back := len(e.Code)
 	e.JmpRel32(0)
-	patchJmp(hostDigitBack, hostLoop)
+	patchJmp(back, hostLoop)
 
 	dotLabel := len(e.Code)
 	patchJcc(dot, dotLabel)
 	e.TestRegReg(amd64.R14, amd64.R14)
 	emptyOctet := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	invalidHost = append(invalidHost, emptyOctet)
+	numericInvalid = append(numericInvalid, emptyOctet)
 	e.CmpRegImm32(amd64.R10, 3)
 	tooManyOctets := len(e.Code)
 	e.JccRel32(amd64.CondAE, 0)
-	invalidHost = append(invalidHost, tooManyOctets)
+	numericInvalid = append(numericInvalid, tooManyOctets)
 	e.MovRegReg(amd64.R11, amd64.RSP)
-	e.AddRegImm32(amd64.R11, 4)
 	e.AddRegReg(amd64.R11, amd64.R10)
 	e.MovDerefReg8(amd64.R11, 0, amd64.R13)
 	e.AddRegImm32(amd64.R10, 1)
 	e.MovRegImm64(amd64.R13, 0)
 	e.MovRegImm64(amd64.R14, 0)
 	e.AddRegImm32(amd64.R9, 1)
-	hostDotBack := len(e.Code)
+	dotBack := len(e.Code)
 	e.JmpRel32(0)
-	patchJmp(hostDotBack, hostLoop)
+	patchJmp(dotBack, hostLoop)
 
 	hostEndLabel := len(e.Code)
 	patchJcc(hostEnd, hostEndLabel)
 	e.TestRegReg(amd64.R14, amd64.R14)
-	missingLastOctet := len(e.Code)
+	missingLast := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	invalidHost = append(invalidHost, missingLastOctet)
+	numericInvalid = append(numericInvalid, missingLast)
 	e.CmpRegImm32(amd64.R10, 3)
-	notFourOctets := len(e.Code)
+	notFour := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
-	invalidHost = append(invalidHost, notFourOctets)
+	numericInvalid = append(numericInvalid, notFour)
 	e.MovRegReg(amd64.R11, amd64.RSP)
-	e.AddRegImm32(amd64.R11, 7)
+	e.AddRegImm32(amd64.R11, 3)
 	e.MovDerefReg8(amd64.R11, 0, amd64.R13)
+	numericReadyJump := len(e.Code)
+	e.JmpRel32(0)
+
+	// Numeric parsing failed: accept localhost as the deterministic resolver base.
+	localhostCheck := len(e.Code)
+	for _, at := range numericInvalid {
+		patchJcc(at, localhostCheck)
+	}
+	e.MovRegDeref(amd64.R10, amd64.RBX, 0)
+	e.CmpRegImm32(amd64.R10, 9)
+	notLocalhost := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	var localhostMismatch []int
+	for i, ch := range []byte("localhost") {
+		e.MovRegReg(amd64.R11, amd64.RBX)
+		e.AddRegImm32(amd64.R11, int32(8+i))
+		e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+		e.CmpRegImm32(amd64.RAX, int32(ch))
+		at := len(e.Code)
+		e.JccRel32(amd64.CondNE, 0)
+		localhostMismatch = append(localhostMismatch, at)
+	}
+	for i, value := range []byte{127, 0, 0, 1} {
+		e.MovRegImm64(amd64.R11, int64(value))
+		e.MovDerefReg8(amd64.RSP, int32(i), amd64.R11)
+	}
+	localhostReadyJump := len(e.Code)
+	e.JmpRel32(0)
+
+	invalid := len(e.Code)
+	patchJcc(notLocalhost, invalid)
+	for _, at := range localhostMismatch {
+		patchJcc(at, invalid)
+	}
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callEmpty := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callEmpty + 5)))
+	invalidReturn := len(e.Code)
+	e.JmpRel32(0)
+
+	ready := len(e.Code)
+	patchJmp(numericReadyJump, ready)
+	patchJmp(localhostReadyJump, ready)
+	e.MovRegImm64(amd64.R10, 4)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callAddress := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callAddress + 5)))
+	e.MovRegReg(amd64.R12, amd64.RAX)
+	e.MovRegDeref(amd64.R13, amd64.R12, amd64ByteBufferData)
+	for i := 0; i < 4; i++ {
+		e.MovzxRegDeref8(amd64.R11, amd64.RSP, int32(i))
+		e.MovDerefReg8(amd64.R13, int32(i), amd64.R11)
+	}
+	e.MovRegImm64(amd64.R10, 4)
+	e.MovDerefReg(amd64.R12, amd64ByteBufferLength, amd64.R10)
+	e.MovRegReg(amd64.RAX, amd64.R12)
+
+	returnLabel := len(e.Code)
+	patchJmp(invalidReturn, returnLabel)
+	e.AddRegImm32(amd64.RSP, 32)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBufferCopyOffset, taskYieldOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 64)
+	e.MovRegReg(amd64.RBX, amd64.RDI)       // resolved IPv4 address ByteBuffer
+	e.MovDerefReg(amd64.RSP, 16, amd64.RSI) // port string
+	e.MovRegReg(amd64.R12, amd64.RDX)       // request buffer
+	e.MovDerefReg(amd64.RSP, 24, amd64.RCX) // AbortSignal, survives cooperative yields
+
+	// sockaddr_in family, resolved address, and zero padding.
+	for off, value := range []byte{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
+		e.MovRegImm64(amd64.R11, int64(value))
+		e.MovDerefReg8(amd64.RSP, int32(off), amd64.R11)
+	}
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferData)
+	for i := 0; i < 4; i++ {
+		e.MovzxRegDeref8(amd64.R11, amd64.R10, int32(i))
+		e.MovDerefReg8(amd64.RSP, int32(4+i), amd64.R11)
+	}
 
 	// Parse decimal port, defaulting empty to 80.
 	e.MovRegDeref(amd64.RBX, amd64.RSP, 16)
@@ -390,9 +474,6 @@ func emitAMD64NetHTTPRequestIPv4(e *amd64.Emitter, byteBufferNewOffset, byteBuff
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.Syscall()
 	failureNoFD := len(e.Code)
-	for _, at := range invalidHost {
-		patchJcc(at, failureNoFD)
-	}
 	patchJcc(socketFailed, failureNoFD)
 	e.MovRegImm64(amd64.R10, 0)
 	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
