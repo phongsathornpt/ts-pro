@@ -194,6 +194,7 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		}
 	}
 
+	g.validateRequestMethodBody(method, hasBody)
 	bodyStream := g.newBodyStream(data, hasBody, req, g.semaResult.RequestType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.SetFieldInst{Obj: req, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
@@ -206,6 +207,23 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		&ir.SetFieldInst{Obj: req, Field: "url", Offset: offsets["url"], Val: url},
 	)
 	return req
+}
+
+func (g *generator) validateRequestMethodBody(method, hasBody ir.Operand) {
+	isGet := g.urlStringEqual(method, "GET")
+	isHead := g.urlStringEqual(method, "HEAD")
+	getOrHead := g.currentFn.NewValue("request_get_or_head", types.TypeBoolean)
+	invalid := g.currentFn.NewValue("request_body_method_invalid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: getOrHead, Op: ir.OpOr, LHS: isGet, RHS: isHead},
+		&ir.BinaryInst{Res: invalid, Op: ir.OpAnd, LHS: getOrHead, RHS: hasBody},
+	)
+	errBB := g.currentFn.NewBlock("request_body_method_error")
+	okBB := g.currentFn.NewBlock("request_body_method_ok")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: invalid, Then: errBB, Else: okBB}
+	g.currentBB = errBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Request with GET/HEAD method cannot have body"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = okBB
 }
 
 func (g *generator) ensureRequestBodyUnused(req ir.Operand) {

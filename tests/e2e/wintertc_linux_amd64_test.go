@@ -1637,3 +1637,25 @@ test();
 		t.Fatal("IPv6 server did not observe request")
 	}
 }
+
+func TestLinuxAMD64WinterTCRequestResponseValidation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_request_response_validation",
+		source: `
+try { new Request("http://example.com/", { method: "GET", body: "x" }); console.log("get-body:unexpected"); } catch (err: any) { console.log("get-body:" + err.name); }
+try { new Request("http://example.com/", { method: "HEAD", body: "x" }); console.log("head-body:unexpected"); } catch (err: any) { console.log("head-body:" + err.name); }
+try { new Response(null, { status: 199 }); console.log("status-low:unexpected"); } catch (err: any) { console.log("status-low:" + err.name); }
+try { new Response(null, { status: 600 }); console.log("status-high:unexpected"); } catch (err: any) { console.log("status-high:" + err.name); }
+try { new Response(null, { statusText: "bad\r\ntext" }); console.log("status-text:unexpected"); } catch (err: any) { console.log("status-text:" + err.name); }
+try { new Response("x", { status: 204 }); console.log("body-204:unexpected"); } catch (err: any) { console.log("body-204:" + err.name); }
+try { new Response("x", { status: 205 }); console.log("body-205:unexpected"); } catch (err: any) { console.log("body-205:" + err.name); }
+try { new Response("x", { status: 304 }); console.log("body-304:unexpected"); } catch (err: any) { console.log("body-304:" + err.name); }
+try { Response.redirect("http://example.com/", 200); console.log("redirect-status:unexpected"); } catch (err: any) { console.log("redirect-status:" + err.name); }
+const ok = new Response("x", { status: 201, statusText: "Created" });
+console.log(ok.status);
+console.log(ok.statusText);
+console.log(Response.redirect("http://example.com/x", 307).status);
+`,
+		expected: "get-body:TypeError\nhead-body:TypeError\nstatus-low:RangeError\nstatus-high:RangeError\nstatus-text:TypeError\nbody-204:TypeError\nbody-205:TypeError\nbody-304:TypeError\nredirect-status:RangeError\n201\nCreated\n307\n",
+	})
+}

@@ -47,6 +47,67 @@ func (g *generator) responseOK(status ir.Operand) ir.Operand {
 	return ok
 }
 
+func (g *generator) validateResponseStatus(status ir.Operand) {
+	ge200 := g.currentFn.NewValue("response_status_ge_200", types.TypeBoolean)
+	le599 := g.currentFn.NewValue("response_status_le_599", types.TypeBoolean)
+	valid := g.currentFn.NewValue("response_status_valid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: ge200, Op: ir.OpGe, LHS: status, RHS: ir.ConstNumber{Value: 200}},
+		&ir.BinaryInst{Res: le599, Op: ir.OpLe, LHS: status, RHS: ir.ConstNumber{Value: 599}},
+		&ir.BinaryInst{Res: valid, Op: ir.OpAnd, LHS: ge200, RHS: le599},
+	)
+	okBB := g.currentFn.NewBlock("response_status_ok")
+	errBB := g.currentFn.NewBlock("response_status_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: valid, Then: okBB, Else: errBB}
+	g.currentBB = errBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Response status must be in the range 200 to 599"}, ir.ConstString{Value: "RangeError"}))
+	g.currentBB = okBB
+}
+
+func (g *generator) validateResponseNullBodyStatus(status, hasBody ir.Operand) {
+	var nullStatus ir.Operand
+	for i, code := range []float64{204, 205, 304} {
+		eq := g.currentFn.NewValue("response_null_body_status", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: eq, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: code}})
+		if i == 0 {
+			nullStatus = eq
+		} else {
+			combined := g.currentFn.NewValue("response_null_body_status_any", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: combined, Op: ir.OpOr, LHS: nullStatus, RHS: eq})
+			nullStatus = combined
+		}
+	}
+	invalid := g.currentFn.NewValue("response_null_body_invalid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: invalid, Op: ir.OpAnd, LHS: nullStatus, RHS: hasBody})
+	errBB := g.currentFn.NewBlock("response_null_body_error")
+	okBB := g.currentFn.NewBlock("response_null_body_ok")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: invalid, Then: errBB, Else: okBB}
+	g.currentBB = errBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Response with null body status cannot have body"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = okBB
+}
+
+func (g *generator) validateResponseRedirectStatus(status ir.Operand) {
+	var valid ir.Operand
+	for i, code := range []float64{301, 302, 303, 307, 308} {
+		eq := g.currentFn.NewValue("response_redirect_status", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: eq, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: code}})
+		if i == 0 {
+			valid = eq
+		} else {
+			combined := g.currentFn.NewValue("response_redirect_status_any", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: combined, Op: ir.OpOr, LHS: valid, RHS: eq})
+			valid = combined
+		}
+	}
+	okBB := g.currentFn.NewBlock("response_redirect_status_ok")
+	errBB := g.currentFn.NewBlock("response_redirect_status_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: valid, Then: okBB, Else: errBB}
+	g.currentBB = errBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect status"}, ir.ConstString{Value: "RangeError"}))
+	g.currentBB = okBB
+}
+
 func (g *generator) lowerResponseNew(e *ast.NewExpr) ir.Operand {
 	data, hasBody := g.lowerRequestBody(nil)
 	headers := g.newEmptyHeaders()
@@ -68,6 +129,9 @@ func (g *generator) lowerResponseNew(e *ast.NewExpr) ir.Operand {
 			}
 		}
 	}
+	g.validateResponseStatus(status)
+	g.validateHeaderValue(statusText)
+	g.validateResponseNullBodyStatus(status, hasBody)
 	return g.newResponseObject(data, hasBody, headers, status, statusText, ir.ConstString{Value: "default"}, ir.ConstString{Value: ""}, ir.ConstBool{Value: false})
 }
 
@@ -106,6 +170,7 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 			if len(e.Args) > 1 {
 				status = g.lowerExpr(e.Args[1])
 			}
+			g.validateResponseRedirectStatus(status)
 			headers := g.newEmptyHeaders()
 			target := g.lowerExpr(e.Args[0])
 			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: "location"}, g.coerceStringType(g.semanticType(e.Args[0]), target))
@@ -128,6 +193,8 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 					}
 				}
 			}
+			g.validateResponseStatus(status)
+			g.validateResponseNullBodyStatus(status, hasBody)
 			return g.newResponseObject(data, hasBody, headers, status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, ir.ConstString{Value: ""}, ir.ConstBool{Value: false}), true
 		}
 		return nil, false
