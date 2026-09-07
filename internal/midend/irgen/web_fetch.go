@@ -544,12 +544,30 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	return outURL, outHref, outStatus, outHeaders, outBody
 }
 
+func (g *generator) validateFetchRedirectMode(mode ir.Operand) {
+	follow := g.urlStringEqual(mode, "follow")
+	errorMode := g.urlStringEqual(mode, "error")
+	manual := g.urlStringEqual(mode, "manual")
+	first := g.currentFn.NewValue("fetch_redirect_mode_first", types.TypeBoolean)
+	valid := g.currentFn.NewValue("fetch_redirect_mode_valid", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: first, Op: ir.OpOr, LHS: follow, RHS: errorMode},
+		&ir.BinaryInst{Res: valid, Op: ir.OpOr, LHS: first, RHS: manual},
+	)
+	okBB := g.currentFn.NewBlock("fetch_redirect_mode_ok")
+	errBB := g.currentFn.NewBlock("fetch_redirect_mode_invalid")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: valid, Then: okBB, Else: errBB}
+	g.currentBB = errBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid fetch redirect mode"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = okBB
+}
+
 func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	if len(e.Args) == 0 {
 		return g.failExpr("fetch expects an input")
 	}
 
-	var href, method, headers, body, signal ir.Operand
+	var href, method, headers, body, signal, hasBody ir.Operand
 	redirectMode := ir.Operand(ir.ConstString{Value: "follow"})
 	inputType := g.semanticType(e.Args[0])
 	if obj, ok := inputType.(*types.ObjectType); ok && obj.Name == "$Request" {
@@ -559,6 +577,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		method = g.requestField(req, "method", types.TypeString)
 		headers = g.cloneHeaders(g.requestField(req, "headers", g.semaResult.HeadersType))
 		body = g.copyByteBuffer(g.requestField(req, "$bodyData", g.semaResult.ByteBufferType))
+		hasBody = g.requestField(req, "$hasBody", types.TypeBoolean)
 		signal = g.requestField(req, "signal", g.semaResult.AbortSignalType)
 		g.setRequestField(req, "bodyUsed", ir.ConstBool{Value: true})
 	} else if inputType == types.TypeString {
@@ -572,6 +591,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		method = ir.ConstString{Value: "GET"}
 		headers = g.newEmptyHeaders()
 		body = g.emptyByteBuffer()
+		hasBody = ir.ConstBool{Value: false}
 		freshSignal := g.currentFn.NewValue("fetch_signal", g.semaResult.AbortSignalType)
 		signal = freshSignal
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: freshSignal, Callee: "ts_abort_signal_new"})
@@ -588,7 +608,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 				headers = g.lowerHeadersNew(&ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{ex}})
 			}
 			if ex := objectLiteralProperty(lit, "body"); ex != nil {
-				body, _ = g.lowerRequestBody(ex)
+				body, hasBody = g.lowerRequestBody(ex)
 			}
 			if ex := objectLiteralProperty(lit, "signal"); ex != nil {
 				signal = g.lowerExpr(ex)
@@ -599,6 +619,8 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		}
 	}
 
+	g.validateRequestMethodBody(method, hasBody)
+	g.validateFetchRedirectMode(redirectMode)
 	_, outHref, outStatus, outHeaders, outBody := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
 	redirected := g.currentFn.NewValue("fetch_redirected", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: redirected, Op: ir.OpNe, LHS: outHref, RHS: href})

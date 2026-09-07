@@ -1988,3 +1988,45 @@ test();
 		expected: "1\ntrue\nmissing:TypeError\nmalformed:TypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchInitValidationBeforeNetwork(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = fmt.Fprint(w, "ok")
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const badRedirect = "bogus";
+  try {
+    await fetch(%q, { redirect: badRedirect });
+    console.log("redirect:unexpected");
+  } catch (err: any) {
+    console.log("redirect:" + err.name);
+  }
+  try {
+    await fetch(%q, { method: "GET", body: "payload" });
+    console.log("get:unexpected");
+  } catch (err: any) {
+    console.log("get:" + err.name);
+  }
+  try {
+    await fetch(%q, { method: "HEAD", body: "payload" });
+    console.log("head:unexpected");
+  } catch (err: any) {
+    console.log("head:" + err.name);
+  }
+}
+test();
+`, server.URL, server.URL, server.URL)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_init_validation_before_network",
+		source:   source,
+		expected: "redirect:TypeError\nget:TypeError\nhead:TypeError\n",
+	})
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("invalid fetch init reached network %d times", got)
+	}
+}
