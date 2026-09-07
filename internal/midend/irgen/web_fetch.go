@@ -313,9 +313,33 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	offset := g.lowerHTTPBodyOffset(raw)
 	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: responseBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	rawBody := g.currentFn.NewValue("fetch_response_body_raw", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rawBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
 	responseHeaders := g.lowerHTTPResponseHeaders(raw, offset)
+	hasTransferEncoding := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "transfer-encoding"})
+	checkEncodingBB := g.currentFn.NewBlock("fetch_transfer_encoding_check")
+	plainBodyBB := g.currentFn.NewBlock("fetch_transfer_encoding_plain")
+	dechunkBB := g.currentFn.NewBlock("fetch_transfer_encoding_dechunk")
+	bodyJoinBB := g.currentFn.NewBlock("fetch_transfer_encoding_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasTransferEncoding, Then: checkEncodingBB, Else: plainBodyBB}
+	plainBodyBB.Terminator = &ir.JumpTerm{Target: bodyJoinBB}
+
+	g.currentBB = checkEncodingBB
+	transferEncoding := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "transfer-encoding"})
+	isChunked := g.currentFn.NewValue("fetch_transfer_encoding_chunked", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: isChunked, Callee: "ts_string_eq", Args: []ir.Operand{transferEncoding, ir.ConstString{Value: "chunked"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}})
+	checkEncodingEnd := g.currentBB
+	checkEncodingEnd.Terminator = &ir.BranchTerm{Cond: isChunked, Then: dechunkBB, Else: plainBodyBB}
+
+	g.currentBB = dechunkBB
+	decodedBody := g.currentFn.NewValue("fetch_response_body_dechunked", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: decodedBody, Callee: "ts_http_dechunk", Args: []ir.Operand{raw, offset}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber}})
+	dechunkEnd := g.currentBB
+	dechunkEnd.Terminator = &ir.JumpTerm{Target: bodyJoinBB}
+
+	g.currentBB = bodyJoinBB
+	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
+	bodyJoinBB.Phis = append(bodyJoinBB.Phis, &ir.PhiInst{Res: responseBody, Incoming: []ir.PhiIncoming{{Block: plainBodyBB, Value: rawBody}, {Block: dechunkEnd, Value: decodedBody}}})
 	return urlObj, canonicalHref, status, responseHeaders, responseBody
 }
 

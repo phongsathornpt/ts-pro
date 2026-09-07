@@ -1522,3 +1522,33 @@ test();
 		expected: "200\nhosts\nhosts-ok\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchChunkedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatalf("response writer does not implement http.Flusher")
+		}
+		_, _ = fmt.Fprint(w, "hello-")
+		flusher.Flush()
+		_, _ = fmt.Fprint(w, "chunked")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.headers.get("transfer-encoding"));
+  console.log(await response.text());
+}
+test();
+`, server.URL+"/chunked")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_chunked_response",
+		source:   source,
+		expected: "200\nchunked\nhello-chunked\n",
+	})
+}
