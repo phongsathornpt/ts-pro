@@ -1,6 +1,9 @@
 package e2e_test
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -998,5 +1001,29 @@ async function test(): Promise<void> {
 test();
 `,
 		expected: "201\nCreated\ntrue\ndefault\n\nfalse\none\nfalse\none\ntwo\nhello response\ntrue\n14\n104\n307\nhttps://example.com/next\nfalse\n0\nerror\nfalse\n202\napplication/json\n{\"answer\":42}\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchLoopbackTransport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, "%s|%s", r.Method, r.UserAgent())
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const res = await fetch(%q);
+  console.log(res.status);
+  console.log(res.ok);
+  console.log(res.url);
+  console.log(await res.text());
+}
+test();
+`, server.URL+"/hello?x=1")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_loopback_transport",
+		source:   source,
+		expected: "201\ntrue\n" + server.URL + "/hello?x=1\nGET|ts-pro\n",
 	})
 }

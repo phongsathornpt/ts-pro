@@ -47,6 +47,8 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			id := g.lowerExpr(e.Args[0])
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_timeout", Args: []ir.Operand{id}})
 			return nil
+		case "fetch":
+			return g.lowerFetchCall(e)
 		case "queueMicrotask":
 			closure := g.lowerExpr(e.Args[0])
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{

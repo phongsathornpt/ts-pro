@@ -144,6 +144,14 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 				c.result.Types[e] = ctor
 				return ctor
 			}
+			if e.Name == "fetch" {
+				// Fetch normalization reuses the URL record lowering even when source
+				// code never names URL directly, so materialize that layout dependency.
+				c.builtinURLType()
+				fn := types.NewFunction([]types.Param{{Name: "input", Type: types.TypeAny}, {Name: "init", Type: types.TypeAny, Optional: true}}, c.newPromiseType(c.builtinResponseType()))
+				c.result.Types[e] = fn
+				return fn
+			}
 			if e.Name == "Headers" {
 				ctor := types.NewObject("$HeadersConstructor")
 				c.result.Types[e] = ctor
