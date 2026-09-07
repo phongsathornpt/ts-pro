@@ -1166,3 +1166,36 @@ test();
 		expected: "GET|\nPOST|payload\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchRedirectModes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			w.Header().Set("Location", "/final")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, "final")
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const manual = await fetch(%q, { redirect: "manual" });
+  console.log(manual.status);
+  console.log(manual.redirected);
+  console.log(manual.headers.get("location"));
+  try {
+    await fetch(%q, { redirect: "error" });
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/start", server.URL+"/start")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_modes",
+		source:   source,
+		expected: "302\nfalse\n/final\nTypeError\n",
+	})
+}
