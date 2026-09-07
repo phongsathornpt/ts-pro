@@ -47,6 +47,22 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		c.result.Types[e] = t
 		return t
 	}
+	if e.ClassName == "Request" {
+		t := c.builtinRequestType()
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			c.error(e.Span(), "TS2554", "Request expects input and optional init.")
+		} else {
+			it := c.checkExpr(e.Args[0])
+			if it != types.TypeString && it != t && it != types.TypeAny {
+				c.error(e.Args[0].Span(), "TS2345", "Request input must be a string or Request.")
+			}
+			if len(e.Args) == 2 {
+				c.checkExpr(e.Args[1])
+			}
+		}
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "Headers" {
 		t := c.builtinHeadersType()
 		if len(e.Args) > 1 {

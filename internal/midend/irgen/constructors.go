@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
+	if e.ClassName == "Request" {
+		return g.lowerRequestNew(e)
+	}
 	if e.ClassName == "Blob" {
 		return g.lowerBlobNew(e)
 	}

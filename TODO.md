@@ -605,7 +605,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Streams conformance suite and differential testing matching Node.js v26.8.1.
 - [ ] Phase 6: Headers, Request, Response and fetch with cancellation/streaming semantics.
   - [x] Finish `Headers` conformance with dedicated WinterTC fixture covering normalization, duplicate combination, `set-cookie`, mutation, iteration, constructors, and validation errors.
-  - [ ] Add `Request` constructor, method/url/headers/body state, cloning, body-use semantics, and AbortSignal integration.
+  - [x] Add `Request` constructor, method/url/headers/body state, cloning, body-use semantics, and AbortSignal integration.
   - [ ] Add `Response` constructor, status/statusText/headers/body state, cloning, redirect/error/json helpers, and body-use semantics.
   - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
@@ -628,4 +628,4 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Mark WinterTC target complete only when the matrix has no unchecked required rows.
 
 Current WinterTC execution order (2026-09-07): **Phase 6 Request -> Response -> fetch -> Phase 7 -> Phase 8 -> Phase 9**.
-Current acceptance baseline: **152 / 152 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.
+Current acceptance baseline: **153 / 153 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.

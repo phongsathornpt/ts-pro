@@ -907,3 +907,46 @@ func TestLinuxAMD64WinterTCHeadersConformance(t *testing.T) {
 		expected: "one, three\ntrue\nnull\n2\ncookie=a=1\ncookie=b=2\nset-cookie=a=1\nset-cookie=b=2\nx-a=one, three\nx-b=two\nafter=replacement\nhasb=false\n[set-cookie:a=1][set-cookie:b=2][x-a:replacement]\ncopy=replacement\nrec=x-y=y\nrec=x-z=z\nname=TypeError\nvalue=TypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCRequestCore(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_request_core",
+		source: `
+async function test(): Promise<void> {
+  const req = new Request("https://EXAMPLE.com/a?x=1", {
+    method: "post",
+    headers: { "X-Test": "  one  ", "Content-Type": "text/plain" },
+    body: "hello request"
+  });
+  console.log(req.method);
+  console.log(req.url);
+  console.log(req.headers.get("x-test"));
+  console.log(req.headers.get("content-type"));
+  console.log(req.bodyUsed);
+
+  const clone = req.clone();
+  clone.headers.set("x-test", "two");
+  console.log(req.headers.get("x-test"));
+  console.log(clone.headers.get("x-test"));
+  console.log(clone.method);
+  console.log(clone.url);
+
+  const text = await req.text();
+  console.log(text);
+  console.log(req.bodyUsed);
+
+  const bytes = await clone.bytes();
+  console.log(bytes.length);
+  console.log(bytes[0]);
+  console.log(clone.bodyUsed);
+
+  const copied = new Request(clone, { method: "put" });
+  console.log(copied.method);
+  console.log(copied.url);
+  console.log(copied.headers.get("x-test"));
+}
+test();
+`,
+		expected: "POST\nhttps://example.com/a?x=1\none\ntext/plain\nfalse\none\ntwo\nPOST\nhttps://example.com/a?x=1\nhello request\ntrue\n13\n104\ntrue\nPUT\nhttps://example.com/a?x=1\ntwo\n",
+	})
+}

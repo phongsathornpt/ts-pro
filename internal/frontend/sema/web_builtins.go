@@ -590,6 +590,56 @@ func (c *Checker) builtinHeadersMember(property string) (types.Type, bool) {
 	return nil, false
 }
 
+func (c *Checker) builtinRequestType() *types.ObjectType {
+	// Request URL normalization reuses the URL record layout during IR lowering.
+	// Materialize that builtin dependency even when source code never names URL directly.
+	c.builtinURLType()
+	if c.result.RequestType == nil {
+		t := types.NewObject("$Request")
+		c.result.RequestType = t
+		t.AddField("$bodyData", c.builtinByteBufferType(), false)
+		t.AddField("$hasBody", types.TypeBoolean, false)
+		t.AddField("bodyUsed", types.TypeBoolean, false)
+		t.AddField("headers", c.builtinHeadersType(), false)
+		t.AddField("method", types.TypeString, false)
+		t.AddField("signal", c.builtinAbortSignalType(), false)
+		t.AddField("url", types.TypeString, false)
+	}
+	return c.result.RequestType
+}
+
+func (c *Checker) builtinRequestMember(property string) (types.Type, bool) {
+	switch property {
+	case "method", "url":
+		return types.TypeString, true
+	case "headers":
+		return c.builtinHeadersType(), true
+	case "signal":
+		return c.builtinAbortSignalType(), true
+	case "bodyUsed":
+		return types.TypeBoolean, true
+	case "body":
+		return types.NewUnion(c.builtinReadableStreamType(), types.TypeNull), true
+	case "clone":
+		return types.NewFunction(nil, c.builtinRequestType()), true
+	case "text":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeString)), true
+	case "arrayBuffer":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinArrayBufferType())), true
+	case "bytes":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinUint8ArrayType())), true
+	case "blob":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinBlobType())), true
+	case "json":
+		return types.NewFunction(nil, c.newPromiseType(types.TypeAny)), true
+	case "formData":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinFormDataType())), true
+	case "textStream":
+		return types.NewFunction(nil, c.builtinReadableStreamType()), true
+	}
+	return nil, false
+}
+
 func (c *Checker) builtinReadableStreamReadResultType() *types.ObjectType {
 	if c.result.ReadableStreamReadResultType == nil {
 		t := types.NewObject("$ReadableStreamReadResult")

@@ -83,59 +83,60 @@ func (s *Scope) Resolve(name string) *Symbol {
 
 // Result holds the analyzed types and symbols for an AST.
 type Result struct {
-	Types               map[ast.Node]types.Type
-	Symbols             map[ast.Node]*Symbol
-	GenericCalls        map[*ast.CallExpr]*types.FunctionType
-	GenericClasses      map[*ast.NewExpr]*ClassInfo
-	Classes             map[string]*ClassInfo
-	Enums               map[string]map[string]float64
-	ImportAliases       map[string]string
-	BuiltinCollections  map[string]*BuiltinCollectionInfo
-	TaskResults         map[string]types.Type
-	ChannelElements     map[string]types.Type
-	TaskGroupType       *types.ObjectType
-	AsyncResults        map[*ast.FunctionDecl]types.Type
-	DateType            *types.ObjectType
-	RegExpType          *types.ObjectType
-	DOMExceptionType    *types.ObjectType
-	EventType           *types.ObjectType
-	CustomEventType     *types.ObjectType
-	MessageEventType    *types.ObjectType
-	ErrorEventType      *types.ObjectType
-	EventTargetType     *types.ObjectType
-	AbortSignalType     *types.ObjectType
-	AbortControllerType *types.ObjectType
-	ByteBufferType      *types.ObjectType
-	ArrayBufferType     *types.ObjectType
-	Uint8ArrayType      *types.ObjectType
-	TextEncoderType     *types.ObjectType
-	TextDecoderType     *types.ObjectType
-	URLSearchParamsType           *types.ObjectType
-	URLType                       *types.ObjectType
-	URLPatternType                *types.ObjectType
-	URLPatternResultType          *types.ObjectType
-	URLPatternComponentResultType *types.ObjectType
-	URLPatternInitType            *types.ObjectType
-	BlobType                      *types.ObjectType
-	FileType                      *types.ObjectType
-	FormDataType                  *types.ObjectType
-	HeadersType                   *types.ObjectType
-	ReadableStreamType            *types.ObjectType
-	ReadableStreamDefaultReaderType *types.ObjectType
-	ReadableStreamDefaultControllerType *types.ObjectType
-	ReadableStreamReadResultType  *types.ObjectType
-	WritableStreamType            *types.ObjectType
-	WritableStreamDefaultWriterType *types.ObjectType
-	WritableStreamDefaultControllerType *types.ObjectType
-	TransformStreamType           *types.ObjectType
+	Types                                map[ast.Node]types.Type
+	Symbols                              map[ast.Node]*Symbol
+	GenericCalls                         map[*ast.CallExpr]*types.FunctionType
+	GenericClasses                       map[*ast.NewExpr]*ClassInfo
+	Classes                              map[string]*ClassInfo
+	Enums                                map[string]map[string]float64
+	ImportAliases                        map[string]string
+	BuiltinCollections                   map[string]*BuiltinCollectionInfo
+	TaskResults                          map[string]types.Type
+	ChannelElements                      map[string]types.Type
+	TaskGroupType                        *types.ObjectType
+	AsyncResults                         map[*ast.FunctionDecl]types.Type
+	DateType                             *types.ObjectType
+	RegExpType                           *types.ObjectType
+	DOMExceptionType                     *types.ObjectType
+	EventType                            *types.ObjectType
+	CustomEventType                      *types.ObjectType
+	MessageEventType                     *types.ObjectType
+	ErrorEventType                       *types.ObjectType
+	EventTargetType                      *types.ObjectType
+	AbortSignalType                      *types.ObjectType
+	AbortControllerType                  *types.ObjectType
+	ByteBufferType                       *types.ObjectType
+	ArrayBufferType                      *types.ObjectType
+	Uint8ArrayType                       *types.ObjectType
+	TextEncoderType                      *types.ObjectType
+	TextDecoderType                      *types.ObjectType
+	URLSearchParamsType                  *types.ObjectType
+	URLType                              *types.ObjectType
+	URLPatternType                       *types.ObjectType
+	URLPatternResultType                 *types.ObjectType
+	URLPatternComponentResultType        *types.ObjectType
+	URLPatternInitType                   *types.ObjectType
+	BlobType                             *types.ObjectType
+	FileType                             *types.ObjectType
+	FormDataType                         *types.ObjectType
+	HeadersType                          *types.ObjectType
+	RequestType                          *types.ObjectType
+	ReadableStreamType                   *types.ObjectType
+	ReadableStreamDefaultReaderType      *types.ObjectType
+	ReadableStreamDefaultControllerType  *types.ObjectType
+	ReadableStreamReadResultType         *types.ObjectType
+	WritableStreamType                   *types.ObjectType
+	WritableStreamDefaultWriterType      *types.ObjectType
+	WritableStreamDefaultControllerType  *types.ObjectType
+	TransformStreamType                  *types.ObjectType
 	TransformStreamDefaultControllerType *types.ObjectType
-	ByteLengthQueuingStrategyType *types.ObjectType
-	CountQueuingStrategyType      *types.ObjectType
-	TextEncoderStreamType         *types.ObjectType
-	TextDecoderStreamType         *types.ObjectType
-	VarTypes                      map[*ast.VarDeclStmt][]types.Type
-	RootScope           *Scope
-	Diagnostics         diag.DiagnosticList
+	ByteLengthQueuingStrategyType        *types.ObjectType
+	CountQueuingStrategyType             *types.ObjectType
+	TextEncoderStreamType                *types.ObjectType
+	TextDecoderStreamType                *types.ObjectType
+	VarTypes                             map[*ast.VarDeclStmt][]types.Type
+	RootScope                            *Scope
+	Diagnostics                          diag.DiagnosticList
 }
 
 type Checker struct {
@@ -487,6 +488,9 @@ func (c *Checker) lookupMemberType(objType types.Type, property string) (types.T
 		if t.Name == "$Headers" {
 			return c.builtinHeadersMember(property)
 		}
+		if t.Name == "$Request" {
+			return c.builtinRequestMember(property)
+		}
 		if t.Name == "$Event" {
 			return c.builtinEventMember(property)
 		}
@@ -760,6 +764,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 		}
 		if t.Name == "FormData" {
 			return c.builtinFormDataType()
+		}
+		if t.Name == "Request" {
+			return c.builtinRequestType()
 		}
 		if t.Name == "ReadableStream" {
 			return c.builtinReadableStreamType()
