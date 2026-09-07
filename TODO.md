@@ -615,9 +615,12 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
     - [x] Honor pre-aborted signals before transport dispatch.
     - [x] Follow relative redirects, expose `redirected`/final URL, support manual/error modes, and apply 301/302/303 vs 307/308 method/body semantics.
-    - [ ] Follow redirect chains with the Fetch redirect-count limit and loop/error coverage.
-    - [ ] Cancel connect/write/read while I/O is in flight when AbortSignal fires.
-    - [ ] Stream request/response bodies instead of bounded whole-buffer transport.
+    - [x] Follow redirect chains with the Fetch redirect-count limit and loop/error coverage.
+    - [x] Cancel connect/write/read while I/O is in flight when AbortSignal fires.
+    - [x] Receive response bytes incrementally with geometric buffer growth instead of a fixed 64 KiB read cap.
+    - [x] Back Request/Response bodies with stable ReadableStream objects and enforce disturbed/locked body usability semantics.
+    - [ ] Resolve fetch before the complete response body arrives and drive the body from live transport/backpressure.
+    - [ ] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
   - [ ] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
   - [ ] Finish `Performance` inheritance/surface that depends on EventTarget and verify ECMA-429-required members.
