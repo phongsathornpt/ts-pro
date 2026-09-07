@@ -252,6 +252,8 @@ func (c *Checker) builtinEventTargetMember(property string) (types.Type, bool) {
 
 func (c *Checker) builtinAbortSignalType() *types.ObjectType {
 	if c.result.AbortSignalType == nil {
+		c.builtinEventType()
+		c.builtinDOMExceptionType()
 		c.result.AbortSignalType = types.NewObject("$AbortSignal")
 	}
 	return c.result.AbortSignalType

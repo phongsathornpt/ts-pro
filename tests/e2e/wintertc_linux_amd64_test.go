@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 
 	"github.com/phongsathornpt/ts-pro/pkg/tspro"
@@ -1069,4 +1070,35 @@ test();
 		source:   source,
 		expected: "true\n202\nPUT|beta|override|ts-pro\n",
 	})
+}
+
+func TestLinuxAMD64WinterTCFetchPreAbortedSignal(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const controller = new AbortController();
+  controller.abort();
+  try {
+    await fetch(%q, { signal: controller.signal });
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/abort")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_pre_aborted_signal",
+		source:   source,
+		expected: "AbortError\n",
+	})
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("pre-aborted fetch reached server %d times", got)
+	}
 }

@@ -245,7 +245,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		return g.failExpr("fetch expects an input")
 	}
 
-	var href, method, headers, body ir.Operand
+	var href, method, headers, body, signal ir.Operand
 	inputType := g.semanticType(e.Args[0])
 	if obj, ok := inputType.(*types.ObjectType); ok && obj.Name == "$Request" {
 		req := g.lowerExpr(e.Args[0])
@@ -254,6 +254,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		method = g.requestField(req, "method", types.TypeString)
 		headers = g.cloneHeaders(g.requestField(req, "headers", g.semaResult.HeadersType))
 		body = g.copyByteBuffer(g.requestField(req, "$bodyData", g.semaResult.ByteBufferType))
+		signal = g.requestField(req, "signal", g.semaResult.AbortSignalType)
 		g.setRequestField(req, "bodyUsed", ir.ConstBool{Value: true})
 	} else if inputType == types.TypeString {
 		invalid := g.currentFn.NewBlock("fetch_input_url_invalid")
@@ -266,6 +267,9 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		method = ir.ConstString{Value: "GET"}
 		headers = g.newEmptyHeaders()
 		body = g.emptyByteBuffer()
+		freshSignal := g.currentFn.NewValue("fetch_signal", g.semaResult.AbortSignalType)
+		signal = freshSignal
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: freshSignal, Callee: "ts_abort_signal_new"})
 	} else {
 		return g.failExpr("fetch input must be a string or Request")
 	}
@@ -283,6 +287,9 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 			}
 			if ex := objectLiteralProperty(lit, "body"); ex != nil {
 				body, _ = g.lowerRequestBody(ex)
+			}
+			if ex := objectLiteralProperty(lit, "signal"); ex != nil {
+				signal = g.lowerExpr(ex)
 			}
 		}
 	}
@@ -309,6 +316,17 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	g.currentBB = transportErr
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports loopback HTTP only"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = transportOK
+
+	aborted := g.currentFn.NewValue("fetch_signal_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	fetchAbort := g.currentFn.NewBlock("fetch_aborted")
+	fetchDispatch := g.currentFn.NewBlock("fetch_dispatch")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: fetchAbort, Else: fetchDispatch}
+	g.currentBB = fetchAbort
+	reason := g.currentFn.NewValue("fetch_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: reason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(reason)
+	g.currentBB = fetchDispatch
 
 	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
