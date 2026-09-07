@@ -97,15 +97,10 @@ func (g *generator) copyByteBuffer(data ir.Operand) ir.Operand {
 	return copy
 }
 
-func (g *generator) lowerRequestBody(expr ast.Expr) (ir.Operand, ir.Operand) {
-	if expr == nil {
-		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
-	}
-	typ := g.semanticType(expr)
+func (g *generator) lowerRequestBodyValue(typ types.Type, value ir.Operand) (ir.Operand, ir.Operand) {
 	if typ == types.TypeNull || typ == types.TypeUndefined {
 		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
 	}
-	value := g.lowerExpr(expr)
 	if typ == types.TypeString {
 		data := g.currentFn.NewValue("request_body_string", g.semaResult.ByteBufferType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
@@ -138,6 +133,17 @@ func (g *generator) lowerRequestBody(expr ast.Expr) (ir.Operand, ir.Operand) {
 		Res: data, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{str}, ParamTypes: []types.Type{types.TypeString},
 	})
 	return data, ir.ConstBool{Value: true}
+}
+
+func (g *generator) lowerRequestBody(expr ast.Expr) (ir.Operand, ir.Operand) {
+	if expr == nil {
+		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
+	}
+	typ := g.semanticType(expr)
+	if typ == types.TypeNull || typ == types.TypeUndefined {
+		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
+	}
+	return g.lowerRequestBodyValue(typ, g.lowerExpr(expr))
 }
 
 func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
@@ -441,4 +447,52 @@ func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 		}
 	}
 	return nil, false
+}
+
+func (g *generator) lowerHeadersInitValue(initType types.Type, initValue ir.Operand) ir.Operand {
+	if obj, ok := initType.(*types.ObjectType); ok && obj.Name == "$Headers" {
+		return g.cloneHeaders(initValue)
+	}
+	headers := g.newEmptyHeaders()
+	if obj, ok := initType.(*types.ObjectType); ok {
+		offsets, _, _ := g.objectLayout(obj)
+		for _, name := range obj.FieldOrder {
+			field := obj.Fields[name]
+			value := g.currentFn.NewValue("fetch_init_header_"+name, field.Type)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: value, Obj: initValue, Field: name, Offset: offsets[name]})
+			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: name}, g.coerceStringType(field.Type, value))
+		}
+		return headers
+	}
+	if arr, ok := initType.(*types.ArrayType); ok {
+		length := g.currentFn.NewValue("fetch_init_headers_len", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: initValue})
+		pre := g.currentBB
+		cond := g.currentFn.NewBlock("fetch_init_headers_cond")
+		body := g.currentFn.NewBlock("fetch_init_headers_body")
+		done := g.currentFn.NewBlock("fetch_init_headers_done")
+		pre.Terminator = &ir.JumpTerm{Target: cond}
+		i := g.currentFn.NewValue("fetch_init_headers_i", types.TypeNumber)
+		next := g.currentFn.NewValue("fetch_init_headers_next", types.TypeNumber)
+		cond.Phis = append(cond.Phis, &ir.PhiInst{Res: i, Incoming: []ir.PhiIncoming{{Block: pre, Value: ir.ConstNumber{Value: 0}}, {Block: body, Value: next}}})
+		more := g.currentFn.NewValue("fetch_init_headers_more", types.TypeBoolean)
+		cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: i, RHS: length})
+		cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: done}
+		g.currentBB = body
+		pair := g.currentFn.NewValue("fetch_init_header_pair", arr.Elem)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: pair, Array: initValue, Index: i})
+		if pairType, ok := arr.Elem.(*types.ArrayType); ok {
+			key := g.currentFn.NewValue("fetch_init_header_key", pairType.Elem)
+			value := g.currentFn.NewValue("fetch_init_header_value", pairType.Elem)
+			g.currentBB.Instructions = append(g.currentBB.Instructions,
+				&ir.GetElementInst{Res: key, Array: pair, Index: ir.ConstNumber{Value: 0}},
+				&ir.GetElementInst{Res: value, Array: pair, Index: ir.ConstNumber{Value: 1}},
+			)
+			g.lowerHeadersAppendDirect(headers, g.coerceStringType(pairType.Elem, key), g.coerceStringType(pairType.Elem, value))
+		}
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+		g.currentBB.Terminator = &ir.JumpTerm{Target: cond}
+		g.currentBB = done
+	}
+	return headers
 }

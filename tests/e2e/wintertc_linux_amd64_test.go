@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2064,4 +2065,80 @@ test();
 		source:   source,
 		expected: "201\nCreated\n202\nAccepted\ntrue\n",
 	})
+}
+
+func TestLinuxAMD64WinterTCFetchRedirectBodyHeaderSemantics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start303":
+			w.Header().Set("Location", "/final303")
+			w.WriteHeader(http.StatusSeeOther)
+			return
+		case "/start307":
+			w.Header().Set("Location", "/final307")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		_, _ = fmt.Fprintf(w, "%s|%s|%s|%s|%s", r.Method, string(body), r.Header.Get("Content-Type"), r.Header.Get("Content-Language"), r.Header.Get("Content-Location"))
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  console.log(await (await fetch(%q, { method: "POST", body: "payload", headers: { "Content-Type": "text/plain", "Content-Language": "en", "Content-Location": "/source" } })).text());
+  console.log(await (await fetch(%q, { method: "POST", body: "payload", headers: { "Content-Type": "text/plain", "Content-Language": "en", "Content-Location": "/source" } })).text());
+}
+test();
+`, server.URL+"/start303", server.URL+"/start307")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_body_header_semantics",
+		source:   source,
+		expected: "GET||||\nPOST|payload|text/plain|en|/source\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchInitObjectVariable(t *testing.T) {
+	var finalHits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/echo":
+			body, _ := io.ReadAll(r.Body)
+			_, _ = fmt.Fprintf(w, "%s|%s|%s|%s", r.Method, string(body), r.Header.Get("X-Init"), r.Header.Get("Content-Type"))
+		case "/redirect":
+			w.Header().Set("Location", "/final")
+			w.WriteHeader(http.StatusFound)
+		case "/final":
+			finalHits.Add(1)
+			_, _ = fmt.Fprint(w, "final")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const init = {
+    method: "POST",
+    body: "payload",
+    headers: { "X-Init": "yes", "Content-Type": "text/plain" }
+  };
+  const echo = await fetch(%q, init);
+  console.log(await echo.text());
+
+  const manual = { redirect: "manual" };
+  const redirect = await fetch(%q, manual);
+  console.log(redirect.status);
+  console.log(redirect.redirected);
+  console.log(redirect.headers.get("location"));
+}
+test();
+`, server.URL+"/echo", server.URL+"/redirect")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_init_object_variable",
+		source:   source,
+		expected: "POST|payload|yes|text/plain\n302\nfalse\n/final\n",
+	})
+	if got := finalHits.Load(); got != 0 {
+		t.Fatalf("manual redirect unexpectedly followed %d times", got)
+	}
 }

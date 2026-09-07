@@ -442,7 +442,7 @@ func (g *generator) lowerFetchRedirectStatus(status ir.Operand) ir.Operand {
 	return combined
 }
 
-func (g *generator) lowerFetchRedirectMethodBody(status, method, body ir.Operand) (ir.Operand, ir.Operand) {
+func (g *generator) lowerFetchRedirectMethodBody(status, method, headers, body ir.Operand) (ir.Operand, ir.Operand) {
 	is301 := g.currentFn.NewValue("fetch_redirect_301", types.TypeBoolean)
 	is302 := g.currentFn.NewValue("fetch_redirect_302", types.TypeBoolean)
 	is303 := g.currentFn.NewValue("fetch_redirect_303", types.TypeBoolean)
@@ -474,6 +474,9 @@ func (g *generator) lowerFetchRedirectMethodBody(status, method, body ir.Operand
 	joinBB := g.currentFn.NewBlock("fetch_redirect_method_join")
 	pre.Terminator = &ir.BranchTerm{Cond: rewrite, Then: rewriteBB, Else: preserveBB}
 	g.currentBB = rewriteBB
+	for _, name := range []string{"content-encoding", "content-language", "content-location", "content-type"} {
+		g.lowerHeadersDelete(headers, ir.ConstString{Value: name})
+	}
 	empty := g.emptyByteBuffer()
 	rewriteEnd := g.currentBB
 	rewriteEnd.Terminator = &ir.JumpTerm{Target: joinBB}
@@ -531,7 +534,7 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	g.currentBB = redirectInvalid
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect URL"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = redirectParseOK
-	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, body)
+	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, headers, body)
 
 	var followedHref, followedStatus, followedStatusText, followedHeaders, followedBody ir.Operand
 	var followEnd *ir.BasicBlock
@@ -629,21 +632,37 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	}
 
 	if len(e.Args) > 1 {
-		if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
-			if ex := objectLiteralProperty(lit, "method"); ex != nil {
-				method = g.normalizeRequestMethod(g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex)))
+		initExpr := e.Args[1]
+		initType := g.semanticType(initExpr)
+		initValue := g.lowerExpr(initExpr)
+		if obj, ok := initType.(*types.ObjectType); ok {
+			offsets, _, _ := g.objectLayout(obj)
+			readField := func(name string) (ir.Operand, types.Type, bool) {
+				field, exists := obj.Fields[name]
+				if !exists {
+					return nil, nil, false
+				}
+				raw := g.currentFn.NewValue("fetch_init_"+name, field.Type)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: initValue, Field: name, Offset: offsets[name]})
+				return raw, field.Type, true
 			}
-			if ex := objectLiteralProperty(lit, "headers"); ex != nil {
-				headers = g.lowerHeadersNew(&ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{ex}})
+			if raw, typ, ok := readField("method"); ok {
+				method = g.normalizeRequestMethod(g.coerceStringType(typ, raw))
 			}
-			if ex := objectLiteralProperty(lit, "body"); ex != nil {
-				body, hasBody = g.lowerRequestBody(ex)
+			if raw, typ, ok := readField("headers"); ok {
+				headers = g.lowerHeadersInitValue(typ, raw)
 			}
-			if ex := objectLiteralProperty(lit, "signal"); ex != nil {
-				signal = g.lowerExpr(ex)
+			if raw, typ, ok := readField("body"); ok {
+				body, hasBody = g.lowerRequestBodyValue(typ, raw)
 			}
-			if ex := objectLiteralProperty(lit, "redirect"); ex != nil {
-				redirectMode = g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex))
+			if raw, typ, ok := readField("signal"); ok {
+				signal = raw
+				if irJSValueType(raw.Type()) {
+					signal = g.coerceJSValueBoundary(raw, typ, g.semaResult.AbortSignalType)
+				}
+			}
+			if raw, typ, ok := readField("redirect"); ok {
+				redirectMode = g.coerceStringType(typ, raw)
 			}
 		}
 	}
