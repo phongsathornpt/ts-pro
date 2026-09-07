@@ -172,8 +172,14 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 			}
 			g.validateResponseRedirectStatus(status)
 			headers := g.newEmptyHeaders()
-			target := g.lowerExpr(e.Args[0])
-			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: "location"}, g.coerceStringType(g.semanticType(e.Args[0]), target))
+			invalidURL := g.currentFn.NewBlock("response_redirect_url_invalid")
+			parsedURL := g.lowerURLResolveAndParse(e.Args[0], nil, invalidURL)
+			location, _ := g.lowerURLMember(parsedURL, "href")
+			redirectURLReady := g.currentBB
+			g.currentBB = invalidURL
+			g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect URL"}, ir.ConstString{Value: "TypeError"}))
+			g.currentBB = redirectURLReady
+			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: "location"}, location)
 			return g.newResponseObject(g.emptyByteBuffer(), ir.ConstBool{Value: false}, headers, status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, ir.ConstString{Value: ""}, ir.ConstBool{Value: false}), true
 		case "json":
 			value := g.lowerExpr(e.Args[0])

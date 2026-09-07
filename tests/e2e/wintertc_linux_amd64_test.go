@@ -1704,3 +1704,41 @@ console.log(new Request("http://example.com/", { method: custom }).method);
 		expected: "connect:TypeError\ntrace:TypeError\ntrack:TypeError\ntoken:TypeError\npatch\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCResponseRedirectURLValidation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_response_redirect_url_validation",
+		source: `
+const res = Response.redirect("HTTP://EXAMPLE.COM:80/a/../b?x=1", 302);
+console.log(res.status);
+console.log(res.headers.get("location"));
+const v6 = Response.redirect("http://[::1]:80/x", 307);
+console.log(v6.headers.get("location"));
+try { Response.redirect("/relative", 302); console.log("relative:unexpected"); } catch (err: any) { console.log("relative:" + err.name); }
+try { Response.redirect("not a url", 302); console.log("invalid:unexpected"); } catch (err: any) { console.log("invalid:" + err.name); }
+`,
+		expected: "302\nhttp://example.com/b?x=1\nhttp://[::1]/x\nrelative:TypeError\ninvalid:TypeError\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCNullBodyInit(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_null_body_init",
+		source: `
+async function test(): Promise<void> {
+  const res = new Response(null, { status: 204 });
+  console.log(res.body === null);
+  console.log(res.bodyUsed);
+  console.log(await res.text());
+  console.log(res.bodyUsed);
+  const req = new Request("http://example.com/", { method: "POST", body: null });
+  console.log(req.body === null);
+  console.log(req.bodyUsed);
+  console.log(await req.text());
+  console.log(req.bodyUsed);
+}
+test();
+`,
+		expected: "true\nfalse\n\ntrue\ntrue\nfalse\n\ntrue\n",
+	})
+}

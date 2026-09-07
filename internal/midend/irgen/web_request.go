@@ -102,6 +102,9 @@ func (g *generator) lowerRequestBody(expr ast.Expr) (ir.Operand, ir.Operand) {
 		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
 	}
 	typ := g.semanticType(expr)
+	if typ == types.TypeNull || typ == types.TypeUndefined {
+		return g.emptyByteBuffer(), ir.ConstBool{Value: false}
+	}
 	value := g.lowerExpr(expr)
 	if typ == types.TypeString {
 		data := g.currentFn.NewValue("request_body_string", g.semaResult.ByteBufferType)

@@ -669,6 +669,7 @@ func (c *Checker) builtinResponseStaticMember(property string) (types.Type, bool
 	case "error":
 		return types.NewFunction(nil, c.builtinResponseType()), true
 	case "redirect":
+		_ = c.builtinURLType()
 		return types.NewFunction([]types.Param{{Name: "url", Type: types.TypeString}, {Name: "status", Type: types.TypeNumber, Optional: true}}, c.builtinResponseType()), true
 	case "json":
 		return types.NewFunction([]types.Param{{Name: "data", Type: types.TypeAny}, {Name: "init", Type: types.TypeAny, Optional: true}}, c.builtinResponseType()), true
