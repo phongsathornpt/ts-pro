@@ -275,7 +275,7 @@ func (g *generator) buildFetchWireRequest(method, host, port, path, search, head
 	return wire
 }
 
-func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
+func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
 	invalid := g.currentFn.NewBlock("fetch_url_invalid")
 	urlObj := g.lowerURLParseRecord(href, invalid)
 	canonicalHref, _ := g.lowerURLMember(urlObj, "href")
@@ -382,38 +382,56 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 
 	g.currentBB = readResponseBB
 	headerRaw := g.currentFn.NewValue("fetch_raw_headers", g.semaResult.ByteBufferType)
-	bodyRaw := g.currentFn.NewValue("fetch_raw_body_remainder", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.CallInst{Res: headerRaw, Callee: "ts_net_http_read_headers", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
-		&ir.CallInst{Res: bodyRaw, Callee: "ts_net_http_read_all", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
-		&ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}},
 	)
 	headerRawLen := g.currentFn.NewValue("fetch_raw_headers_len", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.CallInst{Res: headerRawLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{headerRaw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}},
 	)
-	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
+	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_headers", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
-	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")
-	parseResponseBB := g.currentFn.NewBlock("fetch_parse_response")
+	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_headers")
+	parseResponseBB := g.currentFn.NewBlock("fetch_parse_headers")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: postAborted, Then: postAbortBB, Else: parseResponseBB}
 	g.currentBB = postAbortBB
-	postReason := g.currentFn.NewValue("fetch_abort_reason_after_io", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
+	postReason := g.currentFn.NewValue("fetch_abort_reason_after_headers", types.TypeAny)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
 	g.routeThrownValue(postReason)
 	g.currentBB = parseResponseBB
 	networkFailed := g.currentFn.NewValue("fetch_network_failed", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: networkFailed, Op: ir.OpEq, LHS: headerRawLen, RHS: ir.ConstNumber{Value: 0}})
 	networkErrBB := g.currentFn.NewBlock("fetch_network_error")
-	httpParseBB := g.currentFn.NewBlock("fetch_http_parse")
+	httpParseBB := g.currentFn.NewBlock("fetch_http_headers_parse")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: networkFailed, Then: networkErrBB, Else: httpParseBB}
 	g.currentBB = networkErrBB
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network request failed"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = httpParseBB
 	status := g.lowerHTTPStatus(headerRaw)
 	statusText := g.lowerHTTPStatusText(headerRaw, headerRawLen)
-	rawBody := bodyRaw
 	responseHeaders := g.lowerHTTPResponseHeaders(headerRaw, headerRawLen)
+	return urlObj, canonicalHref, fd, status, statusText, responseHeaders
+
+}
+
+func (g *generator) lowerFetchReadResponseBody(fd, signal, responseHeaders ir.Operand) ir.Operand {
+	bodyRaw := g.currentFn.NewValue("fetch_raw_body_remainder", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: bodyRaw, Callee: "ts_net_http_read_all", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
+		&ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}},
+	)
+	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_body", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	abortBB := g.currentFn.NewBlock("fetch_aborted_after_body")
+	bodyBB := g.currentFn.NewBlock("fetch_body_ready")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: postAborted, Then: abortBB, Else: bodyBB}
+	g.currentBB = abortBB
+	postReason := g.currentFn.NewValue("fetch_abort_reason_after_body", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(postReason)
+	g.currentBB = bodyBB
 	hasTransferEncoding := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "transfer-encoding"})
 	checkEncodingBB := g.currentFn.NewBlock("fetch_transfer_encoding_check")
 	plainBodyBB := g.currentFn.NewBlock("fetch_transfer_encoding_plain")
@@ -437,8 +455,8 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 
 	g.currentBB = bodyJoinBB
 	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
-	bodyJoinBB.Phis = append(bodyJoinBB.Phis, &ir.PhiInst{Res: responseBody, Incoming: []ir.PhiIncoming{{Block: plainBodyBB, Value: rawBody}, {Block: dechunkEnd, Value: decodedBody}}})
-	return urlObj, canonicalHref, status, statusText, responseHeaders, responseBody
+	bodyJoinBB.Phis = append(bodyJoinBB.Phis, &ir.PhiInst{Res: responseBody, Incoming: []ir.PhiIncoming{{Block: plainBodyBB, Value: bodyRaw}, {Block: dechunkEnd, Value: decodedBody}}})
+	return responseBody
 }
 
 func (g *generator) lowerFetchRedirectStatus(status ir.Operand) ir.Operand {
@@ -507,7 +525,7 @@ func (g *generator) lowerFetchRedirectMethodBody(status, method, headers, body i
 }
 
 func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, redirectMode ir.Operand, depth int) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
-	urlObj, finalHref, status, statusText, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
+	urlObj, finalHref, fd, status, statusText, responseHeaders := g.lowerFetchRoundHeaders(href, method, headers, body, signal)
 	isRedirect := g.lowerFetchRedirectStatus(status)
 	hasLocation := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "location"})
 	shouldRedirect := g.currentFn.NewValue("fetch_should_redirect", types.TypeBoolean)
@@ -517,7 +535,11 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	directBB := g.currentFn.NewBlock("fetch_redirect_direct")
 	joinBB := g.currentFn.NewBlock("fetch_redirect_join")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: shouldRedirect, Then: redirectBB, Else: directBB}
-	directBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = directBB
+	directBody := g.lowerFetchReadResponseBody(fd, signal, responseHeaders)
+	directEnd := g.currentBB
+	directEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
 	g.currentBB = redirectBB
 	isErrorMode := g.urlStringEqual(redirectMode, "error")
@@ -525,6 +547,7 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	notErrorBB := g.currentFn.NewBlock("fetch_redirect_not_error")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: isErrorMode, Then: errorBB, Else: notErrorBB}
 	g.currentBB = errorBB
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch redirect mode is error"}, ir.ConstString{Value: "TypeError"}))
 
 	g.currentBB = notErrorBB
@@ -532,12 +555,16 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	manualBB := g.currentFn.NewBlock("fetch_redirect_manual")
 	followBB := g.currentFn.NewBlock("fetch_redirect_follow")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: isManualMode, Then: manualBB, Else: followBB}
-	manualBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = manualBB
+	manualBody := g.lowerFetchReadResponseBody(fd, signal, responseHeaders)
+	manualEnd := g.currentBB
+	manualEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
 	g.currentBB = followBB
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
 	if depth >= 20 {
 		g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch redirect count exceeded 20"}, ir.ConstString{Value: "TypeError"}))
-		// Keep IR construction alive after the throwing edge; this block is unreachable at runtime.
 		g.currentBB = g.currentFn.NewBlock("fetch_redirect_limit_unreachable")
 	}
 	location := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "location"})
@@ -566,12 +593,12 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	outStatusText := g.currentFn.NewValue("fetch_final_status_text", types.TypeString)
 	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
 	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
-	urlIncoming := []ir.PhiIncoming{{Block: directBB, Value: urlObj}, {Block: manualBB, Value: urlObj}}
-	hrefIncoming := []ir.PhiIncoming{{Block: directBB, Value: finalHref}, {Block: manualBB, Value: finalHref}}
-	statusIncoming := []ir.PhiIncoming{{Block: directBB, Value: status}, {Block: manualBB, Value: status}}
-	statusTextIncoming := []ir.PhiIncoming{{Block: directBB, Value: statusText}, {Block: manualBB, Value: statusText}}
-	headersIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseHeaders}, {Block: manualBB, Value: responseHeaders}}
-	bodyIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseBody}, {Block: manualBB, Value: responseBody}}
+	urlIncoming := []ir.PhiIncoming{{Block: directEnd, Value: urlObj}, {Block: manualEnd, Value: urlObj}}
+	hrefIncoming := []ir.PhiIncoming{{Block: directEnd, Value: finalHref}, {Block: manualEnd, Value: finalHref}}
+	statusIncoming := []ir.PhiIncoming{{Block: directEnd, Value: status}, {Block: manualEnd, Value: status}}
+	statusTextIncoming := []ir.PhiIncoming{{Block: directEnd, Value: statusText}, {Block: manualEnd, Value: statusText}}
+	headersIncoming := []ir.PhiIncoming{{Block: directEnd, Value: responseHeaders}, {Block: manualEnd, Value: responseHeaders}}
+	bodyIncoming := []ir.PhiIncoming{{Block: directEnd, Value: directBody}, {Block: manualEnd, Value: manualBody}}
 	if depth < 20 {
 		urlIncoming = append(urlIncoming, ir.PhiIncoming{Block: followEnd, Value: redirectURL})
 		hrefIncoming = append(hrefIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHref})

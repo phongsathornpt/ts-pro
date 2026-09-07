@@ -2181,3 +2181,48 @@ test();
 		expected: "POST\nhttp://example.com/path\nyes\ntext/plain\npayload\nPUT\nnull\n2\nnew\ninvalid:TypeError\n",
 	})
 }
+func TestLinuxAMD64WinterTCFetchRedirectDoesNotWaitForBody(t *testing.T) {
+	finalReached := make(chan struct{}, 1)
+	var waitedForBody atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			w.Header().Set("Location", "/final")
+			w.WriteHeader(http.StatusFound)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-finalReached:
+			case <-time.After(750 * time.Millisecond):
+				waitedForBody.Store(true)
+			}
+			_, _ = fmt.Fprint(w, "ignored redirect body")
+		case "/final":
+			select {
+			case finalReached <- struct{}{}:
+			default:
+			}
+			_, _ = fmt.Fprint(w, "final")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.redirected);
+  console.log(await response.text());
+}
+test();
+`, server.URL+"/start")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_headers_before_body",
+		source:   source,
+		expected: "200\ntrue\nfinal\n",
+	})
+	if waitedForBody.Load() {
+		t.Fatal("fetch waited for redirect response body before following Location")
+	}
+}
