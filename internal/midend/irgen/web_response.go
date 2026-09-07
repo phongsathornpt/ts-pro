@@ -184,24 +184,38 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 		case "json":
 			value := g.lowerExpr(e.Args[0])
 			text := g.lowerJSONStringifyValue(value, value.Type())
-			_, hasBody := g.lowerRequestBody(&ast.StringLit{Value: ""})
-			dataValue := g.currentFn.NewValue("response_json_body", g.semaResult.ByteBufferType)
-			var data ir.Operand = dataValue
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: dataValue, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{text}, ParamTypes: []types.Type{types.TypeString}})
-			hasBody = ir.ConstBool{Value: true}
+			data := g.currentFn.NewValue("response_json_body", g.semaResult.ByteBufferType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: data, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{text}, ParamTypes: []types.Type{types.TypeString}})
+			hasBody := ir.Operand(ir.ConstBool{Value: true})
 			headers := g.newEmptyHeaders()
-			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: "content-type"}, ir.ConstString{Value: "application/json"})
 			status := ir.Operand(ir.ConstNumber{Value: 200})
+			statusText := ir.Operand(ir.ConstString{Value: ""})
 			if len(e.Args) > 1 {
 				if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
 					if ex := objectLiteralProperty(lit, "status"); ex != nil {
 						status = g.lowerExpr(ex)
 					}
+					if ex := objectLiteralProperty(lit, "statusText"); ex != nil {
+						statusText = g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex))
+					}
+					if ex := objectLiteralProperty(lit, "headers"); ex != nil {
+						headers = g.lowerHeadersNew(&ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{ex}})
+					}
 				}
 			}
 			g.validateResponseStatus(status)
+			g.validateHeaderValue(statusText)
 			g.validateResponseNullBodyStatus(status, hasBody)
-			return g.newResponseObject(data, hasBody, headers, status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, ir.ConstString{Value: ""}, ir.ConstBool{Value: false}), true
+			hasContentType := g.lowerHeadersHas(headers, ir.ConstString{Value: "content-type"})
+			addContentType := g.currentFn.NewBlock("response_json_content_type_add")
+			contentTypeDone := g.currentFn.NewBlock("response_json_content_type_done")
+			g.currentBB.Terminator = &ir.BranchTerm{Cond: hasContentType, Then: contentTypeDone, Else: addContentType}
+			g.currentBB = addContentType
+			g.lowerHeadersAppendDirect(headers, ir.ConstString{Value: "content-type"}, ir.ConstString{Value: "application/json"})
+			g.currentBB.Terminator = &ir.JumpTerm{Target: contentTypeDone}
+			g.currentBB = contentTypeDone
+			return g.newResponseObject(data, hasBody, headers, status, statusText, ir.ConstString{Value: "default"}, ir.ConstString{Value: ""}, ir.ConstBool{Value: false}), true
+
 		}
 		return nil, false
 	}

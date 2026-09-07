@@ -1008,6 +1008,35 @@ test();
 	})
 }
 
+func TestLinuxAMD64WinterTCResponseJSONInit(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_response_json_init",
+		source: `
+const a = Response.json({ answer: 42 }, {
+  status: 201,
+  statusText: "Created",
+  headers: { "X-Test": "yes" },
+});
+console.log(a.status);
+console.log(a.statusText);
+console.log(a.headers.get("x-test"));
+console.log(a.headers.get("content-type"));
+console.log(await a.text());
+
+const b = Response.json({ error: true }, {
+  headers: { "Content-Type": "application/problem+json" },
+});
+console.log(b.headers.get("content-type"));
+console.log(await b.text());
+
+try { Response.json({}, { status: 199 }); console.log("bad-status:unexpected"); } catch (err: any) { console.log("bad-status:" + err.name); }
+try { Response.json({}, { statusText: "bad\r\ntext" }); console.log("bad-text:unexpected"); } catch (err: any) { console.log("bad-text:" + err.name); }
+try { Response.json({}, { status: 204 }); console.log("null-status:unexpected"); } catch (err: any) { console.log("null-status:" + err.name); }
+`,
+		expected: "201\nCreated\nyes\napplication/json\n{\"answer\":42}\napplication/problem+json\n{\"error\":true}\nbad-status:RangeError\nbad-text:TypeError\nnull-status:TypeError\n",
+	})
+}
+
 func TestLinuxAMD64WinterTCFetchLoopbackTransport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("X-Test", " one ")
