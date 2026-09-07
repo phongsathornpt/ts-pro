@@ -74,8 +74,23 @@ func (g *generator) lowerResponseNew(e *ast.NewExpr) ir.Operand {
 func (g *generator) ensureResponseBodyUnused(res ir.Operand) {
 	used := g.responseField(res, "bodyUsed", types.TypeBoolean)
 	fail := g.currentFn.NewBlock("response_body_used_error")
+	checkBody := g.currentFn.NewBlock("response_body_lock_check")
+	checkLocked := g.currentFn.NewBlock("response_body_locked_check")
 	ok := g.currentFn.NewBlock("response_body_unused")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: used, Then: fail, Else: ok}
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: used, Then: fail, Else: checkBody}
+
+	g.currentBB = checkBody
+	hasBody := g.responseField(res, "$hasBody", types.TypeBoolean)
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasBody, Then: checkLocked, Else: ok}
+
+	g.currentBB = checkLocked
+	bodyValue := g.responseField(res, "$bodyStream", types.TypeAny)
+	stream := g.coerceJSValueBoundary(bodyValue, types.TypeAny, g.semaResult.ReadableStreamType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	locked := g.currentFn.NewValue("response_body_locked", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: locked, Obj: stream, Field: "locked", Offset: sOffsets["locked"]})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: locked, Then: fail, Else: ok}
+
 	g.currentBB = fail
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Body is unusable"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = ok

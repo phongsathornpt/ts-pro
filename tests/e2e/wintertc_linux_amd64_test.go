@@ -1376,3 +1376,42 @@ test();
 		expected: "false\ntrue\n3\n97\nfalse\ntrue\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCBodyLockedIsUnusable(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_locked_unusable",
+		source: `
+async function test(): Promise<void> {
+  const response = new Response("abc");
+  const responseStream = response.body ?? new ReadableStream();
+  responseStream.getReader();
+  console.log(response.bodyUsed);
+  try {
+    await response.text();
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+  try {
+    response.clone();
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+
+  const request = new Request("https://example.com/", { method: "POST", body: "xyz" });
+  const requestStream = request.body ?? new ReadableStream();
+  requestStream.getReader();
+  console.log(request.bodyUsed);
+  try {
+    request.clone();
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`,
+		expected: "false\nTypeError\nTypeError\nfalse\nTypeError\n",
+	})
+}
