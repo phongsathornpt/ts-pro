@@ -22,7 +22,7 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	e.Push(amd64.R12)
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
-	e.SubRegImm32(amd64.RSP, 32)
+	e.SubRegImm32(amd64.RSP, 64)
 	e.MovRegReg(amd64.RBX, amd64.RDI)       // port string
 	e.MovRegReg(amd64.R12, amd64.RSI)       // request buffer
 	e.MovDerefReg(amd64.RSP, 24, amd64.RDX) // AbortSignal, survives cooperative yields
@@ -83,33 +83,109 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	e.AndRegReg(amd64.R10, amd64.R11)
 	e.MovDerefReg8(amd64.RSP, 3, amd64.R10)
 
-	// connect(fd, &sockaddr, 16)
+	// Make the socket nonblocking before connect/write/read. Slow peers must not
+	// pin the cooperative scheduler and starve AbortSignal timers.
+	e.MovRegImm64(amd64.RAX, 72) // fcntl
+	e.MovRegReg(amd64.RDI, amd64.R14)
+	e.MovRegImm64(amd64.RSI, 4)    // F_SETFL
+	e.MovRegImm64(amd64.RDX, 2048) // O_NONBLOCK
+	e.Syscall()
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	fcntlFailed := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+
+	connectLoop := len(e.Code)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 24)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64AbortSignalAborted)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	abortedConnect := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+
+	// connect(fd, &sockaddr, 16). EINPROGRESS/EALREADY are cooperative waits;
+	// EISCONN means a retried nonblocking connect has completed.
 	e.MovRegImm64(amd64.RAX, 42)
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.MovRegReg(amd64.RSI, amd64.RSP)
 	e.MovRegImm64(amd64.RDX, 16)
 	e.Syscall()
 	e.TestRegReg(amd64.RAX, amd64.RAX)
+	connectOK := len(e.Code)
+	e.JccRel32(amd64.CondGE, 0)
+	e.CmpRegImm32(amd64.RAX, -106) // EISCONN
+	connectIsConn := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	var connectRetry []int
+	for _, errno := range []int32{-115, -114, -4} { // EINPROGRESS, EALREADY, EINTR
+		e.CmpRegImm32(amd64.RAX, errno)
+		at := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		connectRetry = append(connectRetry, at)
+	}
 	connectFailed := len(e.Code)
-	e.JccRel32(amd64.CondL, 0)
+	e.JmpRel32(0)
+	connectYield := len(e.Code)
+	for _, at := range connectRetry {
+		patchJcc(at, connectYield)
+	}
+	callConnectYield := len(e.Code)
+	e.CallRel32(int32(taskYieldOffset - (callConnectYield + 5)))
+	connectBack := len(e.Code)
+	e.JmpRel32(int32(connectLoop - (connectBack + 5)))
+	connected := len(e.Code)
+	patchJcc(connectOK, connected)
+	patchJcc(connectIsConn, connected)
 
-	// write(fd, request.data, request.length)
+	// Write the complete request. Partial writes and EAGAIN yield rather than
+	// silently truncating the request body.
+	e.MovRegImm64(amd64.R13, 0) // bytes written
+	writeLoop := len(e.Code)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 24)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64AbortSignalAborted)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	abortedWrite := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegDeref(amd64.R10, amd64.R12, amd64ByteBufferLength)
+	e.CmpRegReg(amd64.R13, amd64.R10)
+	writeComplete := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
 	e.MovRegImm64(amd64.RAX, 1)
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.MovRegDeref(amd64.RSI, amd64.R12, amd64ByteBufferData)
-	e.MovRegDeref(amd64.RDX, amd64.R12, amd64ByteBufferLength)
+	e.AddRegReg(amd64.RSI, amd64.R13)
+	e.MovRegReg(amd64.RDX, amd64.R10)
+	e.SubRegReg(amd64.RDX, amd64.R13)
 	e.Syscall()
 	e.TestRegReg(amd64.RAX, amd64.RAX)
+	writeProgress := len(e.Code)
+	e.JccRel32(amd64.CondG, 0)
+	var writeRetry []int
+	e.CmpRegImm32(amd64.RAX, 0)
+	writeZero := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	writeRetry = append(writeRetry, writeZero)
+	for _, errno := range []int32{-11, -4} { // EAGAIN/EWOULDBLOCK, EINTR
+		e.CmpRegImm32(amd64.RAX, errno)
+		at := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		writeRetry = append(writeRetry, at)
+	}
 	writeFailed := len(e.Code)
-	e.JccRel32(amd64.CondL, 0)
-
-	// Make response reads nonblocking. This lets the cooperative scheduler run
-	// AbortSignal.timeout callbacks while the peer has not produced bytes yet.
-	e.MovRegImm64(amd64.RAX, 72) // fcntl
-	e.MovRegReg(amd64.RDI, amd64.R14)
-	e.MovRegImm64(amd64.RSI, 4)    // F_SETFL
-	e.MovRegImm64(amd64.RDX, 2048) // O_NONBLOCK
-	e.Syscall()
+	e.JmpRel32(0)
+	writeYield := len(e.Code)
+	for _, at := range writeRetry {
+		patchJcc(at, writeYield)
+	}
+	callWriteYield := len(e.Code)
+	e.CallRel32(int32(taskYieldOffset - (callWriteYield + 5)))
+	writeRetryBack := len(e.Code)
+	e.JmpRel32(int32(writeLoop - (writeRetryBack + 5)))
+	writeProgressLabel := len(e.Code)
+	patchJcc(writeProgress, writeProgressLabel)
+	e.AddRegReg(amd64.R13, amd64.RAX)
+	writeProgressBack := len(e.Code)
+	e.JmpRel32(int32(writeLoop - (writeProgressBack + 5)))
+	writeDone := len(e.Code)
+	patchJcc(writeComplete, writeDone)
 
 	// Allocate a bounded receive buffer. Streaming growth replaces this bound in
 	// the next transport phase, but cancellation is real while waiting for bytes.
@@ -118,6 +194,15 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	callNew := len(e.Code)
 	e.CallRel32(int32(byteBufferNewOffset - (callNew + 5)))
 	e.MovRegReg(amd64.RBX, amd64.RAX)
+	// Root the response buffer while scheduler yields can run arbitrary tasks/GC.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 32, amd64.R10)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RSP, 40, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 48, amd64.RBX)
+	e.MovRegReg(amd64.R10, amd64.RSP)
+	e.AddRegImm32(amd64.R10, 32)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 
 	readLoop := len(e.Code)
 	// AbortSignal.aborted is a native boolean field. The caller still owns the
@@ -158,9 +243,17 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	patchJcc(readOK, readDone)
 	patchJmp(readFailureDone, readDone)
 	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.RAX)
+	responseCloseJump := len(e.Code)
+	e.JmpRel32(0)
 	abortedLabel := len(e.Code)
 	patchJcc(abortedRead, abortedLabel)
-	closeAndReturn := len(e.Code)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R10)
+	responseClose := len(e.Code)
+	patchJmp(responseCloseJump, responseClose)
+	// Pop the runtime-local precise root before returning to the caller frame.
+	e.MovRegDeref(amd64.R10, amd64.RSP, 32)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 	e.MovRegImm64(amd64.RAX, 3)
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.Syscall()
@@ -168,10 +261,13 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	returnJump := len(e.Code)
 	e.JmpRel32(0)
 
-	// Failures after socket creation close the fd and return an empty buffer.
+	// Failures/aborts before response allocation close the fd and return an empty buffer.
 	failureWithFD := len(e.Code)
-	patchJcc(connectFailed, failureWithFD)
-	patchJcc(writeFailed, failureWithFD)
+	patchJcc(fcntlFailed, failureWithFD)
+	patchJcc(abortedConnect, failureWithFD)
+	patchJmp(connectFailed, failureWithFD)
+	patchJcc(abortedWrite, failureWithFD)
+	patchJmp(writeFailed, failureWithFD)
 	e.MovRegImm64(amd64.RAX, 3)
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.Syscall()
@@ -184,8 +280,7 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 
 	returnLabel := len(e.Code)
 	patchJmp(returnJump, returnLabel)
-	_ = closeAndReturn
-	e.AddRegImm32(amd64.RSP, 32)
+	e.AddRegImm32(amd64.RSP, 64)
 	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)
 	e.Pop(amd64.R12)
