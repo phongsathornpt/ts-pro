@@ -4,6 +4,7 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
+	"strings"
 )
 
 func (g *generator) lowerHTTPStatus(raw ir.Operand) ir.Operand {
@@ -102,16 +103,133 @@ func (g *generator) lowerHTTPBodyOffset(raw ir.Operand) ir.Operand {
 	return res
 }
 
+func (g *generator) serializeFetchHeaders(headers ir.Operand) ir.Operand {
+	entries := g.headersEntries(headers)
+	length := g.currentFn.NewValue("fetch_headers_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: entries})
+	pre := g.currentBB
+	cond := g.currentFn.NewBlock("fetch_headers_cond")
+	body := g.currentFn.NewBlock("fetch_headers_body")
+	done := g.currentFn.NewBlock("fetch_headers_done")
+	pre.Terminator = &ir.JumpTerm{Target: cond}
+	idx := g.currentFn.NewValue("fetch_headers_i", types.TypeNumber)
+	nextIdx := g.currentFn.NewValue("fetch_headers_next_i", types.TypeNumber)
+	acc := g.currentFn.NewValue("fetch_headers_acc", types.TypeString)
+	cond.Phis = append(cond.Phis,
+		&ir.PhiInst{Res: idx, Incoming: []ir.PhiIncoming{{Block: pre, Value: ir.ConstNumber{Value: 0}}, {Block: body, Value: nextIdx}}},
+		&ir.PhiInst{Res: acc, Incoming: []ir.PhiIncoming{{Block: pre, Value: ir.ConstString{Value: ""}}}},
+	)
+	more := g.currentFn.NewValue("fetch_headers_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: idx, RHS: length})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: done}
+
+	name := g.currentFn.NewValue("fetch_header_name", types.TypeString)
+	valueIndex := g.currentFn.NewValue("fetch_header_value_i", types.TypeNumber)
+	value := g.currentFn.NewValue("fetch_header_value", types.TypeString)
+	body.Instructions = append(body.Instructions,
+		&ir.GetElementInst{Res: name, Array: entries, Index: idx},
+		&ir.BinaryInst{Res: valueIndex, Op: ir.OpAdd, LHS: idx, RHS: ir.ConstNumber{Value: 1}},
+		&ir.GetElementInst{Res: value, Array: entries, Index: valueIndex},
+	)
+	g.currentBB = body
+	line := g.concatNativeStrings(name, ir.ConstString{Value: ": "})
+	line = g.concatNativeStrings(line, value)
+	line = g.concatNativeStrings(line, ir.ConstString{Value: "\r\n"})
+	computed := g.concatNativeStrings(acc, line)
+	body = g.currentBB
+	body.Instructions = append(body.Instructions,
+		&ir.BinaryInst{Res: nextIdx, Op: ir.OpAdd, LHS: idx, RHS: ir.ConstNumber{Value: 2}},
+	)
+	body.Terminator = &ir.JumpTerm{Target: cond}
+	cond.Phis[0].Incoming[1].Block = body
+	cond.Phis[1].Incoming = append(cond.Phis[1].Incoming, ir.PhiIncoming{Block: body, Value: computed})
+	g.currentBB = done
+	return acc
+}
+
+func (g *generator) buildFetchWireRequest(method, host, port, path, search, headers, body ir.Operand) ir.Operand {
+	target := g.concatNativeStrings(path, search)
+	hostHeader := g.concatNativeStrings(g.concatNativeStrings(host, ir.ConstString{Value: ":"}), port)
+	requestText := g.concatNativeStrings(method, ir.ConstString{Value: " "})
+	requestText = g.concatNativeStrings(requestText, target)
+	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: " HTTP/1.1\r\nHost: "})
+	requestText = g.concatNativeStrings(requestText, hostHeader)
+	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: "\r\nConnection: close\r\nUser-Agent: ts-pro\r\n"})
+	requestText = g.concatNativeStrings(requestText, g.serializeFetchHeaders(headers))
+	bodyLen := g.currentFn.NewValue("fetch_body_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: bodyLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{body}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	bodyLenText := g.currentFn.NewValue("fetch_body_len_text", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: bodyLenText, Callee: "ts_number_to_string", Args: []ir.Operand{bodyLen}, ParamTypes: []types.Type{types.TypeNumber}})
+	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: "Content-Length: "})
+	requestText = g.concatNativeStrings(requestText, bodyLenText)
+	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: "\r\n\r\n"})
+
+	headerBuf := g.currentFn.NewValue("fetch_header_buffer", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: headerBuf, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{requestText}, ParamTypes: []types.Type{types.TypeString}})
+	headerLen := g.currentFn.NewValue("fetch_header_len", types.TypeNumber)
+	totalLen := g.currentFn.NewValue("fetch_wire_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: headerLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{headerBuf}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}},
+		&ir.BinaryInst{Res: totalLen, Op: ir.OpAdd, LHS: headerLen, RHS: bodyLen},
+	)
+	wire := g.currentFn.NewValue("fetch_wire_buffer", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: wire, Callee: "ts_byte_buffer_new", Args: []ir.Operand{totalLen}, ParamTypes: []types.Type{types.TypeNumber}},
+		&ir.CallInst{Callee: "ts_byte_buffer_copy", Args: []ir.Operand{wire, headerBuf, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: 0}, headerLen}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeNumber}},
+		&ir.CallInst{Callee: "ts_byte_buffer_copy", Args: []ir.Operand{wire, body, headerLen, ir.ConstNumber{Value: 0}, bodyLen}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeNumber}},
+	)
+	return wire
+}
+
 func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	if len(e.Args) == 0 {
 		return g.failExpr("fetch expects an input")
 	}
-	if g.semanticType(e.Args[0]) != types.TypeString {
-		return g.failExpr("fetch currently requires a string URL while Request transport normalization is being completed")
+
+	var href, method, headers, body ir.Operand
+	inputType := g.semanticType(e.Args[0])
+	if obj, ok := inputType.(*types.ObjectType); ok && obj.Name == "$Request" {
+		req := g.lowerExpr(e.Args[0])
+		g.ensureRequestBodyUnused(req)
+		href = g.requestField(req, "url", types.TypeString)
+		method = g.requestField(req, "method", types.TypeString)
+		headers = g.cloneHeaders(g.requestField(req, "headers", g.semaResult.HeadersType))
+		body = g.copyByteBuffer(g.requestField(req, "$bodyData", g.semaResult.ByteBufferType))
+		g.setRequestField(req, "bodyUsed", ir.ConstBool{Value: true})
+	} else if inputType == types.TypeString {
+		invalid := g.currentFn.NewBlock("fetch_input_url_invalid")
+		urlObj := g.lowerURLResolveAndParse(e.Args[0], nil, invalid)
+		href, _ = g.lowerURLMember(urlObj, "href")
+		parseOK := g.currentBB
+		g.currentBB = invalid
+		g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Failed to parse URL from fetch input"}, ir.ConstString{Value: "TypeError"}))
+		g.currentBB = parseOK
+		method = ir.ConstString{Value: "GET"}
+		headers = g.newEmptyHeaders()
+		body = g.emptyByteBuffer()
+	} else {
+		return g.failExpr("fetch input must be a string or Request")
 	}
+
+	if len(e.Args) > 1 {
+		if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
+			if ex := objectLiteralProperty(lit, "method"); ex != nil {
+				method = g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex))
+				if c, ok := method.(ir.ConstString); ok {
+					method = ir.ConstString{Value: strings.ToUpper(c.Value)}
+				}
+			}
+			if ex := objectLiteralProperty(lit, "headers"); ex != nil {
+				headers = g.lowerHeadersNew(&ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{ex}})
+			}
+			if ex := objectLiteralProperty(lit, "body"); ex != nil {
+				body, _ = g.lowerRequestBody(ex)
+			}
+		}
+	}
+
 	invalid := g.currentFn.NewBlock("fetch_url_invalid")
-	urlObj := g.lowerURLResolveAndParse(e.Args[0], nil, invalid)
-	href, _ := g.lowerURLMember(urlObj, "href")
+	urlObj := g.lowerURLParseRecord(href, invalid)
 	scheme, _ := g.lowerURLMember(urlObj, "protocol")
 	host, _ := g.lowerURLMember(urlObj, "hostname")
 	port, _ := g.lowerURLMember(urlObj, "port")
@@ -119,7 +237,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	search, _ := g.lowerURLMember(urlObj, "search")
 	parseOK := g.currentBB
 	g.currentBB = invalid
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Failed to parse URL from fetch input"}, ir.ConstString{Value: "TypeError"}))
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Failed to parse URL from fetch request"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = parseOK
 
 	isHTTP := g.urlStringEqual(scheme, "http:")
@@ -133,22 +251,15 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports loopback HTTP only"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = transportOK
 
-	target := g.concatNativeStrings(path, search)
-	hostHeader := g.concatNativeStrings(g.concatNativeStrings(host, ir.ConstString{Value: ":"}), port)
-	requestText := g.concatNativeStrings(ir.ConstString{Value: "GET "}, target)
-	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: " HTTP/1.1\r\nHost: "})
-	requestText = g.concatNativeStrings(requestText, hostHeader)
-	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: "\r\nConnection: close\r\nUser-Agent: ts-pro\r\n\r\n"})
-	requestBuf := g.currentFn.NewValue("fetch_request_buffer", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: requestBuf, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{requestText}, ParamTypes: []types.Type{types.TypeString}})
+	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType}})
 	status := g.lowerHTTPStatus(raw)
 	offset := g.lowerHTTPBodyOffset(raw)
 	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	body := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: body, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
-	res := g.newResponseObject(body, ir.ConstBool{Value: true}, g.newEmptyHeaders(), status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, href, ir.ConstBool{Value: false})
+	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: responseBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	res := g.newResponseObject(responseBody, ir.ConstBool{Value: true}, g.newEmptyHeaders(), status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, href, ir.ConstBool{Value: false})
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }

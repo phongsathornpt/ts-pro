@@ -630,4 +630,4 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Mark WinterTC target complete only when the matrix has no unchecked required rows.
 
 Current WinterTC execution order (2026-09-07): **Phase 6 Request -> Response -> fetch -> Phase 7 -> Phase 8 -> Phase 9**.
-Current acceptance baseline: **155 / 155 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.
+Current acceptance baseline: **156 / 156 native fixtures PASS**, **52 / 52 Node differential fixtures matched**.

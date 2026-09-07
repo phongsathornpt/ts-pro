@@ -1027,3 +1027,37 @@ test();
 		expected: "201\ntrue\n" + server.URL + "/hello?x=1\nGET|ts-pro\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchRequestNormalization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, "%s|%s|%s|%s", r.Method, r.Header.Get("X-Test"), string(body), r.UserAgent())
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const req = new Request(%q, {
+    method: "post",
+    headers: { "X-Test": "alpha" },
+    body: "payload"
+  });
+  const res = await fetch(req, {
+    method: "put",
+    headers: { "X-Test": "beta" },
+    body: "override"
+  });
+  console.log(req.bodyUsed);
+  console.log(res.status);
+  console.log(await res.text());
+}
+test();
+`, server.URL+"/submit")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_request_normalization",
+		source:   source,
+		expected: "true\n202\nPUT|beta|override|ts-pro\n",
+	})
+}
