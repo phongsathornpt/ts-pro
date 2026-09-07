@@ -1569,3 +1569,27 @@ test();
 		expected: "true\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCURLIPv6Authority(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_url_ipv6_authority",
+		source: `
+const a = new URL("http://[::1]/x");
+console.log(a.hostname);
+console.log(a.host);
+console.log(a.href);
+const b = new URL("http://[2001:db8::1]:8080/path");
+console.log(b.hostname);
+console.log(b.port);
+console.log(b.host);
+console.log(b.href);
+try {
+  new URL("http://[::1/path");
+  console.log("unexpected");
+} catch (err: any) {
+  console.log(err.name);
+}
+`,
+		expected: "[::1]\n[::1]\nhttp://[::1]/x\n[2001:db8::1]\n8080\n[2001:db8::1]:8080\nhttp://[2001:db8::1]:8080/path\nTypeError\n",
+	})
+}

@@ -135,7 +135,55 @@ func (g *generator) lowerURLParseRecord(input ir.Operand, invalid *ir.BasicBlock
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasAuthority, Then: hostBB, Else: invalid}
 
 	g.currentBB = hostBB
-	portColon := g.urlStringFindByte(input, ir.ConstNumber{Value: ':'}, authorityStart, authorityEnd)
+	// Bracketed IPv6 literals may contain many colons; only a colon after the
+	// closing bracket separates the port. Ordinary hosts keep the first-colon path.
+	firstHostByte := g.urlStringByteAt(input, authorityStart)
+	isBracketedIPv6 := g.currentFn.NewValue("url_host_bracketed_ipv6", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: isBracketedIPv6, Op: ir.OpEq, LHS: firstHostByte, RHS: ir.ConstNumber{Value: '['}})
+	regularPortBB := g.currentFn.NewBlock("url_regular_port_scan")
+	ipv6PortBB := g.currentFn.NewBlock("url_ipv6_port_scan")
+	portJoinBB := g.currentFn.NewBlock("url_port_scan_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isBracketedIPv6, Then: ipv6PortBB, Else: regularPortBB}
+
+	g.currentBB = regularPortBB
+	regularPortColon := g.urlStringFindByte(input, ir.ConstNumber{Value: ':'}, authorityStart, authorityEnd)
+	regularPortEnd := g.currentBB
+	regularPortEnd.Terminator = &ir.JumpTerm{Target: portJoinBB}
+
+	g.currentBB = ipv6PortBB
+	closeBracket := g.urlStringFindByte(input, ir.ConstNumber{Value: ']'}, authorityStart, authorityEnd)
+	closeFound := g.currentFn.NewValue("url_ipv6_close_found", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: closeFound, Op: ir.OpGe, LHS: closeBracket, RHS: ir.ConstNumber{Value: 0}})
+	ipv6CloseOK := g.currentFn.NewBlock("url_ipv6_close_ok")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: closeFound, Then: ipv6CloseOK, Else: invalid}
+
+	g.currentBB = ipv6CloseOK
+	afterBracket := g.currentFn.NewValue("url_ipv6_after_bracket", types.TypeNumber)
+	hasIPv6Tail := g.currentFn.NewValue("url_ipv6_has_tail", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: afterBracket, Op: ir.OpAdd, LHS: closeBracket, RHS: ir.ConstNumber{Value: 1}},
+		&ir.BinaryInst{Res: hasIPv6Tail, Op: ir.OpLt, LHS: afterBracket, RHS: authorityEnd},
+	)
+	ipv6TailBB := g.currentFn.NewBlock("url_ipv6_tail")
+	ipv6NoPortBB := g.currentFn.NewBlock("url_ipv6_no_port")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasIPv6Tail, Then: ipv6TailBB, Else: ipv6NoPortBB}
+
+	g.currentBB = ipv6TailBB
+	tailByte := g.urlStringByteAt(input, afterBracket)
+	tailIsColon := g.currentFn.NewValue("url_ipv6_tail_colon", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: tailIsColon, Op: ir.OpEq, LHS: tailByte, RHS: ir.ConstNumber{Value: ':'}})
+	ipv6WithPortBB := g.currentFn.NewBlock("url_ipv6_with_port")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: tailIsColon, Then: ipv6WithPortBB, Else: invalid}
+	ipv6WithPortBB.Terminator = &ir.JumpTerm{Target: portJoinBB}
+	ipv6NoPortBB.Terminator = &ir.JumpTerm{Target: portJoinBB}
+
+	g.currentBB = portJoinBB
+	portColon := g.currentFn.NewValue("url_port_colon", types.TypeNumber)
+	portJoinBB.Phis = append(portJoinBB.Phis, &ir.PhiInst{Res: portColon, Incoming: []ir.PhiIncoming{
+		{Block: regularPortEnd, Value: regularPortColon},
+		{Block: ipv6WithPortBB, Value: afterBracket},
+		{Block: ipv6NoPortBB, Value: ir.ConstNumber{Value: -1}},
+	}})
 	hasPort := g.currentFn.NewValue("url_has_port", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasPort, Op: ir.OpGe, LHS: portColon, RHS: ir.ConstNumber{Value: 0}})
 	withPortBB := g.currentFn.NewBlock("url_with_port")
