@@ -240,6 +240,117 @@ func (g *generator) buildFetchWireRequest(method, host, port, path, search, head
 	return wire
 }
 
+func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
+	invalid := g.currentFn.NewBlock("fetch_url_invalid")
+	urlObj := g.lowerURLParseRecord(href, invalid)
+	canonicalHref, _ := g.lowerURLMember(urlObj, "href")
+	scheme, _ := g.lowerURLMember(urlObj, "protocol")
+	host, _ := g.lowerURLMember(urlObj, "hostname")
+	port, _ := g.lowerURLMember(urlObj, "port")
+	path, _ := g.lowerURLMember(urlObj, "pathname")
+	search, _ := g.lowerURLMember(urlObj, "search")
+	parseOK := g.currentBB
+	g.currentBB = invalid
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Failed to parse URL from fetch request"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = parseOK
+
+	isHTTP := g.urlStringEqual(scheme, "http:")
+	isLoopback := g.urlStringEqual(host, "127.0.0.1")
+	allowed := g.currentFn.NewValue("fetch_transport_allowed", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: isHTTP, RHS: isLoopback})
+	transportOK := g.currentFn.NewBlock("fetch_transport_ok")
+	transportErr := g.currentFn.NewBlock("fetch_transport_err")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: allowed, Then: transportOK, Else: transportErr}
+	g.currentBB = transportErr
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports loopback HTTP only"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = transportOK
+
+	aborted := g.currentFn.NewValue("fetch_signal_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	fetchAbort := g.currentFn.NewBlock("fetch_aborted")
+	fetchDispatch := g.currentFn.NewBlock("fetch_dispatch")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: fetchAbort, Else: fetchDispatch}
+	g.currentBB = fetchAbort
+	reason := g.currentFn.NewValue("fetch_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: reason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(reason)
+	g.currentBB = fetchDispatch
+
+	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
+	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType}})
+	status := g.lowerHTTPStatus(raw)
+	offset := g.lowerHTTPBodyOffset(raw)
+	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: responseBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	responseHeaders := g.lowerHTTPResponseHeaders(raw, offset)
+	return urlObj, canonicalHref, status, responseHeaders, responseBody
+}
+
+func (g *generator) lowerFetchRedirectStatus(status ir.Operand) ir.Operand {
+	var combined ir.Operand
+	for i, code := range []float64{301, 302, 303, 307, 308} {
+		eq := g.currentFn.NewValue("fetch_redirect_status", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: eq, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: code}})
+		if i == 0 {
+			combined = eq
+		} else {
+			next := g.currentFn.NewValue("fetch_redirect_status_any", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpOr, LHS: combined, RHS: eq})
+			combined = next
+		}
+	}
+	return combined
+}
+
+func (g *generator) lowerFetchRedirectMethodBody(status, method, body ir.Operand) (ir.Operand, ir.Operand) {
+	is301 := g.currentFn.NewValue("fetch_redirect_301", types.TypeBoolean)
+	is302 := g.currentFn.NewValue("fetch_redirect_302", types.TypeBoolean)
+	is303 := g.currentFn.NewValue("fetch_redirect_303", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: is301, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: 301}},
+		&ir.BinaryInst{Res: is302, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: 302}},
+		&ir.BinaryInst{Res: is303, Op: ir.OpEq, LHS: status, RHS: ir.ConstNumber{Value: 303}},
+	)
+	isPost := g.urlStringEqual(method, "POST")
+	isGet := g.urlStringEqual(method, "GET")
+	isHead := g.urlStringEqual(method, "HEAD")
+	is301or302 := g.currentFn.NewValue("fetch_redirect_301_302", types.TypeBoolean)
+	post301or302 := g.currentFn.NewValue("fetch_redirect_post_301_302", types.TypeBoolean)
+	getOrHead := g.currentFn.NewValue("fetch_redirect_get_head", types.TypeBoolean)
+	notGetOrHead := g.currentFn.NewValue("fetch_redirect_not_get_head", types.TypeBoolean)
+	rewrite303 := g.currentFn.NewValue("fetch_redirect_rewrite_303", types.TypeBoolean)
+	rewrite := g.currentFn.NewValue("fetch_redirect_rewrite_method", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: is301or302, Op: ir.OpOr, LHS: is301, RHS: is302},
+		&ir.BinaryInst{Res: post301or302, Op: ir.OpAnd, LHS: is301or302, RHS: isPost},
+		&ir.BinaryInst{Res: getOrHead, Op: ir.OpOr, LHS: isGet, RHS: isHead},
+		&ir.BinaryInst{Res: notGetOrHead, Op: ir.OpEq, LHS: getOrHead, RHS: ir.ConstBool{Value: false}},
+		&ir.BinaryInst{Res: rewrite303, Op: ir.OpAnd, LHS: is303, RHS: notGetOrHead},
+		&ir.BinaryInst{Res: rewrite, Op: ir.OpOr, LHS: post301or302, RHS: rewrite303},
+	)
+	pre := g.currentBB
+	rewriteBB := g.currentFn.NewBlock("fetch_redirect_rewrite")
+	preserveBB := g.currentFn.NewBlock("fetch_redirect_preserve")
+	joinBB := g.currentFn.NewBlock("fetch_redirect_method_join")
+	pre.Terminator = &ir.BranchTerm{Cond: rewrite, Then: rewriteBB, Else: preserveBB}
+	g.currentBB = rewriteBB
+	empty := g.emptyByteBuffer()
+	rewriteEnd := g.currentBB
+	rewriteEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	preserveBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = joinBB
+	outMethod := g.currentFn.NewValue("fetch_redirect_method", types.TypeString)
+	outBody := g.currentFn.NewValue("fetch_redirect_body", g.semaResult.ByteBufferType)
+	joinBB.Phis = append(joinBB.Phis,
+		&ir.PhiInst{Res: outMethod, Incoming: []ir.PhiIncoming{{Block: rewriteEnd, Value: ir.ConstString{Value: "GET"}}, {Block: preserveBB, Value: method}}},
+		&ir.PhiInst{Res: outBody, Incoming: []ir.PhiIncoming{{Block: rewriteEnd, Value: empty}, {Block: preserveBB, Value: body}}},
+	)
+	return outMethod, outBody
+}
+
 func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	if len(e.Args) == 0 {
 		return g.failExpr("fetch expects an input")
@@ -294,50 +405,46 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		}
 	}
 
-	invalid := g.currentFn.NewBlock("fetch_url_invalid")
-	urlObj := g.lowerURLParseRecord(href, invalid)
-	scheme, _ := g.lowerURLMember(urlObj, "protocol")
-	host, _ := g.lowerURLMember(urlObj, "hostname")
-	port, _ := g.lowerURLMember(urlObj, "port")
-	path, _ := g.lowerURLMember(urlObj, "pathname")
-	search, _ := g.lowerURLMember(urlObj, "search")
-	parseOK := g.currentBB
-	g.currentBB = invalid
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Failed to parse URL from fetch request"}, ir.ConstString{Value: "TypeError"}))
-	g.currentBB = parseOK
+	urlObj, finalHref, status, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
+	isRedirect := g.lowerFetchRedirectStatus(status)
+	hasLocation := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "location"})
+	shouldRedirect := g.currentFn.NewValue("fetch_should_redirect", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: shouldRedirect, Op: ir.OpAnd, LHS: isRedirect, RHS: hasLocation})
+	redirectBB := g.currentFn.NewBlock("fetch_redirect_follow")
+	directBB := g.currentFn.NewBlock("fetch_redirect_direct")
+	joinBB := g.currentFn.NewBlock("fetch_redirect_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: shouldRedirect, Then: redirectBB, Else: directBB}
 
-	isHTTP := g.urlStringEqual(scheme, "http:")
-	isLoopback := g.urlStringEqual(host, "127.0.0.1")
-	allowed := g.currentFn.NewValue("fetch_transport_allowed", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: isHTTP, RHS: isLoopback})
-	transportOK := g.currentFn.NewBlock("fetch_transport_ok")
-	transportErr := g.currentFn.NewBlock("fetch_transport_err")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: allowed, Then: transportOK, Else: transportErr}
-	g.currentBB = transportErr
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports loopback HTTP only"}, ir.ConstString{Value: "TypeError"}))
-	g.currentBB = transportOK
+	directBB.Terminator = &ir.JumpTerm{Target: joinBB}
 
-	aborted := g.currentFn.NewValue("fetch_signal_aborted", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
-	fetchAbort := g.currentFn.NewBlock("fetch_aborted")
-	fetchDispatch := g.currentFn.NewBlock("fetch_dispatch")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: fetchAbort, Else: fetchDispatch}
-	g.currentBB = fetchAbort
-	reason := g.currentFn.NewValue("fetch_abort_reason", types.TypeAny)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: reason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
-	g.routeThrownValue(reason)
-	g.currentBB = fetchDispatch
+	g.currentBB = redirectBB
+	location := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "location"})
+	resolved := g.lowerURLResolveInput(location, urlObj)
+	redirectInvalid := g.currentFn.NewBlock("fetch_redirect_url_invalid")
+	redirectURL := g.lowerURLParseRecord(resolved, redirectInvalid)
+	redirectHref, _ := g.lowerURLMember(redirectURL, "href")
+	redirectParseOK := g.currentBB
+	g.currentBB = redirectInvalid
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect URL"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = redirectParseOK
+	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, body)
+	_, followedHref, followedStatus, followedHeaders, followedBody := g.lowerFetchRound(redirectHref, redirectMethod, headers, redirectBody, signal)
+	followEnd := g.currentBB
+	followEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
-	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
-	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType}})
-	status := g.lowerHTTPStatus(raw)
-	offset := g.lowerHTTPBodyOffset(raw)
-	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: responseBody, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, length}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
-	responseHeaders := g.lowerHTTPResponseHeaders(raw, offset)
-	res := g.newResponseObject(responseBody, ir.ConstBool{Value: true}, responseHeaders, status, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, href, ir.ConstBool{Value: false})
+	g.currentBB = joinBB
+	outHref := g.currentFn.NewValue("fetch_final_href", types.TypeString)
+	outStatus := g.currentFn.NewValue("fetch_final_status", types.TypeNumber)
+	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
+	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
+	redirected := g.currentFn.NewValue("fetch_redirected", types.TypeBoolean)
+	joinBB.Phis = append(joinBB.Phis,
+		&ir.PhiInst{Res: outHref, Incoming: []ir.PhiIncoming{{Block: directBB, Value: finalHref}, {Block: followEnd, Value: followedHref}}},
+		&ir.PhiInst{Res: outStatus, Incoming: []ir.PhiIncoming{{Block: directBB, Value: status}, {Block: followEnd, Value: followedStatus}}},
+		&ir.PhiInst{Res: outHeaders, Incoming: []ir.PhiIncoming{{Block: directBB, Value: responseHeaders}, {Block: followEnd, Value: followedHeaders}}},
+		&ir.PhiInst{Res: outBody, Incoming: []ir.PhiIncoming{{Block: directBB, Value: responseBody}, {Block: followEnd, Value: followedBody}}},
+		&ir.PhiInst{Res: redirected, Incoming: []ir.PhiIncoming{{Block: directBB, Value: ir.ConstBool{Value: false}}, {Block: followEnd, Value: ir.ConstBool{Value: true}}}},
+	)
+	res := g.newResponseObject(outBody, ir.ConstBool{Value: true}, outHeaders, outStatus, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, outHref, redirected)
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }

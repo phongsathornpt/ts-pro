@@ -1102,3 +1102,67 @@ test();
 		t.Fatalf("pre-aborted fetch reached server %d times", got)
 	}
 }
+
+func TestLinuxAMD64WinterTCFetchRedirectFollow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			w.Header().Set("Location", "/final")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.Header().Set("X-Final", "yes")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "redirected-body")
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const res = await fetch(%q);
+  console.log(res.status);
+  console.log(res.redirected);
+  console.log(res.url);
+  console.log(res.headers.get("x-final"));
+  console.log(await res.text());
+}
+test();
+`, server.URL+"/start")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_follow",
+		source:   source,
+		expected: "200\ntrue\n" + server.URL + "/final\nyes\nredirected-body\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchRedirectMethodSemantics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start303":
+			w.Header().Set("Location", "/final303")
+			w.WriteHeader(http.StatusSeeOther)
+		case "/start307":
+			w.Header().Set("Location", "/final307")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		default:
+			body := make([]byte, r.ContentLength)
+			_, _ = r.Body.Read(body)
+			_, _ = fmt.Fprintf(w, "%s|%s", r.Method, string(body))
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const a = await fetch(%q, { method: "POST", body: "payload" });
+  console.log(await a.text());
+  const b = await fetch(%q, { method: "POST", body: "payload" });
+  console.log(await b.text());
+}
+test();
+`, server.URL+"/start303", server.URL+"/start307")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_method_semantics",
+		source:   source,
+		expected: "GET|\nPOST|payload\n",
+	})
+}
