@@ -1593,3 +1593,47 @@ try {
 		expected: "[::1]\n[::1]\nhttp://[::1]/x\n[2001:db8::1]\n8080\n[2001:db8::1]:8080\nhttp://[2001:db8::1]:8080/path\nTypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchIPv6Transport(t *testing.T) {
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	hostSeen := make(chan string, 1)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hostSeen <- r.Host
+		w.Header().Set("X-IPv6", "yes")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = fmt.Fprint(w, "ipv6-ok")
+	})}
+	go func() { _ = server.Serve(ln) }()
+	defer server.Close()
+
+	url := fmt.Sprintf("http://[::1]:%d/ipv6", port)
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const res = await fetch(%q);
+  console.log(res.status);
+  console.log(res.url);
+  console.log(res.headers.get("x-ipv6"));
+  console.log(await res.text());
+}
+test();
+`, url)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_ipv6_transport",
+		source:   source,
+		expected: "206\n" + url + "\nyes\nipv6-ok\n",
+	})
+	select {
+	case got := <-hostSeen:
+		want := fmt.Sprintf("[::1]:%d", port)
+		if got != want {
+			t.Fatalf("IPv6 Host header: got %q, want %q", got, want)
+		}
+	default:
+		t.Fatal("IPv6 server did not observe request")
+	}
+}

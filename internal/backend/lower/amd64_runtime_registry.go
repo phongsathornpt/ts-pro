@@ -154,8 +154,12 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64NetDNSLookupIPv4(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_task_sleep"])
 	fnOffsets["ts_net_resolve_ipv4"] = len(e.Code)
 	emitAMD64NetResolveIPv4(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_net_hosts_lookup_ipv4"], fnOffsets["ts_net_dns_lookup_ipv4"])
+	fnOffsets["ts_net_parse_ipv6"] = len(e.Code)
+	emitAMD64NetParseIPv6(e, fnOffsets["ts_byte_buffer_new"])
 	fnOffsets["ts_net_http_request_ipv4"] = len(e.Code)
 	emitAMD64NetHTTPRequestIPv4(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
+	fnOffsets["ts_net_http_request_ipv6"] = len(e.Code)
+	emitAMD64NetHTTPRequestIPv6(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
 
 	fnOffsets["ts_utf8_validate"] = len(e.Code)
 	emitAMD64UTF8Validate(e)

@@ -208,7 +208,19 @@ func (g *generator) serializeFetchHeaders(headers ir.Operand) ir.Operand {
 
 func (g *generator) buildFetchWireRequest(method, host, port, path, search, headers, body ir.Operand) ir.Operand {
 	target := g.concatNativeStrings(path, search)
-	hostHeader := g.concatNativeStrings(g.concatNativeStrings(host, ir.ConstString{Value: ":"}), port)
+	portEmpty := g.urlStringEqual(port, "")
+	hostOnlyBB := g.currentFn.NewBlock("fetch_host_header_no_port")
+	hostPortBB := g.currentFn.NewBlock("fetch_host_header_with_port")
+	hostJoinBB := g.currentFn.NewBlock("fetch_host_header_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: portEmpty, Then: hostOnlyBB, Else: hostPortBB}
+	hostOnlyBB.Terminator = &ir.JumpTerm{Target: hostJoinBB}
+	g.currentBB = hostPortBB
+	hostWithPort := g.concatNativeStrings(g.concatNativeStrings(host, ir.ConstString{Value: ":"}), port)
+	hostPortEnd := g.currentBB
+	hostPortEnd.Terminator = &ir.JumpTerm{Target: hostJoinBB}
+	g.currentBB = hostJoinBB
+	hostHeader := g.currentFn.NewValue("fetch_host_header", types.TypeString)
+	hostJoinBB.Phis = append(hostJoinBB.Phis, &ir.PhiInst{Res: hostHeader, Incoming: []ir.PhiIncoming{{Block: hostOnlyBB, Value: host}, {Block: hostPortEnd, Value: hostWithPort}}})
 	requestText := g.concatNativeStrings(method, ir.ConstString{Value: " "})
 	requestText = g.concatNativeStrings(requestText, target)
 	requestText = g.concatNativeStrings(requestText, ir.ConstString{Value: " HTTP/1.1\r\nHost: "})
@@ -273,22 +285,69 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.routeThrownValue(reason)
 	g.currentBB = fetchDispatch
 
-	address := g.currentFn.NewValue("fetch_ipv4_address", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address, Callee: "ts_net_resolve_ipv4", Args: []ir.Operand{host, signal}, ParamTypes: []types.Type{types.TypeString, g.semaResult.AbortSignalType}})
-	addressLen := g.currentFn.NewValue("fetch_ipv4_address_len", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: addressLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{address}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	resolved := g.currentFn.NewValue("fetch_ipv4_resolved", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: resolved, Op: ir.OpEq, LHS: addressLen, RHS: ir.ConstNumber{Value: 4}})
-	resolveOK := g.currentFn.NewBlock("fetch_resolve_ok")
+	hostFirst := g.urlStringByteAt(host, ir.ConstNumber{Value: 0})
+	isIPv6 := g.currentFn.NewValue("fetch_host_ipv6_literal", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: isIPv6, Op: ir.OpEq, LHS: hostFirst, RHS: ir.ConstNumber{Value: '['}})
+	ipv4ResolveBB := g.currentFn.NewBlock("fetch_ipv4_resolve")
+	ipv6ResolveBB := g.currentFn.NewBlock("fetch_ipv6_resolve")
+	ipv4ResolvedBB := g.currentFn.NewBlock("fetch_ipv4_resolved")
+	ipv6ResolvedBB := g.currentFn.NewBlock("fetch_ipv6_resolved")
 	resolveErr := g.currentFn.NewBlock("fetch_resolve_error")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: resolved, Then: resolveOK, Else: resolveErr}
+	resolveJoin := g.currentFn.NewBlock("fetch_resolve_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isIPv6, Then: ipv6ResolveBB, Else: ipv4ResolveBB}
+
+	g.currentBB = ipv4ResolveBB
+	address4 := g.currentFn.NewValue("fetch_ipv4_address", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address4, Callee: "ts_net_resolve_ipv4", Args: []ir.Operand{host, signal}, ParamTypes: []types.Type{types.TypeString, g.semaResult.AbortSignalType}})
+	address4Len := g.currentFn.NewValue("fetch_ipv4_address_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address4Len, Callee: "ts_byte_buffer_len", Args: []ir.Operand{address4}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	resolved4 := g.currentFn.NewValue("fetch_ipv4_resolved_ok", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: resolved4, Op: ir.OpEq, LHS: address4Len, RHS: ir.ConstNumber{Value: 4}})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: resolved4, Then: ipv4ResolvedBB, Else: resolveErr}
+	ipv4ResolvedBB.Terminator = &ir.JumpTerm{Target: resolveJoin}
+
+	g.currentBB = ipv6ResolveBB
+	address6 := g.currentFn.NewValue("fetch_ipv6_address", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address6, Callee: "ts_net_parse_ipv6", Args: []ir.Operand{host}, ParamTypes: []types.Type{types.TypeString}})
+	address6Len := g.currentFn.NewValue("fetch_ipv6_address_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address6Len, Callee: "ts_byte_buffer_len", Args: []ir.Operand{address6}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	resolved6 := g.currentFn.NewValue("fetch_ipv6_resolved_ok", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: resolved6, Op: ir.OpEq, LHS: address6Len, RHS: ir.ConstNumber{Value: 16}})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: resolved6, Then: ipv6ResolvedBB, Else: resolveErr}
+	ipv6ResolvedBB.Terminator = &ir.JumpTerm{Target: resolveJoin}
+
 	g.currentBB = resolveErr
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch host resolution failed"}, ir.ConstString{Value: "TypeError"}))
-	g.currentBB = resolveOK
+
+	g.currentBB = resolveJoin
+	address := g.currentFn.NewValue("fetch_ip_address", g.semaResult.ByteBufferType)
+	useIPv6 := g.currentFn.NewValue("fetch_use_ipv6", types.TypeBoolean)
+	resolveJoin.Phis = append(resolveJoin.Phis,
+		&ir.PhiInst{Res: address, Incoming: []ir.PhiIncoming{{Block: ipv4ResolvedBB, Value: address4}, {Block: ipv6ResolvedBB, Value: address6}}},
+		&ir.PhiInst{Res: useIPv6, Incoming: []ir.PhiIncoming{{Block: ipv4ResolvedBB, Value: ir.ConstBool{Value: false}}, {Block: ipv6ResolvedBB, Value: ir.ConstBool{Value: true}}}},
+	)
 
 	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
+	ipv4TransportBB := g.currentFn.NewBlock("fetch_ipv4_transport")
+	ipv6TransportBB := g.currentFn.NewBlock("fetch_ipv6_transport")
+	transportJoin := g.currentFn.NewBlock("fetch_ip_transport_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: useIPv6, Then: ipv6TransportBB, Else: ipv4TransportBB}
+
+	g.currentBB = ipv4TransportBB
+	raw4 := g.currentFn.NewValue("fetch_raw_response_ipv4", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw4, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	ipv4TransportEnd := g.currentBB
+	ipv4TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
+
+	g.currentBB = ipv6TransportBB
+	raw6 := g.currentFn.NewValue("fetch_raw_response_ipv6", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw6, Callee: "ts_net_http_request_ipv6", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	ipv6TransportEnd := g.currentBB
+	ipv6TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
+
+	g.currentBB = transportJoin
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	transportJoin.Phis = append(transportJoin.Phis, &ir.PhiInst{Res: raw, Incoming: []ir.PhiIncoming{{Block: ipv4TransportEnd, Value: raw4}, {Block: ipv6TransportEnd, Value: raw6}}})
 	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
 	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")
