@@ -11,7 +11,336 @@ import (
 // connect/write/read. DNS and TLS remain separate transport layers.
 //
 // ABI: RDI=host string, RSI=port string, RDX=request ByteBuffer, RCX=AbortSignal -> RAX=response ByteBuffer.
-func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
+func emitAMD64NetHostsLookupIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 4160)
+	e.MovRegReg(amd64.RBX, amd64.RDI) // requested hostname
+
+	// openat(AT_FDCWD, "/etc/hosts", O_RDONLY, 0)
+	for i, ch := range append([]byte("/etc/hosts"), 0) {
+		e.MovRegImm64(amd64.R11, int64(ch))
+		e.MovDerefReg8(amd64.RSP, int32(8+i), amd64.R11)
+	}
+	e.MovRegImm64(amd64.RAX, 257)
+	e.MovRegImm64(amd64.RDI, -100)
+	e.MovRegReg(amd64.RSI, amd64.RSP)
+	e.AddRegImm32(amd64.RSI, 8)
+	e.MovRegImm64(amd64.RDX, 0)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Syscall()
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	openFailed := len(e.Code)
+	e.JccRel32(amd64.CondL, 0)
+	e.MovRegReg(amd64.R12, amd64.RAX) // fd
+
+	// Read a bounded hosts snapshot. 4KiB is ample for the runtime's deterministic
+	// host-file path; DNS remains the fallback for larger/external name sets.
+	e.MovRegImm64(amd64.RAX, 0)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	e.MovRegReg(amd64.RSI, amd64.RSP)
+	e.AddRegImm32(amd64.RSI, 32)
+	e.MovRegImm64(amd64.RDX, 4096)
+	e.Syscall()
+	e.MovRegReg(amd64.R13, amd64.RAX) // bytes read
+	e.MovRegImm64(amd64.RAX, 3)
+	e.MovRegReg(amd64.RDI, amd64.R12)
+	e.Syscall()
+	e.TestRegReg(amd64.R13, amd64.R13)
+	readFailed := len(e.Code)
+	e.JccRel32(amd64.CondLE, 0)
+
+	e.MovRegReg(amd64.R12, amd64.RSP)
+	e.AddRegImm32(amd64.R12, 32)          // file buffer base
+	e.MovRegDeref(amd64.R8, amd64.RBX, 0) // hostname length
+	e.MovRegImm64(amd64.R9, 0)            // candidate index
+
+	scanLoop := len(e.Code)
+	e.CmpRegReg(amd64.R9, amd64.R13)
+	scanExhausted := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	// Candidate must fit in the file snapshot.
+	e.MovRegReg(amd64.R14, amd64.R9)
+	e.AddRegReg(amd64.R14, amd64.R8)
+	e.CmpRegReg(amd64.R14, amd64.R13)
+	candidateNext := []int{}
+	var candidateNextJmp []int
+	tooShort := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+	candidateNext = append(candidateNext, tooShort)
+
+	// Compare candidate bytes with the requested hostname.
+	e.MovRegImm64(amd64.R10, 0)
+	compareLoop := len(e.Code)
+	e.CmpRegReg(amd64.R10, amd64.R8)
+	compareDone := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegReg(amd64.R11, amd64.R12)
+	e.AddRegReg(amd64.R11, amd64.R9)
+	e.AddRegReg(amd64.R11, amd64.R10)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+	e.MovRegReg(amd64.R11, amd64.RBX)
+	e.AddRegImm32(amd64.R11, 8)
+	e.AddRegReg(amd64.R11, amd64.R10)
+	e.MovzxRegDeref8(amd64.R11, amd64.R11, 0)
+	e.CmpRegReg(amd64.RAX, amd64.R11)
+	mismatch := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	candidateNext = append(candidateNext, mismatch)
+	e.AddRegImm32(amd64.R10, 1)
+	compareBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(compareBack, compareLoop)
+	compareDoneLabel := len(e.Code)
+	patchJcc(compareDone, compareDoneLabel)
+
+	// Require token boundaries around the hostname.
+	e.TestRegReg(amd64.R9, amd64.R9)
+	noPrev := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegReg(amd64.R11, amd64.R12)
+	e.AddRegReg(amd64.R11, amd64.R9)
+	e.AddRegImm32(amd64.R11, -1)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+	e.CmpRegImm32(amd64.RAX, ' ')
+	prevSpace := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '\t')
+	prevTab := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	prevBad := len(e.Code)
+	e.JmpRel32(0)
+	candidateNextJmp = append(candidateNextJmp, prevBad)
+	prevOK := len(e.Code)
+	patchJcc(noPrev, prevOK)
+	patchJcc(prevSpace, prevOK)
+	patchJcc(prevTab, prevOK)
+
+	e.CmpRegReg(amd64.R14, amd64.R13)
+	nextEOF := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegReg(amd64.R11, amd64.R12)
+	e.AddRegReg(amd64.R11, amd64.R14)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+	var nextOKJumps []int
+	for _, ch := range []int32{' ', '\t', '\n', '\r', '#'} {
+		e.CmpRegImm32(amd64.RAX, ch)
+		at := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		nextOKJumps = append(nextOKJumps, at)
+	}
+	nextBad := len(e.Code)
+	e.JmpRel32(0)
+	candidateNextJmp = append(candidateNextJmp, nextBad)
+	nextOK := len(e.Code)
+	patchJcc(nextEOF, nextOK)
+	for _, at := range nextOKJumps {
+		patchJcc(at, nextOK)
+	}
+
+	// Walk backward to the line start. Reject matches appearing after '#'.
+	e.MovRegReg(amd64.R14, amd64.R9)
+	lineBack := len(e.Code)
+	e.TestRegReg(amd64.R14, amd64.R14)
+	lineStartAtZero := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.MovRegReg(amd64.R11, amd64.R12)
+	e.AddRegReg(amd64.R11, amd64.R14)
+	e.AddRegImm32(amd64.R11, -1)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+	e.CmpRegImm32(amd64.RAX, '\n')
+	lineStartFound := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '#')
+	commented := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	candidateNext = append(candidateNext, commented)
+	e.AddRegImm32(amd64.R14, -1)
+	lineBackJump := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(lineBackJump, lineBack)
+	lineStart := len(e.Code)
+	patchJcc(lineStartAtZero, lineStart)
+	patchJcc(lineStartFound, lineStart)
+
+	// Skip leading horizontal whitespace, then parse the first token as IPv4.
+	skipLeading := len(e.Code)
+	e.CmpRegReg(amd64.R14, amd64.R9)
+	noAddress := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	candidateNext = append(candidateNext, noAddress)
+	e.MovRegReg(amd64.R11, amd64.R12)
+	e.AddRegReg(amd64.R11, amd64.R14)
+	e.MovzxRegDeref8(amd64.RAX, amd64.R11, 0)
+	e.CmpRegImm32(amd64.RAX, ' ')
+	leadingSpace := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '\t')
+	leadingTab := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	addressStart := len(e.Code)
+	leadingDoneJump := len(e.Code)
+	e.JmpRel32(0)
+	leadingAdvance := len(e.Code)
+	patchJcc(leadingSpace, leadingAdvance)
+	patchJcc(leadingTab, leadingAdvance)
+	e.AddRegImm32(amd64.R14, 1)
+	leadingBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(leadingBack, skipLeading)
+	addressParse := len(e.Code)
+	patchJmp(leadingDoneJump, addressParse)
+	_ = addressStart
+
+	e.MovRegImm64(amd64.R10, 0) // octet index
+	e.MovRegImm64(amd64.R11, 0) // value
+	e.MovRegImm64(amd64.R8, 0)  // digits
+	e.MovDerefReg8(amd64.RSP, 4, amd64.R8)
+	var addressInvalid []int
+	addressLoop := len(e.Code)
+	e.CmpRegReg(amd64.R14, amd64.R9)
+	addressTokenEnd := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	e.MovRegReg(amd64.RAX, amd64.R12)
+	e.AddRegReg(amd64.RAX, amd64.R14)
+	e.MovzxRegDeref8(amd64.RAX, amd64.RAX, 0)
+	e.CmpRegImm32(amd64.RAX, ' ')
+	addressSpaceEnd := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '\t')
+	addressTabEnd := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '.')
+	addressDot := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, '0')
+	addrBelow := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	addressInvalid = append(addressInvalid, addrBelow)
+	e.CmpRegImm32(amd64.RAX, '9')
+	addrAbove := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+	addressInvalid = append(addressInvalid, addrAbove)
+	e.SubRegImm32(amd64.RAX, '0')
+	e.MovRegImm64(amd64.R8, 10) // temporarily multiplier
+	e.ImulRegReg(amd64.R11, amd64.R8)
+	e.AddRegReg(amd64.R11, amd64.RAX)
+	e.CmpRegImm32(amd64.R11, 255)
+	addrLarge := len(e.Code)
+	e.JccRel32(amd64.CondA, 0)
+	addressInvalid = append(addressInvalid, addrLarge)
+	// digits marker only needs nonzero; use rsp[4].
+	e.MovRegImm64(amd64.R8, 1)
+	e.MovDerefReg8(amd64.RSP, 4, amd64.R8)
+	e.AddRegImm32(amd64.R14, 1)
+	addrDigitBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(addrDigitBack, addressLoop)
+
+	addrDotLabel := len(e.Code)
+	patchJcc(addressDot, addrDotLabel)
+	e.MovzxRegDeref8(amd64.R8, amd64.RSP, 4)
+	e.TestRegReg(amd64.R8, amd64.R8)
+	addrEmpty := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	addressInvalid = append(addressInvalid, addrEmpty)
+	e.CmpRegImm32(amd64.R10, 3)
+	addrTooMany := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+	addressInvalid = append(addressInvalid, addrTooMany)
+	e.MovRegReg(amd64.R8, amd64.RSP)
+	e.AddRegReg(amd64.R8, amd64.R10)
+	e.MovDerefReg8(amd64.R8, 0, amd64.R11)
+	e.AddRegImm32(amd64.R10, 1)
+	e.MovRegImm64(amd64.R11, 0)
+	e.MovRegImm64(amd64.R8, 0)
+	e.MovDerefReg8(amd64.RSP, 4, amd64.R8)
+	e.AddRegImm32(amd64.R14, 1)
+	addrDotBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(addrDotBack, addressLoop)
+
+	addrEnd := len(e.Code)
+	patchJcc(addressTokenEnd, addrEnd)
+	patchJcc(addressSpaceEnd, addrEnd)
+	patchJcc(addressTabEnd, addrEnd)
+	e.MovzxRegDeref8(amd64.R8, amd64.RSP, 4)
+	e.TestRegReg(amd64.R8, amd64.R8)
+	addrMissing := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	addressInvalid = append(addressInvalid, addrMissing)
+	e.CmpRegImm32(amd64.R10, 3)
+	addrNotFour := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	addressInvalid = append(addressInvalid, addrNotFour)
+	e.MovRegReg(amd64.R8, amd64.RSP)
+	e.AddRegImm32(amd64.R8, 3)
+	e.MovDerefReg8(amd64.R8, 0, amd64.R11)
+	foundJump := len(e.Code)
+	e.JmpRel32(0)
+
+	candidateNextLabel := len(e.Code)
+	for _, at := range candidateNext {
+		patchJcc(at, candidateNextLabel)
+	}
+	for _, at := range candidateNextJmp {
+		patchJmp(at, candidateNextLabel)
+	}
+	for _, at := range addressInvalid {
+		patchJcc(at, candidateNextLabel)
+	}
+	e.MovRegDeref(amd64.R8, amd64.RBX, 0)
+	e.AddRegImm32(amd64.R9, 1)
+	scanBack := len(e.Code)
+	e.JmpRel32(0)
+	patchJmp(scanBack, scanLoop)
+
+	notFound := len(e.Code)
+	patchJcc(openFailed, notFound)
+	patchJcc(readFailed, notFound)
+	patchJcc(scanExhausted, notFound)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callEmpty := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callEmpty + 5)))
+	emptyReturn := len(e.Code)
+	e.JmpRel32(0)
+
+	found := len(e.Code)
+	patchJmp(foundJump, found)
+	e.MovRegImm64(amd64.R10, 4)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callAddress := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callAddress + 5)))
+	e.MovRegReg(amd64.R14, amd64.RAX)
+	e.MovRegDeref(amd64.R13, amd64.R14, amd64ByteBufferData)
+	for i := 0; i < 4; i++ {
+		e.MovzxRegDeref8(amd64.R11, amd64.RSP, int32(i))
+		e.MovDerefReg8(amd64.R13, int32(i), amd64.R11)
+	}
+	e.MovRegImm64(amd64.R10, 4)
+	e.MovDerefReg(amd64.R14, amd64ByteBufferLength, amd64.R10)
+	e.MovRegReg(amd64.RAX, amd64.R14)
+
+	returnLabel := len(e.Code)
+	patchJmp(emptyReturn, returnLabel)
+	e.AddRegImm32(amd64.RSP, 4160)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
+func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 
@@ -127,16 +456,15 @@ func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
 	localhostReadyJump := len(e.Code)
 	e.JmpRel32(0)
 
-	invalid := len(e.Code)
-	patchJcc(notLocalhost, invalid)
+	hostsFallback := len(e.Code)
+	patchJcc(notLocalhost, hostsFallback)
 	for _, at := range localhostMismatch {
-		patchJcc(at, invalid)
+		patchJcc(at, hostsFallback)
 	}
-	e.MovRegImm64(amd64.R10, 0)
-	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
-	callEmpty := len(e.Code)
-	e.CallRel32(int32(byteBufferNewOffset - (callEmpty + 5)))
-	invalidReturn := len(e.Code)
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	callHosts := len(e.Code)
+	e.CallRel32(int32(hostsLookupOffset - (callHosts + 5)))
+	hostsReturn := len(e.Code)
 	e.JmpRel32(0)
 
 	ready := len(e.Code)
@@ -157,7 +485,7 @@ func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
 	e.MovRegReg(amd64.RAX, amd64.R12)
 
 	returnLabel := len(e.Code)
-	patchJmp(invalidReturn, returnLabel)
+	patchJmp(hostsReturn, returnLabel)
 	e.AddRegImm32(amd64.RSP, 32)
 	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)

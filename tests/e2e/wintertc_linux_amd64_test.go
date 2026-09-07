@@ -1490,3 +1490,35 @@ test();
 		expected: "200\nlocalhost\nresolved\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchHostsFileResolver(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for hosts resolver test: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Resolver", "hosts")
+		_, _ = fmt.Fprint(w, "hosts-ok")
+	})}
+	defer server.Close()
+	go func() { _ = server.Serve(listener) }()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split listener address: %v", err)
+	}
+	url := "http://runtime.us-east-1.kiro.dev:" + port + "/hosts"
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.headers.get("x-resolver"));
+  console.log(await response.text());
+}
+test();
+`, url)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_hosts_file_resolver",
+		source:   source,
+		expected: "200\nhosts\nhosts-ok\n",
+	})
+}
