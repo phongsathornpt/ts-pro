@@ -655,6 +655,7 @@ func (c *Checker) builtinResponseType() *types.ObjectType {
 		t.AddField("$bodyData", c.builtinByteBufferType(), false)
 		t.AddField("$hasBody", types.TypeBoolean, false)
 		t.AddField("$bodyStream", types.TypeAny, false)
+		t.AddField("$bodyLive", types.TypeBoolean, false)
 		t.AddField("bodyUsed", types.TypeBoolean, false)
 		t.AddField("headers", c.builtinHeadersType(), false)
 		t.AddField("ok", types.TypeBoolean, false)

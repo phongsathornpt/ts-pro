@@ -23,6 +23,7 @@ func (g *generator) newResponseObject(data, hasBody, headers, status, statusText
 		&ir.SetFieldInst{Obj: res, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 		&ir.SetFieldInst{Obj: res, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},
 		&ir.SetFieldInst{Obj: res, Field: "$bodyStream", Offset: offsets["$bodyStream"], Val: bodyStream},
+		&ir.SetFieldInst{Obj: res, Field: "$bodyLive", Offset: offsets["$bodyLive"], Val: ir.ConstBool{Value: false}},
 		&ir.SetFieldInst{Obj: res, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: false}},
 		&ir.SetFieldInst{Obj: res, Field: "headers", Offset: offsets["headers"], Val: headers},
 		&ir.SetFieldInst{Obj: res, Field: "ok", Offset: offsets["ok"], Val: g.responseOK(status)},
@@ -106,6 +107,45 @@ func (g *generator) validateResponseRedirectStatus(status ir.Operand) {
 	g.currentBB = errBB
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect status"}, ir.ConstString{Value: "RangeError"}))
 	g.currentBB = okBB
+}
+
+func (g *generator) materializeLiveResponseBody(res ir.Operand) {
+	live := g.responseField(res, "$bodyLive", types.TypeBoolean)
+	liveBB := g.currentFn.NewBlock("response_body_live_materialize")
+	doneBB := g.currentFn.NewBlock("response_body_materialize_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: live, Then: liveBB, Else: doneBB}
+
+	g.currentBB = liveBB
+	bodyValue := g.responseField(res, "$bodyStream", types.TypeAny)
+	stream := g.coerceJSValueBoundary(bodyValue, types.TypeAny, g.semaResult.ReadableStreamType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	pullFn := g.currentFn.NewValue("response_live_pull_fn", types.TypeAny)
+	ctrl := g.currentFn.NewValue("response_live_ctrl", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetFieldInst{Res: pullFn, Obj: stream, Field: "$pullFn", Offset: sOffsets["$pullFn"]},
+		&ir.GetFieldInst{Res: ctrl, Obj: stream, Field: "$controller", Offset: sOffsets["$controller"]},
+	)
+	hasPull := g.currentFn.NewValue("response_live_has_pull", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasPull, Op: ir.OpNe, LHS: pullFn, RHS: ir.ConstUndefined{}})
+	callBB := g.currentFn.NewBlock("response_live_pull_call")
+	noPullBB := g.currentFn.NewBlock("response_live_no_pull")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasPull, Then: callBB, Else: noPullBB}
+	g.currentBB = callBB
+	fnType := types.NewFunction([]types.Param{{Name: "controller", Type: types.TypeAny}}, types.TypeVoid)
+	pull := g.coerceJSValueBoundary(pullFn, types.TypeAny, fnType)
+	callRes := g.currentFn.NewValue("response_live_pull_result", types.TypeVoid)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{
+		Res: callRes, Closure: pull, ThisArg: nil,
+		Args: []ir.Operand{ctrl}, ParamTypes: []types.Type{types.TypeAny},
+	})
+	callEnd := g.currentBB
+	callEnd.Terminator = &ir.JumpTerm{Target: doneBB}
+
+	g.currentBB = noPullBB
+	offsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: "$bodyLive", Offset: offsets["$bodyLive"], Val: ir.ConstBool{Value: false}})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	g.currentBB = doneBB
 }
 
 func (g *generator) lowerResponseNew(e *ast.NewExpr) ir.Operand {
@@ -227,6 +267,7 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 	switch mem.Property {
 	case "clone":
 		g.ensureResponseBodyUnused(res)
+		g.materializeLiveResponseBody(res)
 		return g.newResponseObject(
 			g.copyByteBuffer(g.responseField(res, "$bodyData", g.semaResult.ByteBufferType)),
 			g.responseField(res, "$hasBody", types.TypeBoolean),
@@ -235,6 +276,7 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 			g.responseField(res, "type", types.TypeString), g.responseField(res, "url", types.TypeString), g.responseField(res, "redirected", types.TypeBoolean)), true
 	case "text", "arrayBuffer", "bytes", "blob", "formData", "json":
 		g.ensureResponseBodyUnused(res)
+		g.materializeLiveResponseBody(res)
 		offsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: true}})
 		rawData := g.responseField(res, "$bodyData", g.semaResult.ByteBufferType)

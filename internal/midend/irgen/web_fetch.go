@@ -1,6 +1,8 @@
 package irgen
 
 import (
+	"fmt"
+
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
@@ -459,6 +461,149 @@ func (g *generator) lowerFetchReadResponseBody(fd, signal, responseHeaders ir.Op
 	return responseBody
 }
 
+func (g *generator) makeFetchBodyPullCallback(owner, fd, signal, headers, stream, ctrl ir.Operand) ir.Operand {
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	fnType := types.NewFunction([]types.Param{{Name: "controller", Type: types.TypeAny}}, types.TypeVoid)
+	name := fmt.Sprintf("$fetch_body_pull%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, types.TypeVoid)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	controllerParam := lifted.NewValue("controller", types.TypeAny)
+	lifted.Params = append(lifted.Params, controllerParam)
+	_ = controllerParam
+	capturedOwner := lifted.NewValue("fetch_body_owner", g.semaResult.ResponseType)
+	capturedFD := lifted.NewValue("fetch_body_fd", types.TypeNumber)
+	capturedSignal := lifted.NewValue("fetch_body_signal", g.semaResult.AbortSignalType)
+	capturedHeaders := lifted.NewValue("fetch_body_headers", g.semaResult.HeadersType)
+	capturedStream := lifted.NewValue("fetch_body_stream", g.semaResult.ReadableStreamType)
+	capturedCtrl := lifted.NewValue("fetch_body_ctrl", g.semaResult.ReadableStreamDefaultControllerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.ClosureGetInst{Res: capturedOwner, Closure: env, Index: 0},
+		&ir.ClosureGetInst{Res: capturedFD, Closure: env, Index: 1},
+		&ir.ClosureGetInst{Res: capturedSignal, Closure: env, Index: 2},
+		&ir.ClosureGetInst{Res: capturedHeaders, Closure: env, Index: 3},
+		&ir.ClosureGetInst{Res: capturedStream, Closure: env, Index: 4},
+		&ir.ClosureGetInst{Res: capturedCtrl, Closure: env, Index: 5},
+	)
+
+	body := g.lowerFetchReadResponseBody(capturedFD, capturedSignal, capturedHeaders)
+	resOffsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: capturedOwner, Field: "$bodyData", Offset: resOffsets["$bodyData"], Val: body},
+		&ir.SetFieldInst{Obj: capturedOwner, Field: "$bodyLive", Offset: resOffsets["$bodyLive"], Val: ir.ConstBool{Value: false}},
+	)
+	length := g.currentFn.NewValue("fetch_body_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{body}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	ab := g.newArrayBufferFromData(body)
+	u8 := g.newUint8ArrayView(body, ab, ir.ConstNumber{Value: 0}, length)
+	boxedU8 := g.boxJSValue(u8, g.semaResult.Uint8ArrayType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	queue := g.currentFn.NewValue("fetch_body_queue", types.NewArray(types.TypeAny))
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetFieldInst{Res: queue, Obj: capturedStream, Field: "$queue", Offset: sOffsets["$queue"]},
+		&ir.ArrayPushInst{Res: g.currentFn.NewValue("fetch_body_push", types.TypeNumber), Array: queue, Val: boxedU8},
+		&ir.SetFieldInst{Obj: capturedStream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
+		&ir.SetFieldInst{Obj: capturedStream, Field: "$pullFn", Offset: sOffsets["$pullFn"], Val: ir.ConstUndefined{}},
+		&ir.SetFieldInst{Obj: capturedStream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"], Val: ir.ConstUndefined{}},
+	)
+	ctrlOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamDefaultControllerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: capturedCtrl, Field: "desiredSize", Offset: ctrlOffsets["desiredSize"], Val: ir.ConstNumber{Value: 0}})
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("fetch_body_pull_closure", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
+		Res: closure, Function: name,
+		Captures: []ir.Operand{owner, fd, signal, headers, stream, ctrl},
+		RefMask:  0b111101,
+	})
+	return closure
+}
+
+func (g *generator) makeFetchBodyCancelCallback(owner, fd, stream ir.Operand) ir.Operand {
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	fnType := types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny}}, types.TypeVoid)
+	name := fmt.Sprintf("$fetch_body_cancel%d", g.arrowCounter)
+	g.arrowCounter++
+	lifted := ir.NewFunction(name, types.TypeVoid)
+	g.currentFn = lifted
+	g.currentBB = lifted.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := lifted.NewValue("$env", fnType)
+	lifted.Params = append(lifted.Params, env)
+	reasonParam := lifted.NewValue("reason", types.TypeAny)
+	lifted.Params = append(lifted.Params, reasonParam)
+	_ = reasonParam
+	capturedOwner := lifted.NewValue("fetch_cancel_owner", g.semaResult.ResponseType)
+	capturedFD := lifted.NewValue("fetch_cancel_fd", types.TypeNumber)
+	capturedStream := lifted.NewValue("fetch_cancel_stream", g.semaResult.ReadableStreamType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.ClosureGetInst{Res: capturedOwner, Closure: env, Index: 0},
+		&ir.ClosureGetInst{Res: capturedFD, Closure: env, Index: 1},
+		&ir.ClosureGetInst{Res: capturedStream, Closure: env, Index: 2},
+		&ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{capturedFD}, ParamTypes: []types.Type{types.TypeNumber}},
+	)
+	resOffsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: capturedOwner, Field: "$bodyLive", Offset: resOffsets["$bodyLive"], Val: ir.ConstBool{Value: false}},
+		&ir.SetFieldInst{Obj: capturedStream, Field: "$pullFn", Offset: sOffsets["$pullFn"], Val: ir.ConstUndefined{}},
+		&ir.SetFieldInst{Obj: capturedStream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"], Val: ir.ConstUndefined{}},
+	)
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, lifted)
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("fetch_body_cancel_closure", fnType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
+		Res: closure, Function: name,
+		Captures: []ir.Operand{owner, fd, stream},
+		RefMask:  0b101,
+	})
+	return closure
+}
+
+func (g *generator) newFetchResponseObject(fd, signal, headers, status, statusText, typ, url, redirected ir.Operand) ir.Operand {
+	t := g.semaResult.ResponseType
+	offsets, refMask, shape := g.objectLayout(t)
+	res := g.currentFn.NewValue("fetch_response", t)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
+	data := g.emptyByteBuffer()
+	stream, ctrl := g.newReadableStreamCore(ir.ConstNumber{Value: 1})
+	pull := g.makeFetchBodyPullCallback(res, fd, signal, headers, stream, ctrl)
+	cancel := g.makeFetchBodyCancelCallback(res, fd, stream)
+	disturb := g.makeBodyDisturbCallback(res, g.semaResult.ResponseType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: stream, Field: "$pullFn", Offset: sOffsets["$pullFn"], Val: g.boxJSValue(pull, pull.Type())},
+		&ir.SetFieldInst{Obj: stream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"], Val: g.boxJSValue(cancel, cancel.Type())},
+		&ir.SetFieldInst{Obj: stream, Field: "$disturbFn", Offset: sOffsets["$disturbFn"], Val: disturb},
+	)
+	boxedStream := g.boxJSValue(stream, g.semaResult.ReadableStreamType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: res, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
+		&ir.SetFieldInst{Obj: res, Field: "$hasBody", Offset: offsets["$hasBody"], Val: ir.ConstBool{Value: true}},
+		&ir.SetFieldInst{Obj: res, Field: "$bodyStream", Offset: offsets["$bodyStream"], Val: boxedStream},
+		&ir.SetFieldInst{Obj: res, Field: "$bodyLive", Offset: offsets["$bodyLive"], Val: ir.ConstBool{Value: true}},
+		&ir.SetFieldInst{Obj: res, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: false}},
+		&ir.SetFieldInst{Obj: res, Field: "headers", Offset: offsets["headers"], Val: headers},
+		&ir.SetFieldInst{Obj: res, Field: "ok", Offset: offsets["ok"], Val: g.responseOK(status)},
+		&ir.SetFieldInst{Obj: res, Field: "redirected", Offset: offsets["redirected"], Val: redirected},
+		&ir.SetFieldInst{Obj: res, Field: "status", Offset: offsets["status"], Val: status},
+		&ir.SetFieldInst{Obj: res, Field: "statusText", Offset: offsets["statusText"], Val: statusText},
+		&ir.SetFieldInst{Obj: res, Field: "type", Offset: offsets["type"], Val: typ},
+		&ir.SetFieldInst{Obj: res, Field: "url", Offset: offsets["url"], Val: url},
+	)
+	return res
+}
+
 func (g *generator) lowerFetchRedirectStatus(status ir.Operand) ir.Operand {
 	var combined ir.Operand
 	for i, code := range []float64{301, 302, 303, 307, 308} {
@@ -537,7 +682,6 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: shouldRedirect, Then: redirectBB, Else: directBB}
 
 	g.currentBB = directBB
-	directBody := g.lowerFetchReadResponseBody(fd, signal, responseHeaders)
 	directEnd := g.currentBB
 	directEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
@@ -557,7 +701,6 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: isManualMode, Then: manualBB, Else: followBB}
 
 	g.currentBB = manualBB
-	manualBody := g.lowerFetchReadResponseBody(fd, signal, responseHeaders)
 	manualEnd := g.currentBB
 	manualEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 
@@ -578,10 +721,10 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	g.currentBB = redirectParseOK
 	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, headers, body)
 
-	var followedHref, followedStatus, followedStatusText, followedHeaders, followedBody ir.Operand
+	var followedHref, followedStatus, followedStatusText, followedHeaders, followedFD ir.Operand
 	var followEnd *ir.BasicBlock
 	if depth < 20 {
-		_, followedHref, followedStatus, followedStatusText, followedHeaders, followedBody = g.lowerFetchFollowChain(redirectHref, redirectMethod, headers, redirectBody, signal, redirectMode, depth+1)
+		_, followedHref, followedStatus, followedStatusText, followedHeaders, followedFD = g.lowerFetchFollowChain(redirectHref, redirectMethod, headers, redirectBody, signal, redirectMode, depth+1)
 		followEnd = g.currentBB
 		followEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 	}
@@ -592,20 +735,20 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	outStatus := g.currentFn.NewValue("fetch_final_status", types.TypeNumber)
 	outStatusText := g.currentFn.NewValue("fetch_final_status_text", types.TypeString)
 	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
-	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
+	outFD := g.currentFn.NewValue("fetch_final_socket", types.TypeNumber)
 	urlIncoming := []ir.PhiIncoming{{Block: directEnd, Value: urlObj}, {Block: manualEnd, Value: urlObj}}
 	hrefIncoming := []ir.PhiIncoming{{Block: directEnd, Value: finalHref}, {Block: manualEnd, Value: finalHref}}
 	statusIncoming := []ir.PhiIncoming{{Block: directEnd, Value: status}, {Block: manualEnd, Value: status}}
 	statusTextIncoming := []ir.PhiIncoming{{Block: directEnd, Value: statusText}, {Block: manualEnd, Value: statusText}}
 	headersIncoming := []ir.PhiIncoming{{Block: directEnd, Value: responseHeaders}, {Block: manualEnd, Value: responseHeaders}}
-	bodyIncoming := []ir.PhiIncoming{{Block: directEnd, Value: directBody}, {Block: manualEnd, Value: manualBody}}
+	fdIncoming := []ir.PhiIncoming{{Block: directEnd, Value: fd}, {Block: manualEnd, Value: fd}}
 	if depth < 20 {
 		urlIncoming = append(urlIncoming, ir.PhiIncoming{Block: followEnd, Value: redirectURL})
 		hrefIncoming = append(hrefIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHref})
 		statusIncoming = append(statusIncoming, ir.PhiIncoming{Block: followEnd, Value: followedStatus})
 		statusTextIncoming = append(statusTextIncoming, ir.PhiIncoming{Block: followEnd, Value: followedStatusText})
 		headersIncoming = append(headersIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHeaders})
-		bodyIncoming = append(bodyIncoming, ir.PhiIncoming{Block: followEnd, Value: followedBody})
+		fdIncoming = append(fdIncoming, ir.PhiIncoming{Block: followEnd, Value: followedFD})
 	}
 	joinBB.Phis = append(joinBB.Phis,
 		&ir.PhiInst{Res: outURL, Incoming: urlIncoming},
@@ -613,9 +756,9 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 		&ir.PhiInst{Res: outStatus, Incoming: statusIncoming},
 		&ir.PhiInst{Res: outStatusText, Incoming: statusTextIncoming},
 		&ir.PhiInst{Res: outHeaders, Incoming: headersIncoming},
-		&ir.PhiInst{Res: outBody, Incoming: bodyIncoming},
+		&ir.PhiInst{Res: outFD, Incoming: fdIncoming},
 	)
-	return outURL, outHref, outStatus, outStatusText, outHeaders, outBody
+	return outURL, outHref, outStatus, outStatusText, outHeaders, outFD
 }
 
 func (g *generator) validateFetchRedirectMode(mode ir.Operand) {
@@ -711,9 +854,9 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 
 	g.validateRequestMethodBody(method, hasBody)
 	g.validateFetchRedirectMode(redirectMode)
-	_, outHref, outStatus, outStatusText, outHeaders, outBody := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
+	_, outHref, outStatus, outStatusText, outHeaders, outFD := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
 	redirected := g.currentFn.NewValue("fetch_redirected", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: redirected, Op: ir.OpNe, LHS: outHref, RHS: href})
-	res := g.newResponseObject(outBody, ir.ConstBool{Value: true}, outHeaders, outStatus, outStatusText, ir.ConstString{Value: "default"}, outHref, redirected)
+	res := g.newFetchResponseObject(outFD, signal, outHeaders, outStatus, outStatusText, ir.ConstString{Value: "default"}, outHref, redirected)
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }

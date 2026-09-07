@@ -808,9 +808,28 @@ func (g *generator) lowerReadableStreamDefaultReaderMethodCall(e *ast.CallExpr, 
 		stream := g.currentFn.NewValue("reader_stream", streamType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: stream, Obj: reader, Field: "$stream", Offset: rOffsets["$stream"]})
 		g.lowerReadableStreamDisturb(stream)
+		reason := ir.Operand(ir.ConstUndefined{})
+		if len(e.Args) > 0 {
+			reason = g.lowerExpr(e.Args[0])
+			reason = g.boxJSValue(reason, g.semanticType(e.Args[0]))
+		}
+		cancelFn := g.currentFn.NewValue("reader_cancel_fn", types.TypeAny)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
 			&ir.SetFieldInst{Obj: stream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
+			&ir.GetFieldInst{Res: cancelFn, Obj: stream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"]},
 		)
+		hasCancel := g.currentFn.NewValue("reader_has_cancel", types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasCancel, Op: ir.OpNe, LHS: cancelFn, RHS: ir.ConstUndefined{}})
+		callBB := g.currentFn.NewBlock("reader_cancel_call")
+		doneBB := g.currentFn.NewBlock("reader_cancel_done")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: hasCancel, Then: callBB, Else: doneBB}
+		g.currentBB = callBB
+		fnType := types.NewFunction([]types.Param{{Name: "reason", Type: types.TypeAny}}, types.TypeVoid)
+		unboxed := g.coerceJSValueBoundary(cancelFn, types.TypeAny, fnType)
+		callRes := g.currentFn.NewValue("reader_cancel_result", types.TypeVoid)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: callRes, Closure: unboxed, Args: []ir.Operand{reason}, ParamTypes: []types.Type{types.TypeAny}})
+		g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+		g.currentBB = doneBB
 		task := g.makeImmediatePromiseTask(ir.ConstUndefined{}, types.TypeUndefined, types.TypeUndefined)
 		return task, true
 

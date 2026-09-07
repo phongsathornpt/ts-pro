@@ -2226,3 +2226,147 @@ test();
 		t.Fatal("fetch waited for redirect response body before following Location")
 	}
 }
+func TestLinuxAMD64WinterTCFetchResolvesAfterHeaders(t *testing.T) {
+	release := make(chan struct{}, 1)
+	var waitedForRelease atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/body":
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Length", "5")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-release:
+			case <-time.After(750 * time.Millisecond):
+				waitedForRelease.Store(true)
+			}
+			_, _ = fmt.Fprint(w, "hello")
+		case "/release":
+			select {
+			case release <- struct{}{}:
+			default:
+			}
+			_, _ = fmt.Fprint(w, "released")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.headers.get("content-type"));
+  await fetch(%q);
+  console.log(await response.text());
+}
+test();
+`, server.URL+"/body", server.URL+"/release")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_resolves_after_headers",
+		source:   source,
+		expected: "200\ntext/plain\nhello\n",
+	})
+	if waitedForRelease.Load() {
+		t.Fatal("fetch waited for the response body before resolving")
+	}
+}
+func TestLinuxAMD64WinterTCFetchLiveBodyReader(t *testing.T) {
+	release := make(chan struct{}, 1)
+	var waitedForRelease atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/body":
+			w.Header().Set("Content-Length", "3")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-release:
+			case <-time.After(750 * time.Millisecond):
+				waitedForRelease.Store(true)
+			}
+			_, _ = w.Write([]byte{97, 0, 122})
+		case "/release":
+			select {
+			case release <- struct{}{}:
+			default:
+			}
+			_, _ = fmt.Fprint(w, "released")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.bodyUsed);
+  const stream = response.body ?? new ReadableStream();
+  const reader = stream.getReader();
+  console.log(response.bodyUsed);
+  await fetch(%q);
+  const first: any = await reader.read();
+  const bytes: Uint8Array = first.value;
+  console.log(first.done);
+  console.log(response.bodyUsed);
+  console.log(bytes.length);
+  console.log(bytes[0]);
+  console.log(bytes[1]);
+  console.log(bytes[2]);
+  const end: any = await reader.read();
+  console.log(end.done);
+}
+test();
+`, server.URL+"/body", server.URL+"/release")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_live_body_reader",
+		source:   source,
+		expected: "false\nfalse\nfalse\ntrue\n3\n97\n0\n122\ntrue\n",
+	})
+	if waitedForRelease.Load() {
+		t.Fatal("fetch or getReader waited for body bytes before explicit read")
+	}
+}
+func TestLinuxAMD64WinterTCFetchLiveBodyReaderCancelClosesSocket(t *testing.T) {
+	var observedClose atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100000")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		select {
+		case <-r.Context().Done():
+			observedClose.Store(true)
+		case <-time.After(1 * time.Second):
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  const stream = response.body ?? new ReadableStream();
+  const reader = stream.getReader();
+  console.log(response.bodyUsed);
+  await reader.cancel("stop");
+  console.log(response.bodyUsed);
+}
+test();
+`, server.URL)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_live_body_reader_cancel",
+		source:   source,
+		expected: "false\ntrue\n",
+	})
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for !observedClose.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !observedClose.Load() {
+		t.Fatal("reader.cancel did not close the live fetch socket")
+	}
+}
