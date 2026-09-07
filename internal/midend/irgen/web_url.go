@@ -12,6 +12,12 @@ func (g *generator) urlStringLen(value ir.Operand) ir.Operand {
 	return res
 }
 
+func (g *generator) urlStringFind(value, needle, start ir.Operand) ir.Operand {
+	res := g.currentFn.NewValue("url_string_find_substring", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_find", Args: []ir.Operand{value, needle, start}, ParamTypes: []types.Type{types.TypeString, types.TypeString, types.TypeNumber}})
+	return res
+}
+
 func (g *generator) urlStringFindByte(value ir.Operand, ch, start, end ir.Operand) ir.Operand {
 	res := g.currentFn.NewValue("url_string_find", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_string_find_byte", Args: []ir.Operand{value, ch, start, end}, ParamTypes: []types.Type{types.TypeString, types.TypeNumber, types.TypeNumber, types.TypeNumber}})

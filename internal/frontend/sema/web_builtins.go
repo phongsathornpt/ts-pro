@@ -480,6 +480,9 @@ func (c *Checker) builtinFileMember(property string) (types.Type, bool) {
 }
 
 func (c *Checker) builtinFormDataType() *types.ObjectType {
+	// FormData values may contain File entries, including values produced by Body.formData().
+	// Materialize File even when user source never names it directly so IR lowering has a stable layout.
+	c.builtinFileType()
 	if c.result.FormDataType == nil {
 		t := types.NewObject("$FormData")
 		t.AddField("$entries", types.NewArray(types.TypeAny), false)

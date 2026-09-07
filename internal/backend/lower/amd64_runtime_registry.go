@@ -194,6 +194,8 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64StringSliceBytes(e, fnOffsets["ts_alloc"])
 	fnOffsets["ts_string_find_byte"] = len(e.Code)
 	emitAMD64StringFindByte(e)
+	fnOffsets["ts_string_find"] = len(e.Code)
+	emitAMD64StringFind(e)
 	fnOffsets["ts_string_find_last_byte"] = len(e.Code)
 	emitAMD64StringFindLastByte(e)
 	fnOffsets["ts_string_find_first_of3"] = len(e.Code)

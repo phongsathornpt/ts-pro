@@ -1919,3 +1919,72 @@ test();
 		expected: "ts-pro\n7\n😀\n250\ntrue\nSyntaxError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCBodyFormDataMultipart(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_formdata_multipart",
+		source: `
+async function test(): Promise<void> {
+  const prefixText = "--AaB03x\r\n" +
+    "Content-Disposition: form-data; name=\"field\"\r\n\r\n" +
+    "first\r\n" +
+    "--AaB03x\r\n" +
+    "Content-Disposition: form-data; name=\"field\"\r\n\r\n" +
+    "second\r\n" +
+    "--AaB03x\r\n" +
+    "Content-Disposition: form-data; name=\"upload\"; filename=\"data.bin\"\r\n" +
+    "Content-Type: application/octet-stream\r\n\r\n" +
+    "A";
+  const suffixText = "B\r\n--AaB03x--\r\n";
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode(prefixText);
+  const suffix = encoder.encode(suffixText);
+  const body = new Uint8Array(prefix.length + 1 + suffix.length);
+  let i = 0;
+  for (let j = 0; j < prefix.length; j += 1) { body[i] = prefix[j]; i += 1; }
+  body[i] = 0; i += 1;
+  for (let j = 0; j < suffix.length; j += 1) { body[i] = suffix[j]; i += 1; }
+  const res = new Response(body, { headers: { "Content-Type": "multipart/form-data; boundary=\"AaB03x\"" } });
+  const form = await res.formData();
+  const fields = form.getAll("field");
+  console.log(fields.length);
+  console.log(fields[0]);
+  console.log(fields[1]);
+  const file: File = form.get("upload");
+  console.log(file.name);
+  console.log(file.type);
+  console.log(file.size);
+  const bytes = await file.bytes();
+  console.log(bytes[0]);
+  console.log(bytes[1]);
+  console.log(bytes[2]);
+  console.log(res.bodyUsed);
+}
+test();
+`,
+		expected: "2\nfirst\nsecond\ndata.bin\napplication/octet-stream\n3\n65\n0\n66\ntrue\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCBodyFormDataMultipartValidation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_formdata_multipart_validation",
+		source: `
+async function test(): Promise<void> {
+  const body = "--simple\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--simple--\r\n";
+  const ok = new Request("http://example.com/", { method: "POST", body: body, headers: { "Content-Type": "multipart/form-data; boundary=simple" } });
+  const form = await ok.formData();
+  console.log(form.get("a"));
+  console.log(ok.bodyUsed);
+
+  const missing = new Response(body, { headers: { "Content-Type": "multipart/form-data" } });
+  try { await missing.formData(); console.log("missing:unexpected"); } catch (err: any) { console.log("missing:" + err.name); }
+
+  const malformed = new Response("--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1", { headers: { "Content-Type": "multipart/form-data; boundary=x" } });
+  try { await malformed.formData(); console.log("malformed:unexpected"); } catch (err: any) { console.log("malformed:" + err.name); }
+}
+test();
+`,
+		expected: "1\ntrue\nmissing:TypeError\nmalformed:TypeError\n",
+	})
+}

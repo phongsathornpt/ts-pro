@@ -317,7 +317,7 @@ func (g *generator) lowerBodyJSON(data ir.Operand) ir.Operand {
 	return g.makeImmediatePromiseTask(value, types.TypeAny, types.TypeAny)
 }
 
-func (g *generator) lowerBodyFormData(data, headers ir.Operand) ir.Operand {
+func (g *generator) lowerBodyURLEncodedFormData(data, headers ir.Operand) ir.Operand {
 	const mime = "application/x-www-form-urlencoded"
 	hasContentType := g.lowerHeadersHas(headers, ir.ConstString{Value: "content-type"})
 	checkBB := g.currentFn.NewBlock("body_form_data_content_type_check")

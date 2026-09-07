@@ -609,7 +609,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Add `Response` constructor, status/statusText/headers/body state, cloning, redirect/error/json helpers, and body-use semantics.
   - [x] Implement structured runtime `Body.json()` parsing for objects, arrays, escaped strings/Unicode, strict JSON numbers, nested dynamic access, and `SyntaxError` coverage.
   - [x] Implement `Body.formData()` for `application/x-www-form-urlencoded`, including percent decoding, duplicate names, UTF-8, MIME validation, and disturbed/locked body semantics.
-  - [ ] Add `multipart/form-data` Body parsing with boundary/file-part handling.
+  - [x] Add `multipart/form-data` Body parsing with quoted/unquoted boundaries, duplicate text fields, binary-safe `File` parts, per-part MIME types, and malformed/missing-boundary rejection.
   - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
     - [x] Add Linux/AMD64 raw HTTP transport primitive and standalone-ELF integration harness.
     - [x] Generalize transport to numeric IPv4, numeric IPv6, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
