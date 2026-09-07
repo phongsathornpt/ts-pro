@@ -123,186 +123,262 @@ func (a *Allocator) Allocate(fn *ir.Function) map[int]Location {
 	return assignment
 }
 
+func operandValue(op ir.Operand) *ir.Value {
+	v, _ := op.(*ir.Value)
+	return v
+}
+
+func instructionValues(inst ir.Instruction) []*ir.Value {
+	values := make([]*ir.Value, 0, 4)
+	add := func(op ir.Operand) {
+		if v := operandValue(op); v != nil {
+			values = append(values, v)
+		}
+	}
+	switch i := inst.(type) {
+	case *ir.BinaryInst:
+		add(i.LHS)
+		add(i.RHS)
+	case *ir.UnaryInst:
+		add(i.Val)
+	case *ir.CallInst:
+		for _, arg := range i.Args {
+			add(arg)
+		}
+	case *ir.MakeClosureInst:
+		for _, capture := range i.Captures {
+			add(capture)
+		}
+	case *ir.ClosureGetInst:
+		add(i.Closure)
+	case *ir.IndirectCallInst:
+		add(i.Closure)
+		add(i.ThisArg)
+		for _, arg := range i.Args {
+			add(arg)
+		}
+	case *ir.GetFieldInst:
+		add(i.Obj)
+	case *ir.SetFieldInst:
+		add(i.Obj)
+		add(i.Val)
+	case *ir.AllocArrayInst:
+		add(i.Length)
+	case *ir.GetElementInst:
+		add(i.Array)
+		add(i.Index)
+	case *ir.SetElementInst:
+		add(i.Array)
+		add(i.Index)
+		add(i.Val)
+	case *ir.ArrayLengthInst:
+		add(i.Array)
+	case *ir.ArrayPushInst:
+		add(i.Array)
+		add(i.Val)
+	case *ir.ArrayPopInst:
+		add(i.Array)
+	}
+	return values
+}
+
+func terminatorValues(term ir.Terminator) []*ir.Value {
+	if term == nil {
+		return nil
+	}
+	switch t := term.(type) {
+	case *ir.ReturnTerm:
+		if v := operandValue(t.Val); v != nil {
+			return []*ir.Value{v}
+		}
+	case *ir.BranchTerm:
+		if v := operandValue(t.Cond); v != nil {
+			return []*ir.Value{v}
+		}
+	}
+	return nil
+}
+
+func copySet(src map[int]struct{}) map[int]struct{} {
+	out := make(map[int]struct{}, len(src))
+	for id := range src {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func setsEqual(a, b map[int]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if _, ok := b[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 	startMap := make(map[int]int)
 	endMap := make(map[int]int)
-	bbStart := make(map[string]int)
+	blockStart := make(map[*ir.BasicBlock]int, len(fn.Blocks))
+	blockEnd := make(map[*ir.BasicBlock]int, len(fn.Blocks))
+	defs := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	uses := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	liveIn := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	liveOut := make(map[*ir.BasicBlock]map[int]struct{}, len(fn.Blocks))
+	edgeUses := make(map[*ir.BasicBlock]map[*ir.BasicBlock]map[int]struct{})
 
 	step := 0
-	for _, p := range fn.Params {
-		startMap[p.ID] = step
-		endMap[p.ID] = step
+	for _, param := range fn.Params {
+		startMap[param.ID] = 0
+		endMap[param.ID] = 0
 	}
 
-	for _, bb := range fn.Blocks {
-		bbStart[bb.Name] = step + 1
+	for blockIndex, bb := range fn.Blocks {
+		defs[bb] = map[int]struct{}{}
+		uses[bb] = map[int]struct{}{}
+		liveIn[bb] = map[int]struct{}{}
+		liveOut[bb] = map[int]struct{}{}
+		blockStart[bb] = step + 1
+		if blockIndex == 0 {
+			for _, param := range fn.Params {
+				defs[bb][param.ID] = struct{}{}
+			}
+		}
+
 		for _, phi := range bb.Phis {
 			step++
 			if phi.Res != nil {
-				startMap[phi.Res.ID] = step
-				endMap[phi.Res.ID] = step
-			}
-			for _, inc := range phi.Incoming {
-				if v, ok := inc.Value.(*ir.Value); ok {
-					endMap[v.ID] = step
+				if _, exists := startMap[phi.Res.ID]; !exists {
+					startMap[phi.Res.ID] = step
 				}
+				if endMap[phi.Res.ID] < step {
+					endMap[phi.Res.ID] = step
+				}
+				defs[bb][phi.Res.ID] = struct{}{}
 			}
 		}
 
 		for _, inst := range bb.Instructions {
 			step++
-			res := inst.Result()
-			if res != nil {
+			for _, value := range instructionValues(inst) {
+				if _, defined := defs[bb][value.ID]; !defined {
+					uses[bb][value.ID] = struct{}{}
+				}
+				if endMap[value.ID] < step {
+					endMap[value.ID] = step
+				}
+			}
+			if res := inst.Result(); res != nil {
 				if _, exists := startMap[res.ID]; !exists {
 					startMap[res.ID] = step
 				}
-				endMap[res.ID] = step
-			}
-			switch i := inst.(type) {
-			case *ir.BinaryInst:
-				if v, ok := i.LHS.(*ir.Value); ok {
-					endMap[v.ID] = step
+				if endMap[res.ID] < step {
+					endMap[res.ID] = step
 				}
-				if v, ok := i.RHS.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.UnaryInst:
-				if v, ok := i.Val.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.GetFieldInst:
-				if v, ok := i.Obj.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.SetFieldInst:
-				if v, ok := i.Obj.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.Val.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.CallInst:
-				for _, arg := range i.Args {
-					if v, ok := arg.(*ir.Value); ok {
-						endMap[v.ID] = step
-					}
-				}
-			case *ir.MakeClosureInst:
-				for _, cap := range i.Captures {
-					if v, ok := cap.(*ir.Value); ok {
-						endMap[v.ID] = step
-					}
-				}
-			case *ir.ClosureGetInst:
-				if v, ok := i.Closure.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.IndirectCallInst:
-				if v, ok := i.Closure.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.ThisArg.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				for _, arg := range i.Args {
-					if v, ok := arg.(*ir.Value); ok {
-						endMap[v.ID] = step
-					}
-				}
-			case *ir.AllocArrayInst:
-				if v, ok := i.Length.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.GetElementInst:
-				if v, ok := i.Array.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.Index.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.SetElementInst:
-				if v, ok := i.Array.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.Index.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.Val.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.ArrayLengthInst:
-				if v, ok := i.Array.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.ArrayPushInst:
-				if v, ok := i.Array.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-				if v, ok := i.Val.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
-			case *ir.ArrayPopInst:
-				if v, ok := i.Array.(*ir.Value); ok {
-					endMap[v.ID] = step
-				}
+				defs[bb][res.ID] = struct{}{}
 			}
 		}
 
 		if bb.Terminator != nil {
 			step++
-			switch t := bb.Terminator.(type) {
-			case *ir.ReturnTerm:
-				if v, ok := t.Val.(*ir.Value); ok {
-					endMap[v.ID] = step
+			for _, value := range terminatorValues(bb.Terminator) {
+				if _, defined := defs[bb][value.ID]; !defined {
+					uses[bb][value.ID] = struct{}{}
 				}
-			case *ir.BranchTerm:
-				if v, ok := t.Cond.(*ir.Value); ok {
-					endMap[v.ID] = step
+				if endMap[value.ID] < step {
+					endMap[value.ID] = step
 				}
-				for _, target := range []*ir.BasicBlock{t.Then, t.Else} {
-					for _, phi := range target.Phis {
-						for _, inc := range phi.Incoming {
-							if inc.Block == bb {
-								if v, ok := inc.Value.(*ir.Value); ok {
-									endMap[v.ID] = step
-								}
-							}
-						}
-					}
-				}
-			case *ir.JumpTerm:
-				// If target was visited before bb, this is a loop backedge!
-				if tStart, ok := bbStart[t.Target.Name]; ok && tStart < bbStart[bb.Name] {
-					for valID, start := range startMap {
-						if start <= tStart && endMap[valID] >= tStart {
-							if endMap[valID] < step {
-								endMap[valID] = step
-							}
-						}
-					}
-				}
+			}
+		}
+		blockEnd[bb] = step
+	}
 
-				for _, phi := range t.Target.Phis {
-					for _, inc := range phi.Incoming {
-						if inc.Block == bb {
-							if v, ok := inc.Value.(*ir.Value); ok {
-								endMap[v.ID] = step
-							}
+	// Phi incoming values are used on predecessor edges, not at the target
+	// block's phi position. Recording them here is what makes arbitrary block
+	// layout safe instead of accidentally depending on creation order.
+	for _, pred := range fn.Blocks {
+		if pred.Terminator == nil {
+			continue
+		}
+		for _, succ := range pred.Terminator.Successors() {
+			if edgeUses[pred] == nil {
+				edgeUses[pred] = map[*ir.BasicBlock]map[int]struct{}{}
+			}
+			set := map[int]struct{}{}
+			for _, phi := range succ.Phis {
+				for _, incoming := range phi.Incoming {
+					if incoming.Block != pred {
+						continue
+					}
+					if value := operandValue(incoming.Value); value != nil {
+						set[value.ID] = struct{}{}
+						if endMap[value.ID] < blockEnd[pred] {
+							endMap[value.ID] = blockEnd[pred]
 						}
 					}
 				}
 			}
+			edgeUses[pred][succ] = set
 		}
 	}
 
-	var intervals []Interval
+	for changed := true; changed; {
+		changed = false
+		for i := len(fn.Blocks) - 1; i >= 0; i-- {
+			bb := fn.Blocks[i]
+			newOut := map[int]struct{}{}
+			if bb.Terminator != nil {
+				for _, succ := range bb.Terminator.Successors() {
+					for id := range liveIn[succ] {
+						newOut[id] = struct{}{}
+					}
+					for id := range edgeUses[bb][succ] {
+						newOut[id] = struct{}{}
+					}
+				}
+			}
+			newIn := copySet(uses[bb])
+			for id := range newOut {
+				if _, defined := defs[bb][id]; !defined {
+					newIn[id] = struct{}{}
+				}
+			}
+			if !setsEqual(liveOut[bb], newOut) || !setsEqual(liveIn[bb], newIn) {
+				liveOut[bb], liveIn[bb] = newOut, newIn
+				changed = true
+			}
+		}
+	}
+
+	// Linear scan still needs one contiguous interval. Conservatively span every
+	// block where a value is live, even when physical block order differs from
+	// CFG execution order. This may increase pressure slightly, but cannot
+	// miscompile a live-through value by reusing its register early.
+	for _, bb := range fn.Blocks {
+		for id := range liveIn[bb] {
+			if start, ok := startMap[id]; ok && blockStart[bb] < start {
+				startMap[id] = blockStart[bb]
+			}
+			if endMap[id] < blockEnd[bb] {
+				endMap[id] = blockEnd[bb]
+			}
+		}
+		for id := range liveOut[bb] {
+			if start, ok := startMap[id]; ok && blockStart[bb] < start {
+				startMap[id] = blockStart[bb]
+			}
+			if endMap[id] < blockEnd[bb] {
+				endMap[id] = blockEnd[bb]
+			}
+		}
+	}
+
+	intervals := make([]Interval, 0, len(startMap))
 	for valID, start := range startMap {
-		end := endMap[valID]
-		intervals = append(intervals, Interval{
-			ValID: valID,
-			Start: start,
-			End:   end,
-		})
+		intervals = append(intervals, Interval{ValID: valID, Start: start, End: endMap[valID]})
 	}
 	return intervals
 }

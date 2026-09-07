@@ -214,3 +214,33 @@ func TestSortActiveTieBreak2(t *testing.T) {
 	ra := New(2)
 	_ = ra.Allocate(fn)
 }
+
+func TestCFGNonLinearBlockOrderKeepsLiveThroughValue(t *testing.T) {
+	fn := ir.NewFunction("cfgNonLinear", types.TypeNumber)
+	entry := fn.NewBlock("entry")
+	def := fn.NewBlock("def")
+	use := fn.NewBlock("use") // Intentionally created before the bridge.
+	bridge := fn.NewBlock("bridge")
+
+	entry.Terminator = &ir.JumpTerm{Target: def}
+	key := fn.NewValue("key", types.TypeNumber)
+	def.Instructions = append(def.Instructions, &ir.BinaryInst{Res: key, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 1}, RHS: ir.ConstNumber{Value: 2}})
+	def.Terminator = &ir.JumpTerm{Target: bridge}
+
+	tmp := fn.NewValue("tmp", types.TypeNumber)
+	bridge.Instructions = append(bridge.Instructions, &ir.BinaryInst{Res: tmp, Op: ir.OpAdd, LHS: ir.ConstNumber{Value: 4}, RHS: ir.ConstNumber{Value: 5}})
+	bridge.Terminator = &ir.JumpTerm{Target: use}
+	result := fn.NewValue("result", types.TypeNumber)
+	use.Instructions = append(use.Instructions, &ir.BinaryInst{Res: result, Op: ir.OpAdd, LHS: key, RHS: ir.ConstNumber{Value: 1}})
+	use.Terminator = &ir.ReturnTerm{Val: result}
+
+	ra := New(1)
+	locs := ra.Allocate(fn)
+	keyLoc, tmpLoc := locs[key.ID], locs[tmp.ID]
+	if keyLoc.IsReg && tmpLoc.IsReg && keyLoc.Reg == tmpLoc.Reg {
+		t.Fatalf("live-through key and bridge temporary share register %d", keyLoc.Reg)
+	}
+	if !keyLoc.IsReg && !tmpLoc.IsReg && keyLoc.StackSlot == tmpLoc.StackSlot {
+		t.Fatalf("live-through key and bridge temporary share stack slot %d", keyLoc.StackSlot)
+	}
+}
