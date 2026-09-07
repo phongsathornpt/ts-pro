@@ -562,7 +562,7 @@ func emitAMD64NetHostsLookupIPv4(e *amd64.Emitter, byteBufferNewOffset int) {
 	e.Ret()
 }
 
-func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupOffset int) {
+func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupOffset, dnsLookupOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 
@@ -573,7 +573,8 @@ func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupO
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
 	e.SubRegImm32(amd64.RSP, 32)
-	e.MovRegReg(amd64.RBX, amd64.RDI) // host string
+	e.MovRegReg(amd64.RBX, amd64.RDI)       // host string
+	e.MovDerefReg(amd64.RSP, 24, amd64.RSI) // AbortSignal for DNS fallback
 
 	// First try dotted-decimal IPv4 into four scratch bytes at rsp[0:4].
 	e.MovRegDeref(amd64.R8, amd64.RBX, 0)
@@ -686,6 +687,19 @@ func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupO
 	e.MovRegReg(amd64.RDI, amd64.RBX)
 	callHosts := len(e.Code)
 	e.CallRel32(int32(hostsLookupOffset - (callHosts + 5)))
+	e.MovRegDeref(amd64.R10, amd64.RAX, amd64ByteBufferLength)
+	e.CmpRegImm32(amd64.R10, 4)
+	hostsResolved := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	// Hosts file miss: fall back to recursive UDP DNS.
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	e.MovRegDeref(amd64.RSI, amd64.RSP, 24)
+	callDNS := len(e.Code)
+	e.CallRel32(int32(dnsLookupOffset - (callDNS + 5)))
+	dnsReturn := len(e.Code)
+	e.JmpRel32(0)
+	hostsResolvedLabel := len(e.Code)
+	patchJcc(hostsResolved, hostsResolvedLabel)
 	hostsReturn := len(e.Code)
 	e.JmpRel32(0)
 
@@ -708,6 +722,7 @@ func emitAMD64NetResolveIPv4(e *amd64.Emitter, byteBufferNewOffset, hostsLookupO
 
 	returnLabel := len(e.Code)
 	patchJmp(hostsReturn, returnLabel)
+	patchJmp(dnsReturn, returnLabel)
 	e.AddRegImm32(amd64.RSP, 32)
 	e.Pop(amd64.R14)
 	e.Pop(amd64.R13)

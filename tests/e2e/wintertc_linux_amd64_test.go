@@ -1552,3 +1552,20 @@ test();
 		expected: "200\nchunked\nhello-chunked\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchExternalDNSResolver(t *testing.T) {
+	if os.Getenv("TS_PRO_EXTERNAL_DNS_TEST") != "1" {
+		t.Skip("external DNS/network integration is opt-in")
+	}
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_fetch_external_dns_resolver",
+		source: `
+async function test(): Promise<void> {
+  const res = await fetch("http://example.com/", { redirect: "manual", signal: AbortSignal.timeout(3000) });
+  console.log(res.status > 0);
+}
+test();
+`,
+		expected: "true\n",
+	})
+}

@@ -274,7 +274,7 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB = fetchDispatch
 
 	address := g.currentFn.NewValue("fetch_ipv4_address", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address, Callee: "ts_net_resolve_ipv4", Args: []ir.Operand{host}, ParamTypes: []types.Type{types.TypeString}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: address, Callee: "ts_net_resolve_ipv4", Args: []ir.Operand{host, signal}, ParamTypes: []types.Type{types.TypeString, g.semaResult.AbortSignalType}})
 	addressLen := g.currentFn.NewValue("fetch_ipv4_address_len", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: addressLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{address}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
 	resolved := g.currentFn.NewValue("fetch_ipv4_resolved", types.TypeBoolean)
