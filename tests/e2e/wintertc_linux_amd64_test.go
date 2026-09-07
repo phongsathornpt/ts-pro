@@ -2030,3 +2030,38 @@ test();
 		t.Fatalf("invalid fetch init reached network %d times", got)
 	}
 }
+
+func TestLinuxAMD64WinterTCFetchStatusText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/created":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, "created")
+		case "/redirect":
+			w.Header().Set("Location", "/accepted")
+			w.WriteHeader(http.StatusFound)
+		case "/accepted":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprint(w, "accepted")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const created = await fetch(%q);
+  console.log(created.status);
+  console.log(created.statusText);
+  const accepted = await fetch(%q);
+  console.log(accepted.status);
+  console.log(accepted.statusText);
+  console.log(accepted.redirected);
+}
+test();
+`, server.URL+"/created", server.URL+"/redirect")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_status_text",
+		source:   source,
+		expected: "201\nCreated\n202\nAccepted\ntrue\n",
+	})
+}

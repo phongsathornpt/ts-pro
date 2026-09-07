@@ -40,6 +40,30 @@ func (g *generator) lowerHTTPStatus(raw ir.Operand) ir.Operand {
 	return status
 }
 
+func (g *generator) lowerHTTPStatusText(raw, bodyOffset ir.Operand) ir.Operand {
+	headerBytes := g.currentFn.NewValue("http_status_text_bytes", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: headerBytes, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, ir.ConstNumber{Value: 0}, bodyOffset}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}})
+	headerText := g.currentFn.NewValue("http_status_text_header", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: headerText, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{headerBytes}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	total := g.urlStringLen(headerText)
+	lineEnd := g.urlStringFindByte(headerText, ir.ConstNumber{Value: '\r'}, ir.ConstNumber{Value: 0}, total)
+	hasReason := g.currentFn.NewValue("http_status_text_has_reason", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasReason, Op: ir.OpGt, LHS: lineEnd, RHS: ir.ConstNumber{Value: 13}})
+	reasonBB := g.currentFn.NewBlock("http_status_text_reason")
+	emptyBB := g.currentFn.NewBlock("http_status_text_empty")
+	joinBB := g.currentFn.NewBlock("http_status_text_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasReason, Then: reasonBB, Else: emptyBB}
+	g.currentBB = reasonBB
+	reason := g.urlStringSlice(headerText, ir.ConstNumber{Value: 13}, lineEnd)
+	reasonEnd := g.currentBB
+	reasonEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	emptyBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = joinBB
+	result := g.currentFn.NewValue("http_status_text", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{{Block: reasonEnd, Value: reason}, {Block: emptyBB, Value: ir.ConstString{Value: ""}}}})
+	return result
+}
+
 func (g *generator) lowerHTTPBodyOffset(raw ir.Operand) ir.Operand {
 	length := g.currentFn.NewValue("http_raw_len", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
@@ -251,7 +275,7 @@ func (g *generator) buildFetchWireRequest(method, host, port, path, search, head
 	return wire
 }
 
-func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
+func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
 	invalid := g.currentFn.NewBlock("fetch_url_invalid")
 	urlObj := g.lowerURLParseRecord(href, invalid)
 	canonicalHref, _ := g.lowerURLMember(urlObj, "href")
@@ -369,6 +393,7 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB = httpParseBB
 	status := g.lowerHTTPStatus(raw)
 	offset := g.lowerHTTPBodyOffset(raw)
+	statusText := g.lowerHTTPStatusText(raw, offset)
 	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
 	rawBody := g.currentFn.NewValue("fetch_response_body_raw", g.semaResult.ByteBufferType)
@@ -398,7 +423,7 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB = bodyJoinBB
 	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
 	bodyJoinBB.Phis = append(bodyJoinBB.Phis, &ir.PhiInst{Res: responseBody, Incoming: []ir.PhiIncoming{{Block: plainBodyBB, Value: rawBody}, {Block: dechunkEnd, Value: decodedBody}}})
-	return urlObj, canonicalHref, status, responseHeaders, responseBody
+	return urlObj, canonicalHref, status, statusText, responseHeaders, responseBody
 }
 
 func (g *generator) lowerFetchRedirectStatus(status ir.Operand) ir.Operand {
@@ -463,8 +488,8 @@ func (g *generator) lowerFetchRedirectMethodBody(status, method, body ir.Operand
 	return outMethod, outBody
 }
 
-func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, redirectMode ir.Operand, depth int) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
-	urlObj, finalHref, status, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
+func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, redirectMode ir.Operand, depth int) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
+	urlObj, finalHref, status, statusText, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
 	isRedirect := g.lowerFetchRedirectStatus(status)
 	hasLocation := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "location"})
 	shouldRedirect := g.currentFn.NewValue("fetch_should_redirect", types.TypeBoolean)
@@ -508,10 +533,10 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	g.currentBB = redirectParseOK
 	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, body)
 
-	var followedHref, followedStatus, followedHeaders, followedBody ir.Operand
+	var followedHref, followedStatus, followedStatusText, followedHeaders, followedBody ir.Operand
 	var followEnd *ir.BasicBlock
 	if depth < 20 {
-		_, followedHref, followedStatus, followedHeaders, followedBody = g.lowerFetchFollowChain(redirectHref, redirectMethod, headers, redirectBody, signal, redirectMode, depth+1)
+		_, followedHref, followedStatus, followedStatusText, followedHeaders, followedBody = g.lowerFetchFollowChain(redirectHref, redirectMethod, headers, redirectBody, signal, redirectMode, depth+1)
 		followEnd = g.currentBB
 		followEnd.Terminator = &ir.JumpTerm{Target: joinBB}
 	}
@@ -520,17 +545,20 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 	outURL := g.currentFn.NewValue("fetch_final_url_obj", g.semaResult.URLType)
 	outHref := g.currentFn.NewValue("fetch_final_href", types.TypeString)
 	outStatus := g.currentFn.NewValue("fetch_final_status", types.TypeNumber)
+	outStatusText := g.currentFn.NewValue("fetch_final_status_text", types.TypeString)
 	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
 	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
 	urlIncoming := []ir.PhiIncoming{{Block: directBB, Value: urlObj}, {Block: manualBB, Value: urlObj}}
 	hrefIncoming := []ir.PhiIncoming{{Block: directBB, Value: finalHref}, {Block: manualBB, Value: finalHref}}
 	statusIncoming := []ir.PhiIncoming{{Block: directBB, Value: status}, {Block: manualBB, Value: status}}
+	statusTextIncoming := []ir.PhiIncoming{{Block: directBB, Value: statusText}, {Block: manualBB, Value: statusText}}
 	headersIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseHeaders}, {Block: manualBB, Value: responseHeaders}}
 	bodyIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseBody}, {Block: manualBB, Value: responseBody}}
 	if depth < 20 {
 		urlIncoming = append(urlIncoming, ir.PhiIncoming{Block: followEnd, Value: redirectURL})
 		hrefIncoming = append(hrefIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHref})
 		statusIncoming = append(statusIncoming, ir.PhiIncoming{Block: followEnd, Value: followedStatus})
+		statusTextIncoming = append(statusTextIncoming, ir.PhiIncoming{Block: followEnd, Value: followedStatusText})
 		headersIncoming = append(headersIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHeaders})
 		bodyIncoming = append(bodyIncoming, ir.PhiIncoming{Block: followEnd, Value: followedBody})
 	}
@@ -538,10 +566,11 @@ func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, r
 		&ir.PhiInst{Res: outURL, Incoming: urlIncoming},
 		&ir.PhiInst{Res: outHref, Incoming: hrefIncoming},
 		&ir.PhiInst{Res: outStatus, Incoming: statusIncoming},
+		&ir.PhiInst{Res: outStatusText, Incoming: statusTextIncoming},
 		&ir.PhiInst{Res: outHeaders, Incoming: headersIncoming},
 		&ir.PhiInst{Res: outBody, Incoming: bodyIncoming},
 	)
-	return outURL, outHref, outStatus, outHeaders, outBody
+	return outURL, outHref, outStatus, outStatusText, outHeaders, outBody
 }
 
 func (g *generator) validateFetchRedirectMode(mode ir.Operand) {
@@ -621,9 +650,9 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 
 	g.validateRequestMethodBody(method, hasBody)
 	g.validateFetchRedirectMode(redirectMode)
-	_, outHref, outStatus, outHeaders, outBody := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
+	_, outHref, outStatus, outStatusText, outHeaders, outBody := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
 	redirected := g.currentFn.NewValue("fetch_redirected", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: redirected, Op: ir.OpNe, LHS: outHref, RHS: href})
-	res := g.newResponseObject(outBody, ir.ConstBool{Value: true}, outHeaders, outStatus, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, outHref, redirected)
+	res := g.newResponseObject(outBody, ir.ConstBool{Value: true}, outHeaders, outStatus, outStatusText, ir.ConstString{Value: "default"}, outHref, redirected)
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }
