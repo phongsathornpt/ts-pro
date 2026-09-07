@@ -611,6 +611,13 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Add Linux/AMD64 raw loopback HTTP transport primitive and standalone-ELF integration harness.
     - [ ] Generalize transport beyond numeric loopback, including DNS/TLS and streaming/cancellation hooks.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
+    - [x] Normalize string/Request input plus RequestInit method/headers/body/signal overrides and emit `User-Agent: ts-pro`.
+    - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
+    - [x] Honor pre-aborted signals before transport dispatch.
+    - [x] Follow relative redirects, expose `redirected`/final URL, support manual/error modes, and apply 301/302/303 vs 307/308 method/body semantics.
+    - [ ] Follow redirect chains with the Fetch redirect-count limit and loop/error coverage.
+    - [ ] Cancel connect/write/read while I/O is in flight when AbortSignal fires.
+    - [ ] Stream request/response bodies instead of bounded whole-buffer transport.
   - [ ] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
   - [ ] Finish `Performance` inheritance/surface that depends on EventTarget and verify ECMA-429-required members.
