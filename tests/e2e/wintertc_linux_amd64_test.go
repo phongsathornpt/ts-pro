@@ -2142,3 +2142,42 @@ test();
 		t.Fatalf("manual redirect unexpectedly followed %d times", got)
 	}
 }
+
+func TestLinuxAMD64WinterTCRequestInitObjectVariable(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_request_init_object_variable",
+		source: `
+async function test(): Promise<void> {
+  const init = {
+    method: "post",
+    body: "payload",
+    headers: { "X-Init": "yes", "Content-Type": "text/plain" }
+  };
+  const request = new Request("HTTP://Example.COM:80/path", init);
+  console.log(request.method);
+  console.log(request.url);
+  console.log(request.headers.get("x-init"));
+  console.log(request.headers.get("content-type"));
+  console.log(await request.text());
+
+  const source = new Request("http://example.com/source", { method: "POST", body: "old", headers: { "X-Old": "1" } });
+  const override = { method: "PUT", body: "new", headers: { "X-New": "2" } };
+  const copied = new Request(source, override);
+  console.log(copied.method);
+  console.log(copied.headers.get("x-old"));
+  console.log(copied.headers.get("x-new"));
+  console.log(await copied.text());
+
+  const invalid = { method: "GET", body: "bad" };
+  try {
+    new Request("http://example.com/", invalid);
+    console.log("invalid:unexpected");
+  } catch (err: any) {
+    console.log("invalid:" + err.name);
+  }
+}
+test();
+`,
+		expected: "POST\nhttp://example.com/path\nyes\ntext/plain\npayload\nPUT\nnull\n2\nnew\ninvalid:TypeError\n",
+	})
+}

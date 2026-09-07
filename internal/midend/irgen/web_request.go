@@ -182,20 +182,34 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 	}
 
 	if len(e.Args) > 1 {
-		if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
-			if methodExpr := objectLiteralProperty(lit, "method"); methodExpr != nil {
-				raw := g.lowerExpr(methodExpr)
-				method = g.normalizeRequestMethod(g.coerceStringType(g.semanticType(methodExpr), raw))
+		initExpr := e.Args[1]
+		initType := g.semanticType(initExpr)
+		initValue := g.lowerExpr(initExpr)
+		if obj, ok := initType.(*types.ObjectType); ok {
+			offsetsInit, _, _ := g.objectLayout(obj)
+			readField := func(name string) (ir.Operand, types.Type, bool) {
+				field, exists := obj.Fields[name]
+				if !exists {
+					return nil, nil, false
+				}
+				raw := g.currentFn.NewValue("request_init_"+name, field.Type)
+				g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: raw, Obj: initValue, Field: name, Offset: offsetsInit[name]})
+				return raw, field.Type, true
 			}
-			if headersExpr := objectLiteralProperty(lit, "headers"); headersExpr != nil {
-				fake := &ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{headersExpr}}
-				headers = g.lowerHeadersNew(fake)
+			if raw, typ, ok := readField("method"); ok {
+				method = g.normalizeRequestMethod(g.coerceStringType(typ, raw))
 			}
-			if bodyExpr := objectLiteralProperty(lit, "body"); bodyExpr != nil {
-				data, hasBody = g.lowerRequestBody(bodyExpr)
+			if raw, typ, ok := readField("headers"); ok {
+				headers = g.lowerHeadersInitValue(typ, raw)
 			}
-			if signalExpr := objectLiteralProperty(lit, "signal"); signalExpr != nil {
-				signal = g.lowerExpr(signalExpr)
+			if raw, typ, ok := readField("body"); ok {
+				data, hasBody = g.lowerRequestBodyValue(typ, raw)
+			}
+			if raw, typ, ok := readField("signal"); ok {
+				signal = raw
+				if irJSValueType(raw.Type()) {
+					signal = g.coerceJSValueBoundary(raw, typ, g.semaResult.AbortSignalType)
+				}
 			}
 		}
 	}
