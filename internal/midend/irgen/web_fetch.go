@@ -351,6 +351,87 @@ func (g *generator) lowerFetchRedirectMethodBody(status, method, body ir.Operand
 	return outMethod, outBody
 }
 
+func (g *generator) lowerFetchFollowChain(href, method, headers, body, signal, redirectMode ir.Operand, depth int) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
+	urlObj, finalHref, status, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
+	isRedirect := g.lowerFetchRedirectStatus(status)
+	hasLocation := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "location"})
+	shouldRedirect := g.currentFn.NewValue("fetch_should_redirect", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: shouldRedirect, Op: ir.OpAnd, LHS: isRedirect, RHS: hasLocation})
+
+	redirectBB := g.currentFn.NewBlock("fetch_redirect_decide")
+	directBB := g.currentFn.NewBlock("fetch_redirect_direct")
+	joinBB := g.currentFn.NewBlock("fetch_redirect_join")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: shouldRedirect, Then: redirectBB, Else: directBB}
+	directBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = redirectBB
+	isErrorMode := g.urlStringEqual(redirectMode, "error")
+	errorBB := g.currentFn.NewBlock("fetch_redirect_error")
+	notErrorBB := g.currentFn.NewBlock("fetch_redirect_not_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isErrorMode, Then: errorBB, Else: notErrorBB}
+	g.currentBB = errorBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch redirect mode is error"}, ir.ConstString{Value: "TypeError"}))
+
+	g.currentBB = notErrorBB
+	isManualMode := g.urlStringEqual(redirectMode, "manual")
+	manualBB := g.currentFn.NewBlock("fetch_redirect_manual")
+	followBB := g.currentFn.NewBlock("fetch_redirect_follow")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isManualMode, Then: manualBB, Else: followBB}
+	manualBB.Terminator = &ir.JumpTerm{Target: joinBB}
+
+	g.currentBB = followBB
+	if depth >= 20 {
+		g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch redirect count exceeded 20"}, ir.ConstString{Value: "TypeError"}))
+		// Keep IR construction alive after the throwing edge; this block is unreachable at runtime.
+		g.currentBB = g.currentFn.NewBlock("fetch_redirect_limit_unreachable")
+	}
+	location := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "location"})
+	resolved := g.lowerURLResolveInput(location, urlObj)
+	redirectInvalid := g.currentFn.NewBlock("fetch_redirect_url_invalid")
+	redirectURL := g.lowerURLParseRecord(resolved, redirectInvalid)
+	redirectHref, _ := g.lowerURLMember(redirectURL, "href")
+	redirectParseOK := g.currentBB
+	g.currentBB = redirectInvalid
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect URL"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = redirectParseOK
+	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, body)
+
+	var followedHref, followedStatus, followedHeaders, followedBody ir.Operand
+	var followEnd *ir.BasicBlock
+	if depth < 20 {
+		_, followedHref, followedStatus, followedHeaders, followedBody = g.lowerFetchFollowChain(redirectHref, redirectMethod, headers, redirectBody, signal, redirectMode, depth+1)
+		followEnd = g.currentBB
+		followEnd.Terminator = &ir.JumpTerm{Target: joinBB}
+	}
+
+	g.currentBB = joinBB
+	outURL := g.currentFn.NewValue("fetch_final_url_obj", g.semaResult.URLType)
+	outHref := g.currentFn.NewValue("fetch_final_href", types.TypeString)
+	outStatus := g.currentFn.NewValue("fetch_final_status", types.TypeNumber)
+	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
+	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
+	urlIncoming := []ir.PhiIncoming{{Block: directBB, Value: urlObj}, {Block: manualBB, Value: urlObj}}
+	hrefIncoming := []ir.PhiIncoming{{Block: directBB, Value: finalHref}, {Block: manualBB, Value: finalHref}}
+	statusIncoming := []ir.PhiIncoming{{Block: directBB, Value: status}, {Block: manualBB, Value: status}}
+	headersIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseHeaders}, {Block: manualBB, Value: responseHeaders}}
+	bodyIncoming := []ir.PhiIncoming{{Block: directBB, Value: responseBody}, {Block: manualBB, Value: responseBody}}
+	if depth < 20 {
+		urlIncoming = append(urlIncoming, ir.PhiIncoming{Block: followEnd, Value: redirectURL})
+		hrefIncoming = append(hrefIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHref})
+		statusIncoming = append(statusIncoming, ir.PhiIncoming{Block: followEnd, Value: followedStatus})
+		headersIncoming = append(headersIncoming, ir.PhiIncoming{Block: followEnd, Value: followedHeaders})
+		bodyIncoming = append(bodyIncoming, ir.PhiIncoming{Block: followEnd, Value: followedBody})
+	}
+	joinBB.Phis = append(joinBB.Phis,
+		&ir.PhiInst{Res: outURL, Incoming: urlIncoming},
+		&ir.PhiInst{Res: outHref, Incoming: hrefIncoming},
+		&ir.PhiInst{Res: outStatus, Incoming: statusIncoming},
+		&ir.PhiInst{Res: outHeaders, Incoming: headersIncoming},
+		&ir.PhiInst{Res: outBody, Incoming: bodyIncoming},
+	)
+	return outURL, outHref, outStatus, outHeaders, outBody
+}
+
 func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	if len(e.Args) == 0 {
 		return g.failExpr("fetch expects an input")
@@ -409,60 +490,9 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 		}
 	}
 
-	urlObj, finalHref, status, responseHeaders, responseBody := g.lowerFetchRound(href, method, headers, body, signal)
-	isRedirect := g.lowerFetchRedirectStatus(status)
-	hasLocation := g.lowerHeadersHas(responseHeaders, ir.ConstString{Value: "location"})
-	shouldRedirect := g.currentFn.NewValue("fetch_should_redirect", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: shouldRedirect, Op: ir.OpAnd, LHS: isRedirect, RHS: hasLocation})
-	redirectBB := g.currentFn.NewBlock("fetch_redirect_decide")
-	followBB := g.currentFn.NewBlock("fetch_redirect_follow")
-	manualBB := g.currentFn.NewBlock("fetch_redirect_manual")
-	errorBB := g.currentFn.NewBlock("fetch_redirect_error")
-	directBB := g.currentFn.NewBlock("fetch_redirect_direct")
-	joinBB := g.currentFn.NewBlock("fetch_redirect_join")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: shouldRedirect, Then: redirectBB, Else: directBB}
-
-	directBB.Terminator = &ir.JumpTerm{Target: joinBB}
-
-	g.currentBB = redirectBB
-	isErrorMode := g.urlStringEqual(redirectMode, "error")
-	notErrorBB := g.currentFn.NewBlock("fetch_redirect_not_error")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: isErrorMode, Then: errorBB, Else: notErrorBB}
-	g.currentBB = errorBB
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch redirect mode is error"}, ir.ConstString{Value: "TypeError"}))
-	g.currentBB = notErrorBB
-	isManualMode := g.urlStringEqual(redirectMode, "manual")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: isManualMode, Then: manualBB, Else: followBB}
-	manualBB.Terminator = &ir.JumpTerm{Target: joinBB}
-
-	g.currentBB = followBB
-	location := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "location"})
-	resolved := g.lowerURLResolveInput(location, urlObj)
-	redirectInvalid := g.currentFn.NewBlock("fetch_redirect_url_invalid")
-	redirectURL := g.lowerURLParseRecord(resolved, redirectInvalid)
-	redirectHref, _ := g.lowerURLMember(redirectURL, "href")
-	redirectParseOK := g.currentBB
-	g.currentBB = redirectInvalid
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Invalid redirect URL"}, ir.ConstString{Value: "TypeError"}))
-	g.currentBB = redirectParseOK
-	redirectMethod, redirectBody := g.lowerFetchRedirectMethodBody(status, method, body)
-	_, followedHref, followedStatus, followedHeaders, followedBody := g.lowerFetchRound(redirectHref, redirectMethod, headers, redirectBody, signal)
-	followEnd := g.currentBB
-	followEnd.Terminator = &ir.JumpTerm{Target: joinBB}
-
-	g.currentBB = joinBB
-	outHref := g.currentFn.NewValue("fetch_final_href", types.TypeString)
-	outStatus := g.currentFn.NewValue("fetch_final_status", types.TypeNumber)
-	outHeaders := g.currentFn.NewValue("fetch_final_headers", g.semaResult.HeadersType)
-	outBody := g.currentFn.NewValue("fetch_final_body", g.semaResult.ByteBufferType)
+	_, outHref, outStatus, outHeaders, outBody := g.lowerFetchFollowChain(href, method, headers, body, signal, redirectMode, 0)
 	redirected := g.currentFn.NewValue("fetch_redirected", types.TypeBoolean)
-	joinBB.Phis = append(joinBB.Phis,
-		&ir.PhiInst{Res: outHref, Incoming: []ir.PhiIncoming{{Block: directBB, Value: finalHref}, {Block: manualBB, Value: finalHref}, {Block: followEnd, Value: followedHref}}},
-		&ir.PhiInst{Res: outStatus, Incoming: []ir.PhiIncoming{{Block: directBB, Value: status}, {Block: manualBB, Value: status}, {Block: followEnd, Value: followedStatus}}},
-		&ir.PhiInst{Res: outHeaders, Incoming: []ir.PhiIncoming{{Block: directBB, Value: responseHeaders}, {Block: manualBB, Value: responseHeaders}, {Block: followEnd, Value: followedHeaders}}},
-		&ir.PhiInst{Res: outBody, Incoming: []ir.PhiIncoming{{Block: directBB, Value: responseBody}, {Block: manualBB, Value: responseBody}, {Block: followEnd, Value: followedBody}}},
-		&ir.PhiInst{Res: redirected, Incoming: []ir.PhiIncoming{{Block: directBB, Value: ir.ConstBool{Value: false}}, {Block: manualBB, Value: ir.ConstBool{Value: false}}, {Block: followEnd, Value: ir.ConstBool{Value: true}}}},
-	)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: redirected, Op: ir.OpNe, LHS: outHref, RHS: href})
 	res := g.newResponseObject(outBody, ir.ConstBool{Value: true}, outHeaders, outStatus, ir.ConstString{Value: ""}, ir.ConstString{Value: "default"}, outHref, redirected)
 	return g.makeImmediatePromiseTask(res, g.semaResult.ResponseType, g.semaResult.ResponseType)
 }

@@ -1199,3 +1199,66 @@ test();
 		expected: "302\nfalse\n/final\nTypeError\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCFetchMultiHopRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/hop/0":
+			w.Header().Set("Location", "/hop/1")
+			w.WriteHeader(http.StatusFound)
+		case "/hop/1":
+			w.Header().Set("Location", "/hop/2")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		case "/hop/2":
+			w.Header().Set("Location", "/final")
+			w.WriteHeader(http.StatusPermanentRedirect)
+		default:
+			w.Header().Set("X-Hop", "final")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, "multi-hop-body")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const res = await fetch(%q);
+  console.log(res.status);
+  console.log(res.redirected);
+  console.log(res.url);
+  console.log(res.headers.get("x-hop"));
+  console.log(await res.text());
+}
+test();
+`, server.URL+"/hop/0")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_multi_hop_redirect",
+		source:   source,
+		expected: "200\ntrue\n" + server.URL + "/final\nfinal\nmulti-hop-body\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchRedirectLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/loop")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  try {
+    await fetch(%q);
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/loop")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_redirect_limit",
+		source:   source,
+		expected: "TypeError\n",
+	})
+}
