@@ -255,14 +255,11 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB = parseOK
 
 	isHTTP := g.urlStringEqual(scheme, "http:")
-	isLoopback := g.urlStringEqual(host, "127.0.0.1")
-	allowed := g.currentFn.NewValue("fetch_transport_allowed", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: isHTTP, RHS: isLoopback})
 	transportOK := g.currentFn.NewBlock("fetch_transport_ok")
 	transportErr := g.currentFn.NewBlock("fetch_transport_err")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: allowed, Then: transportOK, Else: transportErr}
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isHTTP, Then: transportOK, Else: transportErr}
 	g.currentBB = transportErr
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports loopback HTTP only"}, ir.ConstString{Value: "TypeError"}))
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports HTTP over numeric IPv4 only"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = transportOK
 
 	aborted := g.currentFn.NewValue("fetch_signal_aborted", types.TypeBoolean)
@@ -278,7 +275,7 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 
 	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf, signal}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{host, port, requestBuf, signal}, ParamTypes: []types.Type{types.TypeString, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
 	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")
@@ -289,6 +286,16 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
 	g.routeThrownValue(postReason)
 	g.currentBB = parseResponseBB
+	rawLen := g.currentFn.NewValue("fetch_raw_transport_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: rawLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{raw}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	networkFailed := g.currentFn.NewValue("fetch_network_failed", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: networkFailed, Op: ir.OpEq, LHS: rawLen, RHS: ir.ConstNumber{Value: 0}})
+	networkErrBB := g.currentFn.NewBlock("fetch_network_error")
+	httpParseBB := g.currentFn.NewBlock("fetch_http_parse")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: networkFailed, Then: networkErrBB, Else: httpParseBB}
+	g.currentBB = networkErrBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network request failed"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = httpParseBB
 	status := g.lowerHTTPStatus(raw)
 	offset := g.lowerHTTPBodyOffset(raw)
 	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)

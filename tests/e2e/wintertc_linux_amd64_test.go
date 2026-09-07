@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1413,5 +1414,52 @@ async function test(): Promise<void> {
 test();
 `,
 		expected: "false\nTypeError\nTypeError\nfalse\nTypeError\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchNumericIPv4Transport(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.2:0")
+	if err != nil {
+		t.Fatalf("listen on alternate loopback IPv4: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Host", r.Host)
+		_, _ = fmt.Fprint(w, "ipv4-ok")
+	})}
+	defer server.Close()
+	go func() { _ = server.Serve(listener) }()
+
+	url := "http://" + listener.Addr().String() + "/numeric"
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  console.log(response.headers.get("x-host"));
+  console.log(await response.text());
+}
+test();
+`, url)
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_numeric_ipv4_transport",
+		source:   source,
+		expected: "200\n" + listener.Addr().String() + "\nipv4-ok\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCFetchInvalidNumericIPv4(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_fetch_invalid_numeric_ipv4",
+		source: `
+async function test(): Promise<void> {
+  try {
+    await fetch("http://999.1.1.1:8080/");
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`,
+		expected: "TypeError\n",
 	})
 }
