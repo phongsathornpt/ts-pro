@@ -608,8 +608,9 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [x] Add `Request` constructor, method/url/headers/body state, cloning, body-use semantics, and AbortSignal integration.
   - [x] Add `Response` constructor, status/statusText/headers/body state, cloning, redirect/error/json helpers, and body-use semantics.
   - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
-    - [x] Add Linux/AMD64 raw loopback HTTP transport primitive and standalone-ELF integration harness.
-    - [ ] Generalize transport beyond numeric loopback, including DNS/TLS and streaming/cancellation hooks.
+    - [x] Add Linux/AMD64 raw HTTP transport primitive and standalone-ELF integration harness.
+    - [x] Generalize transport to numeric IPv4, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
+    - [ ] Add UDP DNS fallback, IPv6, and TLS/HTTPS transport.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
     - [x] Normalize string/Request input plus RequestInit method/headers/body/signal overrides and emit `User-Agent: ts-pro`.
     - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
@@ -618,6 +619,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Follow redirect chains with the Fetch redirect-count limit and loop/error coverage.
     - [x] Cancel connect/write/read while I/O is in flight when AbortSignal fires.
     - [x] Receive response bytes incrementally with geometric buffer growth instead of a fixed 64 KiB read cap.
+    - [x] Decode HTTP/1.1 `Transfer-Encoding: chunked` response framing before exposing the body.
     - [x] Back Request/Response bodies with stable ReadableStream objects and enforce disturbed/locked body usability semantics.
     - [ ] Resolve fetch before the complete response body arrives and drive the body from live transport/backpressure.
     - [ ] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
