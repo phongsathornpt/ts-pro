@@ -779,8 +779,8 @@ test();
 
 func TestLinuxAMD64WinterTCBlobFileFormDataConformance(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
-		name:   "wintertc_blob_file_formdata_conformance",
-		source: mustReadExample(t, "../../examples/wintertc/blob_file_formdata_conformance.ts"),
+		name:     "wintertc_blob_file_formdata_conformance",
+		source:   mustReadExample(t, "../../examples/wintertc/blob_file_formdata_conformance.ts"),
 		expected: "0\nempty-type\n11\ntext/plain; charset=utf-8\nhello world\n5\nhello\n5\nworld\nimage/png\n11\n11\n104\n100\ntest.txt\n9\ntrue\ncustom.bin\napplication/octet-stream\n999999\ncontent\n1\nnull-val\ntrue\nfalse\n2\n1\n3\n1\n100\nfalse\nblob\nblobby\ncustom.dat\ncustom.bin\nrenamed.bin\nx:10\ny:20\nx:30\n",
 	})
 }
@@ -894,12 +894,16 @@ test();
 
 func TestLinuxAMD64WinterTCStreamsConformance(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
-		name:   "wintertc_streams_conformance",
-		source: mustReadExample(t, "../../examples/wintertc/streams_conformance.ts"),
+		name:     "wintertc_streams_conformance",
+		source:   mustReadExample(t, "../../examples/wintertc/streams_conformance.ts"),
 		expected: "1024\n16\n10\n1\n1\nfalse\ntrue\nchunk1\nfalse\nchunk2\nfalse\ntrue\nfalse\nalpha\nbeta\ntrue\ntrue\nbranch-data\nbranch-data\nfalse\ntrue\n1\n2\nwrite-1\nwrite-2\ntransformed:in1\ntransformed:in2\ntrue\nutf-8\nutf-8\nfalse\nfalse\nblob-stream-content\ntrue\n",
 	})
 }
 
-
-
-
+func TestLinuxAMD64WinterTCHeadersConformance(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_headers_conformance",
+		source:   mustReadExample(t, "../../examples/wintertc/headers_conformance.ts"),
+		expected: "one, three\ntrue\nnull\n2\ncookie=a=1\ncookie=b=2\nset-cookie=a=1\nset-cookie=b=2\nx-a=one, three\nx-b=two\nafter=replacement\nhasb=false\n[set-cookie:a=1][set-cookie:b=2][x-a:replacement]\ncopy=replacement\nrec=x-y=y\nrec=x-z=z\nname=TypeError\nvalue=TypeError\n",
+	})
+}

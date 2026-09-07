@@ -989,10 +989,8 @@ func (g *generator) lowerHeadersNormalizedPairs(headers ir.Operand) ir.Operand {
 	})
 	uniqNext.Terminator = &ir.JumpTerm{Target: uniqCond}
 
-	// Step 2: Sort uniqueNames in ascending UTF-16 code unit order
-	sortInit.Terminator = &ir.JumpTerm{Target: g.currentFn.NewBlock("hdr_sort_outer_cond")}
-
-	outerCond := g.currentBB
+	// Step 2: Sort uniqueNames in ascending UTF-16 code unit order.
+	outerCond := g.currentFn.NewBlock("hdr_sort_outer_cond")
 	outerBody := g.currentFn.NewBlock("hdr_sort_outer_body")
 	innerCond := g.currentFn.NewBlock("hdr_sort_inner_cond")
 	innerBody := g.currentFn.NewBlock("hdr_sort_inner_body")
@@ -1397,13 +1395,9 @@ func (g *generator) lowerHeadersForEach(headers, cb, thisArg ir.Operand) {
 		&ir.GetElementInst{Res: v, Array: pair, Index: ir.ConstNumber{Value: 1}},
 	)
 	boxedHeaders := g.boxJSValue(headers, g.semaResult.HeadersType)
-	var callThis ir.Operand = thisArg
-	if callThis == nil {
-		callThis = ir.ConstUndefined{}
-	}
 	bodyBB.Instructions = append(bodyBB.Instructions, &ir.IndirectCallInst{
 		Closure:    cb,
-		ThisArg:    callThis,
+		ThisArg:    thisArg,
 		Args:       []ir.Operand{v, k, boxedHeaders},
 		ParamTypes: []types.Type{types.TypeString, types.TypeString, types.TypeAny},
 	})
@@ -1454,8 +1448,8 @@ func (g *generator) lowerHeadersMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 		return g.lowerHeadersEntries(headers), true
 	case "forEach":
 		cb := g.lowerExpr(e.Args[0])
-		var thisArg ir.Operand = ir.ConstUndefined{}
-		if len(e.Args) > 1 {
+		var thisArg ir.Operand
+		if fnType, ok := g.semanticType(e.Args[0]).(*types.FunctionType); ok && fnType.This != nil && len(e.Args) > 1 {
 			thisArg = g.lowerExpr(e.Args[1])
 		}
 		g.lowerHeadersForEach(headers, cb, thisArg)
