@@ -6,13 +6,13 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
 )
 
-// emitAMD64NetHTTPRequestLoopback performs one blocking HTTP/1.x exchange against
+// emitAMD64NetHTTPRequestLoopback performs one HTTP/1.x exchange against
 // 127.0.0.1. It is deliberately a narrow transport primitive for the deterministic
-// fetch integration harness; DNS, TLS, redirects, streaming and cancellation live
-// above/beside this primitive rather than being smuggled into one giant syscall blob.
+// fetch integration harness. Reads are nonblocking and cooperatively yield so an
+// AbortSignal timer can cancel an in-flight response wait. DNS/TLS stay outside it.
 //
-// ABI: RDI=port string, RSI=request ByteBuffer -> RAX=response ByteBuffer.
-func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset int) {
+// ABI: RDI=port string, RSI=request ByteBuffer, RDX=AbortSignal -> RAX=response ByteBuffer.
+func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, taskYieldOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 
@@ -23,8 +23,9 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset int) 
 	e.Push(amd64.R13)
 	e.Push(amd64.R14)
 	e.SubRegImm32(amd64.RSP, 32)
-	e.MovRegReg(amd64.RBX, amd64.RDI) // port string
-	e.MovRegReg(amd64.R12, amd64.RSI) // request buffer
+	e.MovRegReg(amd64.RBX, amd64.RDI)       // port string
+	e.MovRegReg(amd64.R12, amd64.RSI)       // request buffer
+	e.MovDerefReg(amd64.RSP, 24, amd64.RDX) // AbortSignal, survives cooperative yields
 
 	// Parse decimal port, defaulting empty to 80.
 	e.MovRegDeref(amd64.R10, amd64.RBX, 0)
@@ -102,13 +103,30 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset int) 
 	writeFailed := len(e.Code)
 	e.JccRel32(amd64.CondL, 0)
 
-	// Allocate a bounded receive buffer. The transport layer will become streaming
-	// before general network fetch conformance is claimed.
+	// Make response reads nonblocking. This lets the cooperative scheduler run
+	// AbortSignal.timeout callbacks while the peer has not produced bytes yet.
+	e.MovRegImm64(amd64.RAX, 72) // fcntl
+	e.MovRegReg(amd64.RDI, amd64.R14)
+	e.MovRegImm64(amd64.RSI, 4)    // F_SETFL
+	e.MovRegImm64(amd64.RDX, 2048) // O_NONBLOCK
+	e.Syscall()
+
+	// Allocate a bounded receive buffer. Streaming growth replaces this bound in
+	// the next transport phase, but cancellation is real while waiting for bytes.
 	e.MovRegImm64(amd64.R10, 64*1024)
 	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
 	callNew := len(e.Code)
 	e.CallRel32(int32(byteBufferNewOffset - (callNew + 5)))
 	e.MovRegReg(amd64.RBX, amd64.RAX)
+
+	readLoop := len(e.Code)
+	// AbortSignal.aborted is a native boolean field. The caller still owns the
+	// signal root while this runtime helper cooperatively suspends and resumes.
+	e.MovRegDeref(amd64.R10, amd64.RSP, 24)
+	e.MovRegDeref(amd64.R11, amd64.R10, amd64AbortSignalAborted)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	abortedRead := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
 
 	// read(fd, response.data, 64KiB)
 	e.MovRegImm64(amd64.RAX, 0)
@@ -119,9 +137,29 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset int) 
 	e.TestRegReg(amd64.RAX, amd64.RAX)
 	readOK := len(e.Code)
 	e.JccRel32(amd64.CondGE, 0)
+	// EAGAIN/EWOULDBLOCK or EINTR: yield so timers/microtasks can run, then retry.
+	e.CmpRegImm32(amd64.RAX, -11)
+	wouldBlock := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	e.CmpRegImm32(amd64.RAX, -4)
+	interrupted := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	e.MovRegImm64(amd64.RAX, 0)
-	patchJcc(readOK, len(e.Code))
+	readFailureDone := len(e.Code)
+	e.JmpRel32(0)
+	yieldLabel := len(e.Code)
+	patchJcc(wouldBlock, yieldLabel)
+	patchJcc(interrupted, yieldLabel)
+	callYield := len(e.Code)
+	e.CallRel32(int32(taskYieldOffset - (callYield + 5)))
+	retryRead := len(e.Code)
+	e.JmpRel32(int32(readLoop - (retryRead + 5)))
+	readDone := len(e.Code)
+	patchJcc(readOK, readDone)
+	patchJmp(readFailureDone, readDone)
 	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.RAX)
+	abortedLabel := len(e.Code)
+	patchJcc(abortedRead, abortedLabel)
 	closeAndReturn := len(e.Code)
 	e.MovRegImm64(amd64.RAX, 3)
 	e.MovRegReg(amd64.RDI, amd64.R14)

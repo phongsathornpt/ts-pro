@@ -278,7 +278,17 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 
 	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw, Callee: "ts_net_http_request_loopback", Args: []ir.Operand{port, requestBuf, signal}, ParamTypes: []types.Type{types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")
+	parseResponseBB := g.currentFn.NewBlock("fetch_parse_response")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: postAborted, Then: postAbortBB, Else: parseResponseBB}
+	g.currentBB = postAbortBB
+	postReason := g.currentFn.NewValue("fetch_abort_reason_after_io", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(postReason)
+	g.currentBB = parseResponseBB
 	status := g.lowerHTTPStatus(raw)
 	offset := g.lowerHTTPBodyOffset(raw)
 	length := g.currentFn.NewValue("fetch_raw_length", types.TypeNumber)

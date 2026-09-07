@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/phongsathornpt/ts-pro/pkg/tspro"
 )
@@ -1261,4 +1262,35 @@ test();
 		source:   source,
 		expected: "TypeError\n",
 	})
+}
+
+func TestLinuxAMD64WinterTCFetchInFlightAbort(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "too-late")
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  try {
+    await fetch(%q, { signal: AbortSignal.timeout(5) });
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/slow")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_in_flight_abort",
+		source:   source,
+		expected: "TimeoutError\n",
+	})
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("in-flight abort server hits = %d, want 1", got)
+	}
 }

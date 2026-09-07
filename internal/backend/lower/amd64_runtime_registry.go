@@ -147,7 +147,7 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64ByteBufferToUTF8String(e, fnOffsets["ts_alloc"])
 
 	fnOffsets["ts_net_http_request_loopback"] = len(e.Code)
-	emitAMD64NetHTTPRequestLoopback(e, fnOffsets["ts_byte_buffer_new"])
+	emitAMD64NetHTTPRequestLoopback(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_task_yield"])
 
 	fnOffsets["ts_utf8_validate"] = len(e.Code)
 	emitAMD64UTF8Validate(e)
