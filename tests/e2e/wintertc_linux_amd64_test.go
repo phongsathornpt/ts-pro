@@ -1037,6 +1037,62 @@ try { Response.json({}, { status: 204 }); console.log("null-status:unexpected");
 	})
 }
 
+func TestLinuxAMD64WinterTCBodyFormDataURLEncoded(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_form_data_urlencoded",
+		source: `
+async function test(): Promise<void> {
+  const req = new Request("http://example.com/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+    body: "a=1&b=hello+world&a=2&encoded=%E0%B8%81",
+  });
+  const reqForm = await req.formData();
+  console.log(reqForm.get("a"));
+  console.log(reqForm.getAll("a").length);
+  console.log(reqForm.getAll("a")[1]);
+  console.log(reqForm.get("b"));
+  console.log(reqForm.get("encoded"));
+  console.log(req.bodyUsed);
+
+  const res = new Response("x=10&y=a%2Bb", {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  const resForm = await res.formData();
+  console.log(resForm.get("x"));
+  console.log(resForm.get("y"));
+  console.log(res.bodyUsed);
+
+  try {
+    const bad = new Response("x=1", { headers: { "Content-Type": "text/plain" } });
+    await bad.formData();
+    console.log("bad:unexpected");
+  } catch (err: any) {
+    console.log("bad:" + err.name);
+  }
+}
+test();
+`,
+		expected: "1\n2\n2\nhello world\nก\ntrue\n10\na+b\ntrue\nbad:TypeError\n",
+	})
+}
+
+func TestLinuxAMD64PromiseResolveNonThenableFormData(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "promise_resolve_non_thenable_formdata",
+		source: `
+async function test(): Promise<void> {
+  const direct = new FormData();
+  direct.append("z", "9");
+  const promised = await Promise.resolve(direct);
+  console.log(promised.get("z"));
+}
+test();
+`,
+		expected: "9\n",
+	})
+}
+
 func TestLinuxAMD64WinterTCFetchLoopbackTransport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("X-Test", " one ")

@@ -310,6 +310,65 @@ func (g *generator) ensureRequestBodyUnused(req ir.Operand) {
 	g.currentBB = ok
 }
 
+func (g *generator) lowerBodyFormData(data, headers ir.Operand) ir.Operand {
+	const mime = "application/x-www-form-urlencoded"
+	hasContentType := g.lowerHeadersHas(headers, ir.ConstString{Value: "content-type"})
+	checkBB := g.currentFn.NewBlock("body_form_data_content_type_check")
+	failBB := g.currentFn.NewBlock("body_form_data_content_type_error")
+	parseBB := g.currentFn.NewBlock("body_form_data_parse")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasContentType, Then: checkBB, Else: failBB}
+
+	g.currentBB = checkBB
+	contentType := g.lowerHeadersGet(headers, ir.ConstString{Value: "content-type"})
+	contentTypeLen := g.urlStringLen(contentType)
+	longEnough := g.currentFn.NewValue("body_form_data_mime_long_enough", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: longEnough, Op: ir.OpGe, LHS: contentTypeLen, RHS: ir.ConstNumber{Value: float64(len(mime))}})
+	prefixBB := g.currentFn.NewBlock("body_form_data_mime_prefix")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: longEnough, Then: prefixBB, Else: failBB}
+
+	g.currentBB = prefixBB
+	prefix := g.urlStringSlice(contentType, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: float64(len(mime))})
+	isForm := g.urlStringEqual(prefix, mime)
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isForm, Then: parseBB, Else: failBB}
+
+	g.currentBB = failBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Body MIME type is not supported by formData()"}, ir.ConstString{Value: "TypeError"}))
+
+	g.currentBB = parseBB
+	text := g.currentFn.NewValue("body_form_data_text", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: text, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	pairs := g.currentFn.NewValue("body_form_data_pairs", types.NewArray(types.TypeString))
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocArrayInst{Res: pairs, ElemType: types.TypeString, Length: ir.ConstNumber{Value: 0}})
+	g.lowerURLSearchParamsParse(pairs, text)
+
+	fd := g.lowerFormDataNew(&ast.NewExpr{ClassName: "FormData"})
+	entries := g.formDataEntries(fd)
+	length := g.currentFn.NewValue("body_form_data_pairs_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: pairs})
+	entryBB := g.currentBB
+	condBB := g.currentFn.NewBlock("body_form_data_copy_cond")
+	bodyBB := g.currentFn.NewBlock("body_form_data_copy_body")
+	doneBB := g.currentFn.NewBlock("body_form_data_copy_done")
+	entryBB.Terminator = &ir.JumpTerm{Target: condBB}
+	i := g.currentFn.NewValue("body_form_data_copy_i", types.TypeNumber)
+	next := g.currentFn.NewValue("body_form_data_copy_next", types.TypeNumber)
+	condBB.Phis = append(condBB.Phis, &ir.PhiInst{Res: i, Incoming: []ir.PhiIncoming{{Block: entryBB, Value: ir.ConstNumber{Value: 0}}, {Block: bodyBB, Value: next}}})
+	more := g.currentFn.NewValue("body_form_data_copy_more", types.TypeBoolean)
+	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: i, RHS: length})
+	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: bodyBB, Else: doneBB}
+
+	g.currentBB = bodyBB
+	item := g.currentFn.NewValue("body_form_data_copy_item", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: item, Array: pairs, Index: i})
+	boxed := g.boxJSValue(item, types.TypeString)
+	g.pushArrayOperand(entries, boxed)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: condBB}
+
+	g.currentBB = doneBB
+	return g.makeImmediatePromiseTask(fd, g.semaResult.FormDataType, g.semaResult.FormDataType)
+}
+
 func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
 	if !ok || objType.Name != "$Request" {
@@ -341,10 +400,14 @@ func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 			&ir.SetFieldInst{Obj: clone, Field: "url", Offset: offsets["url"], Val: url},
 		)
 		return clone, true
-	case "text", "arrayBuffer", "bytes", "blob":
+	case "text", "arrayBuffer", "bytes", "blob", "formData":
 		g.ensureRequestBodyUnused(req)
 		g.setRequestField(req, "bodyUsed", ir.ConstBool{Value: true})
 		data := g.requestField(req, "$bodyData", g.semaResult.ByteBufferType)
+		if mem.Property == "formData" {
+			headers := g.requestField(req, "headers", g.semaResult.HeadersType)
+			return g.lowerBodyFormData(data, headers), true
+		}
 		copy := g.copyByteBuffer(data)
 		switch mem.Property {
 		case "text":

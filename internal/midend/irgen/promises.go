@@ -24,7 +24,10 @@ func (g *generator) thenableMethodType(t types.Type) (*types.ObjectType, *types.
 			return obj, fn, true
 		}
 	}
-	field := obj.Fields["then"]
+	field, ok := obj.Fields["then"]
+	if !ok || field.Type == nil {
+		return nil, nil, false
+	}
 	return obj, irFunctionMemberType(field.Type), true
 }
 

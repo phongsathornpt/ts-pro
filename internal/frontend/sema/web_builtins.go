@@ -701,6 +701,8 @@ func (c *Checker) builtinResponseMember(property string) (types.Type, bool) {
 		return types.NewFunction(nil, c.newPromiseType(c.builtinBlobType())), true
 	case "json":
 		return types.NewFunction(nil, c.newPromiseType(types.TypeAny)), true
+	case "formData":
+		return types.NewFunction(nil, c.newPromiseType(c.builtinFormDataType())), true
 	}
 	return nil, false
 }
