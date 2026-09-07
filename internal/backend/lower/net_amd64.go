@@ -12,7 +12,7 @@ import (
 // AbortSignal timer can cancel an in-flight response wait. DNS/TLS stay outside it.
 //
 // ABI: RDI=port string, RSI=request ByteBuffer, RDX=AbortSignal -> RAX=response ByteBuffer.
-func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, taskYieldOffset int) {
+func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, byteBufferCopyOffset, taskYieldOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
 
@@ -187,13 +187,14 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	writeDone := len(e.Code)
 	patchJcc(writeComplete, writeDone)
 
-	// Allocate a bounded receive buffer. Streaming growth replaces this bound in
-	// the next transport phase, but cancellation is real while waiting for bytes.
+	// Start with 64KiB and grow geometrically while reading until EOF.
 	e.MovRegImm64(amd64.R10, 64*1024)
 	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
 	callNew := len(e.Code)
 	e.CallRel32(int32(byteBufferNewOffset - (callNew + 5)))
 	e.MovRegReg(amd64.RBX, amd64.RAX)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R10)
 	// Root the response buffer while scheduler yields can run arbitrary tasks/GC.
 	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
 	e.MovDerefReg(amd64.RSP, 32, amd64.R10)
@@ -204,6 +205,7 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	e.AddRegImm32(amd64.R10, 32)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 
+	e.MovRegImm64(amd64.R13, 0) // response bytes used
 	readLoop := len(e.Code)
 	// AbortSignal.aborted is a native boolean field. The caller still owns the
 	// signal root while this runtime helper cooperatively suspends and resumes.
@@ -213,15 +215,46 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	abortedRead := len(e.Code)
 	e.JccRel32(amd64.CondNE, 0)
 
-	// read(fd, response.data, 64KiB)
+	// Grow when the buffer is full. R12 is free after request write completion,
+	// so it temporarily keeps the old rooted response during replacement.
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferCapacity)
+	e.CmpRegReg(amd64.R13, amd64.R10)
+	haveCapacity := len(e.Code)
+	e.JccRel32(amd64.CondB, 0)
+	e.MovRegReg(amd64.R12, amd64.RBX)
+	e.AddRegReg(amd64.R10, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callGrow := len(e.Code)
+	e.CallRel32(int32(byteBufferNewOffset - (callGrow + 5)))
+	e.MovRegReg(amd64.RBX, amd64.RAX)
+	// The precise root must follow the replacement before any subsequent yield.
+	e.MovDerefReg(amd64.RSP, 48, amd64.RBX)
+	e.MovRegReg(amd64.RDI, amd64.RBX)
+	e.MovRegReg(amd64.RSI, amd64.R12)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM1, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM2, amd64.R13)
+	callCopy := len(e.Code)
+	e.CallRel32(int32(byteBufferCopyOffset - (callCopy + 5)))
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
+	haveCapacityLabel := len(e.Code)
+	patchJcc(haveCapacity, haveCapacityLabel)
+
+	// read(fd, response.data+used, capacity-used)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferCapacity)
+	e.MovRegReg(amd64.RDX, amd64.R10)
+	e.SubRegReg(amd64.RDX, amd64.R13)
 	e.MovRegImm64(amd64.RAX, 0)
 	e.MovRegReg(amd64.RDI, amd64.R14)
 	e.MovRegDeref(amd64.RSI, amd64.RBX, amd64ByteBufferData)
-	e.MovRegImm64(amd64.RDX, 64*1024)
+	e.AddRegReg(amd64.RSI, amd64.R13)
 	e.Syscall()
 	e.TestRegReg(amd64.RAX, amd64.RAX)
-	readOK := len(e.Code)
-	e.JccRel32(amd64.CondGE, 0)
+	readProgress := len(e.Code)
+	e.JccRel32(amd64.CondG, 0)
+	readEOF := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
 	// EAGAIN/EWOULDBLOCK or EINTR: yield so timers/microtasks can run, then retry.
 	e.CmpRegImm32(amd64.RAX, -11)
 	wouldBlock := len(e.Code)
@@ -229,8 +262,8 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	e.CmpRegImm32(amd64.RAX, -4)
 	interrupted := len(e.Code)
 	e.JccRel32(amd64.CondE, 0)
-	e.MovRegImm64(amd64.RAX, 0)
-	readFailureDone := len(e.Code)
+	// Other read failures return the bytes already received.
+	readFailure := len(e.Code)
 	e.JmpRel32(0)
 	yieldLabel := len(e.Code)
 	patchJcc(wouldBlock, yieldLabel)
@@ -239,10 +272,16 @@ func emitAMD64NetHTTPRequestLoopback(e *amd64.Emitter, byteBufferNewOffset, task
 	e.CallRel32(int32(taskYieldOffset - (callYield + 5)))
 	retryRead := len(e.Code)
 	e.JmpRel32(int32(readLoop - (retryRead + 5)))
+	readProgressLabel := len(e.Code)
+	patchJcc(readProgress, readProgressLabel)
+	e.AddRegReg(amd64.R13, amd64.RAX)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
+	readMore := len(e.Code)
+	e.JmpRel32(int32(readLoop - (readMore + 5)))
 	readDone := len(e.Code)
-	patchJcc(readOK, readDone)
-	patchJmp(readFailureDone, readDone)
-	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.RAX)
+	patchJcc(readEOF, readDone)
+	patchJmp(readFailure, readDone)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R13)
 	responseCloseJump := len(e.Code)
 	e.JmpRel32(0)
 	abortedLabel := len(e.Code)

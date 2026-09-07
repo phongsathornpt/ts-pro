@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1293,4 +1294,32 @@ test();
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("in-flight abort server hits = %d, want 1", got)
 	}
+}
+
+func TestLinuxAMD64WinterTCFetchLargeResponse(t *testing.T) {
+	const size = 200000
+	payload := strings.Repeat("x", size)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, payload)
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const res = await fetch(%q);
+  const bytes = await res.bytes();
+  console.log(res.status);
+  console.log(bytes.length);
+  console.log(bytes[0]);
+  console.log(bytes[199999]);
+}
+test();
+`, server.URL+"/large")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_large_response",
+		source:   source,
+		expected: "200\n200000\n120\n120\n",
+	})
 }
