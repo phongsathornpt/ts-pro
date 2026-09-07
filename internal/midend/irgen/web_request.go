@@ -194,9 +194,11 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		}
 	}
 
+	bodyStream := g.newBodyStream(data, hasBody)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.SetFieldInst{Obj: req, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 		&ir.SetFieldInst{Obj: req, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},
+		&ir.SetFieldInst{Obj: req, Field: "$bodyStream", Offset: offsets["$bodyStream"], Val: bodyStream},
 		&ir.SetFieldInst{Obj: req, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: false}},
 		&ir.SetFieldInst{Obj: req, Field: "headers", Offset: offsets["headers"], Val: headers},
 		&ir.SetFieldInst{Obj: req, Field: "method", Offset: offsets["method"], Val: method},
@@ -236,9 +238,11 @@ func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 		data := g.copyByteBuffer(g.requestField(req, "$bodyData", g.semaResult.ByteBufferType))
 		hasBody := g.requestField(req, "$hasBody", types.TypeBoolean)
 		signal := g.requestField(req, "signal", g.semaResult.AbortSignalType)
+		bodyStream := g.newBodyStream(data, hasBody)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
 			&ir.SetFieldInst{Obj: clone, Field: "$bodyData", Offset: offsets["$bodyData"], Val: data},
 			&ir.SetFieldInst{Obj: clone, Field: "$hasBody", Offset: offsets["$hasBody"], Val: hasBody},
+			&ir.SetFieldInst{Obj: clone, Field: "$bodyStream", Offset: offsets["$bodyStream"], Val: bodyStream},
 			&ir.SetFieldInst{Obj: clone, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: false}},
 			&ir.SetFieldInst{Obj: clone, Field: "headers", Offset: offsets["headers"], Val: headers},
 			&ir.SetFieldInst{Obj: clone, Field: "method", Offset: offsets["method"], Val: method},

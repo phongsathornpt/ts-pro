@@ -597,10 +597,12 @@ func (c *Checker) builtinRequestType() *types.ObjectType {
 	// Materialize that builtin dependency even when source code never names URL directly.
 	c.builtinURLType()
 	if c.result.RequestType == nil {
+		_ = c.builtinReadableStreamType()
 		t := types.NewObject("$Request")
 		c.result.RequestType = t
 		t.AddField("$bodyData", c.builtinByteBufferType(), false)
 		t.AddField("$hasBody", types.TypeBoolean, false)
+		t.AddField("$bodyStream", types.TypeAny, false)
 		t.AddField("bodyUsed", types.TypeBoolean, false)
 		t.AddField("headers", c.builtinHeadersType(), false)
 		t.AddField("method", types.TypeString, false)
@@ -644,10 +646,12 @@ func (c *Checker) builtinRequestMember(property string) (types.Type, bool) {
 
 func (c *Checker) builtinResponseType() *types.ObjectType {
 	if c.result.ResponseType == nil {
+		_ = c.builtinReadableStreamType()
 		t := types.NewObject("$Response")
 		c.result.ResponseType = t
 		t.AddField("$bodyData", c.builtinByteBufferType(), false)
 		t.AddField("$hasBody", types.TypeBoolean, false)
+		t.AddField("$bodyStream", types.TypeAny, false)
 		t.AddField("bodyUsed", types.TypeBoolean, false)
 		t.AddField("headers", c.builtinHeadersType(), false)
 		t.AddField("ok", types.TypeBoolean, false)
@@ -682,6 +686,8 @@ func (c *Checker) builtinResponseMember(property string) (types.Type, bool) {
 		return c.builtinHeadersType(), true
 	case "bodyUsed", "ok", "redirected":
 		return types.TypeBoolean, true
+	case "body":
+		return types.NewUnion(c.builtinReadableStreamType(), types.TypeNull), true
 	case "clone":
 		return types.NewFunction(nil, c.builtinResponseType()), true
 	case "text":

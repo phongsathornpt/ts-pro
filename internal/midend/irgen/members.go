@@ -41,6 +41,12 @@ func (g *generator) lowerMemberExpr(e *ast.MemberExpr) ir.Operand {
 		if objType.Name == "$URLSearchParams" && e.Property == "size" {
 			return g.lowerURLSearchParamsSize(g.lowerExpr(e.Object))
 		}
+		if objType.Name == "$Request" && e.Property == "body" {
+			return g.requestField(g.lowerExpr(e.Object), "$bodyStream", types.TypeAny)
+		}
+		if objType.Name == "$Response" && e.Property == "body" {
+			return g.responseField(g.lowerExpr(e.Object), "$bodyStream", types.TypeAny)
+		}
 		if (objType.Name == "$TextEncoder" || objType.Name == "$TextDecoder") && e.Property == "encoding" {
 			return ir.ConstString{Value: "utf-8"}
 		}

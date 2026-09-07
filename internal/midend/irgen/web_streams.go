@@ -174,6 +174,48 @@ func (g *generator) newReadableStreamCore(hwm ir.Operand) (ir.Operand, ir.Operan
 	return stream, ctrl
 }
 
+func (g *generator) newReadableStreamFromByteBuffer(data ir.Operand) ir.Operand {
+	length := g.currentFn.NewValue("body_stream_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	// Request/Response own their body buffer, so the stream can expose a view over
+	// the same immutable bytes. Avoid an eager full-body copy, especially for fetch.
+	ab := g.newArrayBufferFromData(data)
+	u8 := g.newUint8ArrayView(data, ab, ir.ConstNumber{Value: 0}, length)
+
+	stream, ctrl := g.newReadableStreamCore(ir.ConstNumber{Value: 1})
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	ctrlOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamDefaultControllerType)
+	boxedU8 := g.boxJSValue(u8, g.semaResult.Uint8ArrayType)
+	queue := g.currentFn.NewValue("body_stream_queue", types.NewArray(types.TypeAny))
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetFieldInst{Res: queue, Obj: stream, Field: "$queue", Offset: sOffsets["$queue"]},
+		&ir.ArrayPushInst{Res: g.currentFn.NewValue("body_stream_push", types.TypeNumber), Array: queue, Val: boxedU8},
+		&ir.SetFieldInst{Obj: stream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
+		&ir.SetFieldInst{Obj: ctrl, Field: "desiredSize", Offset: ctrlOffsets["desiredSize"], Val: ir.ConstNumber{Value: 0}},
+	)
+	return stream
+}
+
+func (g *generator) newBodyStream(data, hasBody ir.Operand) ir.Operand {
+	pre := g.currentBB
+	withBody := g.currentFn.NewBlock("body_stream_present")
+	withoutBody := g.currentFn.NewBlock("body_stream_absent")
+	join := g.currentFn.NewBlock("body_stream_join")
+	pre.Terminator = &ir.BranchTerm{Cond: hasBody, Then: withBody, Else: withoutBody}
+	g.currentBB = withBody
+	stream := g.newReadableStreamFromByteBuffer(data)
+	boxedStream := g.boxJSValue(stream, g.semaResult.ReadableStreamType)
+	withBodyEnd := g.currentBB
+	withBodyEnd.Terminator = &ir.JumpTerm{Target: join}
+	g.currentBB = withoutBody
+	withoutBodyEnd := g.currentBB
+	withoutBodyEnd.Terminator = &ir.JumpTerm{Target: join}
+	g.currentBB = join
+	bodyStream := g.currentFn.NewValue("body_stream", types.TypeAny)
+	join.Phis = append(join.Phis, &ir.PhiInst{Res: bodyStream, Incoming: []ir.PhiIncoming{{Block: withBodyEnd, Value: boxedStream}, {Block: withoutBodyEnd, Value: ir.ConstNull{}}}})
+	return bodyStream
+}
+
 func (g *generator) lowerReadableStreamNew(e *ast.NewExpr) ir.Operand {
 	hwm := ir.Operand(ir.ConstNumber{Value: 1})
 	if len(e.Args) > 1 {

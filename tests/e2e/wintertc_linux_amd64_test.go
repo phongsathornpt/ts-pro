@@ -1323,3 +1323,28 @@ test();
 		expected: "200\n200000\n120\n120\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCBodyStreamBacking(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_stream_backing",
+		source: `
+function test(): void {
+  const emptyResponse = new Response();
+  console.log(emptyResponse.body === null);
+
+  const response = new Response("response-body");
+  console.log(response.body === null);
+  console.log(response.body === response.body);
+
+  const emptyRequest = new Request("https://example.com/");
+  console.log(emptyRequest.body === null);
+
+  const request = new Request("https://example.com/", { method: "POST", body: "request-body" });
+  console.log(request.body === null);
+  console.log(request.body === request.body);
+}
+test();
+`,
+		expected: "true\nfalse\ntrue\ntrue\nfalse\ntrue\n",
+	})
+}
