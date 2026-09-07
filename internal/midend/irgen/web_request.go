@@ -207,6 +207,26 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 }
 
 func (g *generator) normalizeRequestMethod(method ir.Operand) ir.Operand {
+	// HTTP methods use the same RFC token grammar as header names. Reuse the
+	// token validator, then apply Fetch's forbidden-method check case-insensitively.
+	g.validateHeaderName(method)
+	upperForForbidden := g.stringAsciiUpper(method)
+	isConnect := g.urlStringEqual(upperForForbidden, "CONNECT")
+	isTrace := g.urlStringEqual(upperForForbidden, "TRACE")
+	isTrack := g.urlStringEqual(upperForForbidden, "TRACK")
+	forbidden1 := g.currentFn.NewValue("request_method_forbidden_1", types.TypeBoolean)
+	forbidden := g.currentFn.NewValue("request_method_forbidden", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: forbidden1, Op: ir.OpOr, LHS: isConnect, RHS: isTrace},
+		&ir.BinaryInst{Res: forbidden, Op: ir.OpOr, LHS: forbidden1, RHS: isTrack},
+	)
+	forbiddenBB := g.currentFn.NewBlock("request_method_forbidden_error")
+	methodOKBB := g.currentFn.NewBlock("request_method_allowed")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: forbidden, Then: forbiddenBB, Else: methodOKBB}
+	g.currentBB = forbiddenBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "Forbidden request method"}, ir.ConstString{Value: "TypeError"}))
+	g.currentBB = methodOKBB
+
 	if c, ok := method.(ir.ConstString); ok {
 		upper := strings.ToUpper(c.Value)
 		for _, standard := range []string{"DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"} {

@@ -1686,3 +1686,21 @@ test();
 		expected: "POST\npatch\nPUT\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCRequestMethodValidation(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_request_method_validation",
+		source: `
+try { new Request("http://example.com/", { method: "CONNECT" }); console.log("connect:unexpected"); } catch (err: any) { console.log("connect:" + err.name); }
+let traceMethod: string = "trace";
+try { new Request("http://example.com/", { method: traceMethod }); console.log("trace:unexpected"); } catch (err: any) { console.log("trace:" + err.name); }
+let trackMethod: string = "TrAcK";
+try { new Request("http://example.com/", { method: trackMethod }); console.log("track:unexpected"); } catch (err: any) { console.log("track:" + err.name); }
+let invalidMethod: string = "BAD METHOD";
+try { new Request("http://example.com/", { method: invalidMethod }); console.log("token:unexpected"); } catch (err: any) { console.log("token:" + err.name); }
+let custom: string = "patch";
+console.log(new Request("http://example.com/", { method: custom }).method);
+`,
+		expected: "connect:TypeError\ntrace:TypeError\ntrack:TypeError\ntoken:TypeError\npatch\n",
+	})
+}
