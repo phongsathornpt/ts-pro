@@ -233,7 +233,7 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 			g.cloneHeaders(g.responseField(res, "headers", g.semaResult.HeadersType)),
 			g.responseField(res, "status", types.TypeNumber), g.responseField(res, "statusText", types.TypeString),
 			g.responseField(res, "type", types.TypeString), g.responseField(res, "url", types.TypeString), g.responseField(res, "redirected", types.TypeBoolean)), true
-	case "text", "arrayBuffer", "bytes", "blob", "formData":
+	case "text", "arrayBuffer", "bytes", "blob", "formData", "json":
 		g.ensureResponseBodyUnused(res)
 		offsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: "bodyUsed", Offset: offsets["bodyUsed"], Val: ir.ConstBool{Value: true}})
@@ -241,6 +241,9 @@ func (g *generator) lowerResponseCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.
 		if mem.Property == "formData" {
 			headers := g.responseField(res, "headers", g.semaResult.HeadersType)
 			return g.lowerBodyFormData(rawData, headers), true
+		}
+		if mem.Property == "json" {
+			return g.lowerBodyJSON(rawData), true
 		}
 		data := g.copyByteBuffer(rawData)
 		switch mem.Property {

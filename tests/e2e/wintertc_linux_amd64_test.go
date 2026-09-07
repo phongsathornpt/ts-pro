@@ -1093,6 +1093,37 @@ test();
 	})
 }
 
+func TestLinuxAMD64WinterTCBodyJSONScalars(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_body_json_scalars",
+		source: `
+async function test(): Promise<void> {
+  const req = new Request("http://example.com/", { method: "POST", body: "123.5" });
+  console.log(await req.json());
+  console.log(req.bodyUsed);
+  try { await req.text(); console.log("reuse:unexpected"); } catch (err: any) { console.log("reuse:" + err.name); }
+
+  const t = new Response("true");
+  console.log(await t.json());
+  console.log(t.bodyUsed);
+
+  const f = new Response("false");
+  console.log(await f.json());
+
+  const n = new Response("null");
+  console.log(await n.json());
+
+  const locked = new Response("1");
+  const lockedStream = locked.body ?? new ReadableStream();
+  lockedStream.getReader();
+  try { await locked.json(); console.log("locked:unexpected"); } catch (err: any) { console.log("locked:" + err.name); }
+}
+test();
+`,
+		expected: "123.5\ntrue\nreuse:TypeError\ntrue\ntrue\nfalse\nnull\nlocked:TypeError\n",
+	})
+}
+
 func TestLinuxAMD64WinterTCFetchLoopbackTransport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("X-Test", " one ")

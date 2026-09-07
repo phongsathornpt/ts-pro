@@ -310,6 +310,14 @@ func (g *generator) ensureRequestBodyUnused(req ir.Operand) {
 	g.currentBB = ok
 }
 
+func (g *generator) lowerBodyJSON(data ir.Operand) ir.Operand {
+	text := g.currentFn.NewValue("body_json_text", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: text, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	value := g.currentFn.NewValue("body_json_value", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_json_parse_scalar", Args: []ir.Operand{text}, ParamTypes: []types.Type{types.TypeString}})
+	return g.makeImmediatePromiseTask(value, types.TypeAny, types.TypeAny)
+}
+
 func (g *generator) lowerBodyFormData(data, headers ir.Operand) ir.Operand {
 	const mime = "application/x-www-form-urlencoded"
 	hasContentType := g.lowerHeadersHas(headers, ir.ConstString{Value: "content-type"})
@@ -400,13 +408,16 @@ func (g *generator) lowerRequestMethodCall(e *ast.CallExpr, mem *ast.MemberExpr)
 			&ir.SetFieldInst{Obj: clone, Field: "url", Offset: offsets["url"], Val: url},
 		)
 		return clone, true
-	case "text", "arrayBuffer", "bytes", "blob", "formData":
+	case "text", "arrayBuffer", "bytes", "blob", "formData", "json":
 		g.ensureRequestBodyUnused(req)
 		g.setRequestField(req, "bodyUsed", ir.ConstBool{Value: true})
 		data := g.requestField(req, "$bodyData", g.semaResult.ByteBufferType)
 		if mem.Property == "formData" {
 			headers := g.requestField(req, "headers", g.semaResult.HeadersType)
 			return g.lowerBodyFormData(data, headers), true
+		}
+		if mem.Property == "json" {
+			return g.lowerBodyJSON(data), true
 		}
 		copy := g.copyByteBuffer(data)
 		switch mem.Property {
