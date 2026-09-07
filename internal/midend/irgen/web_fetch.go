@@ -357,20 +357,35 @@ func (g *generator) lowerFetchRound(href, method, headers, body, signal ir.Opera
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: useIPv6, Then: ipv6TransportBB, Else: ipv4TransportBB}
 
 	g.currentBB = ipv4TransportBB
-	raw4 := g.currentFn.NewValue("fetch_raw_response_ipv4", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw4, Callee: "ts_net_http_request_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	fd4 := g.currentFn.NewValue("fetch_socket_ipv4", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd4, Callee: "ts_net_http_open_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	ipv4TransportEnd := g.currentBB
 	ipv4TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
 
 	g.currentBB = ipv6TransportBB
-	raw6 := g.currentFn.NewValue("fetch_raw_response_ipv6", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: raw6, Callee: "ts_net_http_request_ipv6", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	fd6 := g.currentFn.NewValue("fetch_socket_ipv6", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd6, Callee: "ts_net_http_open_ipv6", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	ipv6TransportEnd := g.currentBB
 	ipv6TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
 
 	g.currentBB = transportJoin
+	fd := g.currentFn.NewValue("fetch_socket", types.TypeNumber)
+	transportJoin.Phis = append(transportJoin.Phis, &ir.PhiInst{Res: fd, Incoming: []ir.PhiIncoming{{Block: ipv4TransportEnd, Value: fd4}, {Block: ipv6TransportEnd, Value: fd6}}})
+	opened := g.currentFn.NewValue("fetch_socket_opened", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: opened, Op: ir.OpGe, LHS: fd, RHS: ir.ConstNumber{Value: 0}})
+	readResponseBB := g.currentFn.NewBlock("fetch_socket_read_all")
+	openErrBB := g.currentFn.NewBlock("fetch_socket_open_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: opened, Then: readResponseBB, Else: openErrBB}
+
+	g.currentBB = openErrBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network connection failed"}, ir.ConstString{Value: "TypeError"}))
+
+	g.currentBB = readResponseBB
 	raw := g.currentFn.NewValue("fetch_raw_response", g.semaResult.ByteBufferType)
-	transportJoin.Phis = append(transportJoin.Phis, &ir.PhiInst{Res: raw, Incoming: []ir.PhiIncoming{{Block: ipv4TransportEnd, Value: raw4}, {Block: ipv6TransportEnd, Value: raw6}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{Res: raw, Callee: "ts_net_http_read_all", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},
+		&ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}},
+	)
 	postAborted := g.currentFn.NewValue("fetch_signal_aborted_after_io", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: postAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
 	postAbortBB := g.currentFn.NewBlock("fetch_aborted_after_io")
