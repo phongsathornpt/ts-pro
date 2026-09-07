@@ -198,6 +198,8 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64StringFindFirstOf3(e)
 	fnOffsets["ts_string_ascii_lower"] = len(e.Code)
 	emitAMD64StringASCIILower(e, fnOffsets["ts_alloc"])
+	fnOffsets["ts_string_ascii_upper"] = len(e.Code)
+	emitAMD64StringASCIIUpper(e, fnOffsets["ts_alloc"])
 
 	fnOffsets["ts_hex_nibble"] = len(e.Code)
 	emitAMD64HexNibble(e)

@@ -1659,3 +1659,30 @@ console.log(Response.redirect("http://example.com/x", 307).status);
 		expected: "get-body:TypeError\nhead-body:TypeError\nstatus-low:RangeError\nstatus-high:RangeError\nstatus-text:TypeError\nbody-204:TypeError\nbody-205:TypeError\nbody-304:TypeError\nredirect-status:RangeError\n201\nCreated\n307\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCRequestDynamicMethodNormalization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, r.Method)
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  let standard: string = "post";
+  const req = new Request(%q, { method: standard, body: "x" });
+  console.log(req.method);
+  let custom: string = "patch";
+  const customReq = new Request(%q, { method: custom, body: "x" });
+  console.log(customReq.method);
+  let fetchMethod: string = "put";
+  const res = await fetch(%q, { method: fetchMethod, body: "x" });
+  console.log(await res.text());
+}
+test();
+`, server.URL+"/request", server.URL+"/custom", server.URL+"/fetch")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_request_dynamic_method_normalization",
+		source:   source,
+		expected: "POST\npatch\nPUT\n",
+	})
+}

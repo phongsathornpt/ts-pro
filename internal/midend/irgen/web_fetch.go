@@ -4,7 +4,6 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
-	"strings"
 )
 
 func (g *generator) lowerHTTPStatus(raw ir.Operand) ir.Operand {
@@ -583,10 +582,7 @@ func (g *generator) lowerFetchCall(e *ast.CallExpr) ir.Operand {
 	if len(e.Args) > 1 {
 		if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
 			if ex := objectLiteralProperty(lit, "method"); ex != nil {
-				method = g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex))
-				if c, ok := method.(ir.ConstString); ok {
-					method = ir.ConstString{Value: strings.ToUpper(c.Value)}
-				}
+				method = g.normalizeRequestMethod(g.coerceStringType(g.semanticType(ex), g.lowerExpr(ex)))
 			}
 			if ex := objectLiteralProperty(lit, "headers"); ex != nil {
 				headers = g.lowerHeadersNew(&ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{ex}})

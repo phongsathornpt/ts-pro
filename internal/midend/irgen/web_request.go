@@ -176,10 +176,7 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		if lit, ok := e.Args[1].(*ast.ObjectLit); ok {
 			if methodExpr := objectLiteralProperty(lit, "method"); methodExpr != nil {
 				raw := g.lowerExpr(methodExpr)
-				method = g.coerceStringType(g.semanticType(methodExpr), raw)
-				if c, ok := method.(ir.ConstString); ok {
-					method = ir.ConstString{Value: strings.ToUpper(c.Value)}
-				}
+				method = g.normalizeRequestMethod(g.coerceStringType(g.semanticType(methodExpr), raw))
 			}
 			if headersExpr := objectLiteralProperty(lit, "headers"); headersExpr != nil {
 				fake := &ast.NewExpr{ClassName: "Headers", Args: []ast.Expr{headersExpr}}
@@ -207,6 +204,44 @@ func (g *generator) lowerRequestNew(e *ast.NewExpr) ir.Operand {
 		&ir.SetFieldInst{Obj: req, Field: "url", Offset: offsets["url"], Val: url},
 	)
 	return req
+}
+
+func (g *generator) normalizeRequestMethod(method ir.Operand) ir.Operand {
+	if c, ok := method.(ir.ConstString); ok {
+		upper := strings.ToUpper(c.Value)
+		for _, standard := range []string{"DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"} {
+			if upper == standard {
+				return ir.ConstString{Value: upper}
+			}
+		}
+		return method
+	}
+
+	upper := g.stringAsciiUpper(method)
+	var standardMatch ir.Operand
+	for i, standard := range []string{"DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"} {
+		eq := g.urlStringEqual(upper, standard)
+		if i == 0 {
+			standardMatch = eq
+		} else {
+			combined := g.currentFn.NewValue("request_method_standard_any", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: combined, Op: ir.OpOr, LHS: standardMatch, RHS: eq})
+			standardMatch = combined
+		}
+	}
+	standardBB := g.currentFn.NewBlock("request_method_standard")
+	customBB := g.currentFn.NewBlock("request_method_custom")
+	joinBB := g.currentFn.NewBlock("request_method_normalized")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: standardMatch, Then: standardBB, Else: customBB}
+	standardBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	customBB.Terminator = &ir.JumpTerm{Target: joinBB}
+	g.currentBB = joinBB
+	result := g.currentFn.NewValue("request_method", types.TypeString)
+	joinBB.Phis = append(joinBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: standardBB, Value: upper},
+		{Block: customBB, Value: method},
+	}})
+	return result
 }
 
 func (g *generator) validateRequestMethodBody(method, hasBody ir.Operand) {

@@ -355,6 +355,18 @@ func (g *generator) stringAsciiLower(s ir.Operand) ir.Operand {
 	return res
 }
 
+func (g *generator) stringAsciiUpper(s ir.Operand) ir.Operand {
+	if c, ok := s.(ir.ConstString); ok {
+		return ir.ConstString{Value: strings.ToUpper(c.Value)}
+	}
+	res := g.currentFn.NewValue("upper_str", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: res, Callee: "ts_string_ascii_upper", Args: []ir.Operand{s},
+		ParamTypes: []types.Type{types.TypeString},
+	})
+	return res
+}
+
 func (g *generator) lowerHeadersAppendDirect(headers, name, value ir.Operand) {
 	g.validateHeaderName(name)
 	trimmed := g.trimHttpWhitespace(value)
