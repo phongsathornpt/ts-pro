@@ -167,6 +167,75 @@ func emitAMD64ByteBufferCopy(e *amd64.Emitter) {
 	e.Ret()
 }
 
+func emitAMD64ByteBufferConcat(e *amd64.Emitter, newOffset, copyOffset int) {
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 64)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+	e.MovRegReg(amd64.R12, amd64.RSI)
+
+	e.MovRegDeref(amd64.R13, amd64.RBX, amd64ByteBufferLength)
+	e.MovRegDeref(amd64.R14, amd64.R12, amd64ByteBufferLength)
+	e.MovDerefReg(amd64.RSP, 32, amd64.R13)
+	e.MovDerefReg(amd64.RSP, 40, amd64.R14)
+
+	// Root both source wrappers across allocation of the combined destination.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 2)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R12)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	e.MovRegDeref(amd64.R13, amd64.RSP, 32)
+	e.MovRegDeref(amd64.R14, amd64.RSP, 40)
+	e.MovRegReg(amd64.R10, amd64.R13)
+	e.AddRegReg(amd64.R10, amd64.R14)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	callNew := len(e.Code)
+	e.CallRel32(int32(newOffset - (callNew + 5)))
+	e.MovRegReg(amd64.R13, amd64.RAX)
+
+	// Copy first source at offset 0.
+	e.MovRegReg(amd64.RDI, amd64.R13)
+	e.MovRegReg(amd64.RSI, amd64.RBX)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R10)
+	e.Cvtsi2sd(amd64.XMM1, amd64.R10)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 32)
+	e.Cvtsi2sd(amd64.XMM2, amd64.R11)
+	callCopyA := len(e.Code)
+	e.CallRel32(int32(copyOffset - (callCopyA + 5)))
+
+	// Copy second source immediately after the first.
+	e.MovRegReg(amd64.RDI, amd64.R13)
+	e.MovRegReg(amd64.RSI, amd64.R12)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 32)
+	e.Cvtsi2sd(amd64.XMM0, amd64.R11)
+	e.MovRegImm64(amd64.R10, 0)
+	e.Cvtsi2sd(amd64.XMM1, amd64.R10)
+	e.MovRegDeref(amd64.R11, amd64.RSP, 40)
+	e.Cvtsi2sd(amd64.XMM2, amd64.R11)
+	callCopyB := len(e.Code)
+	e.CallRel32(int32(copyOffset - (callCopyB + 5)))
+
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.MovRegReg(amd64.RAX, amd64.R13)
+	e.AddRegImm32(amd64.RSP, 64)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64ByteBufferSlice(e *amd64.Emitter, newOffset, copyOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	e.Push(amd64.RBP)

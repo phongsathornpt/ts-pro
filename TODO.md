@@ -624,7 +624,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Receive response bytes incrementally with geometric buffer growth instead of a fixed 64 KiB read cap.
     - [x] Decode HTTP/1.1 `Transfer-Encoding: chunked` response framing before exposing the body.
     - [x] Back Request/Response bodies with stable ReadableStream objects and enforce disturbed/locked body usability semantics.
-    - [ ] Resolve fetch before the complete response body arrives and drive the body from live transport/backpressure.
+    - [x] Resolve fetch before the complete response body arrives and drive the body from live transport/backpressure.
     - [ ] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
   - [ ] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.

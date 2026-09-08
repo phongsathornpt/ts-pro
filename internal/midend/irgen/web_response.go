@@ -110,9 +110,16 @@ func (g *generator) validateResponseRedirectStatus(status ir.Operand) {
 }
 
 func (g *generator) materializeLiveResponseBody(res ir.Operand) {
-	live := g.responseField(res, "$bodyLive", types.TypeBoolean)
+	entryBB := g.currentBB
+	condBB := g.currentFn.NewBlock("response_body_materialize_cond")
 	liveBB := g.currentFn.NewBlock("response_body_live_materialize")
+	callBB := g.currentFn.NewBlock("response_live_pull_call")
+	noPullBB := g.currentFn.NewBlock("response_live_no_pull")
 	doneBB := g.currentFn.NewBlock("response_body_materialize_done")
+	entryBB.Terminator = &ir.JumpTerm{Target: condBB}
+
+	g.currentBB = condBB
+	live := g.responseField(res, "$bodyLive", types.TypeBoolean)
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: live, Then: liveBB, Else: doneBB}
 
 	g.currentBB = liveBB
@@ -127,24 +134,20 @@ func (g *generator) materializeLiveResponseBody(res ir.Operand) {
 	)
 	hasPull := g.currentFn.NewValue("response_live_has_pull", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasPull, Op: ir.OpNe, LHS: pullFn, RHS: ir.ConstUndefined{}})
-	callBB := g.currentFn.NewBlock("response_live_pull_call")
-	noPullBB := g.currentFn.NewBlock("response_live_no_pull")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasPull, Then: callBB, Else: noPullBB}
+
 	g.currentBB = callBB
 	fnType := types.NewFunction([]types.Param{{Name: "controller", Type: types.TypeAny}}, types.TypeVoid)
 	pull := g.coerceJSValueBoundary(pullFn, types.TypeAny, fnType)
 	callRes := g.currentFn.NewValue("response_live_pull_result", types.TypeVoid)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{
-		Res: callRes, Closure: pull, ThisArg: nil,
-		Args: []ir.Operand{ctrl}, ParamTypes: []types.Type{types.TypeAny},
-	})
-	callEnd := g.currentBB
-	callEnd.Terminator = &ir.JumpTerm{Target: doneBB}
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{Res: callRes, Closure: pull, Args: []ir.Operand{ctrl}, ParamTypes: []types.Type{types.TypeAny}})
+	g.currentBB.Terminator = &ir.JumpTerm{Target: condBB}
 
 	g.currentBB = noPullBB
 	offsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: res, Field: "$bodyLive", Offset: offsets["$bodyLive"], Val: ir.ConstBool{Value: false}})
-	g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	g.currentBB.Terminator = &ir.JumpTerm{Target: condBB}
+
 	g.currentBB = doneBB
 }
 

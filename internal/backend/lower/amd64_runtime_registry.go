@@ -137,6 +137,8 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64ByteBufferSet(e)
 	fnOffsets["ts_byte_buffer_copy"] = len(e.Code)
 	emitAMD64ByteBufferCopy(e)
+	fnOffsets["ts_byte_buffer_concat"] = len(e.Code)
+	emitAMD64ByteBufferConcat(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"])
 
 	fnOffsets["ts_byte_buffer_slice"] = len(e.Code)
 	emitAMD64ByteBufferSlice(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"])
@@ -168,6 +170,10 @@ func emitAMD64RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64NetHTTPReadAll(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
 	fnOffsets["ts_net_http_read_headers"] = len(e.Code)
 	emitAMD64NetHTTPReadHeaders(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_byte_buffer_copy"], fnOffsets["ts_task_yield"])
+	fnOffsets["ts_net_http_read_chunk"] = len(e.Code)
+	emitAMD64NetHTTPReadChunk(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_task_yield"])
+	fnOffsets["ts_net_http_read_chunked"] = len(e.Code)
+	emitAMD64NetHTTPReadChunked(e, fnOffsets["ts_byte_buffer_new"], fnOffsets["ts_task_yield"])
 	fnOffsets["ts_net_http_close"] = len(e.Code)
 	emitAMD64NetHTTPClose(e)
 

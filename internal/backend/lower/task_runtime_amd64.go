@@ -237,6 +237,12 @@ func emitAMD64TaskResume(e *amd64.Emitter, trampolineOffset int) {
 
 	resumeLabel := len(e.Code)
 	patchJcc(resumeSaved, resumeLabel)
+	// A resumed task is running again, so its suspended-stack metadata must no
+	// longer remain discoverable by GC. Keeping SavedRoot after the task unwinds
+	// past that frame leaves a dangling precise-root chain into reused stack
+	// memory. Snapshot the saved stack pointer first, restore the live root head
+	// and callee-saved registers, then clear the suspended markers before RET.
+	e.MovRegDeref(amd64.RDX, amd64.R11, amd64TaskSavedRsp)
 	e.MovRegDeref(amd64.R10, amd64.R11, amd64TaskSavedRoot)
 	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
 	e.MovRegDeref(amd64.RBP, amd64.R11, amd64TaskSavedRbp)
@@ -244,7 +250,10 @@ func emitAMD64TaskResume(e *amd64.Emitter, trampolineOffset int) {
 	e.MovRegDeref(amd64.R12, amd64.R11, amd64TaskSavedR12)
 	e.MovRegDeref(amd64.R13, amd64.R11, amd64TaskSavedR13)
 	e.MovRegDeref(amd64.R14, amd64.R11, amd64TaskSavedR14)
-	e.MovRegDeref(amd64.RSP, amd64.R11, amd64TaskSavedRsp)
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.R11, amd64TaskSavedRsp, amd64.R10)
+	e.MovDerefReg(amd64.R11, amd64TaskSavedRoot, amd64.R10)
+	e.MovRegReg(amd64.RSP, amd64.RDX)
 	e.Ret()
 }
 

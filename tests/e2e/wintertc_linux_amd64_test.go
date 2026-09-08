@@ -2330,6 +2330,93 @@ test();
 		t.Fatal("fetch or getReader waited for body bytes before explicit read")
 	}
 }
+func TestLinuxAMD64WinterTCFetchChunkedLiveBodyBackpressure(t *testing.T) {
+	releaseFirst := make(chan struct{}, 1)
+	releaseSecond := make(chan struct{}, 1)
+	var waitedForFirst atomic.Bool
+	var waitedForSecond atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/body":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-releaseFirst:
+			case <-time.After(750 * time.Millisecond):
+				waitedForFirst.Store(true)
+			}
+			_, _ = w.Write([]byte{97, 98, 99})
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-releaseSecond:
+			case <-time.After(750 * time.Millisecond):
+				waitedForSecond.Store(true)
+			}
+			_, _ = w.Write([]byte{100, 101, 102})
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		case "/release-first":
+			select {
+			case releaseFirst <- struct{}{}:
+			default:
+			}
+			_, _ = fmt.Fprint(w, "released-first")
+		case "/release-second":
+			select {
+			case releaseSecond <- struct{}{}:
+			default:
+			}
+			_, _ = fmt.Fprint(w, "released-second")
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const response = await fetch(%q);
+  console.log(response.status);
+  const stream = response.body ?? new ReadableStream();
+  const reader = stream.getReader();
+  await fetch(%q);
+  const first: any = await reader.read();
+  const firstBytes: Uint8Array = first.value;
+  console.log(first.done);
+  console.log(firstBytes.length);
+  console.log(firstBytes[0]);
+  console.log(firstBytes[1]);
+  console.log(firstBytes[2]);
+  await fetch(%q);
+  const second: any = await reader.read();
+  const secondBytes: Uint8Array = second.value;
+  console.log(second.done);
+  console.log(secondBytes.length);
+  console.log(secondBytes[0]);
+  console.log(secondBytes[1]);
+  console.log(secondBytes[2]);
+  const end: any = await reader.read();
+  console.log(end.done);
+}
+test();
+`, server.URL+"/body", server.URL+"/release-first", server.URL+"/release-second")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_chunked_live_body_backpressure",
+		source:   source,
+		expected: "200\nfalse\n3\n97\n98\n99\nfalse\n3\n100\n101\n102\ntrue\n",
+	})
+	if waitedForFirst.Load() {
+		t.Fatal("fetch waited for the first chunk instead of resolving after headers")
+	}
+	if waitedForSecond.Load() {
+		t.Fatal("first reader.read waited for a later chunk instead of honoring stream backpressure")
+	}
+}
+
 func TestLinuxAMD64WinterTCFetchLiveBodyReaderCancelClosesSocket(t *testing.T) {
 	var observedClose atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -443,7 +443,7 @@ func (g *generator) lowerFetchReadResponseBody(fd, signal, responseHeaders ir.Op
 	plainBodyBB.Terminator = &ir.JumpTerm{Target: bodyJoinBB}
 
 	g.currentBB = checkEncodingBB
-	transferEncoding := g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "transfer-encoding"})
+	transferEncoding := g.stringAsciiLower(g.lowerHeadersGet(responseHeaders, ir.ConstString{Value: "transfer-encoding"}))
 	isChunked := g.currentFn.NewValue("fetch_transfer_encoding_chunked", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: isChunked, Callee: "ts_string_eq", Args: []ir.Operand{transferEncoding, ir.ConstString{Value: "chunked"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}})
 	checkEncodingEnd := g.currentBB
@@ -459,6 +459,47 @@ func (g *generator) lowerFetchReadResponseBody(fd, signal, responseHeaders ir.Op
 	responseBody := g.currentFn.NewValue("fetch_response_body", g.semaResult.ByteBufferType)
 	bodyJoinBB.Phis = append(bodyJoinBB.Phis, &ir.PhiInst{Res: responseBody, Incoming: []ir.PhiIncoming{{Block: plainBodyBB, Value: bodyRaw}, {Block: dechunkEnd, Value: decodedBody}}})
 	return responseBody
+}
+
+func (g *generator) appendFetchResponseBodyData(owner, chunk ir.Operand) {
+	existing := g.responseField(owner, "$bodyData", g.semaResult.ByteBufferType)
+	combined := g.currentFn.NewValue("fetch_body_combined", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: combined, Callee: "ts_byte_buffer_concat", Args: []ir.Operand{existing, chunk},
+		ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType},
+	})
+	offsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: owner, Field: "$bodyData", Offset: offsets["$bodyData"], Val: combined})
+}
+
+func (g *generator) enqueueFetchResponseBodyChunk(stream, chunk ir.Operand) {
+	length := g.currentFn.NewValue("fetch_body_chunk_view_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{chunk}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	ab := g.newArrayBufferFromData(chunk)
+	u8 := g.newUint8ArrayView(chunk, ab, ir.ConstNumber{Value: 0}, length)
+	boxedU8 := g.boxJSValue(u8, g.semaResult.Uint8ArrayType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	queue := g.currentFn.NewValue("fetch_body_chunk_queue", types.NewArray(types.TypeAny))
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.GetFieldInst{Res: queue, Obj: stream, Field: "$queue", Offset: sOffsets["$queue"]},
+		&ir.ArrayPushInst{Res: g.currentFn.NewValue("fetch_body_chunk_push", types.TypeNumber), Array: queue, Val: boxedU8},
+	)
+}
+
+func (g *generator) finishFetchResponseBody(owner, fd, stream, ctrl ir.Operand, closeSocket bool) {
+	if closeSocket {
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
+	}
+	resOffsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
+	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
+	ctrlOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamDefaultControllerType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.SetFieldInst{Obj: owner, Field: "$bodyLive", Offset: resOffsets["$bodyLive"], Val: ir.ConstBool{Value: false}},
+		&ir.SetFieldInst{Obj: stream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
+		&ir.SetFieldInst{Obj: stream, Field: "$pullFn", Offset: sOffsets["$pullFn"], Val: ir.ConstUndefined{}},
+		&ir.SetFieldInst{Obj: stream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"], Val: ir.ConstUndefined{}},
+		&ir.SetFieldInst{Obj: ctrl, Field: "desiredSize", Offset: ctrlOffsets["desiredSize"], Val: ir.ConstNumber{Value: 0}},
+	)
 }
 
 func (g *generator) makeFetchBodyPullCallback(owner, fd, signal, headers, stream, ctrl ir.Operand) ir.Operand {
@@ -477,6 +518,7 @@ func (g *generator) makeFetchBodyPullCallback(owner, fd, signal, headers, stream
 	controllerParam := lifted.NewValue("controller", types.TypeAny)
 	lifted.Params = append(lifted.Params, controllerParam)
 	_ = controllerParam
+
 	capturedOwner := lifted.NewValue("fetch_body_owner", g.semaResult.ResponseType)
 	capturedFD := lifted.NewValue("fetch_body_fd", types.TypeNumber)
 	capturedSignal := lifted.NewValue("fetch_body_signal", g.semaResult.AbortSignalType)
@@ -492,29 +534,92 @@ func (g *generator) makeFetchBodyPullCallback(owner, fd, signal, headers, stream
 		&ir.ClosureGetInst{Res: capturedCtrl, Closure: env, Index: 5},
 	)
 
-	body := g.lowerFetchReadResponseBody(capturedFD, capturedSignal, capturedHeaders)
-	resOffsets, _, _ := g.objectLayout(g.semaResult.ResponseType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.SetFieldInst{Obj: capturedOwner, Field: "$bodyData", Offset: resOffsets["$bodyData"], Val: body},
-		&ir.SetFieldInst{Obj: capturedOwner, Field: "$bodyLive", Offset: resOffsets["$bodyLive"], Val: ir.ConstBool{Value: false}},
-	)
-	length := g.currentFn.NewValue("fetch_body_len", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: length, Callee: "ts_byte_buffer_len", Args: []ir.Operand{body}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
-	ab := g.newArrayBufferFromData(body)
-	u8 := g.newUint8ArrayView(body, ab, ir.ConstNumber{Value: 0}, length)
-	boxedU8 := g.boxJSValue(u8, g.semaResult.Uint8ArrayType)
-	sOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamType)
-	queue := g.currentFn.NewValue("fetch_body_queue", types.NewArray(types.TypeAny))
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.GetFieldInst{Res: queue, Obj: capturedStream, Field: "$queue", Offset: sOffsets["$queue"]},
-		&ir.ArrayPushInst{Res: g.currentFn.NewValue("fetch_body_push", types.TypeNumber), Array: queue, Val: boxedU8},
-		&ir.SetFieldInst{Obj: capturedStream, Field: "$state", Offset: sOffsets["$state"], Val: ir.ConstString{Value: "closed"}},
-		&ir.SetFieldInst{Obj: capturedStream, Field: "$pullFn", Offset: sOffsets["$pullFn"], Val: ir.ConstUndefined{}},
-		&ir.SetFieldInst{Obj: capturedStream, Field: "$cancelFn", Offset: sOffsets["$cancelFn"], Val: ir.ConstUndefined{}},
-	)
-	ctrlOffsets, _, _ := g.objectLayout(g.semaResult.ReadableStreamDefaultControllerType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{Obj: capturedCtrl, Field: "desiredSize", Offset: ctrlOffsets["desiredSize"], Val: ir.ConstNumber{Value: 0}})
+	hasTransferEncoding := g.lowerHeadersHas(capturedHeaders, ir.ConstString{Value: "transfer-encoding"})
+	checkTEBB := g.currentFn.NewBlock("fetch_pull_check_transfer_encoding")
+	plainBB := g.currentFn.NewBlock("fetch_pull_plain")
+	chunkedBB := g.currentFn.NewBlock("fetch_pull_chunked")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasTransferEncoding, Then: checkTEBB, Else: plainBB}
+
+	g.currentBB = checkTEBB
+	transferEncoding := g.stringAsciiLower(g.lowerHeadersGet(capturedHeaders, ir.ConstString{Value: "transfer-encoding"}))
+	isChunked := g.currentFn.NewValue("fetch_pull_is_chunked", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: isChunked, Callee: "ts_string_eq", Args: []ir.Operand{transferEncoding, ir.ConstString{Value: "chunked"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString},
+	})
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isChunked, Then: chunkedBB, Else: plainBB}
+
+	g.currentBB = chunkedBB
+	chunkedBody := g.currentFn.NewValue("fetch_pull_chunked_body", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: chunkedBody, Callee: "ts_net_http_read_chunked",
+		Args:       []ir.Operand{capturedFD, capturedSignal},
+		ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType},
+	})
+	chunkedAborted := g.currentFn.NewValue("fetch_pull_chunked_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: chunkedAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{capturedSignal}})
+	chunkedAbortBB := g.currentFn.NewBlock("fetch_pull_chunked_abort")
+	chunkedInspectBB := g.currentFn.NewBlock("fetch_pull_chunked_inspect")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: chunkedAborted, Then: chunkedAbortBB, Else: chunkedInspectBB}
+
+	g.currentBB = chunkedAbortBB
+	g.finishFetchResponseBody(capturedOwner, capturedFD, capturedStream, capturedCtrl, true)
+	chunkedReason := g.currentFn.NewValue("fetch_pull_chunked_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: chunkedReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{capturedSignal}})
+	g.routeThrownValue(chunkedReason)
+
+	g.currentBB = chunkedInspectBB
+	chunkedLen := g.currentFn.NewValue("fetch_pull_chunked_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: chunkedLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{chunkedBody}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	chunkedHasData := g.currentFn.NewValue("fetch_pull_chunked_has_data", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: chunkedHasData, Op: ir.OpGt, LHS: chunkedLen, RHS: ir.ConstNumber{Value: 0}})
+	chunkedEnqueueBB := g.currentFn.NewBlock("fetch_pull_chunked_enqueue")
+	chunkedFinishBB := g.currentFn.NewBlock("fetch_pull_chunked_finish")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: chunkedHasData, Then: chunkedEnqueueBB, Else: chunkedFinishBB}
+	g.currentBB = chunkedEnqueueBB
+	g.appendFetchResponseBodyData(capturedOwner, chunkedBody)
+	g.enqueueFetchResponseBodyChunk(capturedStream, chunkedBody)
 	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.currentBB = chunkedFinishBB
+	g.finishFetchResponseBody(capturedOwner, capturedFD, capturedStream, capturedCtrl, true)
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+
+	g.currentBB = plainBB
+	chunk := g.currentFn.NewValue("fetch_pull_chunk", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: chunk, Callee: "ts_net_http_read_chunk",
+		Args:       []ir.Operand{capturedFD, capturedSignal, ir.ConstNumber{Value: 64 * 1024}},
+		ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType, types.TypeNumber},
+	})
+	aborted := g.currentFn.NewValue("fetch_pull_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: aborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{capturedSignal}})
+	abortBB := g.currentFn.NewBlock("fetch_pull_abort")
+	inspectBB := g.currentFn.NewBlock("fetch_pull_inspect")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: aborted, Then: abortBB, Else: inspectBB}
+
+	g.currentBB = abortBB
+	g.finishFetchResponseBody(capturedOwner, capturedFD, capturedStream, capturedCtrl, true)
+	reason := g.currentFn.NewValue("fetch_pull_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: reason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{capturedSignal}})
+	g.routeThrownValue(reason)
+
+	g.currentBB = inspectBB
+	chunkLen := g.currentFn.NewValue("fetch_pull_chunk_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: chunkLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{chunk}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	hasChunk := g.currentFn.NewValue("fetch_pull_has_chunk", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasChunk, Op: ir.OpGt, LHS: chunkLen, RHS: ir.ConstNumber{Value: 0}})
+	chunkBB := g.currentFn.NewBlock("fetch_pull_enqueue_chunk")
+	eofBB := g.currentFn.NewBlock("fetch_pull_eof")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasChunk, Then: chunkBB, Else: eofBB}
+
+	g.currentBB = chunkBB
+	g.appendFetchResponseBodyData(capturedOwner, chunk)
+	g.enqueueFetchResponseBodyChunk(capturedStream, chunk)
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+
+	g.currentBB = eofBB
+	g.finishFetchResponseBody(capturedOwner, capturedFD, capturedStream, capturedCtrl, true)
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+
 	g.prog.Functions = append(g.prog.Functions, lifted)
 	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
 	closure := g.currentFn.NewValue("fetch_body_pull_closure", fnType)
