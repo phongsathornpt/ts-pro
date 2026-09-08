@@ -435,6 +435,107 @@ func (e *Emitter) ShrRegImm8(reg Register, imm byte) {
 	e.emitByte(imm)
 }
 
+// ShrRegCL shifts a 64-bit register right by the count in CL.
+func (e *Emitter) ShrRegCL(reg Register) {
+	e.emitByte(rex(true, false, false, reg >= 8))
+	e.emitByte(0xD3)
+	e.emitByte(modRM(0b11, 5, reg))
+}
+
+// ShlRegImm8 shifts a 64-bit register left by an immediate count.
+func (e *Emitter) ShlRegImm8(reg Register, imm byte) {
+	e.emitByte(rex(true, false, false, reg >= 8))
+	e.emitByte(0xC1)
+	e.emitByte(modRM(0b11, 4, reg))
+	e.emitByte(imm)
+}
+
+// RorReg32Imm8 rotates the low 32 bits right and zero-extends the result.
+func (e *Emitter) RorReg32Imm8(reg Register, imm byte) {
+	if reg >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xC1)
+	e.emitByte(modRM(0b11, 1, reg))
+	e.emitByte(imm)
+}
+
+// ShrReg32Imm8 shifts the low 32 bits right and zero-extends the result.
+func (e *Emitter) ShrReg32Imm8(reg Register, imm byte) {
+	if reg >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xC1)
+	e.emitByte(modRM(0b11, 5, reg))
+	e.emitByte(imm)
+}
+
+// MovRegImm32 writes an unsigned 32-bit immediate to a register.
+func (e *Emitter) MovRegImm32(dst Register, imm uint32) {
+	if dst >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xB8 + (byte(dst) & 0x07))
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], imm)
+	e.Code = append(e.Code, buf[:]...)
+}
+
+func (e *Emitter) MovRegDeref32(dst Register, base Register, disp int32) {
+	if dst >= 8 || base >= 8 {
+		e.emitByte(rex(false, dst >= 8, false, base >= 8))
+	}
+	e.emitByte(0x8B)
+	e.emitBaseDisp(dst, base, disp)
+}
+
+func (e *Emitter) MovDerefReg32(base Register, disp int32, src Register) {
+	if src >= 8 || base >= 8 {
+		e.emitByte(rex(false, src >= 8, false, base >= 8))
+	}
+	e.emitByte(0x89)
+	e.emitBaseDisp(src, base, disp)
+}
+
+func (e *Emitter) AddReg32Reg(dst, src Register) {
+	if src >= 8 || dst >= 8 {
+		e.emitByte(rex(false, src >= 8, false, dst >= 8))
+	}
+	e.emitByte(0x01)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+func (e *Emitter) XorReg32Reg(dst, src Register) {
+	if src >= 8 || dst >= 8 {
+		e.emitByte(rex(false, src >= 8, false, dst >= 8))
+	}
+	e.emitByte(0x31)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+func (e *Emitter) AndReg32Reg(dst, src Register) {
+	if src >= 8 || dst >= 8 {
+		e.emitByte(rex(false, src >= 8, false, dst >= 8))
+	}
+	e.emitByte(0x21)
+	e.emitByte(modRM(0b11, src, dst))
+}
+
+func (e *Emitter) NotReg32(reg Register) {
+	if reg >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitByte(0xF7)
+	e.emitByte(modRM(0b11, 2, reg))
+}
+
+func (e *Emitter) BswapReg32(reg Register) {
+	if reg >= 8 {
+		e.emitByte(rex(false, false, false, true))
+	}
+	e.emitBytes(0x0F, 0xC8+(byte(reg)&0x07))
+}
+
 // Syscall: SYSCALL
 func (e *Emitter) Syscall() {
 	e.emitBytes(0x0F, 0x05)
