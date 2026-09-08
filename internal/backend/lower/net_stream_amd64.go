@@ -712,6 +712,119 @@ func emitAMD64NetHTTPReadHeaders(e *amd64.Emitter, byteBufferNewOffset, byteBuff
 	e.Ret()
 }
 
+func emitAMD64NetHTTPWrite(e *amd64.Emitter, taskYieldOffset int) {
+	// ABI: XMM0=fd, RDI=ByteBuffer, RSI=AbortSignal -> XMM0=bytes written or -1.
+	// The caller keeps ownership of the socket. Writes are capped at 64 KiB per
+	// syscall so large request bodies flow through the transport without a
+	// second header+body wire buffer and without monopolizing the scheduler.
+	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
+	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }
+
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.Push(amd64.R12)
+	e.Push(amd64.R13)
+	e.Push(amd64.R14)
+	e.SubRegImm32(amd64.RSP, 64)
+	e.Cvttsd2si(amd64.R14, amd64.XMM0) // fd
+	e.MovRegReg(amd64.RBX, amd64.RDI)  // request body
+	e.MovRegReg(amd64.R12, amd64.RSI)  // AbortSignal
+	e.MovRegImm64(amd64.R13, 0)        // bytes written
+
+	// Root body and signal while cooperative yields may run arbitrary GC work.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 2)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.RSP, 24, amd64.R12)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	writeLoop := len(e.Code)
+	e.MovRegDeref(amd64.R11, amd64.R12, amd64AbortSignalAborted)
+	e.TestRegReg(amd64.R11, amd64.R11)
+	aborted := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferLength)
+	e.CmpRegReg(amd64.R13, amd64.R10)
+	complete := len(e.Code)
+	e.JccRel32(amd64.CondAE, 0)
+
+	// remaining = len - written; cap each syscall at 64 KiB.
+	e.MovRegReg(amd64.RDX, amd64.R10)
+	e.SubRegReg(amd64.RDX, amd64.R13)
+	e.CmpRegImm32(amd64.RDX, 64*1024)
+	chunkReady := len(e.Code)
+	e.JccRel32(amd64.CondBE, 0)
+	e.MovRegImm64(amd64.RDX, 64*1024)
+	patchJcc(chunkReady, len(e.Code))
+
+	e.MovRegImm64(amd64.RAX, 1) // write
+	e.MovRegReg(amd64.RDI, amd64.R14)
+	e.MovRegDeref(amd64.RSI, amd64.RBX, amd64ByteBufferData)
+	e.AddRegReg(amd64.RSI, amd64.R13)
+	e.Syscall()
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	progress := len(e.Code)
+	e.JccRel32(amd64.CondG, 0)
+
+	var retry []int
+	e.CmpRegImm32(amd64.RAX, 0)
+	zero := len(e.Code)
+	e.JccRel32(amd64.CondE, 0)
+	retry = append(retry, zero)
+	for _, errno := range []int32{-11, -4} { // EAGAIN/EWOULDBLOCK, EINTR
+		e.CmpRegImm32(amd64.RAX, errno)
+		at := len(e.Code)
+		e.JccRel32(amd64.CondE, 0)
+		retry = append(retry, at)
+	}
+	failedJump := len(e.Code)
+	e.JmpRel32(0)
+
+	yieldLabel := len(e.Code)
+	for _, at := range retry {
+		patchJcc(at, yieldLabel)
+	}
+	callYield := len(e.Code)
+	e.CallRel32(int32(taskYieldOffset - (callYield + 5)))
+	yieldBack := len(e.Code)
+	e.JmpRel32(int32(writeLoop - (yieldBack + 5)))
+
+	progressLabel := len(e.Code)
+	patchJcc(progress, progressLabel)
+	e.AddRegReg(amd64.R13, amd64.RAX)
+	progressBack := len(e.Code)
+	e.JmpRel32(int32(writeLoop - (progressBack + 5)))
+
+	success := len(e.Code)
+	patchJcc(complete, success)
+	e.MovRegReg(amd64.RAX, amd64.R13)
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+
+	failure := len(e.Code)
+	patchJcc(aborted, failure)
+	patchJmp(failedJump, failure)
+	e.MovRegImm64(amd64.RAX, -1)
+	e.Cvtsi2sd(amd64.XMM0, amd64.RAX)
+
+	done := len(e.Code)
+	patchJmp(doneJump, done)
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.AddRegImm32(amd64.RSP, 64)
+	e.Pop(amd64.R14)
+	e.Pop(amd64.R13)
+	e.Pop(amd64.R12)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
+}
+
 func emitAMD64NetHTTPReadChunk(e *amd64.Emitter, byteBufferNewOffset, taskYieldOffset int) {
 	patchJcc := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6)))) }
 	patchJmp := func(at, target int) { binary.LittleEndian.PutUint32(e.Code[at+1:], uint32(int32(target-(at+5)))) }

@@ -1158,6 +1158,88 @@ test();
 	})
 }
 
+func TestLinuxAMD64WinterTCFetchLargeRequestBody(t *testing.T) {
+	const size = 200000
+	var gotLen atomic.Int64
+	var first atomic.Int64
+	var last atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		gotLen.Store(int64(len(body)))
+		if len(body) != 0 {
+			first.Store(int64(body[0]))
+			last.Store(int64(body[len(body)-1]))
+		}
+		w.Header().Set("Content-Length", "2")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const body = new Uint8Array(%d);
+  body[0] = 17;
+  body[%d] = 23;
+  const res = await fetch(%q, { method: "POST", body: body });
+  console.log(res.status);
+  console.log(await res.text());
+}
+test();
+`, size, size-1, server.URL+"/upload")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_large_request_body",
+		source:   source,
+		expected: "200\nok\n",
+	})
+	if got := gotLen.Load(); got != size {
+		t.Fatalf("request body length = %d, want %d", got, size)
+	}
+	if got := first.Load(); got != 17 {
+		t.Fatalf("request body first byte = %d, want 17", got)
+	}
+	if got := last.Load(); got != 23 {
+		t.Fatalf("request body last byte = %d, want 23", got)
+	}
+}
+
+func TestLinuxAMD64WinterTCFetchRequestBodyUploadAbort(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		// Intentionally do not consume the request body. Once the kernel send
+		// buffer fills, the client must yield and observe AbortSignal cancellation.
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const body = new Uint8Array(8388608);
+  try {
+    await fetch(%q, { method: "POST", body: body, signal: AbortSignal.timeout(50) });
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/blocked-upload")
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_request_body_upload_abort",
+		source:   source,
+		expected: "TimeoutError\n",
+	})
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("upload abort server hits = %d, want 1", got)
+	}
+}
+
 func TestLinuxAMD64WinterTCFetchRequestNormalization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, r.ContentLength)

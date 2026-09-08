@@ -430,3 +430,33 @@ console.log(g.id);
 	}
 	t.Logf("IR Dump:\n%s", irProg.Dump())
 }
+
+func TestIRGenFetchRequestBodyUsesSeparateTransportWrite(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("fetch_request_stream.ts", []byte(`
+async function send(): Promise<void> {
+  await fetch("http://127.0.0.1:8080/upload", { method: "POST", body: new Uint8Array(200000) });
+}
+send();
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	dump := irProg.Dump()
+	if !strings.Contains(dump, "call @ts_net_http_write") {
+		t.Fatalf("expected request body to use separate transport write, got:\n%s", dump)
+	}
+	if strings.Contains(dump, "fetch_wire_buffer") || strings.Contains(dump, "fetch_wire_len") {
+		t.Fatalf("request lowering still materializes a combined wire buffer:\n%s", dump)
+	}
+}

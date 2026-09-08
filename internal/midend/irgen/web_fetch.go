@@ -231,7 +231,7 @@ func (g *generator) serializeFetchHeaders(headers ir.Operand) ir.Operand {
 	return acc
 }
 
-func (g *generator) buildFetchWireRequest(method, host, port, path, search, headers, body ir.Operand) ir.Operand {
+func (g *generator) buildFetchRequestHeaders(method, host, port, path, search, headers, body ir.Operand) ir.Operand {
 	target := g.concatNativeStrings(path, search)
 	portEmpty := g.urlStringEqual(port, "")
 	hostOnlyBB := g.currentFn.NewBlock("fetch_host_header_no_port")
@@ -262,19 +262,7 @@ func (g *generator) buildFetchWireRequest(method, host, port, path, search, head
 
 	headerBuf := g.currentFn.NewValue("fetch_header_buffer", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: headerBuf, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{requestText}, ParamTypes: []types.Type{types.TypeString}})
-	headerLen := g.currentFn.NewValue("fetch_header_len", types.TypeNumber)
-	totalLen := g.currentFn.NewValue("fetch_wire_len", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.CallInst{Res: headerLen, Callee: "ts_byte_buffer_len", Args: []ir.Operand{headerBuf}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}},
-		&ir.BinaryInst{Res: totalLen, Op: ir.OpAdd, LHS: headerLen, RHS: bodyLen},
-	)
-	wire := g.currentFn.NewValue("fetch_wire_buffer", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.CallInst{Res: wire, Callee: "ts_byte_buffer_new", Args: []ir.Operand{totalLen}, ParamTypes: []types.Type{types.TypeNumber}},
-		&ir.CallInst{Callee: "ts_byte_buffer_copy", Args: []ir.Operand{wire, headerBuf, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: 0}, headerLen}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeNumber}},
-		&ir.CallInst{Callee: "ts_byte_buffer_copy", Args: []ir.Operand{wire, body, headerLen, ir.ConstNumber{Value: 0}, bodyLen}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeNumber}},
-	)
-	return wire
+	return headerBuf
 }
 
 func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal ir.Operand) (ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand, ir.Operand) {
@@ -342,6 +330,16 @@ func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal i
 	ipv6ResolvedBB.Terminator = &ir.JumpTerm{Target: resolveJoin}
 
 	g.currentBB = resolveErr
+	resolveAborted := g.currentFn.NewValue("fetch_resolve_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: resolveAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	resolveAbortBB := g.currentFn.NewBlock("fetch_resolve_abort")
+	resolveNetworkErrBB := g.currentFn.NewBlock("fetch_resolve_network_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: resolveAborted, Then: resolveAbortBB, Else: resolveNetworkErrBB}
+	g.currentBB = resolveAbortBB
+	resolveReason := g.currentFn.NewValue("fetch_resolve_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: resolveReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(resolveReason)
+	g.currentBB = resolveNetworkErrBB
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch host resolution failed"}, ir.ConstString{Value: "TypeError"}))
 
 	g.currentBB = resolveJoin
@@ -352,7 +350,7 @@ func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal i
 		&ir.PhiInst{Res: useIPv6, Incoming: []ir.PhiIncoming{{Block: ipv4ResolvedBB, Value: ir.ConstBool{Value: false}}, {Block: ipv6ResolvedBB, Value: ir.ConstBool{Value: true}}}},
 	)
 
-	requestBuf := g.buildFetchWireRequest(method, host, port, path, search, headers, body)
+	requestHeaders := g.buildFetchRequestHeaders(method, host, port, path, search, headers, body)
 	ipv4TransportBB := g.currentFn.NewBlock("fetch_ipv4_transport")
 	ipv6TransportBB := g.currentFn.NewBlock("fetch_ipv6_transport")
 	transportJoin := g.currentFn.NewBlock("fetch_ip_transport_join")
@@ -360,13 +358,13 @@ func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal i
 
 	g.currentBB = ipv4TransportBB
 	fd4 := g.currentFn.NewValue("fetch_socket_ipv4", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd4, Callee: "ts_net_http_open_ipv4", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd4, Callee: "ts_net_http_open_ipv4", Args: []ir.Operand{address, port, requestHeaders, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	ipv4TransportEnd := g.currentBB
 	ipv4TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
 
 	g.currentBB = ipv6TransportBB
 	fd6 := g.currentFn.NewValue("fetch_socket_ipv6", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd6, Callee: "ts_net_http_open_ipv6", Args: []ir.Operand{address, port, requestBuf, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: fd6, Callee: "ts_net_http_open_ipv6", Args: []ir.Operand{address, port, requestHeaders, signal}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType}})
 	ipv6TransportEnd := g.currentBB
 	ipv6TransportEnd.Terminator = &ir.JumpTerm{Target: transportJoin}
 
@@ -380,9 +378,53 @@ func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal i
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: opened, Then: readResponseBB, Else: openErrBB}
 
 	g.currentBB = openErrBB
+	openAborted := g.currentFn.NewValue("fetch_open_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: openAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	openAbortBB := g.currentFn.NewBlock("fetch_open_abort")
+	openNetworkErrBB := g.currentFn.NewBlock("fetch_open_network_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: openAborted, Then: openAbortBB, Else: openNetworkErrBB}
+	g.currentBB = openAbortBB
+	openReason := g.currentFn.NewValue("fetch_open_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: openReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(openReason)
+	g.currentBB = openNetworkErrBB
 	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch network connection failed"}, ir.ConstString{Value: "TypeError"}))
 
 	g.currentBB = readResponseBB
+	bodyLenForWrite := g.currentFn.NewValue("fetch_request_body_write_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: bodyLenForWrite, Callee: "ts_byte_buffer_len", Args: []ir.Operand{body}, ParamTypes: []types.Type{g.semaResult.ByteBufferType}})
+	hasRequestBodyBytes := g.currentFn.NewValue("fetch_request_has_body_bytes", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: hasRequestBodyBytes, Op: ir.OpGt, LHS: bodyLenForWrite, RHS: ir.ConstNumber{Value: 0}})
+	writeBodyBB := g.currentFn.NewBlock("fetch_request_body_write")
+	readHeadersBB := g.currentFn.NewBlock("fetch_socket_read_headers")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: hasRequestBodyBytes, Then: writeBodyBB, Else: readHeadersBB}
+
+	g.currentBB = writeBodyBB
+	written := g.currentFn.NewValue("fetch_request_body_written", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: written, Callee: "ts_net_http_write", Args: []ir.Operand{fd, body, signal},
+		ParamTypes: []types.Type{types.TypeNumber, g.semaResult.ByteBufferType, g.semaResult.AbortSignalType},
+	})
+	writeOK := g.currentFn.NewValue("fetch_request_body_write_ok", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: writeOK, Op: ir.OpEq, LHS: written, RHS: bodyLenForWrite})
+	writeFailedBB := g.currentFn.NewBlock("fetch_request_body_write_failed")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: writeOK, Then: readHeadersBB, Else: writeFailedBB}
+
+	g.currentBB = writeFailedBB
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_net_http_close", Args: []ir.Operand{fd}, ParamTypes: []types.Type{types.TypeNumber}})
+	writeAborted := g.currentFn.NewValue("fetch_request_body_write_aborted", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: writeAborted, Callee: "ts_abort_signal_aborted", Args: []ir.Operand{signal}})
+	writeAbortBB := g.currentFn.NewBlock("fetch_request_body_write_abort")
+	writeNetworkErrBB := g.currentFn.NewBlock("fetch_request_body_write_network_error")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: writeAborted, Then: writeAbortBB, Else: writeNetworkErrBB}
+	g.currentBB = writeAbortBB
+	writeReason := g.currentFn.NewValue("fetch_request_body_write_abort_reason", types.TypeAny)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: writeReason, Callee: "ts_abort_signal_reason", Args: []ir.Operand{signal}})
+	g.routeThrownValue(writeReason)
+	g.currentBB = writeNetworkErrBB
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch request body write failed"}, ir.ConstString{Value: "TypeError"}))
+
+	g.currentBB = readHeadersBB
 	headerRaw := g.currentFn.NewValue("fetch_raw_headers", g.semaResult.ByteBufferType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.CallInst{Res: headerRaw, Callee: "ts_net_http_read_headers", Args: []ir.Operand{fd, signal}, ParamTypes: []types.Type{types.TypeNumber, g.semaResult.AbortSignalType}},

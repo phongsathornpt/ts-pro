@@ -625,7 +625,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Decode HTTP/1.1 `Transfer-Encoding: chunked` response framing before exposing the body.
     - [x] Back Request/Response bodies with stable ReadableStream objects and enforce disturbed/locked body usability semantics.
     - [x] Resolve fetch before the complete response body arrives and drive the body from live transport/backpressure.
-    - [ ] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
+    - [x] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
   - [ ] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
   - [ ] Finish `Performance` inheritance/surface that depends on EventTarget and verify ECMA-429-required members.
