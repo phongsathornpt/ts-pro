@@ -504,8 +504,10 @@ func (g *generator) lowerHeadersInitValue(initType types.Type, initValue ir.Oper
 			)
 			g.lowerHeadersAppendDirect(headers, g.coerceStringType(pairType.Elem, key), g.coerceStringType(pairType.Elem, value))
 		}
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
-		g.currentBB.Terminator = &ir.JumpTerm{Target: cond}
+		loopEnd := g.currentBB
+		loopEnd.Instructions = append(loopEnd.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: i, RHS: ir.ConstNumber{Value: 1}})
+		loopEnd.Terminator = &ir.JumpTerm{Target: cond}
+		cond.Phis[0].Incoming[1].Block = loopEnd
 		g.currentBB = done
 	}
 	return headers

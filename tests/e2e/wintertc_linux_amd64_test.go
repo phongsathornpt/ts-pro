@@ -2539,3 +2539,102 @@ test();
 		t.Fatal("reader.cancel did not close the live fetch socket")
 	}
 }
+
+func TestLinuxAMD64WinterTCFetchNodeDifferential(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required for WinterTC fetch differential coverage")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/echo":
+			body, _ := io.ReadAll(r.Body)
+			w.Header().Set("X-Server", "echo")
+			payload := r.Method + ":" + string(body)
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+			_, _ = io.WriteString(w, payload)
+		case "/stream":
+			w.Header().Set("Content-Length", "12")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "first-")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(40 * time.Millisecond)
+			_, _ = io.WriteString(w, "second")
+		case "/abort":
+			time.Sleep(80 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	source := fmt.Sprintf(`
+async function test(): Promise<void> {
+  const headers = new Headers([["X-A", "one"], ["x-a", "two"]]);
+  console.log(headers.get("x-a"));
+  headers.set("x-b", " three ");
+  console.log(headers.get("x-b"));
+
+  const request = new Request(%q, { method: "POST", headers: [["X-Req", "yes"]], body: "request-body" });
+  console.log(request.method);
+  console.log(request.url);
+  console.log(request.headers.get("x-req"));
+  const requestClone = request.clone();
+  console.log(await requestClone.text());
+  console.log(request.bodyUsed);
+  console.log(await request.text());
+  console.log(request.bodyUsed);
+
+  const response = new Response("response-body", { status: 201, statusText: "Created", headers: [["X-Res", "ok"]] });
+  console.log(response.status);
+  console.log(response.statusText);
+  console.log(response.headers.get("x-res"));
+  const responseClone = response.clone();
+  console.log(await responseClone.text());
+  console.log(await response.text());
+
+  const fetched = await fetch(%q, { method: "POST", body: "wire" });
+  console.log(fetched.status);
+  console.log(fetched.headers.get("x-server"));
+  console.log(await fetched.text());
+
+  const streamed = await fetch(%q);
+  console.log(streamed.status);
+  const stream = streamed.body ?? new ReadableStream();
+  const reader = stream.getReader();
+  const first = await reader.read();
+  console.log(first.done);
+  console.log(new TextDecoder().decode(first.value));
+  const second = await reader.read();
+  console.log(second.done);
+  console.log(new TextDecoder().decode(second.value));
+  const end = await reader.read();
+  console.log(end.done);
+
+  try {
+    await fetch(%q, { signal: AbortSignal.timeout(5) });
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+test();
+`, server.URL+"/echo", server.URL+"/echo", server.URL+"/stream", server.URL+"/abort")
+
+	referencePath := filepath.Join(t.TempDir(), "fetch_differential.ts")
+	if err := os.WriteFile(referencePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write node differential fixture: %v", err)
+	}
+	nodeOut, err := exec.Command(node, referencePath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node differential reference failed: %v\nOutput:\n%s", err, string(nodeOut))
+	}
+	runLinuxAMD64(t, linuxAMD64Case{
+		name:     "wintertc_fetch_node_differential",
+		source:   source,
+		expected: string(nodeOut),
+	})
+}
