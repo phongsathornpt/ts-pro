@@ -284,7 +284,7 @@ func (g *generator) lowerFetchRoundHeaders(href, method, headers, body, signal i
 	transportErr := g.currentFn.NewBlock("fetch_transport_err")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: isHTTP, Then: transportOK, Else: transportErr}
 	g.currentBB = transportErr
-	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports HTTP over numeric IPv4 only"}, ir.ConstString{Value: "TypeError"}))
+	g.routeThrownValue(g.newWebError(ir.ConstString{Value: "fetch transport currently supports HTTP only; HTTPS/TLS is not implemented"}, ir.ConstString{Value: "TypeError"}))
 	g.currentBB = transportOK
 
 	aborted := g.currentFn.NewValue("fetch_signal_aborted", types.TypeBoolean)

@@ -613,7 +613,8 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Add native network transport abstraction plus deterministic local HTTP integration harness.
     - [x] Add Linux/AMD64 raw HTTP transport primitive and standalone-ELF integration harness.
     - [x] Generalize transport to numeric IPv4, numeric IPv6, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
-    - [ ] Add UDP DNS fallback and TLS/HTTPS transport.
+    - [x] Add UDP DNS fallback from `/etc/resolv.conf` with cooperative cancellation.
+    - [ ] Add TLS/HTTPS transport.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
     - [x] Normalize string/Request input plus RequestInit method/headers/body/signal overrides and emit `User-Agent: ts-pro`.
     - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
