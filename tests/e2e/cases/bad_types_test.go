@@ -1,4 +1,4 @@
-package e2e_test
+package cases_test
 
 import "testing"
 

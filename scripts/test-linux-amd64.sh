@@ -7,7 +7,7 @@ arch="$(uname -m)"
 
 run_native() {
   cd "$repo_dir"
-  CGO_ENABLED=0 go test ./tests/e2e -run '^TestLinuxAMD64' -count=1
+  CGO_ENABLED=0 go test ./tests/e2e/... -run '^TestLinuxAMD64' -count=1
 }
 
 if [[ "$os" == "Linux" && "$arch" == "x86_64" ]]; then
@@ -25,7 +25,7 @@ if [[ "$os" == "Darwin" ]]; then
     -v "$repo_dir:/src" \
     -w /src \
     golang:1.27.1 \
-    go test ./tests/e2e -run '^TestLinuxAMD64' -count=1
+    go test ./tests/e2e/... -run '^TestLinuxAMD64' -count=1
 fi
 
 echo "unsupported host for linux/amd64 execution runner: $os/$arch" >&2

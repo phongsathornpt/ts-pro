@@ -543,5 +543,4 @@ func TestDirectCoverageFinalSprinkles(t *testing.T) {
 	}
 	_ = dPastEnd.Format(fs)
 
-
 }

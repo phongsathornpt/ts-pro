@@ -1,8 +1,8 @@
 package e2e_test
 
 import (
-	"strings"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/phongsathornpt/ts-pro/internal/backend/lower"
@@ -498,22 +498,6 @@ func TestIRGenTemplateCoercionAndExceptions(t *testing.T) {
 		}
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 func TestE2EIRGenErrorBranches(t *testing.T) {
 	fs := source.NewFileSet()
