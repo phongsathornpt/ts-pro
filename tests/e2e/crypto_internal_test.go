@@ -396,3 +396,159 @@ func TestLinuxAMD64InternalAES128GCM(t *testing.T) {
 	prog.Functions = append(prog.Functions, fn)
 	runInternalAMD64IR(t, prog, "aes-128-gcm-afalg", want.String())
 }
+
+func TestLinuxAMD64InternalTLS13KDFAndNonce(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("requires linux/amd64 execution")
+	}
+	wantKey, _ := hex.DecodeString("41bad7ea872fee55da270034f38b9e87")
+	wantNonce, _ := hex.DecodeString("00010203040507050b0d0f0d")
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	bb := fn.NewBlock("entry")
+	bufType := types.NewObject("$ByteBuffer")
+	newLiteral := func(name string, data []byte) *ir.Value {
+		buf := fn.NewValue(name, bufType)
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{
+			Res: buf, Callee: "ts_byte_buffer_new",
+			Args: []ir.Operand{ir.ConstNumber{Value: float64(len(data))}}, ParamTypes: []types.Type{types.TypeNumber},
+		})
+		for i, b := range data {
+			bb.Instructions = append(bb.Instructions, &ir.CallInst{
+				Callee:     "ts_byte_buffer_set",
+				Args:       []ir.Operand{buf, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(b)}},
+				ParamTypes: []types.Type{bufType, types.TypeNumber, types.TypeNumber},
+			})
+		}
+		return buf
+	}
+	secretBytes := make([]byte, 32)
+	for i := range secretBytes {
+		secretBytes[i] = byte(i)
+	}
+	ivBytes := make([]byte, 12)
+	for i := range ivBytes {
+		ivBytes[i] = byte(i)
+	}
+	secret := newLiteral("tls_secret", secretBytes)
+	label := newLiteral("tls_label", []byte("key"))
+	context := newLiteral("tls_context", make([]byte, 32))
+	iv := newLiteral("tls_iv", ivBytes)
+	derived := fn.NewValue("tls_derived", bufType)
+	nonce := fn.NewValue("tls_nonce", bufType)
+	bb.Instructions = append(bb.Instructions,
+		&ir.CallInst{Res: derived, Callee: "ts_tls13_hkdf_expand_label", Args: []ir.Operand{secret, label, context, ir.ConstNumber{Value: 16}}, ParamTypes: []types.Type{bufType, bufType, bufType, types.TypeNumber}},
+		&ir.CallInst{Res: nonce, Callee: "ts_tls13_nonce", Args: []ir.Operand{iv, ir.ConstNumber{Value: 1108152157446}}, ParamTypes: []types.Type{bufType, types.TypeNumber}},
+	)
+	var want strings.Builder
+	for _, item := range []struct {
+		buf   *ir.Value
+		bytes []byte
+	}{{derived, wantKey}, {nonce, wantNonce}} {
+		for i, b := range item.bytes {
+			v := fn.NewValue("tls_kdf_byte", types.TypeNumber)
+			bb.Instructions = append(bb.Instructions,
+				&ir.CallInst{Res: v, Callee: "ts_byte_buffer_get", Args: []ir.Operand{item.buf, ir.ConstNumber{Value: float64(i)}}, ParamTypes: []types.Type{bufType, types.TypeNumber}},
+				&ir.CallInst{Callee: "ts_print_val", Args: []ir.Operand{v}, ParamTypes: []types.Type{types.TypeNumber}},
+			)
+			want.WriteString(formatByte(b))
+		}
+	}
+	bb.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+	runInternalAMD64IR(t, prog, "tls13-kdf-nonce", want.String())
+}
+
+func TestLinuxAMD64InternalTLS13EncryptRecord(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("requires linux/amd64 execution")
+	}
+	const expected = "170303001a6277276bcaad992e148d1273b5aeeb64d37ff9781dfd3844a01c"
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	bb := fn.NewBlock("entry")
+	bufType := types.NewObject("$ByteBuffer")
+	key := fn.NewValue("tls_key", bufType)
+	iv := fn.NewValue("tls_iv", bufType)
+	content := fn.NewValue("tls_content", bufType)
+	record := fn.NewValue("tls_record", bufType)
+	bb.Instructions = append(bb.Instructions,
+		&ir.CallInst{Res: key, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: 16}}, ParamTypes: []types.Type{types.TypeNumber}},
+		&ir.CallInst{Res: iv, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: 12}}, ParamTypes: []types.Type{types.TypeNumber}},
+	)
+	for i := 0; i < 16; i++ {
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{Callee: "ts_byte_buffer_set", Args: []ir.Operand{key, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(i)}}, ParamTypes: []types.Type{bufType, types.TypeNumber, types.TypeNumber}})
+	}
+	for i := 0; i < 12; i++ {
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{Callee: "ts_byte_buffer_set", Args: []ir.Operand{iv, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(i)}}, ParamTypes: []types.Type{bufType, types.TypeNumber, types.TypeNumber}})
+	}
+	bb.Instructions = append(bb.Instructions,
+		&ir.CallInst{Res: content, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{ir.ConstString{Value: "hello tls"}}, ParamTypes: []types.Type{types.TypeString}},
+		&ir.CallInst{Res: record, Callee: "ts_tls13_encrypt_record", Args: []ir.Operand{key, iv, content, ir.ConstNumber{Value: 22}, ir.ConstNumber{Value: 7}}, ParamTypes: []types.Type{bufType, bufType, bufType, types.TypeNumber, types.TypeNumber}},
+	)
+	decoded, err := hex.DecodeString(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want strings.Builder
+	for i, b := range decoded {
+		v := fn.NewValue("tls_record_byte", types.TypeNumber)
+		bb.Instructions = append(bb.Instructions,
+			&ir.CallInst{Res: v, Callee: "ts_byte_buffer_get", Args: []ir.Operand{record, ir.ConstNumber{Value: float64(i)}}, ParamTypes: []types.Type{bufType, types.TypeNumber}},
+			&ir.CallInst{Callee: "ts_print_val", Args: []ir.Operand{v}, ParamTypes: []types.Type{types.TypeNumber}},
+		)
+		want.WriteString(formatByte(b))
+	}
+	bb.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+	runInternalAMD64IR(t, prog, "tls13-encrypt-record", want.String())
+}
+
+func TestLinuxAMD64InternalTLS13DecryptRecord(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("requires linux/amd64 execution")
+	}
+	const recordHex = "170303001a6277276bcaad992e148d1273b5aeeb64d37ff9781dfd3844a01c"
+	recordBytes, err := hex.DecodeString(recordHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := &ir.Program{}
+	fn := ir.NewFunction("@main", types.TypeVoid)
+	bb := fn.NewBlock("entry")
+	bufType := types.NewObject("$ByteBuffer")
+	newBytes := func(name string, data []byte) *ir.Value {
+		buf := fn.NewValue(name, bufType)
+		bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: buf, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: float64(len(data))}}, ParamTypes: []types.Type{types.TypeNumber}})
+		for i, b := range data {
+			bb.Instructions = append(bb.Instructions, &ir.CallInst{Callee: "ts_byte_buffer_set", Args: []ir.Operand{buf, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(b)}}, ParamTypes: []types.Type{bufType, types.TypeNumber, types.TypeNumber}})
+		}
+		return buf
+	}
+	keyBytes := make([]byte, 16)
+	ivBytes := make([]byte, 12)
+	for i := range keyBytes {
+		keyBytes[i] = byte(i)
+	}
+	for i := range ivBytes {
+		ivBytes[i] = byte(i)
+	}
+	key := newBytes("tls_key", keyBytes)
+	iv := newBytes("tls_iv", ivBytes)
+	record := newBytes("tls_record", recordBytes)
+	plain := fn.NewValue("tls_plain", bufType)
+	bb.Instructions = append(bb.Instructions, &ir.CallInst{Res: plain, Callee: "ts_tls13_decrypt_record", Args: []ir.Operand{key, iv, record, ir.ConstNumber{Value: 7}}, ParamTypes: []types.Type{bufType, bufType, bufType, types.TypeNumber}})
+	wantBytes := append([]byte("hello tls"), byte(22))
+	var want strings.Builder
+	for i, b := range wantBytes {
+		v := fn.NewValue("tls_plain_byte", types.TypeNumber)
+		bb.Instructions = append(bb.Instructions,
+			&ir.CallInst{Res: v, Callee: "ts_byte_buffer_get", Args: []ir.Operand{plain, ir.ConstNumber{Value: float64(i)}}, ParamTypes: []types.Type{bufType, types.TypeNumber}},
+			&ir.CallInst{Callee: "ts_print_val", Args: []ir.Operand{v}, ParamTypes: []types.Type{types.TypeNumber}},
+		)
+		want.WriteString(formatByte(b))
+	}
+	bb.Terminator = &ir.ReturnTerm{}
+	prog.Functions = append(prog.Functions, fn)
+	runInternalAMD64IR(t, prog, "tls13-decrypt-record", want.String())
+}
