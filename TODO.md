@@ -615,6 +615,11 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Generalize transport to numeric IPv4, numeric IPv6, `localhost`, and `/etc/hosts` IPv4 resolution while preserving cooperative cancellation.
     - [x] Add UDP DNS fallback from `/etc/resolv.conf` with cooperative cancellation.
     - [ ] Add TLS/HTTPS transport.
+      - [x] Add native TLS 1.3 crypto foundation: SHA-256/HMAC/HKDF, X25519, OS entropy, and AES-128-GCM via AF_ALG.
+      - [x] Add TLS 1.3 HKDF-Expand-Label, sequence nonces, and authenticated record encrypt/decrypt primitives.
+      - [ ] Add ClientHello/ServerHello handshake transcript and traffic-secret derivation.
+      - [ ] Add certificate-chain/hostname authentication against system trust roots.
+      - [ ] Wire encrypted application records into live fetch streaming, cancellation, and HTTPS E2E coverage.
   - [ ] Implement `fetch()` request normalization, redirects, AbortSignal cancellation, streaming request/response bodies, and server-runtime `User-Agent`.
     - [x] Normalize string/Request input plus RequestInit method/headers/body/signal overrides and emit `User-Agent: ts-pro`.
     - [x] Parse response headers including duplicate combination and `set-cookie` preservation.
