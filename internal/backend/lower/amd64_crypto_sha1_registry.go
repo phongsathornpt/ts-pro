@@ -7,4 +7,6 @@ func emitAMD64SHA1RuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
 	emitAMD64SHA1Compress(e)
 	fnOffsets["ts_crypto_sha1"] = len(e.Code)
 	emitAMD64SHA1(e, fnOffsets["ts_crypto_sha1_compress"], fnOffsets["ts_byte_buffer_new"])
+	fnOffsets["ts_crypto_hmac_sha1"] = len(e.Code)
+	emitAMD64HMACSHA1(e, fnOffsets["ts_crypto_sha1"], fnOffsets["ts_byte_buffer_new"])
 }
