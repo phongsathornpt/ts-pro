@@ -58,8 +58,8 @@ func (g *generator) lowerWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) 
 
 	g.currentBB = copyBB
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Callee: "ts_byte_buffer_copy",
-		Args: []ir.Operand{data, random, offset, ir.ConstNumber{Value: 0}, length},
+		Callee:     "ts_byte_buffer_copy",
+		Args:       []ir.Operand{data, random, offset, ir.ConstNumber{Value: 0}, length},
 		ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber, types.TypeNumber},
 	})
 	return view, true
