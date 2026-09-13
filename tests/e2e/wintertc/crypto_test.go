@@ -119,6 +119,32 @@ main();
 	})
 }
 
+func TestSubtleCryptoDigestSHA384AndSHA512(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "subtle_crypto_digest_sha384_sha512",
+		source: `async function main(): Promise<void> {
+  const encoded = new TextEncoder().encode("abc");
+
+  const sha384 = new Uint8Array(await crypto.subtle.digest("sHa-384", encoded));
+  console.log(sha384.length);
+  console.log(sha384[0]);
+  console.log(sha384[1]);
+  console.log(sha384[46]);
+  console.log(sha384[47]);
+
+  const sha512 = new Uint8Array(await crypto.subtle.digest({ name: "ShA-512" }, encoded.buffer));
+  console.log(sha512.length);
+  console.log(sha512[0]);
+  console.log(sha512[1]);
+  console.log(sha512[62]);
+  console.log(sha512[63]);
+}
+main();
+`,
+		expected: "48\n203\n0\n37\n167\n64\n221\n175\n164\n159\n",
+	})
+}
+
 func TestSubtleCryptoDigestRejectsInvalidDataType(t *testing.T) {
 	harness.RunBad(t, harness.BadCase{
 		Name:         "subtle_crypto_digest_invalid_data",
