@@ -1,6 +1,11 @@
 package wintertc_test
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/phongsathornpt/ts-pro/tests/e2e/harness"
+)
 
 func TestCryptoGetRandomValues(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
@@ -40,4 +45,58 @@ try {
 `,
 		expected: "true\n11\n22\n33\n44\ntrue\n65536\n0\nQuotaExceededError\n",
 	})
+}
+
+func TestCryptoRandomUUID(t *testing.T) {
+	out, executed := harness.RunLinuxAMD64Output(t, "crypto_random_uuid", `console.log(crypto.randomUUID());
+console.log(crypto.randomUUID());
+`)
+	if !executed {
+		return
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("randomUUID stdout lines: got %d, want 2: %q", len(lines), out)
+	}
+	for _, uuid := range lines {
+		if !isCanonicalUUIDV4(uuid) {
+			t.Fatalf("randomUUID returned non-canonical UUID v4: %q", uuid)
+		}
+	}
+}
+
+func TestCryptoRandomUUIDRejectsArguments(t *testing.T) {
+	harness.RunBad(t, harness.BadCase{
+		Name:         "crypto_random_uuid_arguments",
+		Source:       `crypto.randomUUID(1);`,
+		ExpectedCode: "TS2554",
+		ExpectedSub:  "crypto.randomUUID expects no arguments",
+	})
+}
+
+func isCanonicalUUIDV4(uuid string) bool {
+	if len(uuid) != 36 {
+		return false
+	}
+	for _, index := range []int{8, 13, 18, 23} {
+		if uuid[index] != '-' {
+			return false
+		}
+	}
+	if uuid[14] != '4' {
+		return false
+	}
+	if !strings.ContainsRune("89ab", rune(uuid[19])) {
+		return false
+	}
+	for i := 0; i < len(uuid); i++ {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdef", rune(uuid[i])) {
+			return false
+		}
+	}
+	return true
 }
