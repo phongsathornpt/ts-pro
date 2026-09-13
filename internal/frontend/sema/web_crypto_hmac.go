@@ -66,12 +66,25 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 	}
 	for i, param := range fnType.Params {
 		actual := c.checkExpr(e.Args[i])
+		if member.Property == "importKey" && i == 2 {
+			c.materializeHMACImportOptionals(actual)
+		}
 		if !actual.AssignableTo(param.Type) {
 			c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("crypto.subtle.%s argument %q has type %s; expected %s.", member.Property, param.Name, actual.String(), param.Type.String()))
 		}
 	}
 	c.result.Types[e] = resultType
 	return resultType, true
+}
+
+func (c *Checker) materializeHMACImportOptionals(actual types.Type) {
+	obj, ok := actual.(*types.ObjectType)
+	if !ok {
+		return
+	}
+	if _, exists := obj.Fields["length"]; !exists {
+		obj.AddField("length", types.TypeNumber, true)
+	}
 }
 
 func (c *Checker) cryptoBufferSourceType() types.Type {
