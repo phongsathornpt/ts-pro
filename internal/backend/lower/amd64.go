@@ -48,7 +48,6 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 		return nil, err
 	}
 
-	// Emit ts_print_val for Linux AMD64
 	fnOffsets["ts_print_val"] = len(e.Code)
 	emitAMD64PrintValV2(e)
 
@@ -63,7 +62,6 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	fnOffsets["ts_print_null"] = len(e.Code)
 	emitAMD64PrintLiteral(e, "null\n")
 
-	// Emit ts_print_str for Linux AMD64
 	fnOffsets["ts_print_str"] = len(e.Code)
 	emitAMD64PrintStr(e)
 	fnOffsets["ts_print_object"] = len(e.Code)
@@ -96,6 +94,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	emitAMD64RuntimeSymbols(e, fnOffsets)
 	emitAMD64SHA2RuntimeSymbols(e, fnOffsets)
+	emitAMD64SHA1RuntimeSymbols(e, fnOffsets)
 
 	return finalizeAMD64(e, fnOffsets, strFixups, closureCodeFixups, callFixups, branchFixups, bbOffsets)
 }
