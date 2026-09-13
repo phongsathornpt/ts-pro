@@ -133,8 +133,8 @@ func (g *generator) setUUIDVersionAndVariant(random ir.Operand) {
 		&ir.BinaryInst{Res: versionLowNibble, Op: ir.OpMod, LHS: versionByte, RHS: ir.ConstNumber{Value: 16}},
 		&ir.BinaryInst{Res: versionValue, Op: ir.OpAdd, LHS: versionLowNibble, RHS: ir.ConstNumber{Value: 64}},
 		&ir.CallInst{
-			Callee: "ts_byte_buffer_set",
-			Args: []ir.Operand{random, ir.ConstNumber{Value: 6}, versionValue},
+			Callee:     "ts_byte_buffer_set",
+			Args:       []ir.Operand{random, ir.ConstNumber{Value: 6}, versionValue},
 			ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber},
 		},
 	)
@@ -146,8 +146,8 @@ func (g *generator) setUUIDVersionAndVariant(random ir.Operand) {
 		&ir.BinaryInst{Res: variantLowBits, Op: ir.OpMod, LHS: variantByte, RHS: ir.ConstNumber{Value: 64}},
 		&ir.BinaryInst{Res: variantValue, Op: ir.OpAdd, LHS: variantLowBits, RHS: ir.ConstNumber{Value: 128}},
 		&ir.CallInst{
-			Callee: "ts_byte_buffer_set",
-			Args: []ir.Operand{random, ir.ConstNumber{Value: 8}, variantValue},
+			Callee:     "ts_byte_buffer_set",
+			Args:       []ir.Operand{random, ir.ConstNumber{Value: 8}, variantValue},
 			ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber},
 		},
 	)
