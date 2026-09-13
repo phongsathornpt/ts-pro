@@ -56,8 +56,13 @@ jobs:
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tfnType := sym.Type.(*types.FunctionType)\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tif sym == nil {\n\t\t\treturn g.failExpr("identifier %q has no lowerable symbol", e.Name)\n\t\t}\n\t\tfnType, ok := sym.Type.(*types.FunctionType)\n\t\tif !ok {\n\t\t\treturn g.failExpr("identifier %q is not a lowerable function", e.Name)\n\t\t}\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
           )
+          replace(
+              'internal/midend/irgen/calls.go',
+              '\tif isConsoleLogCall(e.Callee) {\n\t\treturn g.lowerConsoleLog(e.Args[0])\n\t}\n',
+              '\tif isConsoleLogCall(e.Callee) {\n\t\tif len(e.Args) != 1 {\n\t\t\treturn g.failExpr("console.log lowering expects exactly one argument")\n\t\t}\n\t\treturn g.lowerConsoleLog(e.Args[0])\n\t}\n',
+          )
           PY
-          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/statements.go internal/frontend/sema/sema.go internal/midend/irgen/expressions.go
+          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/statements.go internal/frontend/sema/sema.go internal/midend/irgen/expressions.go internal/midend/irgen/calls.go
       - name: Validate fixes
         env:
           GOTOOLCHAIN: local
