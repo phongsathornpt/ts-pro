@@ -54,7 +54,7 @@ func TestSubtleCryptoHMACRejections(t *testing.T) {
   const data = encoder.encode("abc");
 
   try {
-    await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
+    await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-3" }, false, ["sign"]);
     console.log("unexpected");
   } catch (err: any) {
     console.log(err.name);
