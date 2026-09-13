@@ -11,6 +11,9 @@ import (
 
 func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 	if member, ok := e.Callee.(*ast.MemberExpr); ok {
+		if result, handled := g.lowerWebCryptoCall(e, member); handled {
+			return result
+		}
 		if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" {
 			switch member.Property {
 			case "now":
