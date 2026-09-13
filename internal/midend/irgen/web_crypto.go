@@ -90,23 +90,7 @@ func (g *generator) lowerCryptoRandomUUID() ir.Operand {
 
 	g.currentBB = formatBB
 	g.setUUIDVersionAndVariant(random)
-
-	var uuid ir.Operand
-	appendPart := func(part ir.Operand) {
-		if uuid == nil {
-			uuid = part
-			return
-		}
-		uuid = g.concatNativeStrings(uuid, part)
-	}
-
-	for i := 0; i < uuidByteCount; i++ {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			appendPart(ir.ConstString{Value: "-"})
-		}
-		appendPart(g.uuidHexByte(random, i))
-	}
-	return uuid
+	return g.formatUUID(random)
 }
 
 func (g *generator) emitSecureRandomBytes(length ir.Operand, prefix string) ir.Operand {
@@ -153,43 +137,67 @@ func (g *generator) setUUIDVersionAndVariant(random ir.Operand) {
 	)
 }
 
+func (g *generator) formatUUID(random ir.Operand) ir.Operand {
+	hexLookup := g.currentFn.NewValue("crypto_uuid_hex_lookup", g.semaResult.ByteBufferType)
+	output := g.currentFn.NewValue("crypto_uuid_output", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.CallInst{
+			Res: hexLookup, Callee: "ts_byte_buffer_from_utf8_string", Args: []ir.Operand{ir.ConstString{Value: "0123456789abcdef"}}, ParamTypes: []types.Type{types.TypeString},
+		},
+		&ir.CallInst{
+			Res: output, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: 36}}, ParamTypes: []types.Type{types.TypeNumber},
+		},
+	)
+
+	outputIndex := 0
+	for inputIndex := 0; inputIndex < 16; inputIndex++ {
+		if inputIndex == 4 || inputIndex == 6 || inputIndex == 8 || inputIndex == 10 {
+			g.setByteBufferNumber(output, outputIndex, ir.ConstNumber{Value: 45})
+			outputIndex++
+		}
+
+		value := g.byteBufferNumber(random, inputIndex, "crypto_uuid_byte")
+		low := g.currentFn.NewValue("crypto_uuid_low", types.TypeNumber)
+		highBase := g.currentFn.NewValue("crypto_uuid_high_base", types.TypeNumber)
+		high := g.currentFn.NewValue("crypto_uuid_high", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions,
+			&ir.BinaryInst{Res: low, Op: ir.OpMod, LHS: value, RHS: ir.ConstNumber{Value: 16}},
+			&ir.BinaryInst{Res: highBase, Op: ir.OpSub, LHS: value, RHS: low},
+			&ir.BinaryInst{Res: high, Op: ir.OpDiv, LHS: highBase, RHS: ir.ConstNumber{Value: 16}},
+		)
+
+		highASCII := g.byteBufferNumberAt(hexLookup, high, "crypto_uuid_high_ascii")
+		lowASCII := g.byteBufferNumberAt(hexLookup, low, "crypto_uuid_low_ascii")
+		g.setByteBufferNumber(output, outputIndex, highASCII)
+		g.setByteBufferNumber(output, outputIndex+1, lowASCII)
+		outputIndex += 2
+	}
+
+	uuid := g.currentFn.NewValue("crypto_uuid_string", types.TypeString)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: uuid, Callee: "ts_byte_buffer_to_utf8_string", Args: []ir.Operand{output}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
+	})
+	return uuid
+}
+
 func (g *generator) byteBufferNumber(buffer ir.Operand, index int, name string) ir.Operand {
+	return g.byteBufferNumberAt(buffer, ir.ConstNumber{Value: float64(index)}, name)
+}
+
+func (g *generator) byteBufferNumberAt(buffer, index ir.Operand, name string) ir.Operand {
 	value := g.currentFn.NewValue(name, types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
 		Res: value, Callee: "ts_byte_buffer_get",
-		Args:       []ir.Operand{buffer, ir.ConstNumber{Value: float64(index)}},
+		Args:       []ir.Operand{buffer, index},
 		ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber},
 	})
 	return value
 }
 
-func (g *generator) uuidHexByte(buffer ir.Operand, index int) ir.Operand {
-	value := g.byteBufferNumber(buffer, index, "crypto_uuid_byte")
-	low := g.currentFn.NewValue("crypto_uuid_low", types.TypeNumber)
-	highBase := g.currentFn.NewValue("crypto_uuid_high_base", types.TypeNumber)
-	high := g.currentFn.NewValue("crypto_uuid_high", types.TypeNumber)
-	highEnd := g.currentFn.NewValue("crypto_uuid_high_end", types.TypeNumber)
-	lowEnd := g.currentFn.NewValue("crypto_uuid_low_end", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.BinaryInst{Res: low, Op: ir.OpMod, LHS: value, RHS: ir.ConstNumber{Value: 16}},
-		&ir.BinaryInst{Res: highBase, Op: ir.OpSub, LHS: value, RHS: low},
-		&ir.BinaryInst{Res: high, Op: ir.OpDiv, LHS: highBase, RHS: ir.ConstNumber{Value: 16}},
-		&ir.BinaryInst{Res: highEnd, Op: ir.OpAdd, LHS: high, RHS: ir.ConstNumber{Value: 1}},
-		&ir.BinaryInst{Res: lowEnd, Op: ir.OpAdd, LHS: low, RHS: ir.ConstNumber{Value: 1}},
-	)
-
-	digits := ir.ConstString{Value: "0123456789abcdef"}
-	highDigit := g.currentFn.NewValue("crypto_uuid_high_digit", types.TypeString)
-	lowDigit := g.currentFn.NewValue("crypto_uuid_low_digit", types.TypeString)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
-		&ir.CallInst{
-			Res: highDigit, Callee: "ts_string_slice", Args: []ir.Operand{digits, high, highEnd},
-			ParamTypes: []types.Type{types.TypeString, types.TypeNumber, types.TypeNumber},
-		},
-		&ir.CallInst{
-			Res: lowDigit, Callee: "ts_string_slice", Args: []ir.Operand{digits, low, lowEnd},
-			ParamTypes: []types.Type{types.TypeString, types.TypeNumber, types.TypeNumber},
-		},
-	)
-	return g.concatNativeStrings(highDigit, lowDigit)
+func (g *generator) setByteBufferNumber(buffer ir.Operand, index int, value ir.Operand) {
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Callee:     "ts_byte_buffer_set",
+		Args:       []ir.Operand{buffer, ir.ConstNumber{Value: float64(index)}, value},
+		ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber},
+	})
 }
