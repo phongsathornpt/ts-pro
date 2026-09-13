@@ -73,6 +73,7 @@ func TestE2E_Bad_CLI(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := exec.Command(cliBin, tc.args...)
 			cmd.Dir = root
 			out, err := cmd.CombinedOutput()

@@ -1,13 +1,16 @@
 GO ?= go
 BIN ?= build/ts-pro
 
-.PHONY: fmt test test-linux-amd64 vet build pure-go-build check doctor bench-performance clean
+.PHONY: fmt test test-performance test-linux-amd64 vet build pure-go-build check doctor bench-performance clean
 
 fmt:
 	$(GO) fmt ./...
 
 test:
 	CGO_ENABLED=0 $(GO) test ./...
+
+test-performance:
+	bash ./scripts/test-performance.sh all
 
 test-linux-amd64:
 	./scripts/test-linux-amd64.sh

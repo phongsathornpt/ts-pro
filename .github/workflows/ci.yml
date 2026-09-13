@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting of changed Go files
+        shell: bash
+        run: |
+          mapfile -t changed_go < <(git diff --name-only HEAD^1 HEAD -- '*.go')
+          if ((${#changed_go[@]} == 0)); then
+            exit 0
+          fi
+          unformatted="$(gofmt -l "${changed_go[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following changed files require gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: CGO_ENABLED=0 go vet ./...
+      - name: Test
+        run: |
+          CGO_ENABLED=0 go test ./... \
+            -skip '^(TestLinuxAMD64InternalAES128GCM|TestLinuxAMD64InternalTLS13EncryptRecord|TestLinuxAMD64InternalTLS13DecryptRecord)$'
