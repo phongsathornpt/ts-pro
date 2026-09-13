@@ -6,17 +6,23 @@ import (
 )
 
 func (c *Checker) checkWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
-	ident, ok := member.Object.(*ast.IdentExpr)
-	if !ok || ident.Name != "crypto" {
-		return nil, false
+	if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "crypto" {
+		return c.checkCryptoCall(e, member)
 	}
+	if subtle, ok := member.Object.(*ast.MemberExpr); ok && subtle.Property == "subtle" {
+		ident, ok := subtle.Object.(*ast.IdentExpr)
+		if ok && ident.Name == "crypto" && member.Property == "digest" {
+			return c.checkSubtleCryptoDigestCall(e, subtle, member)
+		}
+	}
+	return nil, false
+}
 
+func (c *Checker) checkCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
 	arrayType := c.builtinUint8ArrayType()
 	getRandomValuesType := types.NewFunction([]types.Param{{Name: "array", Type: arrayType}}, arrayType)
 	randomUUIDType := types.NewFunction([]types.Param{}, types.TypeString)
-	cryptoType := types.NewObject("$Crypto")
-	cryptoType.AddField("getRandomValues", getRandomValuesType, false)
-	cryptoType.AddField("randomUUID", randomUUIDType, false)
+	cryptoType := c.builtinCryptoType()
 
 	var memberType *types.FunctionType
 	switch member.Property {
@@ -55,4 +61,52 @@ func (c *Checker) checkWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (t
 	}
 
 	return nil, false
+}
+
+func (c *Checker) checkSubtleCryptoDigestCall(e *ast.CallExpr, subtle, member *ast.MemberExpr) (types.Type, bool) {
+	arrayBufferType := c.builtinArrayBufferType()
+	uint8ArrayType := c.builtinUint8ArrayType()
+	bufferSourceType := types.NewUnion(arrayBufferType, uint8ArrayType)
+	algorithmObjectType := types.NewObject("$CryptoAlgorithm")
+	algorithmObjectType.AddField("name", types.TypeString, false)
+	algorithmType := types.NewUnion(types.TypeString, algorithmObjectType)
+	resultType := c.newPromiseType(arrayBufferType)
+	digestType := types.NewFunction([]types.Param{
+		{Name: "algorithm", Type: algorithmType},
+		{Name: "data", Type: bufferSourceType},
+	}, resultType)
+
+	cryptoType := c.builtinCryptoType()
+	subtleType := types.NewObject("$SubtleCrypto")
+	subtleType.AddField("digest", digestType, false)
+	c.result.Types[subtle.Object] = cryptoType
+	c.result.Types[subtle] = subtleType
+	c.result.Types[member] = digestType
+	c.builtinDOMExceptionType()
+
+	if len(e.Args) != 2 {
+		c.error(e.Span(), "TS2554", "crypto.subtle.digest expects exactly two arguments.")
+		c.result.Types[e] = resultType
+		return resultType, true
+	}
+
+	actualAlgorithmType := c.checkExpr(e.Args[0])
+	if !actualAlgorithmType.AssignableTo(algorithmType) {
+		c.error(e.Args[0].Span(), "TS2345", "crypto.subtle.digest algorithm must be a string or an object with a string name.")
+	}
+	dataType := c.checkExpr(e.Args[1])
+	if !dataType.AssignableTo(bufferSourceType) {
+		c.error(e.Args[1].Span(), "TS2345", "crypto.subtle.digest expects ArrayBuffer or Uint8Array data.")
+	}
+	c.result.Types[e] = resultType
+	return resultType, true
+}
+
+func (c *Checker) builtinCryptoType() *types.ObjectType {
+	arrayType := c.builtinUint8ArrayType()
+	cryptoType := types.NewObject("$Crypto")
+	cryptoType.AddField("getRandomValues", types.NewFunction([]types.Param{{Name: "array", Type: arrayType}}, arrayType), false)
+	cryptoType.AddField("randomUUID", types.NewFunction(nil, types.TypeString), false)
+	cryptoType.AddField("subtle", types.NewObject("$SubtleCrypto"), false)
+	return cryptoType
 }
