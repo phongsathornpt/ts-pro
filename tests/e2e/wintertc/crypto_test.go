@@ -1,4 +1,4 @@
-package wintertc
+package wintertc_test
 
 import "testing"
 
