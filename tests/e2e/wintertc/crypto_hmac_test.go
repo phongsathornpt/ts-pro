@@ -16,7 +16,7 @@ func TestSubtleCryptoHMACSHA256(t *testing.T) {
     encoder.encode("key"),
     { name: "hMaC", hash: "sHa-256" },
     false,
-    ["sign", "verify"],
+    ["sign", "verify"]
   );
 
   console.log(key.type);
