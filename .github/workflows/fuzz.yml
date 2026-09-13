@@ -2,6 +2,9 @@ name: Compiler Fuzz
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - test/reliability-ir-backend-fuzz
   schedule:
     - cron: "17 3 * * *"
 
@@ -9,6 +12,25 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        env:
+          GOTOOLCHAIN: local
+        run: CGO_ENABLED=0 go vet ./...
+      - name: Test
+        env:
+          GOTOOLCHAIN: local
+        run: CGO_ENABLED=0 go test ./...
+
   fuzz:
     runs-on: ubuntu-latest
     timeout-minutes: 10
