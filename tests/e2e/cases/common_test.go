@@ -21,6 +21,7 @@ type badCase struct {
 
 func runHappy(t *testing.T, tc happyCase) {
 	t.Helper()
+	t.Parallel()
 	harness.RunHappy(t, harness.HappyCase{
 		Name:     tc.name,
 		Source:   tc.source,
@@ -30,6 +31,7 @@ func runHappy(t *testing.T, tc happyCase) {
 
 func runBad(t *testing.T, tc badCase) {
 	t.Helper()
+	t.Parallel()
 	harness.RunBad(t, harness.BadCase{
 		Name:         tc.name,
 		Source:       tc.source,
