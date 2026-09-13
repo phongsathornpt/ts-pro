@@ -27,6 +27,10 @@ for (let i = 2; i < 34; i = i + 1) {
 }
 console.log(changed);
 
+const maximum = new Uint8Array(65536);
+console.log(crypto.getRandomValues(maximum).length);
+console.log(crypto.getRandomValues(new Uint8Array(0)).length);
+
 try {
   crypto.getRandomValues(new Uint8Array(65537));
   console.log("unexpected");
@@ -34,6 +38,6 @@ try {
   console.log(err.name);
 }
 `,
-		expected: "true\n11\n22\n33\n44\ntrue\nQuotaExceededError\n",
+		expected: "true\n11\n22\n33\n44\ntrue\n65536\n0\nQuotaExceededError\n",
 	})
 }
