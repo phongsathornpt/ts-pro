@@ -488,7 +488,32 @@ test();
 	})
 }
 
+func findEtcHostsLoopbackAlias(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("/etc/hosts")
+	if err != nil {
+		t.Skipf("/etc/hosts not readable: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "127.0.0.1" {
+			for _, name := range fields[1:] {
+				if name != "localhost" {
+					return name
+				}
+			}
+		}
+	}
+	t.Skip("/etc/hosts contains no non-localhost loopback alias")
+	return ""
+}
+
 func TestLinuxAMD64WinterTCFetchHostsFileResolver(t *testing.T) {
+	host := findEtcHostsLoopbackAlias(t)
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen for hosts resolver test: %v", err)
@@ -503,7 +528,7 @@ func TestLinuxAMD64WinterTCFetchHostsFileResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("split listener address: %v", err)
 	}
-	url := "http://runtime.us-east-1.kiro.dev:" + port + "/hosts"
+	url := fmt.Sprintf("http://%s:%s/hosts", host, port)
 	source := fmt.Sprintf(`
 async function test(): Promise<void> {
   const response = await fetch(%q);
