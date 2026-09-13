@@ -1,132 +1,27 @@
 name: Validate Web Crypto implementation
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/wintertc-web-crypto-random
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  implement-and-test:
-    if: ${{ github.event.head_commit.message != 'feat(wintertc): add crypto.getRandomValues [crypto-hooked]' }}
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: feat/wintertc-web-crypto-random
-          fetch-depth: 0
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
-
-      - name: Wire Web Crypto dispatch and add e2e coverage
-        shell: bash
+      - name: Check formatting
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          sema = Path("internal/frontend/sema/calls.go")
-          text = sema.read_text()
-          old = '''\tif member, ok := e.Callee.(*ast.MemberExpr); ok {
-          \t\tif result, handled := c.checkPromiseStaticCall(e, member); handled {
-          \t\t\treturn result
-          \t\t}
-          \t}'''
-          new = '''\tif member, ok := e.Callee.(*ast.MemberExpr); ok {
-          \t\tif result, handled := c.checkWebCryptoCall(e, member); handled {
-          \t\t\treturn result
-          \t\t}
-          \t\tif result, handled := c.checkPromiseStaticCall(e, member); handled {
-          \t\t\treturn result
-          \t\t}
-          \t}'''
-          if old not in text:
-              raise SystemExit("sema call-dispatch anchor not found")
-          sema.write_text(text.replace(old, new, 1))
-
-          irgen = Path("internal/midend/irgen/calls.go")
-          text = irgen.read_text()
-          old = '''\tif member, ok := e.Callee.(*ast.MemberExpr); ok {
-          \t\tif ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" {'''
-          new = '''\tif member, ok := e.Callee.(*ast.MemberExpr); ok {
-          \t\tif result, handled := g.lowerWebCryptoCall(e, member); handled {
-          \t\t\treturn result
-          \t\t}
-          \t\tif ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "performance" {'''
-          if old not in text:
-              raise SystemExit("irgen call-dispatch anchor not found")
-          irgen.write_text(text.replace(old, new, 1))
-
-          test = Path("tests/e2e/wintertc/crypto_test.go")
-          test.write_text(r'''package wintertc
-
-import "testing"
-
-func TestCryptoGetRandomValues(t *testing.T) {
-\trunLinuxAMD64(t, linuxAMD64Case{
-\t\tname: "crypto_get_random_values",
-\t\tsource: `const backing = new Uint8Array(36);
-backing[0] = 11;
-backing[1] = 22;
-backing[34] = 33;
-backing[35] = 44;
-
-const view = backing.subarray(2, 34);
-const same = crypto.getRandomValues(view);
-console.log(same === view);
-console.log(backing[0]);
-console.log(backing[1]);
-console.log(backing[34]);
-console.log(backing[35]);
-
-let changed = false;
-for (let i = 2; i < 34; i = i + 1) {
-  if (backing[i] !== 0) {
-    changed = true;
-  }
-}
-console.log(changed);
-
-try {
-  crypto.getRandomValues(new Uint8Array(65537));
-  console.log("unexpected");
-} catch (err: any) {
-  console.log(err.name);
-}
-`,
-\t\texpected: "true\\n11\\n22\\n33\\n44\\ntrue\\nQuotaExceededError\\n",
-\t})
-}
-''')
-          PY
-
-          gofmt -w internal/frontend/sema/web_crypto.go \
-            internal/frontend/sema/calls.go \
-            internal/midend/irgen/web_crypto.go \
-            internal/midend/irgen/calls.go \
-            tests/e2e/wintertc/crypto_test.go
-
+          gofmt -w internal/frontend/sema/web_crypto.go internal/frontend/sema/calls.go internal/midend/irgen/web_crypto.go internal/midend/irgen/calls.go tests/e2e/wintertc/crypto_test.go
+          git diff --exit-code
       - name: Run focused Web Crypto tests
         run: go test ./internal/frontend/sema ./internal/midend/irgen ./tests/e2e/wintertc
-
       - name: Run full Go test suite
         run: go test ./...
-
-      - name: Commit validated implementation
-        shell: bash
-        run: |
-          if git diff --quiet -- internal/frontend/sema/calls.go internal/frontend/sema/web_crypto.go internal/midend/irgen/calls.go internal/midend/irgen/web_crypto.go tests/e2e/wintertc/crypto_test.go; then
-            echo "No implementation changes to commit"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add internal/frontend/sema/calls.go internal/frontend/sema/web_crypto.go \
-            internal/midend/irgen/calls.go internal/midend/irgen/web_crypto.go \
-            tests/e2e/wintertc/crypto_test.go
-          git commit -m "feat(wintertc): add crypto.getRandomValues [crypto-hooked]"
-          git push origin HEAD:feat/wintertc-web-crypto-random
