@@ -19,7 +19,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Patch fuzz-discovered nil assumptions
+      - name: Patch fuzz-discovered compiler assumptions
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -47,12 +47,17 @@ jobs:
               '\t\tif method.Name == "constructor" {\n\t\t\tfnType = info.Constructor\n\t\t} else {\n\t\t\tfnType = info.Methods[method.Name]\n\t\t}\n\t\tif fnType == nil {\n\t\t\tcontinue\n\t\t}\n\n\t\tc.currentFnRet = fnType.Return\n',
           )
           replace(
+              'internal/frontend/sema/sema.go',
+              '\t\tif t.Name == "Promise" || t.Name == "PromiseLike" {\n\t\t\treturn c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))\n\t\t}\n',
+              '\t\tif t.Name == "Promise" || t.Name == "PromiseLike" {\n\t\t\tif len(t.TypeArgs) != 1 {\n\t\t\t\treturn c.newPromiseType(types.TypeAny)\n\t\t\t}\n\t\t\treturn c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))\n\t\t}\n',
+          )
+          replace(
               'internal/midend/irgen/expressions.go',
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tfnType := sym.Type.(*types.FunctionType)\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tif sym == nil {\n\t\t\treturn g.failExpr("identifier %q has no lowerable symbol", e.Name)\n\t\t}\n\t\tfnType, ok := sym.Type.(*types.FunctionType)\n\t\tif !ok {\n\t\t\treturn g.failExpr("identifier %q is not a lowerable function", e.Name)\n\t\t}\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
           )
           PY
-          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/statements.go internal/midend/irgen/expressions.go
+          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/statements.go internal/frontend/sema/sema.go internal/midend/irgen/expressions.go
       - name: Validate fixes
         env:
           GOTOOLCHAIN: local
@@ -66,5 +71,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "fix(compiler): guard fuzz-discovered nil paths"
+          git commit -m "fix(compiler): guard fuzz-discovered invalid paths"
           git push origin HEAD:test/reliability-ir-backend-fuzz
