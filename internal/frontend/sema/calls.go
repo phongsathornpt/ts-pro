@@ -9,6 +9,9 @@ import (
 
 func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 	if member, ok := e.Callee.(*ast.MemberExpr); ok {
+		if result, handled := c.checkWebCryptoCall(e, member); handled {
+			return result
+		}
 		if result, handled := c.checkPromiseStaticCall(e, member); handled {
 			return result
 		}
