@@ -75,6 +75,59 @@ func TestCryptoRandomUUIDRejectsArguments(t *testing.T) {
 	})
 }
 
+func TestSubtleCryptoDigestSHA256(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "subtle_crypto_digest_sha256",
+		source: `async function main(): Promise<void> {
+  const backing = new Uint8Array(5);
+  backing[0] = 9;
+  backing[1] = 97;
+  backing[2] = 98;
+  backing[3] = 99;
+  backing[4] = 7;
+
+  const digest = await crypto.subtle.digest("SHA-256", backing.subarray(1, 4));
+  const bytes = new Uint8Array(digest);
+  console.log(bytes.length);
+  for (let i = 0; i < bytes.length; i = i + 1) {
+    console.log(bytes[i]);
+  }
+
+  const encoded = new TextEncoder().encode("abc");
+  const lower = new Uint8Array(await crypto.subtle.digest("sha-256", encoded.buffer));
+  console.log(lower[0]);
+  console.log(lower[31]);
+
+  const mixed = new Uint8Array(await crypto.subtle.digest("sHa-256", encoded));
+  console.log(mixed[0]);
+  console.log(mixed[31]);
+
+  const dictionary = new Uint8Array(await crypto.subtle.digest({ name: "ShA-256" }, encoded));
+  console.log(dictionary[0]);
+  console.log(dictionary[31]);
+
+  try {
+    await crypto.subtle.digest("MD5", encoded);
+    console.log("unexpected");
+  } catch (err: any) {
+    console.log(err.name);
+  }
+}
+main();
+`,
+		expected: "32\n186\n120\n22\n191\n143\n1\n207\n234\n65\n65\n64\n222\n93\n174\n34\n35\n176\n3\n97\n163\n150\n23\n122\n156\n180\n16\n255\n97\n242\n0\n21\n173\n186\n173\n186\n173\n186\n173\nNotSupportedError\n",
+	})
+}
+
+func TestSubtleCryptoDigestRejectsInvalidDataType(t *testing.T) {
+	harness.RunBad(t, harness.BadCase{
+		Name:         "subtle_crypto_digest_invalid_data",
+		Source:       `crypto.subtle.digest("SHA-256", "abc");`,
+		ExpectedCode: "TS2345",
+		ExpectedSub:  "crypto.subtle.digest expects ArrayBuffer or Uint8Array data",
+	})
+}
+
 func isCanonicalUUIDV4(uuid string) bool {
 	if len(uuid) != 36 {
 		return false

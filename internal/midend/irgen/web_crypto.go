@@ -1,25 +1,31 @@
 package irgen
 
 import (
+	"fmt"
+
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/ir"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
 )
 
 func (g *generator) lowerWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
-	ident, ok := member.Object.(*ast.IdentExpr)
-	if !ok || ident.Name != "crypto" {
-		return nil, false
+	if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "crypto" {
+		switch member.Property {
+		case "getRandomValues":
+			return g.lowerCryptoGetRandomValues(e), true
+		case "randomUUID":
+			return g.lowerCryptoRandomUUID(), true
+		default:
+			return nil, false
+		}
 	}
-
-	switch member.Property {
-	case "getRandomValues":
-		return g.lowerCryptoGetRandomValues(e), true
-	case "randomUUID":
-		return g.lowerCryptoRandomUUID(), true
-	default:
-		return nil, false
+	if subtle, ok := member.Object.(*ast.MemberExpr); ok && subtle.Property == "subtle" {
+		ident, ok := subtle.Object.(*ast.IdentExpr)
+		if ok && ident.Name == "crypto" && member.Property == "digest" {
+			return g.lowerSubtleCryptoDigest(e), true
+		}
 	}
+	return nil, false
 }
 
 func (g *generator) lowerCryptoGetRandomValues(e *ast.CallExpr) ir.Operand {
@@ -91,6 +97,134 @@ func (g *generator) lowerCryptoRandomUUID() ir.Operand {
 	g.currentBB = formatBB
 	g.setUUIDVersionAndVariant(random)
 	return g.formatUUID(random)
+}
+
+func (g *generator) lowerSubtleCryptoDigest(e *ast.CallExpr) ir.Operand {
+	algorithm := g.lowerCryptoAlgorithmName(e.Args[0])
+	data := g.lowerCryptoDigestInput(e.Args[1])
+	arrayBufferType := g.semaResult.ArrayBufferType
+	taskType, _ := g.semanticType(e).(*types.ObjectType)
+	if taskType == nil {
+		taskType = types.NewObject("$SubtleCryptoDigestTask")
+	}
+
+	outerFn, outerBB, outerLocals, outerProv, outerDirect := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
+	driverName := fmt.Sprintf("$crypto_digest%d", g.arrowCounter)
+	g.arrowCounter++
+	driverType := types.NewFunction(nil, arrayBufferType)
+	driver := ir.NewFunction(driverName, arrayBufferType)
+	g.currentFn = driver
+	g.currentBB = driver.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+	env := driver.NewValue("$env", driverType)
+	driver.Params = append(driver.Params, env)
+	capturedAlgorithm := driver.NewValue("digest_algorithm", types.TypeString)
+	capturedData := driver.NewValue("digest_data", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.ClosureGetInst{Res: capturedAlgorithm, Closure: env, Index: 0},
+		&ir.ClosureGetInst{Res: capturedData, Closure: env, Index: 1},
+	)
+
+	supported := g.cryptoSHA256NameMatch(capturedAlgorithm)
+	hashBB := driver.NewBlock("digest_sha256")
+	unsupportedBB := driver.NewBlock("digest_unsupported")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: supported, Then: hashBB, Else: unsupportedBB}
+
+	g.currentBB = hashBB
+	digest := driver.NewValue("digest_sha256_bytes", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: digest, Callee: "ts_crypto_sha256", Args: []ir.Operand{capturedData}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
+	})
+	result := g.newArrayBufferFromData(digest)
+	g.currentBB.Terminator = &ir.ReturnTerm{Val: result}
+
+	g.currentBB = unsupportedBB
+	err := g.newDOMException(
+		ir.ConstString{Value: "Unrecognized digest algorithm."},
+		ir.ConstString{Value: "NotSupportedError"},
+	)
+	boxedErr := g.boxJSValue(err, g.semaResult.DOMExceptionType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Callee: "ts_task_reject", Args: []ir.Operand{boxedErr}, ParamTypes: []types.Type{types.TypeAny},
+	})
+	g.currentBB.Terminator = &ir.ReturnTerm{}
+	g.prog.Functions = append(g.prog.Functions, driver)
+
+	g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee = outerFn, outerBB, outerLocals, outerProv, outerDirect
+	closure := g.currentFn.NewValue("crypto_digest_closure", driverType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{
+		Res: closure, Function: driverName, Captures: []ir.Operand{algorithm, data}, RefMask: 3,
+	})
+	task := g.currentFn.NewValue("crypto_digest_task", taskType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(arrayBufferType)}},
+	})
+	return task
+}
+
+func (g *generator) lowerCryptoAlgorithmName(expr ast.Expr) ir.Operand {
+	semanticType := g.semanticType(expr)
+	if semanticType == types.TypeString {
+		return g.lowerExpr(expr)
+	}
+	if objType, ok := semanticType.(*types.ObjectType); ok {
+		value := g.lowerExpr(expr)
+		field, exists := objType.Fields["name"]
+		if exists {
+			offsets, _, _ := g.objectLayout(objType)
+			name := g.currentFn.NewValue("crypto_algorithm_name", field.Type)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{
+				Res: name, Obj: value, Field: "name", Offset: offsets["name"],
+			})
+			return g.coerceStringType(field.Type, name)
+		}
+	}
+	return ir.ConstString{Value: ""}
+}
+
+func (g *generator) cryptoSHA256NameMatch(value ir.Operand) ir.Operand {
+	variants := []string{
+		"SHA-256", "SHa-256", "ShA-256", "Sha-256",
+		"sHA-256", "sHa-256", "shA-256", "sha-256",
+	}
+	var match ir.Operand
+	for i, variant := range variants {
+		equal := g.currentFn.NewValue(fmt.Sprintf("digest_sha256_match_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: equal, Callee: "ts_string_eq", Args: []ir.Operand{value, ir.ConstString{Value: variant}}, ParamTypes: []types.Type{types.TypeString, types.TypeString},
+		})
+		if match == nil {
+			match = equal
+			continue
+		}
+		combined := g.currentFn.NewValue(fmt.Sprintf("digest_sha256_match_any_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
+			Res: combined, Op: ir.OpOr, LHS: match, RHS: equal,
+		})
+		match = combined
+	}
+	return match
+}
+
+func (g *generator) lowerCryptoDigestInput(expr ast.Expr) ir.Operand {
+	objType, _ := g.semanticType(expr).(*types.ObjectType)
+	value := g.lowerExpr(expr)
+	if objType != nil && objType.Name == "$ArrayBuffer" {
+		return g.copyByteBuffer(g.arrayBufferData(value))
+	}
+
+	raw := g.uint8ArrayField(value, "$data", g.semaResult.ByteBufferType)
+	offset := g.uint8ArrayField(value, "byteOffset", types.TypeNumber)
+	length := g.uint8ArrayField(value, "byteLength", types.TypeNumber)
+	end := g.currentFn.NewValue("crypto_digest_end", types.TypeNumber)
+	copy := g.currentFn.NewValue("crypto_digest_input", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
+		&ir.BinaryInst{Res: end, Op: ir.OpAdd, LHS: offset, RHS: length},
+		&ir.CallInst{Res: copy, Callee: "ts_byte_buffer_slice", Args: []ir.Operand{raw, offset, end}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, types.TypeNumber, types.TypeNumber}},
+	)
+	return copy
 }
 
 func (g *generator) emitSecureRandomBytes(length ir.Operand, prefix string) ir.Operand {
