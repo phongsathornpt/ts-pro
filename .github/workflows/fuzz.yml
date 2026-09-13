@@ -1,4 +1,4 @@
-name: Frontend Fuzz
+name: Compiler Fuzz
 
 on:
   workflow_dispatch:
@@ -20,6 +20,10 @@ jobs:
             target: FuzzParser
           - package: ./internal/frontend/sema
             target: FuzzSema
+          - package: ./internal/midend/irgen
+            target: FuzzIRGen
+          - package: ./internal/backend/lower
+            target: FuzzLowerStructuredIR
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
