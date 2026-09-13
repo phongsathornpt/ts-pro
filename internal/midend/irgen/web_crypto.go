@@ -127,18 +127,28 @@ func (g *generator) lowerSubtleCryptoDigest(e *ast.CallExpr) ir.Operand {
 		&ir.ClosureGetInst{Res: capturedData, Closure: env, Index: 1},
 	)
 
-	supported := g.cryptoSHA256NameMatch(capturedAlgorithm)
-	hashBB := driver.NewBlock("digest_sha256")
+	sha256 := g.cryptoSHA2NameMatch(capturedAlgorithm, "256")
+	sha384 := g.cryptoSHA2NameMatch(capturedAlgorithm, "384")
+	sha512 := g.cryptoSHA2NameMatch(capturedAlgorithm, "512")
+	sha256BB := driver.NewBlock("digest_sha256")
+	check384BB := driver.NewBlock("digest_check_sha384")
+	sha384BB := driver.NewBlock("digest_sha384")
+	check512BB := driver.NewBlock("digest_check_sha512")
+	sha512BB := driver.NewBlock("digest_sha512")
 	unsupportedBB := driver.NewBlock("digest_unsupported")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: supported, Then: hashBB, Else: unsupportedBB}
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha256, Then: sha256BB, Else: check384BB}
 
-	g.currentBB = hashBB
-	digest := driver.NewValue("digest_sha256_bytes", g.semaResult.ByteBufferType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Res: digest, Callee: "ts_crypto_sha256", Args: []ir.Operand{capturedData}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
-	})
-	result := g.newArrayBufferFromData(digest)
-	g.currentBB.Terminator = &ir.ReturnTerm{Val: result}
+	g.currentBB = check384BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha384, Then: sha384BB, Else: check512BB}
+	g.currentBB = check512BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha512, Then: sha512BB, Else: unsupportedBB}
+
+	g.currentBB = sha256BB
+	g.lowerCryptoDigestHash(capturedData, "ts_crypto_sha256", "sha256")
+	g.currentBB = sha384BB
+	g.lowerCryptoDigestHash(capturedData, "ts_crypto_sha384", "sha384")
+	g.currentBB = sha512BB
+	g.lowerCryptoDigestHash(capturedData, "ts_crypto_sha512", "sha512")
 
 	g.currentBB = unsupportedBB
 	err := g.newDOMException(
@@ -164,6 +174,15 @@ func (g *generator) lowerSubtleCryptoDigest(e *ast.CallExpr) ir.Operand {
 	return task
 }
 
+func (g *generator) lowerCryptoDigestHash(data ir.Operand, callee, name string) {
+	digest := g.currentFn.NewValue("digest_"+name+"_bytes", g.semaResult.ByteBufferType)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: digest, Callee: callee, Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
+	})
+	result := g.newArrayBufferFromData(digest)
+	g.currentBB.Terminator = &ir.ReturnTerm{Val: result}
+}
+
 func (g *generator) lowerCryptoAlgorithmName(expr ast.Expr) ir.Operand {
 	semanticType := g.semanticType(expr)
 	if semanticType == types.TypeString {
@@ -184,22 +203,19 @@ func (g *generator) lowerCryptoAlgorithmName(expr ast.Expr) ir.Operand {
 	return ir.ConstString{Value: ""}
 }
 
-func (g *generator) cryptoSHA256NameMatch(value ir.Operand) ir.Operand {
-	variants := []string{
-		"SHA-256", "SHa-256", "ShA-256", "Sha-256",
-		"sHA-256", "sHa-256", "shA-256", "sha-256",
-	}
+func (g *generator) cryptoSHA2NameMatch(value ir.Operand, bits string) ir.Operand {
+	prefixes := []string{"SHA", "SHa", "ShA", "Sha", "sHA", "sHa", "shA", "sha"}
 	var match ir.Operand
-	for i, variant := range variants {
-		equal := g.currentFn.NewValue(fmt.Sprintf("digest_sha256_match_%d", i), types.TypeBoolean)
+	for i, prefix := range prefixes {
+		equal := g.currentFn.NewValue(fmt.Sprintf("digest_sha%s_match_%d", bits, i), types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Res: equal, Callee: "ts_string_eq", Args: []ir.Operand{value, ir.ConstString{Value: variant}}, ParamTypes: []types.Type{types.TypeString, types.TypeString},
+			Res: equal, Callee: "ts_string_eq", Args: []ir.Operand{value, ir.ConstString{Value: prefix + "-" + bits}}, ParamTypes: []types.Type{types.TypeString, types.TypeString},
 		})
 		if match == nil {
 			match = equal
 			continue
 		}
-		combined := g.currentFn.NewValue(fmt.Sprintf("digest_sha256_match_any_%d", i), types.TypeBoolean)
+		combined := g.currentFn.NewValue(fmt.Sprintf("digest_sha%s_match_any_%d", bits, i), types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{
 			Res: combined, Op: ir.OpOr, LHS: match, RHS: equal,
 		})
