@@ -60,8 +60,8 @@ func TestLinuxAMD64InternalHMACHashVariantsKnownAnswers(t *testing.T) {
 		)
 		for i, b := range vector.key {
 			bb.Instructions = append(bb.Instructions, &ir.CallInst{
-				Callee: "ts_byte_buffer_set",
-				Args: []ir.Operand{key, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(b)}},
+				Callee:     "ts_byte_buffer_set",
+				Args:       []ir.Operand{key, ir.ConstNumber{Value: float64(i)}, ir.ConstNumber{Value: float64(b)}},
 				ParamTypes: []types.Type{bufType, types.TypeNumber, types.TypeNumber},
 			})
 		}
