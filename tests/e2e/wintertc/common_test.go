@@ -14,6 +14,7 @@ type linuxAMD64Case struct {
 
 func runLinuxAMD64(t *testing.T, tc linuxAMD64Case) {
 	t.Helper()
+	t.Parallel()
 	harness.RunLinuxAMD64(t, harness.LinuxAMD64Case{
 		Name:     tc.name,
 		Source:   tc.source,
