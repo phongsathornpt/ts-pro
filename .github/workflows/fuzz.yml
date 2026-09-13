@@ -1,0 +1,36 @@
+name: Frontend Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./internal/frontend/parser
+            target: FuzzParser
+          - package: ./internal/frontend/sema
+            target: FuzzSema
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          GOTOOLCHAIN: local
+        run: >-
+          CGO_ENABLED=0 go test ${{ matrix.package }}
+          -run=^$
+          -fuzz=^${{ matrix.target }}$
+          -fuzztime=2m
