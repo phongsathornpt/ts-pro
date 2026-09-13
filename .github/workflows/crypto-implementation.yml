@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   implement-and-test:
-    if: ${{ !contains(github.event.head_commit.message, '[crypto-hooked]') }}
+    if: ${{ github.event.head_commit.message != 'feat(wintertc): add crypto.getRandomValues [crypto-hooked]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
