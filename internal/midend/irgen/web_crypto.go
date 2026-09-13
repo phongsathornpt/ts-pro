@@ -127,22 +127,29 @@ func (g *generator) lowerSubtleCryptoDigest(e *ast.CallExpr) ir.Operand {
 		&ir.ClosureGetInst{Res: capturedData, Closure: env, Index: 1},
 	)
 
-	sha256 := g.cryptoSHA2NameMatch(capturedAlgorithm, "256")
-	sha384 := g.cryptoSHA2NameMatch(capturedAlgorithm, "384")
-	sha512 := g.cryptoSHA2NameMatch(capturedAlgorithm, "512")
+	sha1 := g.cryptoSHANameMatch(capturedAlgorithm, "1")
+	sha256 := g.cryptoSHANameMatch(capturedAlgorithm, "256")
+	sha384 := g.cryptoSHANameMatch(capturedAlgorithm, "384")
+	sha512 := g.cryptoSHANameMatch(capturedAlgorithm, "512")
+	sha1BB := driver.NewBlock("digest_sha1")
+	check256BB := driver.NewBlock("digest_check_sha256")
 	sha256BB := driver.NewBlock("digest_sha256")
 	check384BB := driver.NewBlock("digest_check_sha384")
 	sha384BB := driver.NewBlock("digest_sha384")
 	check512BB := driver.NewBlock("digest_check_sha512")
 	sha512BB := driver.NewBlock("digest_sha512")
 	unsupportedBB := driver.NewBlock("digest_unsupported")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha256, Then: sha256BB, Else: check384BB}
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha1, Then: sha1BB, Else: check256BB}
 
+	g.currentBB = check256BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha256, Then: sha256BB, Else: check384BB}
 	g.currentBB = check384BB
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha384, Then: sha384BB, Else: check512BB}
 	g.currentBB = check512BB
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha512, Then: sha512BB, Else: unsupportedBB}
 
+	g.currentBB = sha1BB
+	g.lowerCryptoDigestHash(capturedData, "ts_crypto_sha1", "sha1")
 	g.currentBB = sha256BB
 	g.lowerCryptoDigestHash(capturedData, "ts_crypto_sha256", "sha256")
 	g.currentBB = sha384BB
@@ -203,7 +210,7 @@ func (g *generator) lowerCryptoAlgorithmName(expr ast.Expr) ir.Operand {
 	return ir.ConstString{Value: ""}
 }
 
-func (g *generator) cryptoSHA2NameMatch(value ir.Operand, bits string) ir.Operand {
+func (g *generator) cryptoSHANameMatch(value ir.Operand, bits string) ir.Operand {
 	prefixes := []string{"SHA", "SHa", "ShA", "Sha", "sHA", "sHa", "shA", "sha"}
 	var match ir.Operand
 	for i, prefix := range prefixes {

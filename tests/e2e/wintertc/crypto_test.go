@@ -119,6 +119,30 @@ main();
 	})
 }
 
+func TestSubtleCryptoDigestSHA1(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "subtle_crypto_digest_sha1",
+		source: `async function main(): Promise<void> {
+  const encoded = new TextEncoder().encode("abc");
+
+  const mixed = new Uint8Array(await crypto.subtle.digest("sHa-1", encoded));
+  console.log(mixed.length);
+  console.log(mixed[0]);
+  console.log(mixed[1]);
+  console.log(mixed[18]);
+  console.log(mixed[19]);
+
+  const dictionary = new Uint8Array(await crypto.subtle.digest({ name: "ShA-1" }, encoded.buffer));
+  console.log(dictionary.length);
+  console.log(dictionary[0]);
+  console.log(dictionary[19]);
+}
+main();
+`,
+		expected: "20\n169\n153\n216\n157\n20\n169\n157\n",
+	})
+}
+
 func TestSubtleCryptoDigestSHA384AndSHA512(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "subtle_crypto_digest_sha384_sha512",
