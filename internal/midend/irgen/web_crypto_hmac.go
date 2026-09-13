@@ -44,19 +44,16 @@ func (g *generator) lowerHMACImportKey(e *ast.CallExpr) ir.Operand {
 	return g.spawnCryptoTask("hmac_import", taskType, keyType, captures, captureTypes, func(captured []ir.Operand) {
 		formatOK := g.cryptoStringEquals(captured[0], "raw", "hmac_import_raw")
 		algorithmOK := g.cryptoHMACNameMatch(captured[2])
-		hashOK := g.cryptoSHANameMatch(captured[3], "256")
-		formatAndAlgorithm := g.currentFn.NewValue("hmac_import_format_algorithm_ok", types.TypeBoolean)
-		allSupported := g.currentFn.NewValue("hmac_import_supported", types.TypeBoolean)
+		supported := g.currentFn.NewValue("hmac_import_supported", types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.BinaryInst{Res: formatAndAlgorithm, Op: ir.OpAnd, LHS: formatOK, RHS: algorithmOK},
-			&ir.BinaryInst{Res: allSupported, Op: ir.OpAnd, LHS: formatAndAlgorithm, RHS: hashOK},
+			&ir.BinaryInst{Res: supported, Op: ir.OpAnd, LHS: formatOK, RHS: algorithmOK},
 		)
 		supportedBB := g.currentFn.NewBlock("hmac_import_supported")
 		unsupportedBB := g.currentFn.NewBlock("hmac_import_unsupported")
-		g.currentBB.Terminator = &ir.BranchTerm{Cond: allSupported, Then: supportedBB, Else: unsupportedBB}
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: supported, Then: supportedBB, Else: unsupportedBB}
 
 		g.currentBB = unsupportedBB
-		g.rejectCryptoTask("NotSupportedError", "Only raw HMAC keys with SHA-256 are currently supported.")
+		g.rejectCryptoTask("NotSupportedError", "Only raw HMAC keys are currently supported.")
 
 		g.currentBB = supportedBB
 		validUsages := g.cryptoHMACUsagesValid(captured[5])
@@ -82,8 +79,7 @@ func (g *generator) lowerHMACImportKey(e *ast.CallExpr) ir.Operand {
 		g.rejectCryptoTask("DataError", "HMAC key data must not be empty.")
 
 		g.currentBB = keyOKBB
-		key := g.newHMACCryptoKey(keyType, captured[1], captured[4], captured[5], keyLength)
-		g.currentBB.Terminator = &ir.ReturnTerm{Val: key}
+		g.finishHMACImportKey(keyType, captured[1], captured[3], captured[4], captured[5], keyLength)
 	})
 }
 
@@ -101,10 +97,7 @@ func (g *generator) lowerHMACSign(e *ast.CallExpr) ir.Operand {
 			return
 		}
 		keyData := g.cryptoKeyField(captured[1], "$data", g.semaResult.ByteBufferType)
-		digest := g.currentFn.NewValue("hmac_signature", g.semaResult.ByteBufferType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Res: digest, Callee: "ts_crypto_hmac_sha256", Args: []ir.Operand{keyData, captured[2]}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType},
-		})
+		digest := g.emitHMACForKey(captured[1], keyData, captured[2], "hmac_sign")
 		result := g.newArrayBufferFromData(digest)
 		g.currentBB.Terminator = &ir.ReturnTerm{Val: result}
 	})
@@ -124,13 +117,103 @@ func (g *generator) lowerHMACVerify(e *ast.CallExpr) ir.Operand {
 			return
 		}
 		keyData := g.cryptoKeyField(captured[1], "$data", g.semaResult.ByteBufferType)
-		expected := g.currentFn.NewValue("hmac_expected", g.semaResult.ByteBufferType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Res: expected, Callee: "ts_crypto_hmac_sha256", Args: []ir.Operand{keyData, captured[3]}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType},
-		})
+		expected := g.emitHMACForKey(captured[1], keyData, captured[3], "hmac_verify")
 		valid := g.cryptoByteBufferEqual(expected, captured[2])
 		g.currentBB.Terminator = &ir.ReturnTerm{Val: valid}
 	})
+}
+
+func (g *generator) finishHMACImportKey(keyType *types.ObjectType, data, hashName, extractable, usages, keyByteLength ir.Operand) {
+	sha1 := g.cryptoSHANameMatch(hashName, "1")
+	sha256 := g.cryptoSHANameMatch(hashName, "256")
+	sha384 := g.cryptoSHANameMatch(hashName, "384")
+	sha512 := g.cryptoSHANameMatch(hashName, "512")
+	sha1BB := g.currentFn.NewBlock("hmac_import_sha1")
+	check256BB := g.currentFn.NewBlock("hmac_import_check_sha256")
+	sha256BB := g.currentFn.NewBlock("hmac_import_sha256")
+	check384BB := g.currentFn.NewBlock("hmac_import_check_sha384")
+	sha384BB := g.currentFn.NewBlock("hmac_import_sha384")
+	check512BB := g.currentFn.NewBlock("hmac_import_check_sha512")
+	sha512BB := g.currentFn.NewBlock("hmac_import_sha512")
+	unsupportedBB := g.currentFn.NewBlock("hmac_import_hash_unsupported")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha1, Then: sha1BB, Else: check256BB}
+
+	g.currentBB = check256BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha256, Then: sha256BB, Else: check384BB}
+	g.currentBB = check384BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha384, Then: sha384BB, Else: check512BB}
+	g.currentBB = check512BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha512, Then: sha512BB, Else: unsupportedBB}
+
+	for _, variant := range []struct {
+		block *ir.BasicBlock
+		hash  string
+	}{
+		{sha1BB, "SHA-1"},
+		{sha256BB, "SHA-256"},
+		{sha384BB, "SHA-384"},
+		{sha512BB, "SHA-512"},
+	} {
+		g.currentBB = variant.block
+		key := g.newHMACCryptoKey(keyType, data, extractable, usages, keyByteLength, variant.hash)
+		g.currentBB.Terminator = &ir.ReturnTerm{Val: key}
+	}
+
+	g.currentBB = unsupportedBB
+	g.rejectCryptoTask("NotSupportedError", "HMAC supports SHA-1, SHA-256, SHA-384, and SHA-512.")
+}
+
+func (g *generator) emitHMACForKey(key, keyData, data ir.Operand, prefix string) ir.Operand {
+	hashName := g.cryptoKeyField(key, "$hashName", types.TypeString)
+	sha1 := g.cryptoStringEquals(hashName, "SHA-1", prefix+"_sha1_match")
+	sha256 := g.cryptoStringEquals(hashName, "SHA-256", prefix+"_sha256_match")
+	sha384 := g.cryptoStringEquals(hashName, "SHA-384", prefix+"_sha384_match")
+	sha512 := g.cryptoStringEquals(hashName, "SHA-512", prefix+"_sha512_match")
+	sha1BB := g.currentFn.NewBlock(prefix + "_sha1")
+	check256BB := g.currentFn.NewBlock(prefix + "_check_sha256")
+	sha256BB := g.currentFn.NewBlock(prefix + "_sha256")
+	check384BB := g.currentFn.NewBlock(prefix + "_check_sha384")
+	sha384BB := g.currentFn.NewBlock(prefix + "_sha384")
+	check512BB := g.currentFn.NewBlock(prefix + "_check_sha512")
+	sha512BB := g.currentFn.NewBlock(prefix + "_sha512")
+	unsupportedBB := g.currentFn.NewBlock(prefix + "_hash_unsupported")
+	doneBB := g.currentFn.NewBlock(prefix + "_hash_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha1, Then: sha1BB, Else: check256BB}
+
+	g.currentBB = check256BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha256, Then: sha256BB, Else: check384BB}
+	g.currentBB = check384BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha384, Then: sha384BB, Else: check512BB}
+	g.currentBB = check512BB
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: sha512, Then: sha512BB, Else: unsupportedBB}
+
+	incoming := make([]ir.PhiIncoming, 0, 4)
+	for _, variant := range []struct {
+		block  *ir.BasicBlock
+		callee string
+		name   string
+	}{
+		{sha1BB, "ts_crypto_hmac_sha1", "sha1"},
+		{sha256BB, "ts_crypto_hmac_sha256", "sha256"},
+		{sha384BB, "ts_crypto_hmac_sha384", "sha384"},
+		{sha512BB, "ts_crypto_hmac_sha512", "sha512"},
+	} {
+		g.currentBB = variant.block
+		digest := g.currentFn.NewValue(prefix+"_"+variant.name+"_digest", g.semaResult.ByteBufferType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: digest, Callee: variant.callee, Args: []ir.Operand{keyData, data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType, g.semaResult.ByteBufferType},
+		})
+		g.currentBB.Terminator = &ir.JumpTerm{Target: doneBB}
+		incoming = append(incoming, ir.PhiIncoming{Block: variant.block, Value: digest})
+	}
+
+	g.currentBB = unsupportedBB
+	g.rejectCryptoTask("NotSupportedError", "Unsupported HMAC hash algorithm.")
+
+	result := g.currentFn.NewValue(prefix+"_digest", g.semaResult.ByteBufferType)
+	doneBB.Phis = append(doneBB.Phis, &ir.PhiInst{Res: result, Incoming: incoming})
+	g.currentBB = doneBB
+	return result
 }
 
 func (g *generator) spawnCryptoTask(prefix string, taskType *types.ObjectType, resultType types.Type, captures []ir.Operand, captureTypes []types.Type, build func([]ir.Operand)) ir.Operand {
@@ -204,7 +287,7 @@ func (g *generator) lowerHMACImportAlgorithm(expr ast.Expr) (ir.Operand, ir.Oper
 	return nameString, ir.ConstString{Value: ""}
 }
 
-func (g *generator) newHMACCryptoKey(keyType *types.ObjectType, data, extractable, usages, keyByteLength ir.Operand) ir.Operand {
+func (g *generator) newHMACCryptoKey(keyType *types.ObjectType, data, extractable, usages, keyByteLength ir.Operand, hashName string) ir.Operand {
 	algorithmType := keyType.Fields["algorithm"].Type.(*types.ObjectType)
 	hashType := algorithmType.Fields["hash"].Type.(*types.ObjectType)
 
@@ -212,7 +295,7 @@ func (g *generator) newHMACCryptoKey(keyType *types.ObjectType, data, extractabl
 	hash := g.currentFn.NewValue("hmac_key_hash", hashType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.AllocObjectInst{Res: hash, Shape: hashShape, FieldCount: len(hashOffsets), RefMask: hashRefMask},
-		&ir.SetFieldInst{Obj: hash, Field: "name", Offset: hashOffsets["name"], Val: ir.ConstString{Value: "SHA-256"}},
+		&ir.SetFieldInst{Obj: hash, Field: "name", Offset: hashOffsets["name"], Val: ir.ConstString{Value: hashName}},
 	)
 
 	algorithmOffsets, algorithmRefMask, algorithmShape := g.objectLayout(algorithmType)
@@ -232,7 +315,7 @@ func (g *generator) newHMACCryptoKey(keyType *types.ObjectType, data, extractabl
 		&ir.AllocObjectInst{Res: key, Shape: keyShape, FieldCount: len(keyOffsets), RefMask: keyRefMask},
 		&ir.SetFieldInst{Obj: key, Field: "$data", Offset: keyOffsets["$data"], Val: data},
 		&ir.SetFieldInst{Obj: key, Field: "$algorithmName", Offset: keyOffsets["$algorithmName"], Val: ir.ConstString{Value: "HMAC"}},
-		&ir.SetFieldInst{Obj: key, Field: "$hashName", Offset: keyOffsets["$hashName"], Val: ir.ConstString{Value: "SHA-256"}},
+		&ir.SetFieldInst{Obj: key, Field: "$hashName", Offset: keyOffsets["$hashName"], Val: ir.ConstString{Value: hashName}},
 		&ir.SetFieldInst{Obj: key, Field: "type", Offset: keyOffsets["type"], Val: ir.ConstString{Value: "secret"}},
 		&ir.SetFieldInst{Obj: key, Field: "extractable", Offset: keyOffsets["extractable"], Val: extractable},
 		&ir.SetFieldInst{Obj: key, Field: "algorithm", Offset: keyOffsets["algorithm"], Val: algorithm},
@@ -253,17 +336,13 @@ func (g *generator) branchHMACKeyAccess(algorithmName, key ir.Operand, usage, pr
 	algorithmOK := g.cryptoHMACNameMatch(algorithmName)
 	keyAlgorithm := g.cryptoKeyField(key, "$algorithmName", types.TypeString)
 	keyAlgorithmOK := g.cryptoStringEquals(keyAlgorithm, "HMAC", prefix+"_key_algorithm")
-	keyHash := g.cryptoKeyField(key, "$hashName", types.TypeString)
-	keyHashOK := g.cryptoStringEquals(keyHash, "SHA-256", prefix+"_key_hash")
 	usageOK := g.cryptoArrayContainsString(g.cryptoKeyField(key, "usages", types.NewArray(types.TypeString)), usage)
 
 	algAndKey := g.currentFn.NewValue(prefix+"_alg_key_ok", types.TypeBoolean)
-	hashAndUsage := g.currentFn.NewValue(prefix+"_hash_usage_ok", types.TypeBoolean)
 	allowed := g.currentFn.NewValue(prefix+"_allowed", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.BinaryInst{Res: algAndKey, Op: ir.OpAnd, LHS: algorithmOK, RHS: keyAlgorithmOK},
-		&ir.BinaryInst{Res: hashAndUsage, Op: ir.OpAnd, LHS: keyHashOK, RHS: usageOK},
-		&ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: algAndKey, RHS: hashAndUsage},
+		&ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: algAndKey, RHS: usageOK},
 	)
 	allowedBB := g.currentFn.NewBlock(prefix + "_allowed")
 	deniedBB := g.currentFn.NewBlock(prefix + "_denied")
