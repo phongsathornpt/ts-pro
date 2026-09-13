@@ -95,6 +95,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 	emitAMD64JSStringToNumber(e, fnOffsets["ts_json_parse_scalar"])
 
 	emitAMD64RuntimeSymbols(e, fnOffsets)
+	emitAMD64SHA2RuntimeSymbols(e, fnOffsets)
 
 	return finalizeAMD64(e, fnOffsets, strFixups, closureCodeFixups, callFixups, branchFixups, bbOffsets)
 }
