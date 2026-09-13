@@ -1,6 +1,8 @@
 package sema
 
 import (
+	"fmt"
+
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
 )
@@ -58,14 +60,14 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 	c.builtinDOMExceptionType()
 
 	if len(e.Args) != len(fnType.Params) {
-		c.error(e.Span(), "TS2554", "crypto.subtle.%s expects exactly %d arguments.", member.Property, len(fnType.Params))
+		c.error(e.Span(), "TS2554", fmt.Sprintf("crypto.subtle.%s expects exactly %d arguments.", member.Property, len(fnType.Params)))
 		c.result.Types[e] = resultType
 		return resultType, true
 	}
 	for i, param := range fnType.Params {
 		actual := c.checkExpr(e.Args[i])
 		if !actual.AssignableTo(param.Type) {
-			c.error(e.Args[i].Span(), "TS2345", "crypto.subtle.%s argument %q has type %s; expected %s.", member.Property, param.Name, actual.String(), param.Type.String())
+			c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("crypto.subtle.%s argument %q has type %s; expected %s.", member.Property, param.Name, actual.String(), param.Type.String()))
 		}
 	}
 	c.result.Types[e] = resultType
