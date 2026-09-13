@@ -6,6 +6,9 @@ import (
 )
 
 func (c *Checker) checkWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
+	if result, handled := c.checkWebCryptoHMACCall(e, member); handled {
+		return result, true
+	}
 	if ident, ok := member.Object.(*ast.IdentExpr); ok && ident.Name == "crypto" {
 		return c.checkCryptoCall(e, member)
 	}
