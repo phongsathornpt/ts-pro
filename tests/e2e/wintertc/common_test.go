@@ -45,7 +45,27 @@ func winterTCParallelSafe(testName string) bool {
 		"TestLinuxAMD64WinterTCStreamsConformance",
 		"TestLinuxAMD64WinterTCBodyStreamBacking",
 		"TestLinuxAMD64WinterTCBodyStreamDisturbance",
-		"TestLinuxAMD64WinterTCBodyLockedIsUnusable":
+		"TestLinuxAMD64WinterTCBodyLockedIsUnusable",
+		"TestLinuxAMD64WinterTCFetchLoopbackTransport",
+		"TestLinuxAMD64WinterTCFetchLargeRequestBody",
+		"TestLinuxAMD64WinterTCFetchRequestNormalization",
+		"TestLinuxAMD64WinterTCFetchPreAbortedSignal",
+		"TestLinuxAMD64WinterTCFetchRedirectFollow",
+		"TestLinuxAMD64WinterTCFetchRedirectMethodSemantics",
+		"TestLinuxAMD64WinterTCFetchRedirectModes",
+		"TestLinuxAMD64WinterTCFetchMultiHopRedirect",
+		"TestLinuxAMD64WinterTCFetchRedirectLimit",
+		"TestLinuxAMD64WinterTCFetchLargeResponse",
+		"TestLinuxAMD64WinterTCFetchNumericIPv4Transport",
+		"TestLinuxAMD64WinterTCFetchInvalidNumericIPv4",
+		"TestLinuxAMD64WinterTCFetchLocalhostResolver",
+		"TestLinuxAMD64WinterTCFetchHostsFileResolver",
+		"TestLinuxAMD64WinterTCFetchChunkedResponse",
+		"TestLinuxAMD64WinterTCFetchIPv6Transport",
+		"TestLinuxAMD64WinterTCFetchInitValidationBeforeNetwork",
+		"TestLinuxAMD64WinterTCFetchStatusText",
+		"TestLinuxAMD64WinterTCFetchRedirectBodyHeaderSemantics",
+		"TestLinuxAMD64WinterTCFetchInitObjectVariable":
 		return true
 	default:
 		return false
