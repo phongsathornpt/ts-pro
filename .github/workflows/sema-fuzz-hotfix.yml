@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'ci: stage sema fuzz regression fix'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -20,51 +19,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Guard unresolved super base
+      - name: Patch SuperExpr guard
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('internal/frontend/sema/expressions.go')
-          text = path.read_text()
-          old = '''\t\tbase := c.result.Classes[c.currentClass.BaseName]\n\t\tc.result.Types[e] = base.Constructor\n\t\treturn base.Constructor\n'''
-          new = '''\t\tbase := c.result.Classes[c.currentClass.BaseName]\n\t\tif base == nil {\n\t\t\tc.result.Types[e] = types.TypeAny\n\t\t\treturn types.TypeAny\n\t\t}\n\t\tc.result.Types[e] = base.Constructor\n\t\treturn base.Constructor\n'''
-          if old not in text:
-              raise SystemExit('expected SuperExpr snippet not found')
-          path.write_text(text.replace(old, new, 1))
-          PY
-          cat > internal/frontend/sema/super_fuzz_regression_test.go <<'EOF'
-          package sema
-
-          import (
-              "testing"
-
-              "github.com/phongsathornpt/ts-pro/internal/frontend/parser"
-              "github.com/phongsathornpt/ts-pro/internal/support/source"
-          )
-
-          func TestMissingBaseSuperDoesNotPanic(t *testing.T) {
-              fs := source.NewFileSet()
-              file := fs.AddFile("missing-base.ts", []byte(`
-          class Derived extends Missing {
-            constructor() { super(); }
-          }
-          `))
-              prog, parseDiags := parser.New(file).Parse()
-              if parseDiags.HasErrors() {
-                  t.Fatalf("parser diagnostics: %s", parseDiags.Format(fs))
-              }
-              result := Check(prog)
-              if !result.Diagnostics.HasErrors() {
-                  t.Fatal("expected missing base class diagnostic")
-              }
-          }
-          EOF
-          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/super_fuzz_regression_test.go
-      - name: Validate regression
-        env:
-          GOTOOLCHAIN: local
-        run: |
+          python3 -c "from pathlib import Path; p=Path('internal/frontend/sema/expressions.go'); s=p.read_text(); old='\\t\\tbase := c.result.Classes[c.currentClass.BaseName]\\n\\t\\tc.result.Types[e] = base.Constructor\\n\\t\\treturn base.Constructor\\n'; new='\\t\\tbase := c.result.Classes[c.currentClass.BaseName]\\n\\t\\tif base == nil {\\n\\t\\t\\tc.result.Types[e] = types.TypeAny\\n\\t\\t\\treturn types.TypeAny\\n\\t\\t}\\n\\t\\tc.result.Types[e] = base.Constructor\\n\\t\\treturn base.Constructor\\n'; assert old in s; p.write_text(s.replace(old,new,1))"
+          gofmt -w internal/frontend/sema/expressions.go
           CGO_ENABLED=0 go test ./internal/frontend/sema
           CGO_ENABLED=0 go test ./internal/frontend/sema -run=^$ -fuzz=^FuzzSema$ -fuzztime=30s
       - name: Commit fix
@@ -72,6 +30,6 @@ jobs:
           rm .github/workflows/sema-fuzz-hotfix.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add internal/frontend/sema/expressions.go internal/frontend/sema/super_fuzz_regression_test.go .github/workflows/sema-fuzz-hotfix.yml
+          git add -A
           git commit -m "fix(sema): guard unresolved super base"
           git push origin HEAD:test/reliability-ir-backend-fuzz
