@@ -66,12 +66,12 @@ func MustReadExample(t *testing.T, path string) string {
 	return string(data)
 }
 
-func RunLinuxAMD64(t *testing.T, tc LinuxAMD64Case) {
+func RunLinuxAMD64Output(t *testing.T, name, source string) (string, bool) {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "linux_amd64_bin")
 	compiler := tspro.New(tspro.Options{TargetOS: "linux", TargetArch: "amd64", OptLevel: 2})
-	bin, diags, err := compiler.CompileSource(tc.Name+".ts", []byte(tc.Source))
+	bin, diags, err := compiler.CompileSource(name+".ts", []byte(source))
 	if err != nil {
 		t.Fatalf("linux/amd64 compile failed: %v, diagnostics: %s", err, diags.Format(compiler.FileSet()))
 	}
@@ -82,14 +82,23 @@ func RunLinuxAMD64(t *testing.T, tc LinuxAMD64Case) {
 
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Logf("linux/amd64 execution skipped on host %s/%s; ELF validation still ran", runtime.GOOS, runtime.GOARCH)
-		return
+		return "", false
 	}
 	out, err := exec.Command(binPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("linux/amd64 execution failed: %v\nOutput:\n%s", err, string(out))
 	}
-	if string(out) != tc.Expected {
-		t.Fatalf("linux/amd64 stdout: got %q, want %q", string(out), tc.Expected)
+	return string(out), true
+}
+
+func RunLinuxAMD64(t *testing.T, tc LinuxAMD64Case) {
+	t.Helper()
+	out, executed := RunLinuxAMD64Output(t, tc.Name, tc.Source)
+	if !executed {
+		return
+	}
+	if out != tc.Expected {
+		t.Fatalf("linux/amd64 stdout: got %q, want %q", out, tc.Expected)
 	}
 }
 
