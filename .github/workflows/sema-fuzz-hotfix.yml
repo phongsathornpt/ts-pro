@@ -1,4 +1,4 @@
-name: Sema Fuzz Hotfix
+name: Compiler Fuzz Hotfix
 
 on:
   push:
@@ -19,17 +19,52 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Patch SuperExpr guard
+      - name: Patch fuzz-discovered nil assumptions
         run: |
-          python3 -c "from pathlib import Path; p=Path('internal/frontend/sema/expressions.go'); s=p.read_text(); old='\\t\\tbase := c.result.Classes[c.currentClass.BaseName]\\n\\t\\tc.result.Types[e] = base.Constructor\\n\\t\\treturn base.Constructor\\n'; new='\\t\\tbase := c.result.Classes[c.currentClass.BaseName]\\n\\t\\tif base == nil {\\n\\t\\t\\tc.result.Types[e] = types.TypeAny\\n\\t\\t\\treturn types.TypeAny\\n\\t\\t}\\n\\t\\tc.result.Types[e] = base.Constructor\\n\\t\\treturn base.Constructor\\n'; assert old in s; p.write_text(s.replace(old,new,1))"
-          gofmt -w internal/frontend/sema/expressions.go
-          CGO_ENABLED=0 go test ./internal/frontend/sema
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected snippet not found in {path}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace(
+              'internal/frontend/sema/expressions.go',
+              '\t\tbase := c.result.Classes[c.currentClass.BaseName]\n\t\tc.result.Types[e] = base.Constructor\n\t\treturn base.Constructor\n',
+              '\t\tbase := c.result.Classes[c.currentClass.BaseName]\n\t\tif base == nil {\n\t\t\tc.result.Types[e] = types.TypeAny\n\t\t\treturn types.TypeAny\n\t\t}\n\t\tc.result.Types[e] = base.Constructor\n\t\treturn base.Constructor\n',
+          )
+          replace(
+              'internal/frontend/sema/statements.go',
+              'func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {\n\tinfo := c.result.Classes[cls.Name]\n\tparentClass := c.currentClass\n',
+              'func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {\n\tinfo := c.result.Classes[cls.Name]\n\tif info == nil {\n\t\treturn\n\t}\n\tparentClass := c.currentClass\n',
+          )
+          replace(
+              'internal/frontend/sema/statements.go',
+              '\t\tif method.Name == "constructor" {\n\t\t\tfnType = info.Constructor\n\t\t} else {\n\t\t\tfnType = info.Methods[method.Name]\n\t\t}\n\n\t\tc.currentFnRet = fnType.Return\n',
+              '\t\tif method.Name == "constructor" {\n\t\t\tfnType = info.Constructor\n\t\t} else {\n\t\t\tfnType = info.Methods[method.Name]\n\t\t}\n\t\tif fnType == nil {\n\t\t\tcontinue\n\t\t}\n\n\t\tc.currentFnRet = fnType.Return\n',
+          )
+          replace(
+              'internal/midend/irgen/expressions.go',
+              '\t\tsym := g.semaResult.Symbols[e]\n\t\tfnType := sym.Type.(*types.FunctionType)\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
+              '\t\tsym := g.semaResult.Symbols[e]\n\t\tif sym == nil {\n\t\t\treturn g.failExpr("identifier %q has no lowerable symbol", e.Name)\n\t\t}\n\t\tfnType, ok := sym.Type.(*types.FunctionType)\n\t\tif !ok {\n\t\t\treturn g.failExpr("identifier %q is not a lowerable function", e.Name)\n\t\t}\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
+          )
+          PY
+          gofmt -w internal/frontend/sema/expressions.go internal/frontend/sema/statements.go internal/midend/irgen/expressions.go
+      - name: Validate fixes
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          CGO_ENABLED=0 go test ./internal/frontend/sema ./internal/midend/irgen
           CGO_ENABLED=0 go test ./internal/frontend/sema -run=^$ -fuzz=^FuzzSema$ -fuzztime=30s
-      - name: Commit fix
+          CGO_ENABLED=0 go test ./internal/midend/irgen -run=^$ -fuzz=^FuzzIRGen$ -fuzztime=30s
+      - name: Commit fixes
         run: |
           rm .github/workflows/sema-fuzz-hotfix.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "fix(sema): guard unresolved super base"
+          git commit -m "fix(compiler): guard fuzz-discovered nil paths"
           git push origin HEAD:test/reliability-ir-backend-fuzz
