@@ -36,9 +36,12 @@ func FuzzIRGen(f *testing.F) {
 		if semaResult == nil || semaResult.Diagnostics.HasErrors() {
 			return
 		}
-		irProg, _ := Generate(prog, semaResult)
+		irProg, err := Generate(prog, semaResult)
+		if err != nil {
+			return
+		}
 		if irProg == nil {
-			t.Fatal("IR generator returned nil program")
+			t.Fatal("IR generator succeeded with nil program")
 		}
 		_ = irProg.Dump()
 	})
