@@ -32,14 +32,14 @@ func (g *generator) lowerWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberEx
 func (g *generator) lowerHMACImportKey(e *ast.CallExpr) ir.Operand {
 	format := g.lowerExpr(e.Args[0])
 	keyData := g.lowerCryptoDigestInput(e.Args[1])
-	algorithmName, hashName := g.lowerHMACImportAlgorithm(e.Args[2])
+	algorithmName, hashName, requestedLength := g.lowerHMACImportAlgorithm(e.Args[2])
 	extractable := g.lowerExpr(e.Args[3])
 	usages := g.copyCryptoStringArray(g.lowerExpr(e.Args[4]), g.semanticType(e.Args[4]).(*types.ArrayType))
 
 	taskType := g.semanticType(e).(*types.ObjectType)
 	keyType := g.promiseSettledIRType(taskType).(*types.ObjectType)
-	captures := []ir.Operand{format, keyData, algorithmName, hashName, extractable, usages}
-	captureTypes := []types.Type{types.TypeString, g.semaResult.ByteBufferType, types.TypeString, types.TypeString, types.TypeBoolean, types.NewArray(types.TypeString)}
+	captures := []ir.Operand{format, keyData, algorithmName, hashName, requestedLength, extractable, usages}
+	captureTypes := []types.Type{types.TypeString, g.semaResult.ByteBufferType, types.TypeString, types.TypeString, types.TypeNumber, types.TypeBoolean, types.NewArray(types.TypeString)}
 
 	return g.spawnCryptoTask("hmac_import", taskType, keyType, captures, captureTypes, func(captured []ir.Operand) {
 		formatOK := g.cryptoStringEquals(captured[0], "raw", "hmac_import_raw")
@@ -56,7 +56,7 @@ func (g *generator) lowerHMACImportKey(e *ast.CallExpr) ir.Operand {
 		g.rejectCryptoTask("NotSupportedError", "Only raw HMAC keys are currently supported.")
 
 		g.currentBB = supportedBB
-		validUsages := g.cryptoHMACUsagesValid(captured[5])
+		validUsages := g.cryptoHMACUsagesValid(captured[6])
 		usagesOKBB := g.currentFn.NewBlock("hmac_import_usages_ok")
 		usagesBadBB := g.currentFn.NewBlock("hmac_import_usages_bad")
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: validUsages, Then: usagesOKBB, Else: usagesBadBB}
@@ -79,7 +79,12 @@ func (g *generator) lowerHMACImportKey(e *ast.CallExpr) ir.Operand {
 		g.rejectCryptoTask("DataError", "HMAC key data must not be empty.")
 
 		g.currentBB = keyOKBB
-		g.finishHMACImportKey(keyType, captured[1], captured[3], captured[4], captured[5], keyLength)
+		keyBits, dropBits := g.resolveHMACImportLength(keyLength, captured[4])
+		g.guardHMACPartialImport(captured[3], keyLength, dropBits)
+		g.maskHMACImportTrailingBits(captured[1], keyLength, dropBits)
+		metadataByteLength := g.currentFn.NewValue("hmac_import_metadata_bytes", types.TypeNumber)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: metadataByteLength, Op: ir.OpDiv, LHS: keyBits, RHS: ir.ConstNumber{Value: 8}})
+		g.finishHMACImportKey(keyType, captured[1], captured[3], captured[5], captured[6], metadataByteLength)
 	})
 }
 
@@ -261,7 +266,7 @@ func cryptoCaptureRefMask(captures []ir.Operand) uint64 {
 	return mask
 }
 
-func (g *generator) lowerHMACImportAlgorithm(expr ast.Expr) (ir.Operand, ir.Operand) {
+func (g *generator) lowerHMACImportAlgorithm(expr ast.Expr) (ir.Operand, ir.Operand, ir.Operand) {
 	objType := g.semanticType(expr).(*types.ObjectType)
 	value := g.lowerExpr(expr)
 	offsets, _, _ := g.objectLayout(objType)
@@ -274,17 +279,21 @@ func (g *generator) lowerHMACImportAlgorithm(expr ast.Expr) (ir.Operand, ir.Oper
 	hashField := objType.Fields["hash"]
 	hash := g.currentFn.NewValue("hmac_import_hash", hashField.Type)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: hash, Obj: value, Field: "hash", Offset: offsets["hash"]})
+
+	length := g.currentFn.NewValue("hmac_import_length", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: length, Obj: value, Field: "length", Offset: offsets["length"]})
+
 	if hashField.Type == types.TypeString {
-		return nameString, hash
+		return nameString, hash, length
 	}
 	if hashObj, ok := hashField.Type.(*types.ObjectType); ok {
 		hashOffsets, _, _ := g.objectLayout(hashObj)
 		hashNameField := hashObj.Fields["name"]
 		hashName := g.currentFn.NewValue("hmac_import_hash_name", hashNameField.Type)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetFieldInst{Res: hashName, Obj: hash, Field: "name", Offset: hashOffsets["name"]})
-		return nameString, g.coerceStringType(hashNameField.Type, hashName)
+		return nameString, g.coerceStringType(hashNameField.Type, hashName), length
 	}
-	return nameString, ir.ConstString{Value: ""}
+	return nameString, ir.ConstString{Value: ""}, length
 }
 
 func (g *generator) newHMACCryptoKey(keyType *types.ObjectType, data, extractable, usages, keyByteLength ir.Operand, hashName string) ir.Operand {
