@@ -21,6 +21,7 @@ func FuzzIRGen(f *testing.F) {
 		"console.log(() => 1);",
 		"console.log(1) - 1;",
 		"const f: any = 1; f({ a: 1 });",
+		"function sink(value: any): void {} sink(console.log(1));",
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
