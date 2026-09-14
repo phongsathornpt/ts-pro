@@ -37,6 +37,11 @@ jobs:
               '\t\tbase := c.result.Classes[c.currentClass.BaseName]\n\t\tif base == nil {\n\t\t\tc.result.Types[e] = types.TypeAny\n\t\t\treturn types.TypeAny\n\t\t}\n\t\tc.result.Types[e] = base.Constructor\n\t\treturn base.Constructor\n',
           )
           replace(
+              'internal/frontend/sema/expressions.go',
+              '\tcase *ast.AssignExpr:\n\t\ttargetType := c.checkExpr(e.Left)\n\t\tvalType := c.checkExpr(e.Right)\n',
+              '\tcase *ast.AssignExpr:\n\t\tswitch e.Left.(type) {\n\t\tcase *ast.IdentExpr, *ast.MemberExpr, *ast.IndexExpr:\n\t\tdefault:\n\t\t\tc.checkExpr(e.Left)\n\t\t\tc.checkExpr(e.Right)\n\t\t\tc.error(e.Left.Span(), "TS2364", "The left-hand side of an assignment expression must be a variable or a property access.")\n\t\t\tc.result.Types[e] = types.TypeAny\n\t\t\treturn types.TypeAny\n\t\t}\n\t\ttargetType := c.checkExpr(e.Left)\n\t\tvalType := c.checkExpr(e.Right)\n',
+          )
+          replace(
               'internal/frontend/sema/statements.go',
               'func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {\n\tinfo := c.result.Classes[cls.Name]\n\tparentClass := c.currentClass\n',
               'func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {\n\tinfo := c.result.Classes[cls.Name]\n\tif info == nil {\n\t\treturn\n\t}\n\tparentClass := c.currentClass\n',
@@ -55,6 +60,11 @@ jobs:
               'internal/midend/irgen/expressions.go',
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tfnType := sym.Type.(*types.FunctionType)\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
               '\t\tsym := g.semaResult.Symbols[e]\n\t\tif sym == nil {\n\t\t\treturn g.failExpr("identifier %q has no lowerable symbol", e.Name)\n\t\t}\n\t\tfnType, ok := sym.Type.(*types.FunctionType)\n\t\tif !ok {\n\t\t\treturn g.failExpr("identifier %q is not a lowerable function", e.Name)\n\t\t}\n\t\tres := g.currentFn.NewValue("closure", fnType)\n',
+          )
+          replace(
+              'internal/midend/irgen/expressions.go',
+              '\t\tident := e.Left.(*ast.IdentExpr)\n\t\tcurrent := g.readLocal(ident.Name)\n',
+              '\t\tident, ok := e.Left.(*ast.IdentExpr)\n\t\tif !ok {\n\t\t\treturn g.failExpr("assignment target %T is not lowerable", e.Left)\n\t\t}\n\t\tcurrent := g.readLocal(ident.Name)\n',
           )
           replace(
               'internal/midend/irgen/calls.go',
