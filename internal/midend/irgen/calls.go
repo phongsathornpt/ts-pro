@@ -37,28 +37,24 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 	}
 	if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 		switch ident.Name {
-		case "setTimeout", "setInterval":
+		case "setTimeout":
 			closure := g.lowerExpr(e.Args[0])
 			delay := ir.Operand(ir.ConstNumber{Value: 0})
 			if len(e.Args) == 2 {
 				delay = g.lowerExpr(e.Args[1])
 			}
-			callee := "ts_set_timeout"
-			name := "timer_id"
-			if ident.Name == "setInterval" {
-				callee = "ts_set_interval"
-				name = "interval_id"
-			}
-			res := g.currentFn.NewValue(name, types.TypeNumber)
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: callee, Args: []ir.Operand{closure, delay}})
+			res := g.currentFn.NewValue("timer_id", types.TypeNumber)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_set_timeout", Args: []ir.Operand{closure, delay}})
 			return res
-		case "clearTimeout", "clearInterval":
+		case "setInterval":
+			return g.lowerSetInterval(e)
+		case "clearTimeout":
 			id := g.lowerExpr(e.Args[0])
-			callee := "ts_clear_timeout"
-			if ident.Name == "clearInterval" {
-				callee = "ts_clear_interval"
-			}
-			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee, Args: []ir.Operand{id}})
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_timeout", Args: []ir.Operand{id}})
+			return nil
+		case "clearInterval":
+			id := g.lowerExpr(e.Args[0])
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_interval", Args: []ir.Operand{id}})
 			return nil
 		case "fetch":
 			return g.lowerFetchCall(e)
