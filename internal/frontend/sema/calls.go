@@ -41,6 +41,17 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 			c.result.Types[e.Callee] = types.TypeAny
 			c.result.Types[e] = types.TypeVoid
 			return types.TypeVoid
+		case "structuredClone":
+			if len(e.Args) != 1 {
+				c.error(e.Span(), "TS2554", "structuredClone expects exactly one value.")
+				c.result.Types[e.Callee] = types.TypeAny
+				c.result.Types[e] = types.TypeAny
+				return types.TypeAny
+			}
+			resultType := c.checkExpr(e.Args[0])
+			c.result.Types[e.Callee] = types.TypeAny
+			c.result.Types[e] = resultType
+			return resultType
 		case "queueMicrotask":
 			if len(e.Args) != 1 {
 				c.error(e.Span(), "TS2554", "queueMicrotask expects exactly one callback.")
