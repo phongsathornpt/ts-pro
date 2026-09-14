@@ -17,9 +17,9 @@ func (g *generator) lowerPerformanceEventTarget() ir.Operand {
 	boxedUndefined := g.boxJSValue(ir.ConstUndefined{}, types.TypeUndefined)
 	isUndefined := g.currentFn.NewValue("performance_target_missing", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Res: isUndefined,
-		Callee: "ts_js_strict_eq",
-		Args: []ir.Operand{existing, boxedUndefined},
+		Res:        isUndefined,
+		Callee:     "ts_js_strict_eq",
+		Args:       []ir.Operand{existing, boxedUndefined},
 		ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
 	})
 
@@ -34,9 +34,9 @@ func (g *generator) lowerPerformanceEventTarget() ir.Operand {
 	created := g.boxJSValue(target, g.semaResult.EventTargetType)
 	set := g.currentFn.NewValue("performance_target_set", types.TypeAny)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Res: set,
-		Callee: "ts_dynamic_set",
-		Args: []ir.Operand{boxedGlobal, ir.ConstString{Value: performanceEventTargetKey}, created},
+		Res:        set,
+		Callee:     "ts_dynamic_set",
+		Args:       []ir.Operand{boxedGlobal, ir.ConstString{Value: performanceEventTargetKey}, created},
 		ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
 	})
 	createBB.Terminator = &ir.JumpTerm{Target: doneBB}
