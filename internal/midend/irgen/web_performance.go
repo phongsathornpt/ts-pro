@@ -44,7 +44,7 @@ func (g *generator) lowerPerformanceEventTarget() ir.Operand {
 	g.currentBB = doneBB
 	boxed := g.currentFn.NewValue("performance_target_boxed", types.TypeAny)
 	doneBB.Phis = append(doneBB.Phis, &ir.PhiInst{
-		Res: boxed,
+		Res:      boxed,
 		Incoming: []ir.PhiIncoming{
 			{Block: entry, Value: existing},
 			{Block: createBB, Value: created},
