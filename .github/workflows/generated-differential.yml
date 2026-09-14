@@ -30,7 +30,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
-          cache: false
       - name: Select optional replay seed
         id: seed
         shell: bash
