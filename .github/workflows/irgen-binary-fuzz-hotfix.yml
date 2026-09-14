@@ -1,0 +1,49 @@
+name: IRGen Binary Fuzz Hotfix
+
+on:
+  push:
+    branches:
+      - test/reliability-ir-backend-fuzz
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: test/reliability-ir-backend-fuzz
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Guard void binary operands
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('internal/midend/irgen/expressions.go')
+          text = path.read_text()
+          old = '''\t\tlhs := g.lowerExpr(e.Left)\n\t\trhs := g.lowerExpr(e.Right)\n\n\t\tif e.Op == token.Plus'''
+          new = '''\t\tlhs := g.lowerExpr(e.Left)\n\t\trhs := g.lowerExpr(e.Right)\n\t\tif lhs == nil || rhs == nil {\n\t\t\treturn g.failExpr("binary operator %s requires value operands", e.Op)\n\t\t}\n\n\t\tif e.Op == token.Plus'''
+          if old not in text:
+              raise SystemExit('expected binary lowering snippet not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          gofmt -w internal/midend/irgen/expressions.go
+      - name: Validate fix
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          CGO_ENABLED=0 go test ./internal/midend/irgen
+          CGO_ENABLED=0 go test ./internal/midend/irgen -run=^$ -fuzz=^FuzzIRGen$ -fuzztime=30s
+      - name: Commit fix
+        run: |
+          rm .github/workflows/irgen-binary-fuzz-hotfix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(irgen): reject void binary operands safely"
+          git push origin HEAD:test/reliability-ir-backend-fuzz
