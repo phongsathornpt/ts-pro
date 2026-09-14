@@ -23,10 +23,9 @@ func (g *generator) lowerPerformanceEventTarget() ir.Operand {
 		ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
 	})
 
-	entry := g.currentBB
 	createBB := g.currentFn.NewBlock("performance_target_create")
 	doneBB := g.currentFn.NewBlock("performance_target_done")
-	entry.Terminator = &ir.BranchTerm{Cond: isUndefined, Then: createBB, Else: doneBB}
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isUndefined, Then: createBB, Else: doneBB}
 
 	g.currentBB = createBB
 	target := g.currentFn.NewValue("performance_target", g.semaResult.EventTargetType)
@@ -42,13 +41,6 @@ func (g *generator) lowerPerformanceEventTarget() ir.Operand {
 	createBB.Terminator = &ir.JumpTerm{Target: doneBB}
 
 	g.currentBB = doneBB
-	boxed := g.currentFn.NewValue("performance_target_boxed", types.TypeAny)
-	doneBB.Phis = append(doneBB.Phis, &ir.PhiInst{
-		Res:      boxed,
-		Incoming: []ir.PhiIncoming{
-			{Block: entry, Value: existing},
-			{Block: createBB, Value: created},
-		},
-	})
+	boxed := g.lowerDynamicGet(boxedGlobal, performanceEventTargetKey)
 	return g.coerceJSValueBoundary(boxed, types.TypeAny, g.semaResult.EventTargetType)
 }
