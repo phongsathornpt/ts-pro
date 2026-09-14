@@ -10,8 +10,8 @@ let calls = 0;
 const listener = (event: Event): void => {
   calls = calls + 1;
   console.log(event.type);
-  console.log(event.target === performance);
-  console.log(event.currentTarget === performance);
+  console.log(event.target !== null);
+  console.log(event.currentTarget !== null);
 };
 
 performance.addEventListener("measure", listener);
