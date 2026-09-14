@@ -2,10 +2,10 @@
 
 ## Active raw-native roadmap: complete
 
-The repository-defined active raw-native roadmap is complete. The authoritative acceptance state is:
+The repository-defined active raw-native roadmap is complete. The current acceptance state is:
 
 ```text
-125 / 125 native fixtures PASS
+152 / 152 native fixtures PASS
 0 diagnostics
 0 build/lowering failures
 0 runtime failures
@@ -13,7 +13,7 @@ The repository-defined active raw-native roadmap is complete. The authoritative 
 52 / 52 Node-comparable deterministic fixtures match
 ```
 
-The full acceptance gate is documented in `docs/STATUS.md` and `TODO.md`.
+The original core-roadmap completion milestone was **125 / 125** native fixtures; later performance and WinterTC work expanded the suite without changing that historical acceptance point. The full current acceptance gate is documented in `docs/STATUS.md` and `TODO.md`.
 
 ### Completed milestones
 
@@ -57,11 +57,11 @@ These are **new scope**, not blockers for the completed fixture roadmap.
 
 ### Reliability and production hardening
 
-- parser/sema/IR/backend fuzzing;
-- randomized GC/scheduler/channel/Promise stress;
-- differential property testing against Node/TypeScript for broader generated programs;
-- security review of executable writer, runtime memory handling, and dynamic boundaries;
-- reproducible benchmark and release artifacts.
+- [x] parser/sema/IR/backend fuzzing with fixed seed corpora plus scheduled compiler fuzzing;
+- [x] replayable seeded GC/scheduler/channel/Promise stress with a stable CI corpus and one fresh nightly seed;
+- [ ] differential property testing against Node/TypeScript for broader generated programs;
+- [ ] security review of executable writer, runtime memory handling, and dynamic boundaries;
+- [ ] reproducible benchmark and release artifacts.
 
 ## Historical roadmaps
 
