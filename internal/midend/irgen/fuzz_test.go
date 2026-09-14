@@ -18,6 +18,7 @@ func FuzzIRGen(f *testing.F) {
 		"const obj: any = { a: 1 }; obj.a = obj.a + 1; console.log(obj.a);",
 		"const key = new Uint8Array(3); crypto.subtle.importKey(\"raw\", key, { name: \"HMAC\", hash: \"SHA-256\", length: 17 }, false, [\"sign\"]);",
 		"console.log();",
+		"console.log(() => 1);",
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
