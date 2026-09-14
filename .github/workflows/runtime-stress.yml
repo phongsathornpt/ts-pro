@@ -1,0 +1,44 @@
+name: Runtime Stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Optional uint64 seed to replay
+        required: false
+        type: string
+  schedule:
+    - cron: "41 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Select replayable seed
+        id: seed
+        shell: bash
+        run: |
+          seed="${{ inputs.seed }}"
+          if [ -z "$seed" ]; then
+            seed="$GITHUB_RUN_ID"
+          fi
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "Runtime stress seed: $seed"
+      - name: Run seeded GC scheduler channel Promise stress
+        env:
+          GOTOOLCHAIN: local
+          TS_PRO_STRESS_SEED: ${{ steps.seed.outputs.seed }}
+        run: >-
+          CGO_ENABLED=0 go test ./tests/e2e
+          -run '^TestLinuxAMD64DeterministicRandomizedRuntimeStress$'
+          -count=1
+          -v
