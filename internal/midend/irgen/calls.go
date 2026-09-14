@@ -201,7 +201,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		args := make([]ir.Operand, 0, len(e.Args)+1)
 		args = append(args, thisVal)
 		for _, arg := range e.Args {
-			args = append(args, g.lowerExpr(arg))
+			args = append(args, g.lowerCallArgument(arg))
 		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: classConstructorName(g.currentClass.BaseName), Args: args})
 		return nil
@@ -305,7 +305,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 					args := make([]ir.Operand, 0, len(e.Args))
 					sourceTypes := make([]types.Type, 0, len(e.Args))
 					for _, arg := range e.Args {
-						args = append(args, g.lowerExpr(arg))
+						args = append(args, g.lowerCallArgument(arg))
 						sourceTypes = append(sourceTypes, g.semanticType(arg))
 					}
 					args = g.coerceCallOperands(args, sourceTypes, fnType)
@@ -328,7 +328,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 				receiver := g.unboxKnownObject(boxed, proven)
 				callArgs := make([]ir.Operand, 0, len(e.Args))
 				for _, arg := range e.Args {
-					callArgs = append(callArgs, g.lowerExpr(arg))
+					callArgs = append(callArgs, g.lowerCallArgument(arg))
 				}
 				return g.emitClassMethodCall(receiver, info, mem.Property, callArgs)
 			}
@@ -355,7 +355,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 				obj := g.lowerExpr(mem.Object)
 				callArgs := make([]ir.Operand, 0, len(e.Args))
 				for _, arg := range e.Args {
-					callArgs = append(callArgs, g.lowerExpr(arg))
+					callArgs = append(callArgs, g.lowerCallArgument(arg))
 				}
 				return g.emitClassMethodCall(obj, staticInfo, mem.Property, callArgs)
 			}
@@ -380,7 +380,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		args := make([]ir.Operand, 0, len(e.Args))
 		sourceTypes := make([]types.Type, 0, len(e.Args))
 		for _, arg := range e.Args {
-			args = append(args, g.lowerExpr(arg))
+			args = append(args, g.lowerCallArgument(arg))
 			sourceTypes = append(sourceTypes, g.semanticType(arg))
 		}
 		args = g.coerceCallOperands(args, sourceTypes, fnType)
@@ -413,7 +413,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			args := make([]ir.Operand, 0, len(e.Args))
 			sourceTypes := make([]types.Type, 0, len(e.Args))
 			for _, arg := range e.Args {
-				args = append(args, g.lowerExpr(arg))
+				args = append(args, g.lowerCallArgument(arg))
 				sourceTypes = append(sourceTypes, g.semanticType(arg))
 			}
 			args = g.coerceCallOperands(args, sourceTypes, fnType)
@@ -445,7 +445,7 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 	var args []ir.Operand
 	var sourceTypes []types.Type
 	for _, arg := range e.Args {
-		args = append(args, g.lowerExpr(arg))
+		args = append(args, g.lowerCallArgument(arg))
 		sourceTypes = append(sourceTypes, g.semanticType(arg))
 	}
 	callType, _ := g.semanticType(e.Callee).(*types.FunctionType)

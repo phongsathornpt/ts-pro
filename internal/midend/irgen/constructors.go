@@ -191,7 +191,7 @@ func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 	}
 	if e.ClassName == "Date" {
 		arg := e.Args[0]
-		value := g.lowerExpr(arg)
+		value := g.lowerCallArgument(arg)
 		if lit, ok := arg.(*ast.StringLit); ok {
 			parsed, _ := time.Parse(time.RFC3339Nano, lit.Value)
 			value = ir.ConstNumber{Value: float64(parsed.UnixMilli())}
@@ -219,7 +219,7 @@ func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 	args := make([]ir.Operand, 0, len(e.Args)+1)
 	args = append(args, obj)
 	for _, arg := range e.Args {
-		args = append(args, g.lowerExpr(arg))
+		args = append(args, g.lowerCallArgument(arg))
 	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
 		Callee: classConstructorName(info.Name), Args: args,
