@@ -6,7 +6,7 @@ The active handwritten TypeScript frontend → SSA → raw-native backend is com
 
 Current acceptance:
 
-- **146 / 146** native fixtures compile and run successfully (the original core-roadmap acceptance milestone was 125 / 125; later performance/WinterTC work expanded the suite).
+- **152 / 152** native fixtures compile and run successfully (the original core-roadmap acceptance milestone was 125 / 125; later performance/WinterTC work expanded the suite).
 - **0** diagnostics, lowering/build failures, runtime failures, or timeouts.
 - **52 / 52** Node-comparable deterministic fixtures match stdout and exit status.
 - 7 differential fixtures are explicitly skipped only because Node strip-types cannot directly execute enum syntax, extensionless TypeScript imports, or parameter-property syntax.
@@ -41,6 +41,16 @@ make test-linux-amd64
 git diff --check
 ```
 
+## Reliability hardening
+
+Post-completion reliability work now includes:
+
+- parser, semantic-analysis, IR-generation, and structured backend fuzzing with stable seed corpora plus scheduled fuzz runs;
+- deterministic seeded GC/scheduler/channel/Promise stress in normal CI;
+- a nightly runtime-stress run that appends one fresh replayable seed through `TS_PRO_STRESS_SEED`.
+
+Generated-program differential property testing against Node/TypeScript remains the next reliability item.
+
 ## Historical architecture notes
 
 Older LLVM, c-archive, pure-Go generated-code, TypeScript-7 migration, and stackless-scheduler plans in historical documents/commits are reference material only. `TODO.md` defines the source of truth for the active raw-native backend.
@@ -51,7 +61,7 @@ The completed fixture roadmap does not imply the compiler implements all TypeScr
 
 - broader TypeScript/ECMAScript syntax and standard-library coverage;
 - ARM64/macOS/Windows execution parity for the full active feature surface;
-- fuzzing and differential-property testing beyond curated fixtures;
+- generated-program differential-property testing beyond curated fixtures;
 - allocator, GC, scheduler, register-allocation, and code-size performance work;
 - stronger module/package resolution and ecosystem compatibility;
 - production hardening, security review, benchmark baselines, PGO/LTO, and cross-compilation ergonomics.
