@@ -379,7 +379,13 @@ func (g *generator) lowerConsoleLog(expr ast.Expr) ir.Operand {
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: callee, Args: []ir.Operand{value}, ParamTypes: []types.Type{t}})
 		return nil
 	}
-	union := t.(*types.UnionType)
+	union, ok := t.(*types.UnionType)
+	if !ok {
+		value := g.lowerExpr(expr)
+		boxed := g.boxJSValue(value, t)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_js_print", Args: []ir.Operand{boxed}, ParamTypes: []types.Type{types.TypeAny}})
+		return nil
+	}
 	var concrete types.Type
 	hasNull, hasUndefined := false, false
 	for _, member := range union.Members {
