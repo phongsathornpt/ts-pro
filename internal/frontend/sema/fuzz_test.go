@@ -11,6 +11,7 @@ func FuzzSema(f *testing.F) {
 	seeds := []string{
 		"let x: number = 1;",
 		"let x: number = \"wrong\";",
+		"1 = 2;",
 		"function id<T>(x: T): T { return x; } const n: number = id(1);",
 		"class A { constructor(public x: number) {} } class B extends A { constructor(x: number) { super(x); } }",
 		"const values: number[] = [1, 2, 3]; for (const value of values) { console.log(value); }",

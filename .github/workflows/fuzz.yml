@@ -1,7 +1,13 @@
-name: Frontend Fuzz
+name: Compiler Fuzz
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
   schedule:
     - cron: "17 3 * * *"
 
@@ -9,6 +15,27 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        env:
+          GOTOOLCHAIN: local
+        run: CGO_ENABLED=0 go vet ./...
+      - name: Test
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          CGO_ENABLED=0 go test ./... \
+            -skip '^(TestLinuxAMD64InternalAES128GCM|TestLinuxAMD64InternalTLS13EncryptRecord|TestLinuxAMD64InternalTLS13DecryptRecord)$'
+
   fuzz:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -20,6 +47,10 @@ jobs:
             target: FuzzParser
           - package: ./internal/frontend/sema
             target: FuzzSema
+          - package: ./internal/midend/irgen
+            target: FuzzIRGen
+          - package: ./internal/backend/lower
+            target: FuzzLowerStructuredIR
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

@@ -86,14 +86,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return res
 	case *ast.ObjectLit:
-		objType := g.semanticType(e).(*types.ObjectType)
+		objType, ok := g.semanticType(e).(*types.ObjectType)
+		if !ok {
+			return g.failExpr("object literal has no lowerable object type")
+		}
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		written := make(map[string]bool, len(objType.Fields))
 		for _, prop := range e.Properties {
 			if prop.Spread {
-				sourceType := g.semanticType(prop.Value).(*types.ObjectType)
+				sourceType, ok := g.semanticType(prop.Value).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("object spread source has no lowerable object type")
+				}
 				source := g.lowerExpr(prop.Value)
 				sourceOffsets, _, _ := g.objectLayout(sourceType)
 				for _, name := range sourceType.FieldOrder {
@@ -128,7 +134,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.readLocal(e.Name)
 		}
 		sym := g.semaResult.Symbols[e]
-		fnType := sym.Type.(*types.FunctionType)
+		if sym == nil {
+			return g.failExpr("identifier %q has no lowerable symbol", e.Name)
+		}
+		fnType, ok := sym.Type.(*types.FunctionType)
+		if !ok {
+			return g.failExpr("identifier %q is not a lowerable function", e.Name)
+		}
 		res := g.currentFn.NewValue("closure", fnType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
 		return res
@@ -147,6 +159,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
+		if lhs == nil || rhs == nil {
+			return g.failExpr("binary operator %s requires value operands", e.Op)
+		}
 
 		if e.Op == token.Plus && (irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
 			irJSValueType(lhs.Type()) || irJSValueType(rhs.Type())) {
@@ -612,7 +627,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: value})
 			return value
 		}
-		ident := e.Left.(*ast.IdentExpr)
+		ident, ok := e.Left.(*ast.IdentExpr)
+		if !ok {
+			return g.failExpr("assignment target %T is not lowerable", e.Left)
+		}
 		current := g.readLocal(ident.Name)
 		rhs := g.lowerExpr(e.Right)
 		if e.Op == token.Eq {
