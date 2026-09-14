@@ -310,10 +310,15 @@ func (g *generator) makeEventListenerAbortRemovalCallback(target, eventType, cal
 
 func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
-	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal") {
+	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal" && objType.Name != "$Performance") {
 		return nil, false
 	}
-	target := g.lowerExpr(mem.Object)
+	var target ir.Operand
+	if objType.Name == "$Performance" {
+		target = g.lowerPerformanceEventTarget()
+	} else {
+		target = g.lowerExpr(mem.Object)
+	}
 	switch mem.Property {
 	case "addEventListener":
 		typeArg := g.lowerExpr(e.Args[0])
