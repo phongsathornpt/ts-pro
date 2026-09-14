@@ -3,6 +3,8 @@ package sema
 import "github.com/phongsathornpt/ts-pro/internal/core/types"
 
 func (c *Checker) builtinPerformanceType() *types.ObjectType {
+	c.builtinEventTargetType()
+
 	obj := types.NewObject("$Performance")
 	json := types.NewObject("$PerformanceJSON")
 	json.AddField("timeOrigin", types.TypeNumber, false)
