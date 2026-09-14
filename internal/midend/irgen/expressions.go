@@ -86,14 +86,20 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		}
 		return res
 	case *ast.ObjectLit:
-		objType := g.semanticType(e).(*types.ObjectType)
+		objType, ok := g.semanticType(e).(*types.ObjectType)
+		if !ok {
+			return g.failExpr("object literal has no lowerable object type")
+		}
 		offsets, refMask, shape := g.objectLayout(objType)
 		res := g.currentFn.NewValue("obj", objType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.AllocObjectInst{Res: res, Shape: shape, FieldCount: len(offsets), RefMask: refMask})
 		written := make(map[string]bool, len(objType.Fields))
 		for _, prop := range e.Properties {
 			if prop.Spread {
-				sourceType := g.semanticType(prop.Value).(*types.ObjectType)
+				sourceType, ok := g.semanticType(prop.Value).(*types.ObjectType)
+				if !ok {
+					return g.failExpr("object spread source has no lowerable object type")
+				}
 				source := g.lowerExpr(prop.Value)
 				sourceOffsets, _, _ := g.objectLayout(sourceType)
 				for _, name := range sourceType.FieldOrder {

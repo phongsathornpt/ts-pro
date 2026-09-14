@@ -310,6 +310,11 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 		}
 	}
 	calleeType := c.checkExpr(e.Callee)
+	argTypes := make([]types.Type, len(e.Args))
+	for i, arg := range e.Args {
+		argTypes[i] = c.checkExpr(arg)
+	}
+
 	fnType, ok := calleeType.(*types.FunctionType)
 	if !ok {
 		if calleeType.Kind() != types.KindAny {
@@ -317,11 +322,6 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 		}
 		c.result.Types[e] = types.TypeAny
 		return types.TypeAny
-	}
-
-	argTypes := make([]types.Type, len(e.Args))
-	for i, arg := range e.Args {
-		argTypes[i] = c.checkExpr(arg)
 	}
 
 	effective := fnType
