@@ -7,7 +7,8 @@ func TestLinuxAMD64WinterTCSetIntervalRepeatsAndCancels(t *testing.T) {
 		name: "wintertc_set_interval",
 		source: `
 let calls = 0;
-const id = setInterval((): void => {
+let id: number = 0;
+id = setInterval((): void => {
   calls = calls + 1;
   console.log(calls);
   if (calls === 3) {
