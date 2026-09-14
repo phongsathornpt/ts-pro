@@ -60,3 +60,27 @@ console.log(clone.self.value);
 		expected: "true\ntrue\n1\n1\n9\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCStructuredCloneArrayBufferCopiesBytes(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_structured_clone_array_buffer",
+		source: `
+const source = new ArrayBuffer(3);
+const sourceView = new Uint8Array(source);
+sourceView[0] = 1;
+sourceView[1] = 2;
+sourceView[2] = 3;
+const clone = structuredClone(source);
+const cloneView = new Uint8Array(clone);
+console.log(clone !== source);
+console.log(clone.byteLength);
+console.log(cloneView[0]);
+console.log(cloneView[1]);
+console.log(cloneView[2]);
+cloneView[0] = 9;
+console.log(sourceView[0]);
+console.log(cloneView[0]);
+`,
+		expected: "true\n3\n1\n2\n3\n1\n9\n",
+	})
+}
