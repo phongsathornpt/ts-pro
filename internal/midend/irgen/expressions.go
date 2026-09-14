@@ -153,6 +153,9 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 
 		lhs := g.lowerExpr(e.Left)
 		rhs := g.lowerExpr(e.Right)
+		if lhs == nil || rhs == nil {
+			return g.failExpr("binary operator %s requires value operands", e.Op)
+		}
 
 		if e.Op == token.Plus && (irJSValueType(g.semanticType(e.Left)) || irJSValueType(g.semanticType(e.Right)) ||
 			irJSValueType(lhs.Type()) || irJSValueType(rhs.Type())) {
