@@ -46,8 +46,8 @@ func buildRuntimeStressProgram(seed uint64) (string, string) {
 	labelCapacity := rng.n(3)
 
 	var src strings.Builder
-	fmt.Fprintln(&src, "const values = channel<number>(", valueCapacity, ");")
-	fmt.Fprintln(&src, "const labels = channel<string>(", labelCapacity, ");")
+	fmt.Fprintf(&src, "const values = channel<number>(%d);\n", valueCapacity)
+	fmt.Fprintf(&src, "const labels = channel<string>(%d);\n", labelCapacity)
 
 	for i := 0; i < workers; i++ {
 		value := i + 1
@@ -63,11 +63,11 @@ func buildRuntimeStressProgram(seed uint64) (string, string) {
 		}
 		fmt.Fprintln(&src, "  let churn = \"\";")
 		fmt.Fprintf(&src, "  for (let i = 0; i < %d; i = i + 1) { churn = \"gc-\" + keep; }\n", churn)
-		if rng.n(2) == 0 {
-			fmt.Fprintf(&src, "  channelSend(values, %d);\n  channelSend(labels, keep);\n", value)
-		} else {
-			fmt.Fprintf(&src, "  channelSend(labels, keep);\n  channelSend(values, %d);\n", value)
-		}
+		// Always publish the numeric value first. With two rendezvous channels,
+		// randomizing send order can create a test-harness deadlock where the
+		// main task waits on values while every worker waits on labels.
+		fmt.Fprintf(&src, "  channelSend(values, %d);\n", value)
+		fmt.Fprintln(&src, "  channelSend(labels, keep);")
 		fmt.Fprintf(&src, "  return %d;\n});\n", value*2)
 	}
 
@@ -124,7 +124,6 @@ func buildRuntimeStressProgram(seed uint64) (string, string) {
 
 func TestLinuxAMD64DeterministicRandomizedRuntimeStress(t *testing.T) {
 	for _, seed := range runtimeStressSeeds(t) {
-		seed := seed
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			source, expected := buildRuntimeStressProgram(seed)
 			runLinuxAMD64(t, linuxAMD64Case{
