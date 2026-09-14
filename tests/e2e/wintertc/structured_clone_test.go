@@ -84,3 +84,40 @@ console.log(cloneView[0]);
 		expected: "true\n3\n1\n2\n3\n1\n9\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCStructuredCloneTransfersArrayBuffer(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_structured_clone_transfer_array_buffer",
+		source: `
+const source = new ArrayBuffer(3);
+const sourceView = new Uint8Array(source);
+sourceView[0] = 4;
+sourceView[1] = 5;
+sourceView[2] = 6;
+const clone = structuredClone(source, { transfer: [source] });
+const cloneView = new Uint8Array(clone);
+console.log(source.byteLength);
+console.log(clone.byteLength);
+console.log(cloneView[0]);
+console.log(cloneView[1]);
+console.log(cloneView[2]);
+`,
+		expected: "0\n3\n4\n5\n6\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCStructuredCloneRejectsDuplicateTransfer(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_structured_clone_duplicate_transfer",
+		source: `
+const source = new ArrayBuffer(1);
+try {
+  structuredClone(source, { transfer: [source, source] });
+  console.log("missed");
+} catch (err: any) {
+  console.log(err.name);
+}
+`,
+		expected: "DataCloneError\n",
+	})
+}
