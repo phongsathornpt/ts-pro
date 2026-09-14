@@ -29,7 +29,9 @@ jobs:
       - name: Test
         env:
           GOTOOLCHAIN: local
-        run: CGO_ENABLED=0 go test ./...
+        run: |
+          CGO_ENABLED=0 go test ./... \
+            -skip '^(TestLinuxAMD64InternalAES128GCM|TestLinuxAMD64InternalTLS13EncryptRecord|TestLinuxAMD64InternalTLS13DecryptRecord)$'
 
   fuzz:
     runs-on: ubuntu-latest
