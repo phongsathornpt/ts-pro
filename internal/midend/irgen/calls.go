@@ -56,6 +56,8 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			id := g.lowerExpr(e.Args[0])
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_interval", Args: []ir.Operand{id}})
 			return nil
+		case "structuredClone":
+			return g.lowerStructuredClone(e)
 		case "fetch":
 			return g.lowerFetchCall(e)
 		case "queueMicrotask":
