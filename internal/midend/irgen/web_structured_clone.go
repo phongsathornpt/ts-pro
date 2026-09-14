@@ -6,6 +6,8 @@ import (
 	"github.com/phongsathornpt/ts-pro/internal/core/types"
 )
 
+const structuredCloneAnyWorkerName = "$structured_clone_any"
+
 func (g *generator) lowerStructuredClone(e *ast.CallExpr) ir.Operand {
 	sourceType := g.semanticType(e.Args[0])
 	source := g.lowerExpr(e.Args[0])
@@ -45,93 +47,106 @@ func (g *generator) cloneStructuredValue(source ir.Operand, sourceType types.Typ
 }
 
 func (g *generator) cloneStructuredAny(source, memoSources, memoClones ir.Operand) ir.Operand {
-	isDynamic := g.currentFn.NewValue("structured_clone_any_dynamic", types.TypeBoolean)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Res: isDynamic, Callee: "ts_js_is_dynamic_object", Args: []ir.Operand{source}, ParamTypes: []types.Type{types.TypeAny},
-	})
-	dynamicBB := g.currentFn.NewBlock("structured_clone_any_object")
-	passthroughBB := g.currentFn.NewBlock("structured_clone_any_passthrough")
-	doneBB := g.currentFn.NewBlock("structured_clone_any_done")
-	g.currentBB.Terminator = &ir.BranchTerm{Cond: isDynamic, Then: dynamicBB, Else: passthroughBB}
-
-	passthroughBB.Terminator = &ir.JumpTerm{Target: doneBB}
-	g.currentBB = dynamicBB
-	cloned := g.cloneStructuredDynamicObject(source, memoSources, memoClones)
-	dynamicEnd := g.currentBB
-	dynamicEnd.Terminator = &ir.JumpTerm{Target: doneBB}
-
+	g.ensureStructuredCloneAnyWorker()
+	memoType := types.NewArray(types.TypeAny)
 	result := g.currentFn.NewValue("structured_clone_any_result", types.TypeAny)
-	doneBB.Phis = append(doneBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
-		{Block: passthroughBB, Value: source},
-		{Block: dynamicEnd, Value: cloned},
-	}})
-	g.currentBB = doneBB
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res:        result,
+		Callee:     structuredCloneAnyWorkerName,
+		Args:       []ir.Operand{source, memoSources, memoClones},
+		ParamTypes: []types.Type{types.TypeAny, memoType, memoType},
+	})
 	return result
 }
 
-func (g *generator) cloneStructuredDynamicObject(source, memoSources, memoClones ir.Operand) ir.Operand {
+func (g *generator) ensureStructuredCloneAnyWorker() {
+	for _, fn := range g.prog.Functions {
+		if fn.Name == structuredCloneAnyWorkerName {
+			return
+		}
+	}
+
+	outerFn, outerBB := g.currentFn, g.currentBB
+	outerLocals, outerProv, outerDirect := g.locals, g.localProvenance, g.localDirectCallee
+
+	memoType := types.NewArray(types.TypeAny)
+	worker := ir.NewFunction(structuredCloneAnyWorkerName, types.TypeAny)
+	source := worker.NewValue("source", types.TypeAny)
+	memoSources := worker.NewValue("memo_sources", memoType)
+	memoClones := worker.NewValue("memo_clones", memoType)
+	worker.Params = append(worker.Params, source, memoSources, memoClones)
+
+	g.currentFn = worker
+	g.currentBB = worker.NewBlock("entry")
+	g.locals = make(map[string]ir.Operand)
+	g.localProvenance = make(map[string]types.Type)
+	g.localDirectCallee = make(map[string]string)
+
+	isDynamic := worker.NewValue("structured_clone_any_dynamic", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+		Res: isDynamic, Callee: "ts_js_is_dynamic_object", Args: []ir.Operand{source}, ParamTypes: []types.Type{types.TypeAny},
+	})
+	dynamicBB := worker.NewBlock("dynamic")
+	passthroughBB := worker.NewBlock("passthrough")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: isDynamic, Then: dynamicBB, Else: passthroughBB}
+	passthroughBB.Terminator = &ir.ReturnTerm{Val: source}
+
+	g.currentBB = dynamicBB
 	memoIndex := g.structuredCloneMemoIndex(source, types.TypeAny, memoSources)
-	missing := g.currentFn.NewValue("structured_clone_dynamic_missing", types.TypeBoolean)
+	missing := worker.NewValue("structured_clone_dynamic_missing", types.TypeBoolean)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: missing, Op: ir.OpEq, LHS: memoIndex, RHS: ir.ConstNumber{Value: -1}})
-	foundBB := g.currentFn.NewBlock("structured_clone_dynamic_found")
-	createBB := g.currentFn.NewBlock("structured_clone_dynamic_create")
-	doneBB := g.currentFn.NewBlock("structured_clone_dynamic_done")
+	foundBB := worker.NewBlock("found")
+	createBB := worker.NewBlock("create")
 	g.currentBB.Terminator = &ir.BranchTerm{Cond: missing, Then: createBB, Else: foundBB}
 
-	existing := g.currentFn.NewValue("structured_clone_dynamic_existing", types.TypeAny)
+	existing := worker.NewValue("structured_clone_dynamic_existing", types.TypeAny)
 	foundBB.Instructions = append(foundBB.Instructions, &ir.GetElementInst{Res: existing, Array: memoClones, Index: memoIndex})
-	foundBB.Terminator = &ir.JumpTerm{Target: doneBB}
+	foundBB.Terminator = &ir.ReturnTerm{Val: existing}
 
 	g.currentBB = createBB
-	clone := g.currentFn.NewValue("structured_clone_dynamic_object", types.TypeAny)
+	clone := worker.NewValue("structured_clone_dynamic_object", types.TypeAny)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: clone, Callee: "ts_dynamic_object_new"})
 	g.registerStructuredCloneMemo(source, types.TypeAny, clone, types.TypeAny, memoSources, memoClones)
-	count := g.currentFn.NewValue("structured_clone_dynamic_count", types.TypeNumber)
+	count := worker.NewValue("structured_clone_dynamic_count", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
 		Res: count, Callee: "ts_dynamic_count", Args: []ir.Operand{source}, ParamTypes: []types.Type{types.TypeAny},
 	})
 
 	pre := g.currentBB
-	condBB := g.currentFn.NewBlock("structured_clone_dynamic_cond")
-	bodyBB := g.currentFn.NewBlock("structured_clone_dynamic_body")
-	postBB := g.currentFn.NewBlock("structured_clone_dynamic_post")
-	createDone := g.currentFn.NewBlock("structured_clone_dynamic_create_done")
+	condBB := worker.NewBlock("property_cond")
+	bodyBB := worker.NewBlock("property_body")
+	postBB := worker.NewBlock("property_post")
+	doneBB := worker.NewBlock("done")
 	pre.Terminator = &ir.JumpTerm{Target: condBB}
 
-	index := g.currentFn.NewValue("structured_clone_dynamic_i", types.TypeNumber)
-	next := g.currentFn.NewValue("structured_clone_dynamic_next", types.TypeNumber)
+	index := worker.NewValue("structured_clone_dynamic_i", types.TypeNumber)
+	next := worker.NewValue("structured_clone_dynamic_next", types.TypeNumber)
 	condBB.Phis = append(condBB.Phis, &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{
 		{Block: pre, Value: ir.ConstNumber{Value: 0}},
 		{Block: postBB, Value: next},
 	}})
-	more := g.currentFn.NewValue("structured_clone_dynamic_more", types.TypeBoolean)
+	more := worker.NewValue("structured_clone_dynamic_more", types.TypeBoolean)
 	condBB.Instructions = append(condBB.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: count})
-	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: bodyBB, Else: createDone}
+	condBB.Terminator = &ir.BranchTerm{Cond: more, Then: bodyBB, Else: doneBB}
 
-	g.currentBB = bodyBB
-	key := g.currentFn.NewValue("structured_clone_dynamic_key", types.TypeString)
-	value := g.currentFn.NewValue("structured_clone_dynamic_value", types.TypeAny)
-	g.currentBB.Instructions = append(g.currentBB.Instructions,
+	key := worker.NewValue("structured_clone_dynamic_key", types.TypeString)
+	value := worker.NewValue("structured_clone_dynamic_value", types.TypeAny)
+	copied := worker.NewValue("structured_clone_dynamic_copy", types.TypeAny)
+	set := worker.NewValue("structured_clone_dynamic_set", types.TypeAny)
+	bodyBB.Instructions = append(bodyBB.Instructions,
 		&ir.CallInst{Res: key, Callee: "ts_dynamic_key_at", Args: []ir.Operand{source, index}, ParamTypes: []types.Type{types.TypeAny, types.TypeNumber}},
 		&ir.CallInst{Res: value, Callee: "ts_dynamic_value_at", Args: []ir.Operand{source, index}, ParamTypes: []types.Type{types.TypeAny, types.TypeNumber}},
+		&ir.CallInst{Res: copied, Callee: structuredCloneAnyWorkerName, Args: []ir.Operand{value, memoSources, memoClones}, ParamTypes: []types.Type{types.TypeAny, memoType, memoType}},
+		&ir.CallInst{Res: set, Callee: "ts_dynamic_set", Args: []ir.Operand{clone, key, copied}, ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny}},
 	)
-	copied := g.cloneStructuredValue(value, types.TypeAny, memoSources, memoClones)
-	set := g.currentFn.NewValue("structured_clone_dynamic_set", types.TypeAny)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-		Res: set, Callee: "ts_dynamic_set", Args: []ir.Operand{clone, key, copied}, ParamTypes: []types.Type{types.TypeAny, types.TypeString, types.TypeAny},
-	})
-	g.currentBB.Terminator = &ir.JumpTerm{Target: postBB}
+	bodyBB.Terminator = &ir.JumpTerm{Target: postBB}
 	postBB.Instructions = append(postBB.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
 	postBB.Terminator = &ir.JumpTerm{Target: condBB}
-	createDone.Terminator = &ir.JumpTerm{Target: doneBB}
+	doneBB.Terminator = &ir.ReturnTerm{Val: clone}
 
-	result := g.currentFn.NewValue("structured_clone_dynamic_result", types.TypeAny)
-	doneBB.Phis = append(doneBB.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
-		{Block: foundBB, Value: existing},
-		{Block: createDone, Value: clone},
-	}})
-	g.currentBB = doneBB
-	return result
+	g.prog.Functions = append(g.prog.Functions, worker)
+	g.currentFn, g.currentBB = outerFn, outerBB
+	g.locals, g.localProvenance, g.localDirectCallee = outerLocals, outerProv, outerDirect
 }
 
 func (g *generator) structuredCloneMemoIndex(source ir.Operand, sourceType types.Type, memoSources ir.Operand) ir.Operand {
@@ -216,6 +231,9 @@ func (g *generator) cloneStructuredObject(source ir.Operand, objectType *types.O
 			Res: value, Obj: source, Field: name, Offset: offsets[name],
 		})
 		copied := g.cloneStructuredValue(value, field.Type, memoSources, memoClones)
+		if copied == nil {
+			return nil
+		}
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
 			Obj: clone, Field: name, Offset: offsets[name], Val: copied,
 		})
@@ -278,6 +296,9 @@ func (g *generator) cloneStructuredArray(source ir.Operand, arrayType *types.Arr
 	item := g.currentFn.NewValue("structured_clone_array_item", arrayType.Elem)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.GetElementInst{Res: item, Array: source, Index: index})
 	copied := g.cloneStructuredValue(item, arrayType.Elem, memoSources, memoClones)
+	if copied == nil {
+		return nil
+	}
 	push := g.currentFn.NewValue("structured_clone_array_push", types.TypeNumber)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayPushInst{Res: push, Array: clone, Val: copied})
 	g.currentBB.Terminator = &ir.JumpTerm{Target: post}
