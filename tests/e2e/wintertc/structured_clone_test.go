@@ -42,3 +42,21 @@ console.log(shared.value);
 		expected: "true\ntrue\ntrue\n7\n1\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCStructuredClonePreservesCycles(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_structured_clone_cycle",
+		source: `
+const source: any = { value: 1 };
+source.self = source;
+const clone: any = structuredClone(source);
+console.log(clone !== source);
+console.log(clone.self === clone);
+console.log(clone.value);
+clone.value = 9;
+console.log(source.value);
+console.log(clone.self.value);
+`,
+		expected: "true\ntrue\n1\n1\n9\n",
+	})
+}
