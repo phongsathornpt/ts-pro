@@ -18,25 +18,25 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 	}
 	if ident, ok := e.Callee.(*ast.IdentExpr); ok {
 		switch ident.Name {
-		case "setTimeout":
+		case "setTimeout", "setInterval":
 			if len(e.Args) < 1 || len(e.Args) > 2 {
-				c.error(e.Span(), "TS2554", "setTimeout expects a callback and optional delay.")
+				c.error(e.Span(), "TS2554", ident.Name+" expects a callback and optional delay.")
 			} else {
 				if fn, ok := c.checkExpr(e.Args[0]).(*types.FunctionType); !ok || len(fn.Params) != 0 {
-					c.error(e.Args[0].Span(), "TS2345", "setTimeout expects a zero-argument function.")
+					c.error(e.Args[0].Span(), "TS2345", ident.Name+" expects a zero-argument function.")
 				}
 				if len(e.Args) == 2 && c.checkExpr(e.Args[1]) != types.TypeNumber {
-					c.error(e.Args[1].Span(), "TS2345", "setTimeout delay must be a number.")
+					c.error(e.Args[1].Span(), "TS2345", ident.Name+" delay must be a number.")
 				}
 			}
 			c.result.Types[e.Callee] = types.TypeAny
 			c.result.Types[e] = types.TypeNumber
 			return types.TypeNumber
-		case "clearTimeout":
+		case "clearTimeout", "clearInterval":
 			if len(e.Args) != 1 {
-				c.error(e.Span(), "TS2554", "clearTimeout expects one timer id.")
+				c.error(e.Span(), "TS2554", ident.Name+" expects one timer id.")
 			} else if c.checkExpr(e.Args[0]) != types.TypeNumber {
-				c.error(e.Args[0].Span(), "TS2345", "clearTimeout expects a numeric timer id.")
+				c.error(e.Args[0].Span(), "TS2345", ident.Name+" expects a numeric timer id.")
 			}
 			c.result.Types[e.Callee] = types.TypeAny
 			c.result.Types[e] = types.TypeVoid
