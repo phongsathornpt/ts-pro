@@ -37,6 +37,9 @@ func (g *generator) cloneStructuredValue(source ir.Operand, sourceType types.Typ
 	case *types.ArrayType:
 		return g.cloneStructuredArray(source, t, memoSources, memoClones)
 	case *types.ObjectType:
+		if t.Name == "$ArrayBuffer" {
+			return g.cloneStructuredArrayBuffer(source, t, memoSources, memoClones)
+		}
 		if t.Name != "" || g.semaResult.Classes[t.Name] != nil {
 			return g.failExpr("structuredClone support for platform/class object %q is not implemented", t.Name)
 		}
@@ -199,6 +202,39 @@ func (g *generator) registerStructuredCloneMemo(source ir.Operand, sourceType ty
 		&ir.ArrayPushInst{Res: g.currentFn.NewValue("structured_clone_source_push", types.TypeNumber), Array: memoSources, Val: boxedSource},
 		&ir.ArrayPushInst{Res: g.currentFn.NewValue("structured_clone_clone_push", types.TypeNumber), Array: memoClones, Val: boxedClone},
 	)
+}
+
+func (g *generator) cloneStructuredArrayBuffer(source ir.Operand, bufferType *types.ObjectType, memoSources, memoClones ir.Operand) ir.Operand {
+	memoIndex := g.structuredCloneMemoIndex(source, bufferType, memoSources)
+	missing := g.currentFn.NewValue("structured_clone_buffer_missing", types.TypeBoolean)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: missing, Op: ir.OpEq, LHS: memoIndex, RHS: ir.ConstNumber{Value: -1}})
+	found := g.currentFn.NewBlock("structured_clone_buffer_found")
+	create := g.currentFn.NewBlock("structured_clone_buffer_create")
+	done := g.currentFn.NewBlock("structured_clone_buffer_done")
+	g.currentBB.Terminator = &ir.BranchTerm{Cond: missing, Then: create, Else: found}
+
+	g.currentBB = found
+	boxedExisting := g.currentFn.NewValue("structured_clone_buffer_boxed", types.TypeAny)
+	found.Instructions = append(found.Instructions, &ir.GetElementInst{Res: boxedExisting, Array: memoClones, Index: memoIndex})
+	existing := g.coerceJSValueBoundary(boxedExisting, types.TypeAny, bufferType)
+	foundEnd := g.currentBB
+	foundEnd.Terminator = &ir.JumpTerm{Target: done}
+
+	g.currentBB = create
+	data := g.arrayBufferData(source)
+	copiedData := g.copyByteBuffer(data)
+	clone := g.newArrayBufferFromData(copiedData)
+	g.registerStructuredCloneMemo(source, bufferType, clone, bufferType, memoSources, memoClones)
+	createEnd := g.currentBB
+	createEnd.Terminator = &ir.JumpTerm{Target: done}
+
+	result := g.currentFn.NewValue("structured_clone_buffer_result", bufferType)
+	done.Phis = append(done.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{
+		{Block: foundEnd, Value: existing},
+		{Block: createEnd, Value: clone},
+	}})
+	g.currentBB = done
+	return result
 }
 
 func (g *generator) cloneStructuredObject(source ir.Operand, objectType *types.ObjectType, memoSources, memoClones ir.Operand) ir.Operand {
