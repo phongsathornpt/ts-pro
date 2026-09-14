@@ -2,9 +2,12 @@ name: Compiler Fuzz
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
-      - test/reliability-ir-backend-fuzz
+      - main
   schedule:
     - cron: "17 3 * * *"
 
@@ -13,7 +16,7 @@ permissions:
 
 jobs:
   validate:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
