@@ -92,6 +92,10 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 			return types.TypeAny
 		}
 		base := c.result.Classes[c.currentClass.BaseName]
+		if base == nil {
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
 		c.result.Types[e] = base.Constructor
 		return base.Constructor
 	case *ast.NewExpr:
@@ -377,6 +381,15 @@ func (c *Checker) checkExpr(expr ast.Expr) types.Type {
 	case *ast.CallExpr:
 		return c.checkCallExpr(e)
 	case *ast.AssignExpr:
+		switch e.Left.(type) {
+		case *ast.IdentExpr, *ast.MemberExpr, *ast.IndexExpr:
+		default:
+			c.checkExpr(e.Left)
+			c.checkExpr(e.Right)
+			c.error(e.Left.Span(), "TS2364", "The left-hand side of an assignment expression must be a variable or a property access.")
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
 		targetType := c.checkExpr(e.Left)
 		valType := c.checkExpr(e.Right)
 		if !valType.AssignableTo(targetType) {

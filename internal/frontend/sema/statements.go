@@ -244,6 +244,9 @@ func (c *Checker) checkFunctionDecl(fn *ast.FunctionDecl) {
 
 func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 	info := c.result.Classes[cls.Name]
+	if info == nil {
+		return
+	}
 	parentClass := c.currentClass
 	parentRet := c.currentFnRet
 	c.currentClass = info
@@ -272,6 +275,9 @@ func (c *Checker) checkClassDecl(cls *ast.ClassDecl) {
 			fnType = info.Constructor
 		} else {
 			fnType = info.Methods[method.Name]
+		}
+		if fnType == nil {
+			continue
 		}
 
 		c.currentFnRet = fnType.Return

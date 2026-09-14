@@ -818,6 +818,9 @@ func (c *Checker) resolveTypeNode(node ast.TypeNode) types.Type {
 			return c.builtinDOMExceptionType()
 		}
 		if t.Name == "Promise" || t.Name == "PromiseLike" {
+			if len(t.TypeArgs) != 1 {
+				return c.newPromiseType(types.TypeAny)
+			}
 			return c.newPromiseType(c.resolveTypeNode(t.TypeArgs[0]))
 		}
 		if tv := c.resolveTypeParam(t.Name); tv != nil {

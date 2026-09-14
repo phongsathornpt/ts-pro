@@ -191,6 +191,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 		}
 	}
 	if isConsoleLogCall(e.Callee) {
+		if len(e.Args) != 1 {
+			return g.failExpr("console.log lowering expects exactly one argument")
+		}
 		return g.lowerConsoleLog(e.Args[0])
 	}
 	if _, ok := e.Callee.(*ast.SuperExpr); ok {

@@ -128,7 +128,13 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			return g.readLocal(e.Name)
 		}
 		sym := g.semaResult.Symbols[e]
-		fnType := sym.Type.(*types.FunctionType)
+		if sym == nil {
+			return g.failExpr("identifier %q has no lowerable symbol", e.Name)
+		}
+		fnType, ok := sym.Type.(*types.FunctionType)
+		if !ok {
+			return g.failExpr("identifier %q is not a lowerable function", e.Name)
+		}
 		res := g.currentFn.NewValue("closure", fnType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: res, Function: e.Name})
 		return res
@@ -612,7 +618,10 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetElementInst{Array: array, Index: index, Val: value})
 			return value
 		}
-		ident := e.Left.(*ast.IdentExpr)
+		ident, ok := e.Left.(*ast.IdentExpr)
+		if !ok {
+			return g.failExpr("assignment target %T is not lowerable", e.Left)
+		}
 		current := g.readLocal(ident.Name)
 		rhs := g.lowerExpr(e.Right)
 		if e.Op == token.Eq {
