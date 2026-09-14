@@ -51,7 +51,7 @@ func buildRuntimeStressProgram(seed uint64) (string, string) {
 
 	for i := 0; i < workers; i++ {
 		value := i + 1
-		churn := 400 + rng.n(800)
+		churn := 2500 + rng.n(2500)
 		fmt.Fprintf(&src, "const task%d = spawn((): number => {\n", i)
 		fmt.Fprintf(&src, "  const keep = \"worker-%d-\" + \"alive\";\n", i)
 		for step := 0; step < 1+rng.n(4); step++ {
@@ -86,7 +86,7 @@ func buildRuntimeStressProgram(seed uint64) (string, string) {
 	promiseCount := 4 + rng.n(5)
 	for i := 0; i < promiseCount; i++ {
 		value := (i + 1) * 3
-		churn := 250 + rng.n(500)
+		churn := 1200 + rng.n(1800)
 		fmt.Fprintf(&src, "async function promiseWorker%d(): Promise<number> {\n", i)
 		for step := 0; step < 1+rng.n(3); step++ {
 			if rng.n(2) == 0 {
