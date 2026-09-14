@@ -24,3 +24,21 @@ console.log(clone.list[0]);
 		expected: "false\nfalse\nfalse\n1\n9\n1\n7\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCStructuredClonePreservesSharedReferences(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_structured_clone_shared_reference",
+		source: `
+const shared = { value: 1 };
+const source = { a: shared, b: shared };
+const clone = structuredClone(source);
+console.log(clone !== source);
+console.log(clone.a !== shared);
+console.log(clone.a === clone.b);
+clone.a.value = 7;
+console.log(clone.b.value);
+console.log(shared.value);
+`,
+		expected: "true\ntrue\ntrue\n7\n1\n",
+	})
+}
