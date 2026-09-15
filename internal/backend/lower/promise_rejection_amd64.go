@@ -1,10 +1,14 @@
 package lower
 
-import "github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
+import (
+	"encoding/binary"
+
+	"github.com/phongsathornpt/ts-pro/internal/backend/asm/amd64"
+)
 
 const (
-	amd64TaskRejectionHandledBit   int64 = 1 << 8
-	amd64TaskUnhandledReportedBit  int64 = 1 << 9
+	amd64TaskRejectionHandledBit  int64 = 1 << 8
+	amd64TaskUnhandledReportedBit int64 = 1 << 9
 )
 
 func emitAMD64PromiseRejectionRuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
@@ -30,7 +34,7 @@ func emitAMD64TaskMarkRejectionHandled(e *amd64.Emitter) {
 	e.OrRegReg(amd64.R10, amd64.R11)
 	e.MovDerefReg(amd64.RDI, amd64TaskKind, amd64.R10)
 	done := len(e.Code)
-	patchAMD64Jcc(e, notSettled, done)
+	patchAMD64RejectionJcc(e, notSettled, done)
 	e.Ret()
 }
 
@@ -55,7 +59,7 @@ func emitAMD64TaskMarkUnhandledReported(e *amd64.Emitter) {
 	e.OrRegReg(amd64.R10, amd64.R11)
 	e.MovDerefReg(amd64.RDI, amd64TaskKind, amd64.R10)
 	done := len(e.Code)
-	patchAMD64Jcc(e, notRejected, done)
+	patchAMD64RejectionJcc(e, notRejected, done)
 	e.Ret()
 }
 
@@ -69,10 +73,6 @@ func emitAMD64TaskUnhandledReported(e *amd64.Emitter) {
 	e.Ret()
 }
 
-func patchAMD64Jcc(e *amd64.Emitter, at, target int) {
-	// All local conditional branches emitted above use the six-byte rel32 form.
-	// Keep the patch helper here so rejection metadata remains self-contained.
-	from := at + 6
-	delta := int32(target - from)
-	e.PatchRel32(at+2, delta)
+func patchAMD64RejectionJcc(e *amd64.Emitter, at, target int) {
+	binary.LittleEndian.PutUint32(e.Code[at+2:], uint32(int32(target-(at+6))))
 }
