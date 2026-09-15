@@ -22,6 +22,10 @@ func (c *Checker) checkMemberExpr(e *ast.MemberExpr) types.Type {
 	if obj, ok := objType.(*types.ObjectType); ok && obj.Name == "$GlobalScope" {
 		switch e.Property {
 		case "onerror", "onunhandledrejection", "onrejectionhandled":
+			// The global object is dynamic-backed at runtime. Mark this member's
+			// receiver occurrence as a JS-value boundary so reads and writes lower
+			// through dynamic get/set instead of inventing physical object fields.
+			c.result.Types[e.Object] = types.TypeAny
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
