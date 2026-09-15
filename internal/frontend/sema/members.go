@@ -41,6 +41,7 @@ func (c *Checker) checkMemberExpr(e *ast.MemberExpr) types.Type {
 			c.result.Types[e] = types.TypeAny
 			return types.TypeAny
 		}
+		c.builtinEventTargetType()
 		if member, ok := c.builtinEventTargetMember(e.Property); ok {
 			c.result.Types[e] = member
 			return member
