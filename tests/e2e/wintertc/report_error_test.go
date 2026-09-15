@@ -6,6 +6,13 @@ func TestLinuxAMD64WinterTCReportErrorCallsGlobalOnError(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "wintertc_report_error_onerror",
 		source: `
+let observed = 0;
+const listener = (event: Event): void => {
+  observed = observed + 1;
+  console.log(event.type);
+};
+
+globalThis.addEventListener("error", listener);
 globalThis.onerror = (
   message: string,
   source: string,
@@ -22,10 +29,12 @@ globalThis.onerror = (
 };
 
 reportError("boom");
+globalThis.removeEventListener("error", listener);
 globalThis.onerror = null;
 reportError("ignored");
+console.log(observed);
 console.log("done");
 `,
-		expected: "boom\ntrue\n0\n0\nboom\ndone\n",
+		expected: "error\nboom\ntrue\n0\n0\nboom\n1\ndone\n",
 	})
 }
