@@ -58,6 +58,45 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			return nil
 		case "structuredClone":
 			return g.lowerStructuredClone(e)
+		case "reportError":
+			value := g.lowerExpr(e.Args[0])
+			boxedValue := value
+			if !irJSValueType(value.Type()) {
+				boxedValue = g.boxJSValue(value, g.semanticType(e.Args[0]))
+			}
+
+			globalType := types.NewObject("$GlobalScope")
+			global := g.currentFn.NewValue("report_error_global", globalType)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: global, Callee: "ts_global_object"})
+			boxedGlobal := g.boxJSValue(global, globalType)
+			handler := g.lowerDynamicGet(boxedGlobal, "onerror")
+			hasHandler := g.currentFn.NewValue("report_error_has_handler", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: hasHandler, Callee: "ts_js_to_bool", Args: []ir.Operand{handler}, ParamTypes: []types.Type{types.TypeAny}})
+			callBB := g.currentFn.NewBlock("report_error_handler")
+			doneBB := g.currentFn.NewBlock("report_error_done")
+			g.currentBB.Terminator = &ir.BranchTerm{Cond: hasHandler, Then: callBB, Else: doneBB}
+
+			g.currentBB = callBB
+			message := g.currentFn.NewValue("report_error_message", types.TypeString)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: message, Callee: "ts_js_to_string", Args: []ir.Operand{boxedValue}, ParamTypes: []types.Type{types.TypeAny}})
+			handlerType := types.NewFunction([]types.Param{
+				{Name: "message", Type: types.TypeString},
+				{Name: "source", Type: types.TypeString},
+				{Name: "lineno", Type: types.TypeNumber},
+				{Name: "colno", Type: types.TypeNumber},
+				{Name: "error", Type: types.TypeAny},
+			}, types.TypeAny)
+			closure := g.coerceJSValueBoundary(handler, types.TypeAny, handlerType)
+			callResult := g.currentFn.NewValue("report_error_handler_result", types.TypeAny)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{
+				Res: callResult,
+				Closure: closure,
+				Args: []ir.Operand{message, ir.ConstString{Value: ""}, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: 0}, boxedValue},
+				ParamTypes: []types.Type{types.TypeString, types.TypeString, types.TypeNumber, types.TypeNumber, types.TypeAny},
+			})
+			callBB.Terminator = &ir.JumpTerm{Target: doneBB}
+			g.currentBB = doneBB
+			return nil
 		case "fetch":
 			return g.lowerFetchCall(e)
 		case "queueMicrotask":
