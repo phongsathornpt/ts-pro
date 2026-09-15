@@ -7,10 +7,10 @@ func TestLinuxAMD64WinterTCReportErrorCallsGlobalOnError(t *testing.T) {
 		name: "wintertc_report_error_onerror",
 		source: `
 globalThis.onerror = (
-  message: any,
-  source: any,
-  line: any,
-  column: any,
+  message: string,
+  source: string,
+  line: number,
+  column: number,
   error: any,
 ): any => {
   console.log(message);
