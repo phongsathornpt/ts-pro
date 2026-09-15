@@ -7,6 +7,8 @@ import (
 )
 
 func emitAMD64StructuredCloneDynamicRuntimeSymbols(e *amd64.Emitter, fnOffsets map[string]int) {
+	fnOffsets["ts_byte_buffer_transfer"] = len(e.Code)
+	emitAMD64ByteBufferTransfer(e, fnOffsets["ts_object_new"])
 	fnOffsets["ts_js_is_dynamic_object"] = len(e.Code)
 	emitAMD64JSIsDynamicObject(e)
 	fnOffsets["ts_dynamic_count"] = len(e.Code)
@@ -15,6 +17,52 @@ func emitAMD64StructuredCloneDynamicRuntimeSymbols(e *amd64.Emitter, fnOffsets m
 	emitAMD64DynamicKeyAt(e)
 	fnOffsets["ts_dynamic_value_at"] = len(e.Code)
 	emitAMD64DynamicValueAt(e)
+}
+
+func emitAMD64ByteBufferTransfer(e *amd64.Emitter, objectNewOffset int) {
+	// RDI = source byte-buffer wrapper. Move its raw backing allocation into a
+	// fresh wrapper, then detach the old wrapper in-place. Existing typed-array
+	// views retain the old wrapper and therefore immediately observe length 0.
+	e.Push(amd64.RBP)
+	e.MovRegReg(amd64.RBP, amd64.RSP)
+	e.Push(amd64.RBX)
+	e.SubRegImm32(amd64.RSP, 32)
+	e.MovRegReg(amd64.RBX, amd64.RDI)
+
+	// ts_object_new may collect. Root the source wrapper until ownership has
+	// been installed in the destination wrapper.
+	e.MovRegDeref(amd64.R10, amd64.R15, amd64RTRootHead)
+	e.MovDerefReg(amd64.RSP, 0, amd64.R10)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RSP, 8, amd64.R10)
+	e.MovDerefReg(amd64.RSP, 16, amd64.RBX)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.RSP)
+
+	e.MovRegImm64(amd64.RDI, 3)
+	e.MovRegImm64(amd64.RSI, 0b001)
+	callObject := len(e.Code)
+	e.CallRel32(int32(objectNewOffset - (callObject + 5)))
+
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferData)
+	e.MovDerefReg(amd64.RAX, amd64ByteBufferData, amd64.R10)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferLength)
+	e.MovDerefReg(amd64.RAX, amd64ByteBufferLength, amd64.R10)
+	e.MovRegDeref(amd64.R10, amd64.RBX, amd64ByteBufferCapacity)
+	e.MovDerefReg(amd64.RAX, amd64ByteBufferCapacity, amd64.R10)
+
+	// Detach source wrapper. Leaving stale payload metadata around would make
+	// old views appear live even though ownership has moved.
+	e.MovRegImm64(amd64.R10, 0)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferData, amd64.R10)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferLength, amd64.R10)
+	e.MovDerefReg(amd64.RBX, amd64ByteBufferCapacity, amd64.R10)
+
+	e.MovRegDeref(amd64.R10, amd64.RSP, 0)
+	e.MovDerefReg(amd64.R15, amd64RTRootHead, amd64.R10)
+	e.AddRegImm32(amd64.RSP, 32)
+	e.Pop(amd64.RBX)
+	e.Pop(amd64.RBP)
+	e.Ret()
 }
 
 func emitAMD64DynamicObjectPayloadOrJump(e *amd64.Emitter, invalidJumps *[]int) {
