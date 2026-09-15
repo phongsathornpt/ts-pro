@@ -97,12 +97,13 @@ sourceView[2] = 6;
 const clone = structuredClone(source, { transfer: [source] });
 const cloneView = new Uint8Array(clone);
 console.log(source.byteLength);
+console.log(sourceView[0]);
 console.log(clone.byteLength);
 console.log(cloneView[0]);
 console.log(cloneView[1]);
 console.log(cloneView[2]);
 `,
-		expected: "0\n3\n4\n5\n6\n",
+		expected: "0\n0\n3\n4\n5\n6\n",
 	})
 }
 
