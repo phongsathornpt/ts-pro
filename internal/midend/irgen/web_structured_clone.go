@@ -92,17 +92,12 @@ func (g *generator) lowerStructuredCloneTransfers(options ast.Expr, memoSources,
 	for _, transfer := range transfers {
 		bufferType := transfer.valueType.(*types.ObjectType)
 		data := g.arrayBufferData(transfer.value)
-		clone := g.newArrayBufferFromData(data)
-		g.registerStructuredCloneMemo(transfer.value, bufferType, clone, bufferType, memoSources, memoClones)
-
-		empty := g.currentFn.NewValue("structured_clone_detached_data", g.semaResult.ByteBufferType)
+		moved := g.currentFn.NewValue("structured_clone_transferred_data", g.semaResult.ByteBufferType)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
-			Res: empty, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: 0}}, ParamTypes: []types.Type{types.TypeNumber},
+			Res: moved, Callee: "ts_byte_buffer_transfer", Args: []ir.Operand{data}, ParamTypes: []types.Type{g.semaResult.ByteBufferType},
 		})
-		offsets, _, _ := g.objectLayout(bufferType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
-			Obj: transfer.value, Field: "$data", Offset: offsets["$data"], Val: empty,
-		})
+		clone := g.newArrayBufferFromData(moved)
+		g.registerStructuredCloneMemo(transfer.value, bufferType, clone, bufferType, memoSources, memoClones)
 	}
 }
 
