@@ -89,9 +89,9 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			closure := g.coerceJSValueBoundary(handler, types.TypeAny, handlerType)
 			callResult := g.currentFn.NewValue("report_error_handler_result", types.TypeAny)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.IndirectCallInst{
-				Res: callResult,
-				Closure: closure,
-				Args: []ir.Operand{message, ir.ConstString{Value: ""}, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: 0}, boxedValue},
+				Res:        callResult,
+				Closure:    closure,
+				Args:       []ir.Operand{message, ir.ConstString{Value: ""}, ir.ConstNumber{Value: 0}, ir.ConstNumber{Value: 0}, boxedValue},
 				ParamTypes: []types.Type{types.TypeString, types.TypeString, types.TypeNumber, types.TypeNumber, types.TypeAny},
 			})
 			callBB.Terminator = &ir.JumpTerm{Target: doneBB}
