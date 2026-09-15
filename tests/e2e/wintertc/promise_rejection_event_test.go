@@ -8,7 +8,7 @@ func TestLinuxAMD64WinterTCPromiseRejectionEvent(t *testing.T) {
 		source: `
 const promise: any = "promise-token";
 const event = new PromiseRejectionEvent("unhandledrejection", {
-  promise,
+  promise: promise,
   reason: "boom",
   cancelable: true,
 });
