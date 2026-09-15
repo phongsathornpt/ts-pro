@@ -46,10 +46,20 @@ func (g *generator) lowerCallExpr(e *ast.CallExpr) ir.Operand {
 			res := g.currentFn.NewValue("timer_id", types.TypeNumber)
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: res, Callee: "ts_set_timeout", Args: []ir.Operand{closure, delay}})
 			return res
+		case "setInterval":
+			return g.lowerSetInterval(e)
 		case "clearTimeout":
 			id := g.lowerExpr(e.Args[0])
 			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_timeout", Args: []ir.Operand{id}})
 			return nil
+		case "clearInterval":
+			id := g.lowerExpr(e.Args[0])
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Callee: "ts_clear_interval", Args: []ir.Operand{id}})
+			return nil
+		case "structuredClone":
+			return g.lowerStructuredClone(e)
+		case "reportError":
+			return g.lowerReportError(e.Args[0])
 		case "fetch":
 			return g.lowerFetchCall(e)
 		case "queueMicrotask":

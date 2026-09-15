@@ -170,6 +170,9 @@ func (g *generator) lowerNewExpr(e *ast.NewExpr) ir.Operand {
 	if e.ClassName == "ErrorEvent" {
 		return g.lowerEventConstructor(e, g.semaResult.ErrorEventType)
 	}
+	if e.ClassName == "PromiseRejectionEvent" {
+		return g.lowerPromiseRejectionEventNew(e)
+	}
 	if e.ClassName == "DOMException" {
 		message := ir.Operand(ir.ConstString{Value: ""})
 		name := ir.Operand(ir.ConstString{Value: "Error"})
