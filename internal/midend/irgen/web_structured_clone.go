@@ -8,6 +8,11 @@ import (
 
 const structuredCloneAnyWorkerName = "$structured_clone_any"
 
+type structuredCloneTransfer struct {
+	value     ir.Operand
+	valueType types.Type
+}
+
 func (g *generator) lowerStructuredClone(e *ast.CallExpr) ir.Operand {
 	sourceType := g.semanticType(e.Args[0])
 	source := g.lowerExpr(e.Args[0])
@@ -18,7 +23,87 @@ func (g *generator) lowerStructuredClone(e *ast.CallExpr) ir.Operand {
 		&ir.AllocArrayInst{Res: memoSources, ElemType: types.TypeAny, Length: ir.ConstNumber{Value: 0}},
 		&ir.AllocArrayInst{Res: memoClones, ElemType: types.TypeAny, Length: ir.ConstNumber{Value: 0}},
 	)
+	if len(e.Args) == 2 {
+		g.lowerStructuredCloneTransfers(e.Args[1], memoSources, memoClones)
+		if g.err != nil {
+			return nil
+		}
+	}
 	return g.cloneStructuredValue(source, sourceType, memoSources, memoClones)
+}
+
+func structuredCloneTransferExprs(options ast.Expr) ([]ast.Expr, bool) {
+	obj, ok := options.(*ast.ObjectLit)
+	if !ok {
+		return nil, false
+	}
+	for _, prop := range obj.Properties {
+		if prop.Spread || prop.Key != "transfer" {
+			continue
+		}
+		arr, ok := prop.Value.(*ast.ArrayLit)
+		if !ok {
+			return nil, false
+		}
+		return arr.Elements, true
+	}
+	return nil, true
+}
+
+func (g *generator) lowerStructuredCloneTransfers(options ast.Expr, memoSources, memoClones ir.Operand) {
+	exprs, ok := structuredCloneTransferExprs(options)
+	if !ok {
+		g.failExpr("structuredClone transfer options currently require an object literal transfer array")
+		return
+	}
+	transfers := make([]structuredCloneTransfer, 0, len(exprs))
+	for _, expr := range exprs {
+		t := g.semanticType(expr)
+		obj, isObject := t.(*types.ObjectType)
+		if !isObject || obj.Name != "$ArrayBuffer" {
+			g.failExpr("structuredClone transfer currently supports ArrayBuffer entries only")
+			return
+		}
+		transfers = append(transfers, structuredCloneTransfer{value: g.lowerExpr(expr), valueType: t})
+	}
+
+	for i := range transfers {
+		for j := 0; j < i; j++ {
+			left := g.boxJSValue(transfers[j].value, transfers[j].valueType)
+			right := g.boxJSValue(transfers[i].value, transfers[i].valueType)
+			duplicate := g.currentFn.NewValue("structured_clone_transfer_duplicate", types.TypeBoolean)
+			g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+				Res: duplicate, Callee: "ts_js_strict_eq", Args: []ir.Operand{left, right}, ParamTypes: []types.Type{types.TypeAny, types.TypeAny},
+			})
+			duplicateBB := g.currentFn.NewBlock("structured_clone_transfer_duplicate")
+			continueBB := g.currentFn.NewBlock("structured_clone_transfer_unique")
+			g.currentBB.Terminator = &ir.BranchTerm{Cond: duplicate, Then: duplicateBB, Else: continueBB}
+
+			g.currentBB = duplicateBB
+			err := g.newDOMException(
+				ir.ConstString{Value: "Transfer list contains a duplicate ArrayBuffer."},
+				ir.ConstString{Value: "DataCloneError"},
+			)
+			g.routeThrownValue(g.boxJSValue(err, g.semaResult.DOMExceptionType))
+			g.currentBB = continueBB
+		}
+	}
+
+	for _, transfer := range transfers {
+		bufferType := transfer.valueType.(*types.ObjectType)
+		data := g.arrayBufferData(transfer.value)
+		clone := g.newArrayBufferFromData(data)
+		g.registerStructuredCloneMemo(transfer.value, bufferType, clone, bufferType, memoSources, memoClones)
+
+		empty := g.currentFn.NewValue("structured_clone_detached_data", g.semaResult.ByteBufferType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{
+			Res: empty, Callee: "ts_byte_buffer_new", Args: []ir.Operand{ir.ConstNumber{Value: 0}}, ParamTypes: []types.Type{types.TypeNumber},
+		})
+		offsets, _, _ := g.objectLayout(bufferType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.SetFieldInst{
+			Obj: transfer.value, Field: "$data", Offset: offsets["$data"], Val: empty,
+		})
+	}
 }
 
 func (g *generator) cloneStructuredValue(source ir.Operand, sourceType types.Type, memoSources, memoClones ir.Operand) ir.Operand {
