@@ -6,12 +6,7 @@ func TestLinuxAMD64WinterTCReportErrorCallsGlobalOnError(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "wintertc_report_error_onerror",
 		source: `
-function identity(value: any): any {
-  return value;
-}
-
-const global: any = identity(globalThis);
-global.onerror = (
+globalThis.onerror = (
   message: any,
   source: any,
   line: any,
@@ -27,7 +22,7 @@ global.onerror = (
 };
 
 reportError("boom");
-global.onerror = null;
+globalThis.onerror = null;
 reportError("ignored");
 console.log("done");
 `,
