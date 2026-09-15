@@ -94,6 +94,7 @@ func lowerAMD64(prog *ir.Program) ([]byte, error) {
 
 	emitAMD64RuntimeSymbols(e, fnOffsets)
 	emitAMD64IntervalRuntimeSymbols(e, fnOffsets)
+	emitAMD64PromiseRejectionRuntimeSymbols(e, fnOffsets)
 	emitAMD64StructuredCloneDynamicRuntimeSymbols(e, fnOffsets)
 	emitAMD64SHA2RuntimeSymbols(e, fnOffsets)
 	emitAMD64SHA1RuntimeSymbols(e, fnOffsets)
