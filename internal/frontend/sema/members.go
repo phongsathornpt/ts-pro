@@ -19,6 +19,13 @@ func (c *Checker) checkMemberExpr(e *ast.MemberExpr) types.Type {
 		}
 	}
 	objType := c.checkExpr(e.Object)
+	if obj, ok := objType.(*types.ObjectType); ok && obj.Name == "$GlobalScope" {
+		switch e.Property {
+		case "onerror", "onunhandledrejection", "onrejectionhandled":
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+	}
 	lookupType := objType
 	if e.Optional {
 		lookupType = removeNullishType(objType)
