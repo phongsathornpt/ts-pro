@@ -55,6 +55,15 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 			c.result.Types[e.Callee] = types.TypeAny
 			c.result.Types[e] = resultType
 			return resultType
+		case "reportError":
+			if len(e.Args) != 1 {
+				c.error(e.Span(), "TS2554", "reportError expects exactly one value.")
+			} else {
+				c.checkExpr(e.Args[0])
+			}
+			c.result.Types[e.Callee] = types.TypeAny
+			c.result.Types[e] = types.TypeVoid
+			return types.TypeVoid
 		case "queueMicrotask":
 			if len(e.Args) != 1 {
 				c.error(e.Span(), "TS2554", "queueMicrotask expects exactly one callback.")
