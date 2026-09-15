@@ -61,6 +61,11 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) types.Type {
 			} else {
 				c.checkExpr(e.Args[0])
 			}
+			// reportError creates and dispatches an ErrorEvent even when user code
+			// never names Event/ErrorEvent/EventTarget directly. Materialize those
+			// layouts here so IR generation never depends on incidental source use.
+			c.builtinErrorEventType()
+			c.builtinEventTargetType()
 			c.result.Types[e.Callee] = types.TypeAny
 			c.result.Types[e] = types.TypeVoid
 			return types.TypeVoid
