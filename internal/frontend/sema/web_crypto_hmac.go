@@ -33,6 +33,12 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 			{Name: "extractable", Type: types.TypeBoolean},
 			{Name: "keyUsages", Type: types.NewArray(types.TypeString)},
 		}, resultType)
+	case "exportKey":
+		resultType = c.newPromiseType(c.builtinArrayBufferType())
+		fnType = types.NewFunction([]types.Param{
+			{Name: "format", Type: types.TypeString},
+			{Name: "key", Type: cryptoKeyType},
+		}, resultType)
 	case "sign":
 		resultType = c.newPromiseType(c.builtinArrayBufferType())
 		fnType = types.NewFunction([]types.Param{
