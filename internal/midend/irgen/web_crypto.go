@@ -24,8 +24,13 @@ func (g *generator) lowerWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) 
 	}
 	if subtle, ok := member.Object.(*ast.MemberExpr); ok && subtle.Property == "subtle" {
 		ident, ok := subtle.Object.(*ast.IdentExpr)
-		if ok && ident.Name == "crypto" && member.Property == "digest" {
-			return g.lowerSubtleCryptoDigest(e), true
+		if ok && ident.Name == "crypto" {
+			switch member.Property {
+			case "digest":
+				return g.lowerSubtleCryptoDigest(e), true
+			case "exportKey":
+				return g.lowerHMACExportKey(e), true
+			}
 		}
 	}
 	return nil, false
