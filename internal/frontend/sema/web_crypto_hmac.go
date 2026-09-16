@@ -24,6 +24,13 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 	var resultType types.Type
 
 	switch member.Property {
+	case "generateKey":
+		resultType = c.newPromiseType(cryptoKeyType)
+		fnType = types.NewFunction([]types.Param{
+			{Name: "algorithm", Type: c.hmacKeyGenParamsType()},
+			{Name: "extractable", Type: types.TypeBoolean},
+			{Name: "keyUsages", Type: types.NewArray(types.TypeString)},
+		}, resultType)
 	case "importKey":
 		resultType = c.newPromiseType(cryptoKeyType)
 		fnType = types.NewFunction([]types.Param{
@@ -73,7 +80,10 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 	for i, param := range fnType.Params {
 		actual := c.checkExpr(e.Args[i])
 		if member.Property == "importKey" && i == 2 {
-			c.materializeHMACImportOptionals(actual)
+			c.materializeHMACOptionals(actual)
+		}
+		if member.Property == "generateKey" && i == 0 {
+			c.materializeHMACOptionals(actual)
 		}
 		if !actual.AssignableTo(param.Type) {
 			c.error(e.Args[i].Span(), "TS2345", fmt.Sprintf("crypto.subtle.%s argument %q has type %s; expected %s.", member.Property, param.Name, actual.String(), param.Type.String()))
@@ -83,7 +93,7 @@ func (c *Checker) checkWebCryptoHMACCall(e *ast.CallExpr, member *ast.MemberExpr
 	return resultType, true
 }
 
-func (c *Checker) materializeHMACImportOptionals(actual types.Type) {
+func (c *Checker) materializeHMACOptionals(actual types.Type) {
 	obj, ok := actual.(*types.ObjectType)
 	if !ok {
 		return
@@ -108,6 +118,17 @@ func (c *Checker) hmacImportParamsType() *types.ObjectType {
 	hashObj.AddField("name", types.TypeString, false)
 
 	params := types.NewObject("$HMACImportParams")
+	params.AddField("name", types.TypeString, false)
+	params.AddField("hash", types.NewUnion(types.TypeString, hashObj), false)
+	params.AddField("length", types.TypeNumber, true)
+	return params
+}
+
+func (c *Checker) hmacKeyGenParamsType() *types.ObjectType {
+	hashObj := types.NewObject("$HMACKeyGenHashAlgorithm")
+	hashObj.AddField("name", types.TypeString, false)
+
+	params := types.NewObject("$HMACKeyGenParams")
 	params.AddField("name", types.TypeString, false)
 	params.AddField("hash", types.NewUnion(types.TypeString, hashObj), false)
 	params.AddField("length", types.TypeNumber, true)
