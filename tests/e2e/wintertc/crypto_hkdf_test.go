@@ -27,8 +27,8 @@ async function main(): Promise<void> {
   const result = new Uint8Array(await crypto.subtle.deriveBits({
     name: "HKDF",
     hash: "SHA-256",
-    salt,
-    info,
+    salt: salt,
+    info: info,
   }, key, 336));
   console.log(result.length);
   for (let i = 0; i < result.length; i = i + 1) console.log(result[i]);
