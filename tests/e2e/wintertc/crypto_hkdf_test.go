@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < ikm.length; i = i + 1) ikm[i] = 11;
   const salt = bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   const info = bytes([240, 241, 242, 243, 244, 245, 246, 247, 248, 249]);
-  const key = await crypto.subtle.importKey("raw", ikm, { name: "HKDF" }, false, ["deriveBits"]);
+  const key = await crypto.subtle.importKey("raw", ikm, { name: "hKdF" }, false, ["deriveBits"]);
   console.log(key.type);
   console.log(key.extractable);
   console.log(key.algorithm.name);
@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   console.log(key.usages[0]);
 
   const result = new Uint8Array(await crypto.subtle.deriveBits({
-    name: "HKDF",
-    hash: "SHA-256",
+    name: "HkDf",
+    hash: "sHa-256",
     salt: salt,
     info: info,
   }, key, 336));
@@ -59,6 +59,11 @@ async function main(): Promise<void> {
 
   const key = await crypto.subtle.importKey("raw", ikm, { name: "HKDF" }, false, ["deriveBits"]);
   try {
+    await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: empty, info: empty }, key, 256);
+    console.log("unexpected");
+  } catch (err: any) { console.log(err.name); }
+
+  try {
     await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-512", salt: empty, info: empty }, key, 256);
     console.log("unexpected");
   } catch (err: any) { console.log(err.name); }
@@ -76,6 +81,6 @@ async function main(): Promise<void> {
 }
 main();
 `,
-		expected: "SyntaxError\nSyntaxError\nNotSupportedError\nOperationError\nInvalidAccessError\n",
+		expected: "SyntaxError\nSyntaxError\nNotSupportedError\nNotSupportedError\nOperationError\nInvalidAccessError\n",
 	})
 }
