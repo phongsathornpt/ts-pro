@@ -43,6 +43,22 @@ func TestIRDump(t *testing.T) {
 	}
 }
 
+func TestIRCallStringHandlesNilOperands(t *testing.T) {
+	var typedNil *Value
+	var typedNilOperand Operand = typedNil
+	inst := &CallInst{Callee: "fuzz", Args: []Operand{nil, typedNilOperand, ConstNumber{Value: 1}}}
+	got := inst.String()
+	if got != "call @fuzz(<nil>, <nil>, 1)" {
+		t.Fatalf("unexpected nil-safe call string: %q", got)
+	}
+	if typedNil.String() != "<nil>" {
+		t.Fatalf("nil Value should stringify safely")
+	}
+	if typedNil.Type() != nil {
+		t.Fatalf("nil Value should have nil type")
+	}
+}
+
 func TestIROperandsAndInstructions(t *testing.T) {
 	cn := ConstNumber{Value: 3.14}
 	cs := ConstString{Value: "foo"}
