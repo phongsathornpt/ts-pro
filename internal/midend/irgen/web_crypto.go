@@ -28,6 +28,8 @@ func (g *generator) lowerWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) 
 			switch member.Property {
 			case "digest":
 				return g.lowerSubtleCryptoDigest(e), true
+			case "generateKey":
+				return g.lowerHMACGenerateKey(e), true
 			case "exportKey":
 				return g.lowerHMACExportKey(e), true
 			}
