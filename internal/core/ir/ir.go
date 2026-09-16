@@ -15,10 +15,16 @@ type Value struct {
 }
 
 func (v *Value) Type() types.Type {
+	if v == nil {
+		return nil
+	}
 	return v.ValType
 }
 
 func (v *Value) String() string {
+	if v == nil {
+		return "<nil>"
+	}
 	if v.Name != "" {
 		return fmt.Sprintf("%%%s", v.Name)
 	}
@@ -30,6 +36,13 @@ type Operand interface {
 	operandNode()
 	Type() types.Type
 	String() string
+}
+
+func operandString(op Operand) string {
+	if op == nil {
+		return "<nil>"
+	}
+	return op.String()
 }
 
 func (v *Value) operandNode() {}
@@ -252,7 +265,7 @@ func (i *CallInst) Result() *Value     { return i.Res }
 func (i *CallInst) String() string {
 	var args []string
 	for _, a := range i.Args {
-		args = append(args, a.String())
+		args = append(args, operandString(a))
 	}
 	if i.Res != nil {
 		return fmt.Sprintf("%s = call @%s(%s)", i.Res, i.Callee, strings.Join(args, ", "))
@@ -264,7 +277,7 @@ func (i *MakeClosureInst) Result() *Value   { return i.Res }
 func (i *MakeClosureInst) String() string {
 	var caps []string
 	for _, c := range i.Captures {
-		caps = append(caps, c.String())
+		caps = append(caps, operandString(c))
 	}
 	return fmt.Sprintf("%s = make_closure @%s refs=%#x [%s]", i.Res, i.Function, i.RefMask, strings.Join(caps, ", "))
 }
@@ -278,7 +291,7 @@ func (i *IndirectCallInst) Result() *Value   { return i.Res }
 func (i *IndirectCallInst) String() string {
 	var args []string
 	for _, a := range i.Args {
-		args = append(args, a.String())
+		args = append(args, operandString(a))
 	}
 	if i.Res != nil {
 		return fmt.Sprintf("%s = call_indirect %s(%s)", i.Res, i.Closure, strings.Join(args, ", "))
