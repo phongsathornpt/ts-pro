@@ -192,7 +192,7 @@ func (g *generator) lowerHKDFParams(expr ast.Expr) (ir.Operand, ir.Operand, ir.O
 func (g *generator) copyCryptoBufferSourceOperand(value ir.Operand, typ types.Type, prefix string) ir.Operand {
 	objType, ok := typ.(*types.ObjectType)
 	if !ok {
-		return g.currentFn.NewValue(prefix+"_invalid", g.semaResult.ByteBufferType)
+		panic("HKDF BufferSource must be ArrayBuffer or Uint8Array")
 	}
 	if objType.Name == "$ArrayBuffer" {
 		return g.copyByteBuffer(g.arrayBufferData(value))
@@ -215,32 +215,43 @@ func (g *generator) copyCryptoBufferSourceOperand(value ir.Operand, typ types.Ty
 }
 
 func (g *generator) hkdfUsagesValid(usages ir.Operand) ir.Operand {
-	length := g.currentFn.NewValue("hkdf_usage_length", types.TypeNumber)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLenInst{Res: length, Array: usages})
-	valid := ir.Operand(ir.ConstBool{Value: true})
-	for i := 0; i < 8; i++ {
-		inRange := g.currentFn.NewValue("hkdf_usage_in_range", types.TypeBoolean)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: inRange, Op: ir.OpLt, LHS: ir.ConstNumber{Value: float64(i)}, RHS: length})
-		checkBB := g.currentFn.NewBlock("hkdf_usage_check")
-		nextBB := g.currentFn.NewBlock("hkdf_usage_next")
-		g.currentBB.Terminator = &ir.BranchTerm{Cond: inRange, Then: checkBB, Else: nextBB}
-
-		g.currentBB = checkBB
-		usage := g.currentFn.NewValue("hkdf_usage", types.TypeString)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayGetInst{Res: usage, Array: usages, Index: ir.ConstNumber{Value: float64(i)}})
-		deriveBits := g.cryptoStringEquals(usage, "deriveBits", "hkdf_usage_derive_bits")
-		deriveKey := g.cryptoStringEquals(usage, "deriveKey", "hkdf_usage_derive_key")
-		allowed := g.currentFn.NewValue("hkdf_usage_allowed", types.TypeBoolean)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: allowed, Op: ir.OpOr, LHS: deriveBits, RHS: deriveKey})
-		checkEnd := g.currentBB
-		checkEnd.Terminator = &ir.JumpTerm{Target: nextBB}
-
-		combined := g.currentFn.NewValue("hkdf_usage_valid", types.TypeBoolean)
-		nextBB.Phis = append(nextBB.Phis, &ir.PhiInst{Res: combined, Incoming: []ir.PhiIncoming{{Block: checkEnd, Value: allowed}, {Block: g.currentBB, Value: valid}}})
-		g.currentBB = nextBB
-		valid = combined
-	}
-	return valid
+	length := g.currentFn.NewValue("hkdf_usages_len", types.TypeNumber)
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ArrayLengthInst{Res: length, Array: usages})
+	entry := g.currentBB
+	cond := g.currentFn.NewBlock("hkdf_usages_cond")
+	body := g.currentFn.NewBlock("hkdf_usages_body")
+	advance := g.currentFn.NewBlock("hkdf_usages_advance")
+	invalid := g.currentFn.NewBlock("hkdf_usages_invalid")
+	valid := g.currentFn.NewBlock("hkdf_usages_valid")
+	done := g.currentFn.NewBlock("hkdf_usages_done")
+	entry.Terminator = &ir.JumpTerm{Target: cond}
+	index := g.currentFn.NewValue("hkdf_usages_index", types.TypeNumber)
+	phi := &ir.PhiInst{Res: index, Incoming: []ir.PhiIncoming{{Block: entry, Value: ir.ConstNumber{Value: 0}}}}
+	cond.Phis = append(cond.Phis, phi)
+	more := g.currentFn.NewValue("hkdf_usages_more", types.TypeBoolean)
+	cond.Instructions = append(cond.Instructions, &ir.BinaryInst{Res: more, Op: ir.OpLt, LHS: index, RHS: length})
+	cond.Terminator = &ir.BranchTerm{Cond: more, Then: body, Else: valid}
+	item := g.currentFn.NewValue("hkdf_usage", types.TypeString)
+	body.Instructions = append(body.Instructions, &ir.GetElementInst{Res: item, Array: usages, Index: index})
+	deriveBits := g.currentFn.NewValue("hkdf_usage_derive_bits", types.TypeBoolean)
+	deriveKey := g.currentFn.NewValue("hkdf_usage_derive_key", types.TypeBoolean)
+	allowed := g.currentFn.NewValue("hkdf_usage_allowed", types.TypeBoolean)
+	body.Instructions = append(body.Instructions,
+		&ir.CallInst{Res: deriveBits, Callee: "ts_string_eq", Args: []ir.Operand{item, ir.ConstString{Value: "deriveBits"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}},
+		&ir.CallInst{Res: deriveKey, Callee: "ts_string_eq", Args: []ir.Operand{item, ir.ConstString{Value: "deriveKey"}}, ParamTypes: []types.Type{types.TypeString, types.TypeString}},
+		&ir.BinaryInst{Res: allowed, Op: ir.OpOr, LHS: deriveBits, RHS: deriveKey},
+	)
+	body.Terminator = &ir.BranchTerm{Cond: allowed, Then: advance, Else: invalid}
+	next := g.currentFn.NewValue("hkdf_usages_next", types.TypeNumber)
+	advance.Instructions = append(advance.Instructions, &ir.BinaryInst{Res: next, Op: ir.OpAdd, LHS: index, RHS: ir.ConstNumber{Value: 1}})
+	advance.Terminator = &ir.JumpTerm{Target: cond}
+	phi.Incoming = append(phi.Incoming, ir.PhiIncoming{Block: advance, Value: next})
+	valid.Terminator = &ir.JumpTerm{Target: done}
+	invalid.Terminator = &ir.JumpTerm{Target: done}
+	result := g.currentFn.NewValue("hkdf_usages_result", types.TypeBoolean)
+	done.Phis = append(done.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{{Block: valid, Value: ir.ConstBool{Value: true}}, {Block: invalid, Value: ir.ConstBool{Value: false}}}})
+	g.currentBB = done
+	return result
 }
 
 func (g *generator) newHKDFCryptoKey(keyType *types.ObjectType, data, usages ir.Operand) ir.Operand {
