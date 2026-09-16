@@ -1,6 +1,7 @@
 package irgen
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
@@ -62,7 +63,7 @@ func (g *generator) lowerHKDFImportKey(e *ast.CallExpr) ir.Operand {
 
 	return g.spawnCryptoTask("hkdf_import", taskType, keyType, captures, captureTypes, func(captured []ir.Operand) {
 		formatOK := g.cryptoStringEquals(captured[0], "raw", "hkdf_import_raw")
-		algorithmOK := g.cryptoStringEquals(captured[2], "HKDF", "hkdf_import_name")
+		algorithmOK := g.cryptoHKDFNameMatch(captured[2])
 		supported := g.currentFn.NewValue("hkdf_import_supported", types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: supported, Op: ir.OpAnd, LHS: formatOK, RHS: algorithmOK})
 		supportedBB := g.currentFn.NewBlock("hkdf_import_supported")
@@ -107,30 +108,30 @@ func (g *generator) lowerHKDFDeriveBits(e *ast.CallExpr) ir.Operand {
 	captureTypes := []types.Type{types.TypeString, types.TypeString, g.semaResult.ByteBufferType, g.semaResult.ByteBufferType, key.Type(), types.TypeNumber}
 
 	return g.spawnCryptoTask("hkdf_derive_bits", taskType, resultType, captures, captureTypes, func(captured []ir.Operand) {
-		nameOK := g.cryptoStringEquals(captured[0], "HKDF", "hkdf_derive_name")
-		hashOK := g.cryptoStringEquals(captured[1], "SHA-256", "hkdf_derive_hash")
+		nameOK := g.cryptoHKDFNameMatch(captured[0])
+		hashOK := g.cryptoSHANameMatch(captured[1], "256")
 		keyAlgorithm := g.cryptoKeyField(captured[4], "$algorithmName", types.TypeString)
 		keyOK := g.cryptoStringEquals(keyAlgorithm, "HKDF", "hkdf_derive_key_algorithm")
 		usageOK := g.cryptoArrayContainsString(g.cryptoKeyField(captured[4], "usages", types.NewArray(types.TypeString)), "deriveBits")
 
-		nameAndHash := g.currentFn.NewValue("hkdf_derive_name_hash", types.TypeBoolean)
+		paramsSupported := g.currentFn.NewValue("hkdf_derive_params_supported", types.TypeBoolean)
 		keyAndUsage := g.currentFn.NewValue("hkdf_derive_key_usage", types.TypeBoolean)
 		allowed := g.currentFn.NewValue("hkdf_derive_allowed", types.TypeBoolean)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.BinaryInst{Res: nameAndHash, Op: ir.OpAnd, LHS: nameOK, RHS: hashOK},
+			&ir.BinaryInst{Res: paramsSupported, Op: ir.OpAnd, LHS: nameOK, RHS: hashOK},
 			&ir.BinaryInst{Res: keyAndUsage, Op: ir.OpAnd, LHS: keyOK, RHS: usageOK},
-			&ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: nameAndHash, RHS: keyAndUsage},
+			&ir.BinaryInst{Res: allowed, Op: ir.OpAnd, LHS: paramsSupported, RHS: keyAndUsage},
 		)
 		allowedBB := g.currentFn.NewBlock("hkdf_derive_allowed")
 		deniedBB := g.currentFn.NewBlock("hkdf_derive_denied")
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: allowed, Then: allowedBB, Else: deniedBB}
 
 		g.currentBB = deniedBB
-		unsupportedHashBB := g.currentFn.NewBlock("hkdf_derive_unsupported_hash")
+		unsupportedParamsBB := g.currentFn.NewBlock("hkdf_derive_unsupported_params")
 		invalidAccessBB := g.currentFn.NewBlock("hkdf_derive_invalid_access")
-		g.currentBB.Terminator = &ir.BranchTerm{Cond: hashOK, Then: invalidAccessBB, Else: unsupportedHashBB}
-		g.currentBB = unsupportedHashBB
-		g.rejectCryptoTask("NotSupportedError", "HKDF currently supports SHA-256 only.")
+		g.currentBB.Terminator = &ir.BranchTerm{Cond: paramsSupported, Then: invalidAccessBB, Else: unsupportedParamsBB}
+		g.currentBB = unsupportedParamsBB
+		g.rejectCryptoTask("NotSupportedError", "HKDF currently supports the HKDF algorithm with SHA-256 only.")
 		g.currentBB = invalidAccessBB
 		g.rejectCryptoTask("InvalidAccessError", "The CryptoKey algorithm or usages do not permit HKDF deriveBits.")
 
@@ -252,6 +253,25 @@ func (g *generator) hkdfUsagesValid(usages ir.Operand) ir.Operand {
 	done.Phis = append(done.Phis, &ir.PhiInst{Res: result, Incoming: []ir.PhiIncoming{{Block: valid, Value: ir.ConstBool{Value: true}}, {Block: invalid, Value: ir.ConstBool{Value: false}}}})
 	g.currentBB = done
 	return result
+}
+
+func (g *generator) cryptoHKDFNameMatch(value ir.Operand) ir.Operand {
+	variants := []string{
+		"HKDF", "HKDf", "HKdF", "HKdf", "HkDF", "HkDf", "HkdF", "Hkdf",
+		"hKDF", "hKDf", "hKdF", "hKdf", "hkDF", "hkDf", "hkdF", "hkdf",
+	}
+	var match ir.Operand
+	for i, variant := range variants {
+		equal := g.cryptoStringEquals(value, variant, fmt.Sprintf("hkdf_name_match_%d", i))
+		if match == nil {
+			match = equal
+			continue
+		}
+		combined := g.currentFn.NewValue(fmt.Sprintf("hkdf_name_match_any_%d", i), types.TypeBoolean)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.BinaryInst{Res: combined, Op: ir.OpOr, LHS: match, RHS: equal})
+		match = combined
+	}
+	return match
 }
 
 func (g *generator) newHKDFCryptoKey(keyType *types.ObjectType, data, usages ir.Operand) ir.Operand {
