@@ -358,12 +358,17 @@ func (a *Allocator) computeIntervals(fn *ir.Function) []Interval {
 		}
 	}
 
-	// Linear scan still needs one contiguous interval. Extend the end through every
-	// block where a value remains live, but never move its start before the actual
-	// SSA definition. Moving starts backwards creates artificial interference and
-	// can turn modest functions into hundreds of needless spills.
+	// Linear scan still needs one contiguous interval even when physical block
+	// emission order differs from CFG execution order. A value can be defined in
+	// a later-emitted block and then carried across an edge into an earlier-emitted
+	// block (for example an if-join inside a loop body feeding the loop post block).
+	// In that case the location must already be reserved at block entry or code
+	// emitted in the earlier block may clobber the live value before its edge use.
 	for _, bb := range fn.Blocks {
 		for id := range liveIn[bb] {
+			if start, ok := startMap[id]; ok && blockStart[bb] < start {
+				startMap[id] = blockStart[bb]
+			}
 			if endMap[id] < blockEnd[bb] {
 				endMap[id] = blockEnd[bb]
 			}
