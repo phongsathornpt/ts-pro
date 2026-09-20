@@ -1,0 +1,51 @@
+name: Generated Differential
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Optional uint64 seed to replay
+        required: false
+        type: string
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 5 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  generated-differential:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Select optional replay seed
+        id: seed
+        shell: bash
+        run: |
+          seed="${{ inputs.seed }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            seed="$GITHUB_RUN_ID"
+          fi
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          if [ -n "$seed" ]; then
+            echo "Generated differential extra seed: $seed"
+          else
+            echo "Generated differential stable seed corpus"
+          fi
+      - name: Compare generated programs with Node
+        env:
+          GOTOOLCHAIN: local
+          TS_PRO_DIFF_SEED: ${{ steps.seed.outputs.seed }}
+        run: python3 scripts/test-generated-differential.py
