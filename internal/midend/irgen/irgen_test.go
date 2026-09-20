@@ -460,3 +460,60 @@ send();
 		t.Fatalf("request lowering still materializes a combined wire buffer:\n%s", dump)
 	}
 }
+
+
+func TestIRGenImmutableCaptureStaysByValue(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("immutable_capture.ts", []byte(`
+const stable = 41;
+const outer = (): number => {
+  const inner = (): number => stable + 1;
+  return inner();
+};
+console.log(outer());
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	if dump := irProg.Dump(); strings.Contains(dump, "ts_jsvalue_cell_new") {
+		t.Fatalf("immutable capture unexpectedly allocated a JSValue cell:\n%s", dump)
+	}
+}
+
+func TestIRGenMutableCaptureStillUsesSharedCell(t *testing.T) {
+	fs := source.NewFileSet()
+	f := fs.AddFile("mutable_capture.ts", []byte(`
+let value = 1;
+const bump = (): number => {
+  value = value + 1;
+  return value;
+};
+console.log(bump());
+`))
+	p := parser.New(f)
+	prog, diags := p.Parse()
+	if diags.HasErrors() {
+		t.Fatalf("parser diags: %v", diags)
+	}
+	semaResult := sema.Check(prog)
+	if semaResult.Diagnostics.HasErrors() {
+		t.Fatalf("sema diags: %v", semaResult.Diagnostics)
+	}
+	irProg, err := Generate(prog, semaResult)
+	if err != nil {
+		t.Fatalf("irgen failed: %v", err)
+	}
+	if dump := irProg.Dump(); strings.Count(dump, "ts_jsvalue_cell_new") != 1 {
+		t.Fatalf("mutable capture should allocate exactly one shared JSValue cell:\n%s", dump)
+	}
+}
