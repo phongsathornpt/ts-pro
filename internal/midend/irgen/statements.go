@@ -2,6 +2,7 @@ package irgen
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/phongsathornpt/ts-pro/internal/core/ast"
@@ -110,6 +111,17 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 	}
 }
 
+func sortedModifiedVarNames(vars map[string]bool) []string {
+	names := make([]string, 0, len(vars))
+	for name, modified := range vars {
+		if modified {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func findModifiedVars(stmt ast.Stmt) map[string]bool {
 	res := make(map[string]bool)
 	var walk func(n ast.Node)
@@ -173,7 +185,7 @@ func (g *generator) lowerForOf(s *ast.ForOfStmt) {
 	modVars := findModifiedVars(s.Body)
 	delete(modVars, s.Name)
 	loopPhis := make(map[string]*ir.PhiInst)
-	for name := range modVars {
+	for _, name := range sortedModifiedVarNames(modVars) {
 		if val, exists := g.locals[name]; exists {
 			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_forof", name), val.Type())
 			phi := &ir.PhiInst{Res: phiVal, Incoming: []ir.PhiIncoming{{Block: preBB, Value: val}}}
@@ -256,7 +268,7 @@ func (g *generator) lowerFor(s *ast.ForStmt) {
 	}
 
 	loopPhis := make(map[string]*ir.PhiInst)
-	for name := range modVars {
+	for _, name := range sortedModifiedVarNames(modVars) {
 		if val, exists := g.locals[name]; exists {
 			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_loop", name), val.Type())
 			phi := &ir.PhiInst{
@@ -400,7 +412,7 @@ func (g *generator) lowerWhile(s *ast.WhileStmt) {
 
 	modVars := findModifiedVars(s.Body)
 	loopPhis := make(map[string]*ir.PhiInst)
-	for name := range modVars {
+	for _, name := range sortedModifiedVarNames(modVars) {
 		if val, exists := g.locals[name]; exists {
 			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_loop", name), val.Type())
 			phi := &ir.PhiInst{
@@ -496,7 +508,7 @@ func (g *generator) lowerDoWhile(s *ast.DoWhileStmt) {
 
 	modVars := findModifiedVars(s.Body)
 	loopPhis := make(map[string]*ir.PhiInst)
-	for name := range modVars {
+	for _, name := range sortedModifiedVarNames(modVars) {
 		if val, exists := g.locals[name]; exists {
 			phiVal := g.currentFn.NewValue(fmt.Sprintf("%s_do", name), val.Type())
 			phi := &ir.PhiInst{Res: phiVal, Incoming: []ir.PhiIncoming{{Block: preBB, Value: val}}}
