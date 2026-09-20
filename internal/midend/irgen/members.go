@@ -33,6 +33,11 @@ func (g *generator) lowerMemberExpr(e *ast.MemberExpr) ir.Operand {
 		return res
 	}
 	if objType, ok := g.semanticType(e.Object).(*types.ObjectType); ok {
+		if objType.Name == "$GlobalScope" {
+			obj := g.lowerExpr(e.Object)
+			boxed := g.boxJSValue(obj, objType)
+			return g.lowerDynamicGet(boxed, e.Property)
+		}
 		if objType.Name == "$URL" {
 			if res, handled := g.lowerURLMember(g.lowerExpr(e.Object), e.Property); handled {
 				return res
