@@ -37,6 +37,35 @@ func (g *generator) bindCaptureCell(fn *ir.Function, name string, cell ir.Operan
 	g.captureCellTypes[fn][name] = valueType
 }
 
+func (g *generator) markImmutableLocal(name string) {
+	if g.currentFn == nil {
+		return
+	}
+	if g.immutableLocals[g.currentFn] == nil {
+		g.immutableLocals[g.currentFn] = make(map[string]bool)
+	}
+	g.immutableLocals[g.currentFn][name] = true
+}
+
+func (g *generator) isImmutableLocal(name string) bool {
+	return g.currentFn != nil && g.immutableLocals[g.currentFn] != nil && g.immutableLocals[g.currentFn][name]
+}
+
+func captureNeedsGCRef(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if irJSValueType(t) {
+		return true
+	}
+	switch t.Kind() {
+	case types.KindString, types.KindArray, types.KindTuple, types.KindObject, types.KindFunction:
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *generator) ensureCaptureCell(name string) (ir.Operand, types.Type) {
 	if cell, valueType, ok := g.captureCell(name); ok {
 		return cell, valueType
@@ -355,12 +384,24 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	}
 	captureOps := make([]ir.Operand, 0, len(captureNames))
 	captureTypes := make([]types.Type, 0, len(captureNames))
+	captureByValue := make([]bool, 0, len(captureNames))
 	var refMask uint64
 	for i, name := range captureNames {
+		if g.isImmutableLocal(name) {
+			value := g.readLocal(name)
+			valueType := value.Type()
+			captureOps = append(captureOps, value)
+			captureTypes = append(captureTypes, valueType)
+			captureByValue = append(captureByValue, true)
+			if captureNeedsGCRef(valueType) {
+				refMask |= uint64(1) << i
+			}
+			continue
+		}
 		cell, valueType := g.ensureCaptureCell(name)
 		captureOps = append(captureOps, cell)
 		captureTypes = append(captureTypes, valueType)
-		// Capture cells are always GC-managed references.
+		captureByValue = append(captureByValue, false)
 		refMask |= uint64(1) << i
 	}
 
@@ -377,13 +418,15 @@ func (g *generator) lowerArrowExpr(e *ast.ArrowFuncExpr) ir.Operand {
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
 	for i, captureName := range captureNames {
-		cellType := captureOps[i].Type()
-		cell := lifted.NewValue(captureName+"_cell_capture", cellType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: cell, Closure: env, Index: i})
-		// Keep the name visible to nested capture analysis while all reads/writes
-		// route through the shared cell.
-		g.locals[captureName] = cell
-		g.bindCaptureCell(lifted, captureName, cell, captureTypes[i])
+		captureType := captureOps[i].Type()
+		captured := lifted.NewValue(captureName+"_capture", captureType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: captured, Closure: env, Index: i})
+		g.locals[captureName] = captured
+		if captureByValue[i] {
+			g.markImmutableLocal(captureName)
+			continue
+		}
+		g.bindCaptureCell(lifted, captureName, captured, captureTypes[i])
 	}
 	savedStreamKind := g.activeStreamControllerKind
 	g.activeStreamControllerKind = ""
@@ -456,11 +499,24 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	captureNames := g.collectBlockClosureCaptures(e.Body, paramSet)
 	captureOps := make([]ir.Operand, 0, len(captureNames))
 	captureTypes := make([]types.Type, 0, len(captureNames))
+	captureByValue := make([]bool, 0, len(captureNames))
 	var refMask uint64
 	for i, captureName := range captureNames {
+		if g.isImmutableLocal(captureName) {
+			value := g.readLocal(captureName)
+			valueType := value.Type()
+			captureOps = append(captureOps, value)
+			captureTypes = append(captureTypes, valueType)
+			captureByValue = append(captureByValue, true)
+			if captureNeedsGCRef(valueType) {
+				refMask |= uint64(1) << i
+			}
+			continue
+		}
 		cell, valueType := g.ensureCaptureCell(captureName)
 		captureOps = append(captureOps, cell)
 		captureTypes = append(captureTypes, valueType)
+		captureByValue = append(captureByValue, false)
 		refMask |= uint64(1) << i
 	}
 	outerFn, outerBB, outerLocals, outerProvenance, outerDirectCallees := g.currentFn, g.currentBB, g.locals, g.localProvenance, g.localDirectCallee
@@ -476,11 +532,15 @@ func (g *generator) lowerFunctionExpr(e *ast.FunctionExpr) ir.Operand {
 	env := lifted.NewValue("$env", fnType)
 	lifted.Params = append(lifted.Params, env)
 	for i, captureName := range captureNames {
-		cellType := captureOps[i].Type()
-		cell := lifted.NewValue(captureName+"_cell_capture", cellType)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: cell, Closure: env, Index: i})
-		g.locals[captureName] = cell
-		g.bindCaptureCell(lifted, captureName, cell, captureTypes[i])
+		captureType := captureOps[i].Type()
+		captured := lifted.NewValue(captureName+"_capture", captureType)
+		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.ClosureGetInst{Res: captured, Closure: env, Index: i})
+		g.locals[captureName] = captured
+		if captureByValue[i] {
+			g.markImmutableLocal(captureName)
+			continue
+		}
+		g.bindCaptureCell(lifted, captureName, captured, captureTypes[i])
 	}
 	if fnType.This != nil {
 		thisVal := lifted.NewValue("$this", fnType.This)
