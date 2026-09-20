@@ -275,3 +275,40 @@ func TestPhiResultsAtSameBlockEntryDoNotShareLocation(t *testing.T) {
 		t.Fatalf("simultaneous phi results share stack slot %d", a.StackSlot)
 	}
 }
+
+func TestLaterEmittedPhiLiveIntoEarlierBlockKeepsLocation(t *testing.T) {
+	fn := ir.NewFunction("backwardPhiLiveIn", types.TypeNumber)
+	entry := fn.NewBlock("entry")
+	post := fn.NewBlock("post") // Emitted before the phi definition on purpose.
+	exit := fn.NewBlock("exit")
+	join := fn.NewBlock("join")
+
+	entry.Terminator = &ir.JumpTerm{Target: join}
+
+	merged := fn.NewValue("merged", types.TypeNumber)
+	join.Phis = append(join.Phis, &ir.PhiInst{
+		Res: merged,
+		Incoming: []ir.PhiIncoming{
+			{Block: entry, Value: ir.ConstNumber{Value: 41}},
+		},
+	})
+	join.Terminator = &ir.JumpTerm{Target: post}
+
+	tmp := fn.NewValue("tmp", types.TypeNumber)
+	post.Instructions = append(post.Instructions, &ir.BinaryInst{
+		Res: tmp, Op: ir.OpAdd,
+		LHS: ir.ConstNumber{Value: 1}, RHS: ir.ConstNumber{Value: 2},
+	})
+	post.Terminator = &ir.JumpTerm{Target: exit}
+	exit.Terminator = &ir.ReturnTerm{Val: merged}
+
+	ra := New(1)
+	locs := ra.Allocate(fn)
+	mergedLoc, tmpLoc := locs[merged.ID], locs[tmp.ID]
+	if mergedLoc.IsReg && tmpLoc.IsReg && mergedLoc.Reg == tmpLoc.Reg {
+		t.Fatalf("backward-CFG live-in phi and earlier temporary share register %d", mergedLoc.Reg)
+	}
+	if !mergedLoc.IsReg && !tmpLoc.IsReg && mergedLoc.StackSlot == tmpLoc.StackSlot {
+		t.Fatalf("backward-CFG live-in phi and earlier temporary share stack slot %d", mergedLoc.StackSlot)
+	}
+}

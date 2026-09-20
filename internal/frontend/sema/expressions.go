@@ -9,6 +9,18 @@ import (
 )
 
 func (c *Checker) checkExprWithExpected(expr ast.Expr, expected types.Type) types.Type {
+	if ternary, ok := expr.(*ast.TernaryExpr); ok {
+		c.checkExpr(ternary.Cond)
+		thenType := c.checkExprWithExpected(ternary.Then, expected)
+		elseType := c.checkExprWithExpected(ternary.Else, expected)
+		if thenType.AssignableTo(expected) && elseType.AssignableTo(expected) {
+			c.result.Types[ternary] = expected
+			return expected
+		}
+		result := types.NewUnion(thenType, elseType)
+		c.result.Types[ternary] = result
+		return result
+	}
 	if tuple, ok := expected.(*types.TupleType); ok {
 		if lit, ok := expr.(*ast.ArrayLit); ok {
 			actual := make([]types.Type, len(lit.Elements))
