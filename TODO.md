@@ -568,7 +568,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Add unhandledrejection/rejectionhandled lifecycle hooks and ordering tests.
 - [ ] F5 Native capabilities
   - [ ] Network transport abstraction and deterministic local HTTP integration harness.
-  - [ ] OS randomness + crypto/hash primitive layer.
+  - [x] OS randomness + crypto/hash primitive layer (secure random source plus SHA/HMAC/HKDF foundations).
   - [ ] Compression/decompression primitive layer.
 - [ ] F6 Finish WinterTC Phase 1-9 using the foundations above, one API cluster per tested commit.
 
@@ -634,9 +634,13 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] Stream request bodies through transport instead of materializing BodyInit into one wire buffer.
   - [x] Add Headers/Request/Response/fetch conformance and cancellation/streaming differential coverage.
 - [ ] Phase 7: WebCrypto, Performance and Compression APIs.
-  - [ ] Finish `Performance` inheritance/surface that depends on EventTarget and verify ECMA-429-required members.
-  - [ ] Add OS randomness foundation and `crypto.getRandomValues()` / `randomUUID()`.
-  - [ ] Add `CryptoKey` / `SubtleCrypto` algorithms required by the WinterTC target with explicit unsupported-algorithm errors.
+  - [x] Finish `Performance` surface required by the current ECMA-429 target (`timeOrigin`, `now()`, `toJSON()`) with native coverage.
+  - [x] Add OS randomness foundation and `crypto.getRandomValues()` / `randomUUID()` with quota/view semantics and UUID-v4 validation.
+  - [ ] Complete `CryptoKey` / `SubtleCrypto` algorithms required by the WinterTC target with explicit unsupported-algorithm errors.
+    - [x] `digest()` for SHA-1 / SHA-256 / SHA-384 / SHA-512.
+    - [x] HMAC key generation/import/export plus sign/verify.
+    - [x] HKDF importKey + deriveBits.
+    - [ ] Complete the remaining ECMA-429-required key algorithms/operations and CryptoKey surface.
   - [ ] Add `CompressionStream` / `DecompressionStream` on top of the Streams foundation.
   - [ ] Add crypto/compression conformance fixtures and deterministic known-answer tests.
 - [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.
