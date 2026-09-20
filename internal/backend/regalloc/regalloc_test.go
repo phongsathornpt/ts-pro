@@ -276,7 +276,6 @@ func TestPhiResultsAtSameBlockEntryDoNotShareLocation(t *testing.T) {
 	}
 }
 
-
 func TestLaterEmittedPhiLiveIntoEarlierBlockKeepsLocation(t *testing.T) {
 	fn := ir.NewFunction("backwardPhiLiveIn", types.TypeNumber)
 	entry := fn.NewBlock("entry")
