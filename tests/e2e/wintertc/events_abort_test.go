@@ -226,6 +226,26 @@ setTimeout((): void => { value = value + 4; console.log(value); }, 0);
 	})
 }
 
+func TestLinuxAMD64WinterTCImmutableAndMutableCaptures(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_immutable_mutable_captures",
+		source: `
+const stable = "stable";
+let count = 1;
+const outer = (): void => {
+  const inner = (): void => { console.log(stable); };
+  inner();
+  count = count + 2;
+};
+outer();
+console.log(count);
+const readCount = (): number => count;
+console.log(readCount());
+`,
+		expected: "stable\n3\n3\n",
+	})
+}
+
 func TestLinuxAMD64WinterTCEventListenerOptions(t *testing.T) {
 	runLinuxAMD64(t, linuxAMD64Case{
 		name: "wintertc_event_listener_options",
