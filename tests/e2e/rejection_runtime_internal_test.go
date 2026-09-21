@@ -54,7 +54,7 @@ func TestLinuxAMD64InternalPromiseRejectionLifecycleState(t *testing.T) {
 				ParamTypes: []types.Type{taskType},
 			},
 			&ir.CallInst{
-				Callee:     "ts_print_val",
+				Callee:     "ts_print_bool",
 				Args:       []ir.Operand{value},
 				ParamTypes: []types.Type{types.TypeBoolean},
 			},
