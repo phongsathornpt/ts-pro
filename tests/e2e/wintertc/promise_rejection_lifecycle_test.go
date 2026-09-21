@@ -1,0 +1,71 @@
+package wintertc_test
+
+import "testing"
+
+func TestLinuxAMD64WinterTCUnhandledRejectionLifecycle(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_unhandled_rejection_lifecycle",
+		source: `
+globalThis.addEventListener("unhandledrejection", (event: PromiseRejectionEvent): void => {
+  console.log(event.type);
+  console.log(event.reason);
+  event.preventDefault();
+});
+globalThis.onunhandledrejection = (event: any): void => {
+  console.log("handler:" + event.reason);
+};
+Promise.reject<string>("boom");
+console.log("sync");
+`,
+		expected: "sync\nunhandledrejection\nboom\nhandler:boom\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCHandledRejectionBeforeCheckpoint(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_handled_rejection_before_checkpoint",
+		source: `
+globalThis.addEventListener("unhandledrejection", (event: PromiseRejectionEvent): void => {
+  console.log("unexpected:" + event.reason);
+});
+async function run(): Promise<void> {
+  const promise = Promise.reject<string>("handled");
+  try {
+    await promise;
+  } catch (error: any) {
+    console.log("caught:" + error);
+  }
+}
+console.log(join(run()));
+`,
+		expected: "caught:handled\nundefined\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCRejectionHandledAfterReport(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_rejection_handled_after_report",
+		source: `
+globalThis.addEventListener("unhandledrejection", (event: PromiseRejectionEvent): void => {
+  console.log("unhandled:" + event.reason);
+});
+globalThis.addEventListener("rejectionhandled", (event: PromiseRejectionEvent): void => {
+  console.log("handled:" + event.reason);
+});
+globalThis.onrejectionhandled = (event: any): void => {
+  console.log("handler:" + event.reason);
+};
+
+const promise = Promise.reject<string>("late");
+async function lateHandler(): Promise<void> {
+  try {
+    await promise;
+  } catch (error: any) {
+    console.log("caught:" + error);
+  }
+}
+lateHandler();
+`,
+		expected: "unhandled:late\nhandled:late\nhandler:late\ncaught:late\n",
+	})
+}
