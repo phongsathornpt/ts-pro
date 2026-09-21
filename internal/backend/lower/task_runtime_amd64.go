@@ -32,9 +32,11 @@ const (
 	amd64TaskCancelled  int32 = 168
 	amd64TaskContext    int32 = 176
 	amd64TaskGroupNext  int32 = 184
-	amd64TaskWakeNS     int32 = 192
-	amd64TaskTimer      int32 = 200
-	amd64TaskPayload    int32 = 208
+	amd64TaskWakeNS             int32 = 192
+	amd64TaskTimer              int32 = 200
+	amd64TaskRejectionHandled   int32 = 208
+	amd64TaskRejectionReported  int32 = 216
+	amd64TaskPayload            int32 = 224
 
 	amd64TaskResultNumber int64 = 1
 	amd64TaskResultRef    int64 = 3
@@ -78,7 +80,7 @@ func emitAMD64TaskSpawnQueued(e *amd64.Emitter, allocOffset int, queueHead, queu
 	e.MovRegDeref(amd64.R10, amd64.RSP, 16)
 	e.MovDerefReg(amd64.RBX, amd64TaskClosure, amd64.R10)
 	e.MovRegImm64(amd64.R10, 0)
-	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext, amd64TaskWakeNS, amd64TaskTimer} {
+	for _, off := range []int32{amd64TaskState, amd64TaskResult, amd64TaskNext, amd64TaskSavedRsp, amd64TaskSavedRbp, amd64TaskSavedRbx, amd64TaskSavedR12, amd64TaskSavedR13, amd64TaskSavedR14, amd64TaskSavedRoot, amd64TaskReturnRsp, amd64TaskReturnRbp, amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13, amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent, amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext, amd64TaskWakeNS, amd64TaskTimer, amd64TaskRejectionHandled, amd64TaskRejectionReported} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
 	e.MovDerefReg(amd64.RBX, amd64TaskKind, amd64.R12)
@@ -634,6 +636,62 @@ func emitAMD64TaskRejected(e *amd64.Emitter) {
 func emitAMD64TaskError(e *amd64.Emitter) {
 	// RDI = task. Return raw NaN-boxed rejection reason.
 	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64TaskResult)
+	e.Ret()
+}
+
+func emitAMD64TaskMarkRejectionHandled(e *amd64.Emitter) {
+	// RDI = task. Mark the task's rejection as handled and return true only on
+	// the first transition. Promise chaining can attach multiple observers.
+	e.MovRegDeref(amd64.R10, amd64.RDI, amd64TaskRejectionHandled)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	alreadyHandled := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RDI, amd64TaskRejectionHandled, amd64.R10)
+	e.MovRegImm64(amd64.RAX, 1)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+	alreadyHandledLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[alreadyHandled+2:], uint32(int32(alreadyHandledLabel-(alreadyHandled+6))))
+	e.MovRegImm64(amd64.RAX, 0)
+	done := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(done-(doneJump+5))))
+	e.Ret()
+}
+
+func emitAMD64TaskRejectionHandled(e *amd64.Emitter) {
+	// RDI = task. Return canonical bool.
+	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64TaskRejectionHandled)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	e.Setcc(amd64.CondNE, amd64.RAX)
+	e.Ret()
+}
+
+func emitAMD64TaskMarkRejectionReported(e *amd64.Emitter) {
+	// RDI = task. Mark that unhandledrejection was emitted and return true only
+	// for the first report attempt.
+	e.MovRegDeref(amd64.R10, amd64.RDI, amd64TaskRejectionReported)
+	e.TestRegReg(amd64.R10, amd64.R10)
+	alreadyReported := len(e.Code)
+	e.JccRel32(amd64.CondNE, 0)
+	e.MovRegImm64(amd64.R10, 1)
+	e.MovDerefReg(amd64.RDI, amd64TaskRejectionReported, amd64.R10)
+	e.MovRegImm64(amd64.RAX, 1)
+	doneJump := len(e.Code)
+	e.JmpRel32(0)
+	alreadyReportedLabel := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[alreadyReported+2:], uint32(int32(alreadyReportedLabel-(alreadyReported+6))))
+	e.MovRegImm64(amd64.RAX, 0)
+	done := len(e.Code)
+	binary.LittleEndian.PutUint32(e.Code[doneJump+1:], uint32(int32(done-(doneJump+5))))
+	e.Ret()
+}
+
+func emitAMD64TaskRejectionReported(e *amd64.Emitter) {
+	// RDI = task. Return canonical bool.
+	e.MovRegDeref(amd64.RAX, amd64.RDI, amd64TaskRejectionReported)
+	e.TestRegReg(amd64.RAX, amd64.RAX)
+	e.Setcc(amd64.CondNE, amd64.RAX)
 	e.Ret()
 }
 
