@@ -640,12 +640,15 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
     - [x] `digest()` for SHA-1 / SHA-256 / SHA-384 / SHA-512.
     - [x] HMAC key generation/import/export plus sign/verify.
     - [x] HKDF importKey + deriveBits.
+    - [x] AES-GCM foundation: raw 128-bit key import plus encrypt/decrypt with a 96-bit IV, explicit additional data, and a 128-bit authentication tag.
     - [ ] Complete the remaining ECMA-429-required key algorithms/operations and CryptoKey surface.
   - [ ] Add `CompressionStream` / `DecompressionStream` on top of the Streams foundation.
   - [ ] Add crypto/compression conformance fixtures and deterministic known-answer tests.
 - [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.
   - [ ] Add MessageChannel/MessagePort lifecycle, FIFO delivery, transfer/close semantics, and EventTarget integration.
-  - [ ] Promise jobs and rejection-event ordering.\n    - [x] Integrate Promise jobs with the Web microtask queue.\n    - [ ] Implement `unhandledrejection` / `rejectionhandled` ordering.
+  - [ ] Promise jobs and rejection-event ordering.
+    - [x] Integrate Promise jobs with the Web microtask queue.
+    - [ ] Implement `unhandledrejection` / `rejectionhandled` ordering.
   - [ ] Complete required WebAssembly globals/interfaces and native execution/linking coverage.
   - [ ] Add messaging/rejection/WebAssembly conformance fixtures.
 - [ ] Phase 9: close conformance matrix, differential/integration suite and documented server-runtime deviations.
