@@ -645,7 +645,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
   - [ ] Add crypto/compression conformance fixtures and deterministic known-answer tests.
 - [ ] Phase 8: MessageChannel/MessagePort, rejection events and required WebAssembly APIs.
   - [ ] Add MessageChannel/MessagePort lifecycle, FIFO delivery, transfer/close semantics, and EventTarget integration.
-  - [ ] Integrate Promise jobs with the Web microtask queue and implement `unhandledrejection` / `rejectionhandled` ordering.
+  - [ ] Promise jobs and rejection-event ordering.\n    - [x] Integrate Promise jobs with the Web microtask queue.\n    - [ ] Implement `unhandledrejection` / `rejectionhandled` ordering.
   - [ ] Complete required WebAssembly globals/interfaces and native execution/linking coverage.
   - [ ] Add messaging/rejection/WebAssembly conformance fixtures.
 - [ ] Phase 9: close conformance matrix, differential/integration suite and documented server-runtime deviations.
