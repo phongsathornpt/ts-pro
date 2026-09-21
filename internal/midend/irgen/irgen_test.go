@@ -461,7 +461,6 @@ send();
 	}
 }
 
-
 func TestIRGenImmutableCaptureStaysByValue(t *testing.T) {
 	fs := source.NewFileSet()
 	f := fs.AddFile("immutable_capture.ts", []byte(`
