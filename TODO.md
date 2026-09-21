@@ -549,11 +549,11 @@ Foundation blockers before broad API expansion:
 
 Execution TODO (finish in order; every checked item requires targeted native/e2e coverage and a separate commit):
 
-- [ ] F1 Callback/closure semantics
+- [x] F1 Callback/closure semantics
   - [x] Box mutable captured lexical bindings into shared GC-safe JSValue cells.
   - [x] Route captured identifier reads, writes, compound assignments, and ++/-- through the shared cell.
   - [x] Share the same cell across nested arrows/function expressions and outer scope.
-  - [ ] Preserve immutable/by-value captures where mutation is impossible.
+  - [x] Preserve immutable/by-value captures where mutation is impossible.
   - [x] Add native regression for outer/inner mutation, nested closures, timers, and EventTarget callbacks.
 - [x] F2 EventTarget/WebIDL listener options
   - [x] Finish capture identity and remove matching semantics.
