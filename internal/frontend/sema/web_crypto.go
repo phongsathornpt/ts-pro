@@ -6,6 +6,9 @@ import (
 )
 
 func (c *Checker) checkWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (types.Type, bool) {
+	if result, handled := c.checkWebCryptoAESGCMCall(e, member); handled {
+		return result, true
+	}
 	if result, handled := c.checkWebCryptoHKDFCall(e, member); handled {
 		return result, true
 	}
