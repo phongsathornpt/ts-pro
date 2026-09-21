@@ -90,3 +90,31 @@ lateHandler(promise);
 		expected: "unhandled:late\nhandled:late\nhandler:late\ncaught:late\n",
 	})
 }
+
+func TestLinuxAMD64WinterTCTaskNestedIndirectCallback(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_task_nested_indirect_callback",
+		source: `
+const callback = (value: string): void => { console.log(value); };
+spawn((): void => { callback("nested"); });
+console.log("sync");
+`,
+		expected: "sync\nnested\n",
+	})
+}
+
+func TestLinuxAMD64WinterTCGlobalEventDispatchFromTask(t *testing.T) {
+	runLinuxAMD64(t, linuxAMD64Case{
+		name: "wintertc_global_event_dispatch_from_task",
+		source: `
+globalThis.addEventListener("probe", (event: Event): void => {
+  console.log(event.type);
+});
+spawn((): void => {
+  globalThis.dispatchEvent(new Event("probe"));
+});
+console.log("sync");
+`,
+		expected: "sync\nprobe\n",
+	})
+}
