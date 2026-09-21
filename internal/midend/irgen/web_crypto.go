@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) lowerWebCryptoCall(e *ast.CallExpr, member *ast.MemberExpr) (ir.Operand, bool) {
+	if result, handled := g.lowerWebCryptoAESGCMCall(e, member); handled {
+		return result, true
+	}
 	if result, handled := g.lowerWebCryptoHKDFCall(e, member); handled {
 		return result, true
 	}
