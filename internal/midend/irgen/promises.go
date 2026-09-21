@@ -141,6 +141,7 @@ func (g *generator) lowerThenablePromise(e *ast.CallExpr, taskType *types.Object
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{thenable}, RefMask: 1})
 	task := g.currentFn.NewValue("thenable_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.scheduleUnhandledRejectionMonitor(task)
 	return task
 }
 
@@ -186,6 +187,7 @@ func (g *generator) makeImmediatePromiseTask(value ir.Operand, sourceType, resul
 	taskType := types.NewObject(fmt.Sprintf("$PromiseImmediate$%d", g.arrowCounter))
 	task := g.currentFn.NewValue("promise_immediate_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
+	g.scheduleUnhandledRejectionMonitor(task)
 	return task
 }
 
@@ -251,6 +253,7 @@ func (g *generator) lowerPromiseLiteralAggregate(member *ast.MemberExpr, taskTyp
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: tasks, RefMask: refMask})
 	result := g.currentFn.NewValue("promise_aggregate_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.scheduleUnhandledRejectionMonitor(result)
 	return result
 }
 
@@ -267,9 +270,8 @@ func (g *generator) lowerPromiseAllDriver(tasks []ir.Operand, resultTypes []type
 		nextBB := g.currentFn.NewBlock(fmt.Sprintf("promise_all_reject_next_%d", i))
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: nextBB}
 		g.currentBB = rejectBB
-		errVal := g.currentFn.NewValue("aggregate_error", types.TypeAny)
+		errVal := g.consumePromiseRejection(task)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
 			&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
 		)
 		g.currentBB.Terminator = &ir.ReturnTerm{}
@@ -341,9 +343,8 @@ func (g *generator) lowerPromiseRaceDriver(tasks []ir.Operand, resultTypes []typ
 		fulfillBB := g.currentFn.NewBlock(fmt.Sprintf("promise_race_fulfill_%d", i))
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: fulfillBB}
 		g.currentBB = rejectBB
-		errVal := g.currentFn.NewValue("race_error", types.TypeAny)
+		errVal := g.consumePromiseRejection(task)
 		g.currentBB.Instructions = append(g.currentBB.Instructions,
-			&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
 			&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
 		)
 		g.currentBB.Terminator = &ir.ReturnTerm{}
@@ -411,6 +412,7 @@ func (g *generator) lowerPromiseArrayAggregate(e *ast.CallExpr, member *ast.Memb
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{source}, RefMask: 1})
 	result := g.currentFn.NewValue("promise_array_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.scheduleUnhandledRejectionMonitor(result)
 	return result
 }
 
@@ -445,12 +447,12 @@ func (g *generator) lowerPromiseAllArrayDriver(array, length ir.Operand, taskEle
 	)
 	rejectFail := g.currentFn.NewBlock("promise_all_array_reject")
 	rejectBody.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectFail, Else: rejectNext}
-	errVal := g.currentFn.NewValue("all_array_error", types.TypeAny)
-	rejectFail.Instructions = append(rejectFail.Instructions,
-		&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+	g.currentBB = rejectFail
+	errVal := g.consumePromiseRejection(task)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
 	)
-	rejectFail.Terminator = &ir.ReturnTerm{}
+	g.currentBB.Terminator = &ir.ReturnTerm{}
 	rejectNext.Instructions = append(rejectNext.Instructions, &ir.BinaryInst{Res: rejectNextIndex, Op: ir.OpAdd, LHS: rejectIndex, RHS: ir.ConstNumber{Value: 1}})
 	rejectNext.Terminator = &ir.JumpTerm{Target: rejectCond}
 
@@ -531,12 +533,12 @@ func (g *generator) lowerPromiseRaceArrayDriver(array, length ir.Operand, taskEl
 	rejectBB := g.currentFn.NewBlock("promise_race_array_reject")
 	fulfillBB := g.currentFn.NewBlock("promise_race_array_fulfill")
 	settled.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: fulfillBB}
-	errVal := g.currentFn.NewValue("race_array_error", types.TypeAny)
-	rejectBB.Instructions = append(rejectBB.Instructions,
-		&ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}},
+	g.currentBB = rejectBB
+	errVal := g.consumePromiseRejection(task)
+	g.currentBB.Instructions = append(g.currentBB.Instructions,
 		&ir.CallInst{Callee: "ts_task_reject", Args: []ir.Operand{errVal}, ParamTypes: []types.Type{types.TypeAny}},
 	)
-	rejectBB.Terminator = &ir.ReturnTerm{}
+	g.currentBB.Terminator = &ir.ReturnTerm{}
 	value := g.currentFn.NewValue("race_array_value", resultType)
 	fulfillBB.Instructions = append(fulfillBB.Instructions, &ir.CallInst{Res: value, Callee: "ts_task_join", Args: []ir.Operand{task}})
 	g.currentBB = fulfillBB
@@ -615,5 +617,6 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: liftedName, Captures: []ir.Operand{capture}, RefMask: refMask})
 	task := g.currentFn.NewValue("promise_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.scheduleUnhandledRejectionMonitor(task)
 	return task, true
 }

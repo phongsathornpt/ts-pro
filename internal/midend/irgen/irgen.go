@@ -415,6 +415,7 @@ func (g *generator) lowerAsyncFunction(fnDecl *ast.FunctionDecl, fnType *types.F
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: liftedName, Captures: captures, RefMask: refMask})
 	task := wrapper.NewValue("async_task", taskType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(innerType)}}})
+	g.scheduleUnhandledRejectionMonitor(task)
 	g.currentBB.Terminator = &ir.ReturnTerm{Val: task}
 	return wrapper
 }
