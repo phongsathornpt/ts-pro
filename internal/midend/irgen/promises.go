@@ -140,7 +140,7 @@ func (g *generator) lowerThenablePromise(e *ast.CallExpr, taskType *types.Object
 	closure := g.currentFn.NewValue("thenable_driver", driverType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{thenable}, RefMask: 1})
 	task := g.currentFn.NewValue("thenable_task", taskType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
 	return task
 }
 
@@ -185,7 +185,7 @@ func (g *generator) makeImmediatePromiseTask(value ir.Operand, sourceType, resul
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: name, Captures: []ir.Operand{value}, RefMask: refMask})
 	taskType := types.NewObject(fmt.Sprintf("$PromiseImmediate$%d", g.arrowCounter))
 	task := g.currentFn.NewValue("promise_immediate_task", taskType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(resultType)}}})
 	return task
 }
 
@@ -250,7 +250,7 @@ func (g *generator) lowerPromiseLiteralAggregate(member *ast.MemberExpr, taskTyp
 	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: tasks, RefMask: refMask})
 	result := g.currentFn.NewValue("promise_aggregate_task", taskType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
 	return result
 }
 
@@ -410,7 +410,7 @@ func (g *generator) lowerPromiseArrayAggregate(e *ast.CallExpr, member *ast.Memb
 	closure := g.currentFn.NewValue("promise_array_driver", driverType)
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: driverName, Captures: []ir.Operand{source}, RefMask: 1})
 	result := g.currentFn.NewValue("promise_array_task", taskType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: result, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
 	return result
 }
 
@@ -614,6 +614,6 @@ func (g *generator) lowerPromiseStaticCall(e *ast.CallExpr, member *ast.MemberEx
 	}
 	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.MakeClosureInst{Res: closure, Function: liftedName, Captures: []ir.Operand{capture}, RefMask: refMask})
 	task := g.currentFn.NewValue("promise_task", taskType)
-	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_task_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
+	g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: task, Callee: "ts_microtask_spawn", Args: []ir.Operand{closure, ir.ConstNumber{Value: nativeTaskResultKind(inner)}}})
 	return task, true
 }
