@@ -9,7 +9,6 @@ func TestLinuxAMD64WinterTCUnhandledRejectionLifecycle(t *testing.T) {
 globalThis.addEventListener("unhandledrejection", (event: PromiseRejectionEvent): void => {
   console.log(event.type);
   console.log(event.reason);
-  event.preventDefault();
 });
 globalThis.onunhandledrejection = (event: any): void => {
   console.log("handler:" + event.reason);
@@ -57,14 +56,14 @@ globalThis.onrejectionhandled = (event: any): void => {
 };
 
 const promise = Promise.reject<string>("late");
-async function lateHandler(): Promise<void> {
+async function lateHandler(value: Promise<string>): Promise<void> {
   try {
-    await promise;
+    await value;
   } catch (error: any) {
     console.log("caught:" + error);
   }
 }
-lateHandler();
+lateHandler(promise);
 `,
 		expected: "unhandled:late\nhandled:late\nhandler:late\ncaught:late\n",
 	})
