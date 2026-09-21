@@ -34,6 +34,7 @@ type generator struct {
 	localDirectCallee          map[string]string
 	captureCells               map[*ir.Function]map[string]ir.Operand
 	captureCellTypes           map[*ir.Function]map[string]types.Type
+	immutableLocals            map[*ir.Function]map[string]bool
 	err                        error
 	arrowCounter               int
 	genericDecls               map[string]*ast.FunctionDecl
@@ -268,6 +269,7 @@ func Generate(astProg *ast.Program, semaResult *sema.Result) (*ir.Program, error
 		emittedClassSpecs: make(map[string]bool),
 		captureCells:      make(map[*ir.Function]map[string]ir.Operand),
 		captureCellTypes:  make(map[*ir.Function]map[string]types.Type),
+		immutableLocals:   make(map[*ir.Function]map[string]bool),
 	}
 	classNames := make([]string, 0, len(semaResult.Classes))
 	for name := range semaResult.Classes {

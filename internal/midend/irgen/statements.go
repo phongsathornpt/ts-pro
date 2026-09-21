@@ -63,6 +63,9 @@ func (g *generator) lowerStatement(stmt ast.Stmt) {
 				initOp = ir.ConstNumber{Value: 0}
 			}
 			g.locals[d.Name] = initOp
+			if s.Kind == token.KwConst {
+				g.markImmutableLocal(d.Name)
+			}
 		}
 	case *ast.ThrowStmt:
 		val := g.lowerExpr(s.Value)
