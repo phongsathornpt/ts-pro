@@ -334,8 +334,7 @@ func (g *generator) lowerExpr(expr ast.Expr) ir.Operand {
 		rejectBB := g.currentFn.NewBlock("await_reject")
 		g.currentBB.Terminator = &ir.BranchTerm{Cond: rejected, Then: rejectBB, Else: okBB}
 		g.currentBB = rejectBB
-		errVal := g.currentFn.NewValue("await_error", types.TypeAny)
-		g.currentBB.Instructions = append(g.currentBB.Instructions, &ir.CallInst{Res: errVal, Callee: "ts_task_error", Args: []ir.Operand{task}})
+		errVal := g.consumePromiseRejection(task)
 		g.routeThrownValue(errVal)
 		g.currentBB = okBB
 		return res
