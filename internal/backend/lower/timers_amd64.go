@@ -51,8 +51,7 @@ func emitAMD64SetTimeout(e *amd64.Emitter, allocOffset, nowOffset int) {
 		amd64TaskReturnRbx, amd64TaskReturnR12, amd64TaskReturnR13,
 		amd64TaskReturnR14, amd64TaskReturnRoot, amd64TaskParent,
 		amd64TaskCancelled, amd64TaskContext, amd64TaskGroupNext,
-		amd64TaskWakeNS, amd64TaskTimer, amd64TaskRejectionHandled,
-		amd64TaskRejectionReported,
+		amd64TaskWakeNS, amd64TaskTimer,
 	} {
 		e.MovDerefReg(amd64.RBX, off, amd64.R10)
 	}
