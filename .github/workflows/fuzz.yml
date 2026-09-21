@@ -30,11 +30,12 @@ jobs:
           GOTOOLCHAIN: local
         run: CGO_ENABLED=0 go vet ./...
       - name: Test
+        # GitHub-hosted runners do not expose the AF_ALG AEAD path used by the raw-native AES/TLS fixtures.
         env:
           GOTOOLCHAIN: local
         run: |
           CGO_ENABLED=0 go test ./... \
-            -skip '^(TestLinuxAMD64InternalAES128GCM|TestLinuxAMD64InternalTLS13EncryptRecord|TestLinuxAMD64InternalTLS13DecryptRecord)$'
+            -skip '^(TestLinuxAMD64InternalAES128GCM|TestLinuxAMD64InternalTLS13EncryptRecord|TestLinuxAMD64InternalTLS13DecryptRecord|TestSubtleCryptoAESGCM128KnownAnswerAndRoundTrip|TestSubtleCryptoAESGCMRejections)$'
 
   fuzz:
     runs-on: ubuntu-latest
