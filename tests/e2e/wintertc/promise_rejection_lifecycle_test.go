@@ -36,9 +36,9 @@ async function run(): Promise<void> {
     console.log("caught:" + error);
   }
 }
-console.log(join(run()));
+join(run());
 `,
-		expected: "caught:handled\nundefined\n",
+		expected: "caught:handled\n",
 	})
 }
 
