@@ -215,6 +215,10 @@ func (c *Checker) error(span source.Span, code string, msg string) {
 // Check performs two-pass semantic analysis on the program.
 func Check(prog *ast.Program) *Result {
 	checker := NewChecker()
+	// Promise rejection lifecycle reporting uses the shared Event/EventTarget
+	// physical ABI even when user source does not reference DOM events directly.
+	checker.builtinEventType()
+	checker.builtinEventTargetType()
 	checker.declareTopLevel(prog)
 	checker.checkProgram(prog)
 	return checker.result
