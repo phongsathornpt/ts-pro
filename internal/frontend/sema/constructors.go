@@ -262,6 +262,19 @@ func (c *Checker) checkNewExpr(e *ast.NewExpr) types.Type {
 		c.result.Types[e] = t
 		return t
 	}
+	if e.ClassName == "PromiseRejectionEvent" {
+		if len(e.Args) != 2 {
+			c.error(e.Span(), "TS2554", "PromiseRejectionEvent expects a type and init dictionary.")
+		} else {
+			if c.checkExpr(e.Args[0]) != types.TypeString {
+				c.error(e.Args[0].Span(), "TS2345", "PromiseRejectionEvent type must be a string.")
+			}
+			c.checkExpr(e.Args[1])
+		}
+		t := c.builtinPromiseRejectionEventType()
+		c.result.Types[e] = t
+		return t
+	}
 	if e.ClassName == "CustomEvent" || e.ClassName == "MessageEvent" || e.ClassName == "ErrorEvent" {
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			c.error(e.Span(), "TS2554", e.ClassName+" expects a type and optional init dictionary.")

@@ -46,6 +46,8 @@ func (c *Checker) builtinEventType() *types.ObjectType {
 		e.AddField("$lineno", types.TypeNumber, false)
 		e.AddField("$colno", types.TypeNumber, false)
 		e.AddField("$error", types.TypeAny, false)
+		e.AddField("$promise", types.TypeAny, false)
+		e.AddField("$reason", types.TypeAny, false)
 		c.result.EventType = e
 	}
 	return c.result.EventType

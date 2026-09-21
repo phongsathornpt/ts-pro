@@ -579,7 +579,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [x] GC-safe byte buffer/string conversion primitive.
 - [ ] Native network/random/crypto/compression capability layer.
 
-- [ ] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
+- [x] Phase 1: global foundation (`globalThis`, `self`, base64, timers, microtasks, error hooks, structured clone, console surface).
 - [x] Phase 2: DOM events and abort primitives.
 - [x] Phase 3: Encoding, URL, URLSearchParams, URLPattern.
   - [x] Add ArrayBuffer/Uint8Array byte-view foundation with GC-safe shared backing.

@@ -19,6 +19,38 @@ func (c *Checker) checkMemberExpr(e *ast.MemberExpr) types.Type {
 		}
 	}
 	objType := c.checkExpr(e.Object)
+	if obj, ok := objType.(*types.ObjectType); ok && obj.Name == "$GlobalScope" {
+		switch e.Property {
+		case "onerror":
+			c.result.Types[e.Object] = types.TypeAny
+			handler := types.NewFunction([]types.Param{
+				{Name: "message", Type: types.TypeString},
+				{Name: "source", Type: types.TypeString},
+				{Name: "lineno", Type: types.TypeNumber},
+				{Name: "colno", Type: types.TypeNumber},
+				{Name: "error", Type: types.TypeAny},
+			}, types.TypeAny)
+			memberType := types.NewUnion(handler, types.TypeNull)
+			c.result.Types[e] = memberType
+			return memberType
+		case "onunhandledrejection", "onrejectionhandled":
+			c.result.Types[e.Object] = types.TypeAny
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+		c.builtinEventTargetType()
+		if member, ok := c.builtinEventTargetMember(e.Property); ok {
+			c.result.Types[e] = member
+			return member
+		}
+	}
+	if obj, ok := objType.(*types.ObjectType); ok && obj.Name == "$PromiseRejectionEvent" {
+		switch e.Property {
+		case "promise", "reason":
+			c.result.Types[e] = types.TypeAny
+			return types.TypeAny
+		}
+	}
 	lookupType := objType
 	if e.Optional {
 		lookupType = removeNullishType(objType)

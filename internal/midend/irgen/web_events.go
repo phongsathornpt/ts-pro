@@ -96,6 +96,8 @@ func (g *generator) initEventVariantFields(obj ir.Operand, className string, ini
 	g.setEventField(obj, "$lineno", ir.ConstNumber{Value: 0})
 	g.setEventField(obj, "$colno", ir.ConstNumber{Value: 0})
 	g.setEventField(obj, "$error", ir.ConstNull{})
+	g.setEventField(obj, "$promise", ir.ConstUndefined{})
+	g.setEventField(obj, "$reason", ir.ConstUndefined{})
 	switch className {
 	case "CustomEvent":
 		g.setEventField(obj, "$detail", g.lowerEventInitValue(init, initValue, "detail", types.TypeAny, ir.ConstNull{}))
@@ -191,6 +193,13 @@ func eventPhysicalProperty(objType *types.ObjectType, property string) (string, 
 		case "error":
 			return "$error", true
 		}
+	case "$PromiseRejectionEvent":
+		switch property {
+		case "promise":
+			return "$promise", true
+		case "reason":
+			return "$reason", true
+		}
 	}
 	return "", false
 }
@@ -200,7 +209,7 @@ func isEventObjectType(t *types.ObjectType) bool {
 		return false
 	}
 	switch t.Name {
-	case "$Event", "$CustomEvent", "$MessageEvent", "$ErrorEvent":
+	case "$Event", "$CustomEvent", "$MessageEvent", "$ErrorEvent", "$PromiseRejectionEvent":
 		return true
 	default:
 		return false
@@ -209,7 +218,7 @@ func isEventObjectType(t *types.ObjectType) bool {
 
 func (g *generator) lowerEventMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
-	if !ok || (objType.Name != "$Event" && objType.Name != "$CustomEvent" && objType.Name != "$MessageEvent" && objType.Name != "$ErrorEvent") {
+	if !ok || (objType.Name != "$Event" && objType.Name != "$CustomEvent" && objType.Name != "$MessageEvent" && objType.Name != "$ErrorEvent" && objType.Name != "$PromiseRejectionEvent") {
 		return nil, false
 	}
 	event := g.lowerExpr(mem.Object)
@@ -310,13 +319,16 @@ func (g *generator) makeEventListenerAbortRemovalCallback(target, eventType, cal
 
 func (g *generator) lowerEventTargetMethodCall(e *ast.CallExpr, mem *ast.MemberExpr) (ir.Operand, bool) {
 	objType, ok := g.semanticType(mem.Object).(*types.ObjectType)
-	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal" && objType.Name != "$Performance") {
+	if !ok || (objType.Name != "$EventTarget" && objType.Name != "$AbortSignal" && objType.Name != "$Performance" && objType.Name != "$GlobalScope") {
 		return nil, false
 	}
 	var target ir.Operand
-	if objType.Name == "$Performance" {
+	switch objType.Name {
+	case "$Performance":
 		target = g.lowerPerformanceEventTarget()
-	} else {
+	case "$GlobalScope":
+		target = g.lowerGlobalEventTarget()
+	default:
 		target = g.lowerExpr(mem.Object)
 	}
 	switch mem.Property {
