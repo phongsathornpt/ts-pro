@@ -563,9 +563,9 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [x] F3 Byte storage foundation
   - [x] Add GC-safe byte buffer allocation, length/capacity, slice/copy helpers.
   - [x] Add UTF-8/Web string <-> bytes conversion and bounds tests.
-- [ ] F4 Web async jobs
-  - [ ] Add Promise-job integration on the microtask queue.
-  - [ ] Add unhandledrejection/rejectionhandled lifecycle hooks and ordering tests.
+- [~] F4 Web async jobs
+  - [x] Add Promise-job integration on the microtask queue.
+  - [~] Add unhandledrejection/rejectionhandled lifecycle hooks and ordering tests.
 - [ ] F5 Native capabilities
   - [ ] Network transport abstraction and deterministic local HTTP integration harness.
   - [x] OS randomness + crypto/hash primitive layer (secure random source plus SHA/HMAC/HKDF foundations).
@@ -575,7 +575,7 @@ Execution TODO (finish in order; every checked item requires targeted native/e2e
 - [x] GC-safe `any`/JSValue cell storage shared by Web runtime state.
 - [ ] Callback/closure ABI hardening across arbitrary user callbacks.
 - [x] Shared WebIDL dictionary/default/coercion helpers.
-- [ ] Web async job and rejection-event hooks.
+- [~] Web async job and rejection-event hooks.
 - [x] GC-safe byte buffer/string conversion primitive.
 - [ ] Native network/random/crypto/compression capability layer.
 
